@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Hello Next.js",
-  description: "Vercel にデプロイできるシンプルな Next.js サンプルアプリ",
+  title: "Cake — ふたりの家計管理",
+  description: "個人とふたりの家計を、ひとつの場所で管理するアプリ",
 };
 
 export default function RootLayout({

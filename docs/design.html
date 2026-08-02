@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Cake 家計管理アプリ 基本設計書</title>
+    <style>
+      :root {
+        --ink: #20231f;
+        --muted: #657066;
+        --line: #dfe4dc;
+        --paper: #fffef9;
+        --soft: #f3f5ef;
+        --green: #1f6b4f;
+        --green-soft: #e4f2eb;
+        --orange: #bd641e;
+        --orange-soft: #fff0df;
+        --red: #a43d35;
+        --red-soft: #fbeae7;
+        --blue: #315d91;
+        --blue-soft: #eaf1fa;
+        --shadow: 0 18px 55px rgba(45, 54, 46, 0.09);
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 8% 4%, rgba(255, 206, 116, 0.2), transparent 24rem),
+          radial-gradient(circle at 92% 18%, rgba(91, 163, 128, 0.15), transparent 28rem),
+          #f4f1e9;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
+          "Yu Gothic UI", "Yu Gothic", sans-serif;
+        line-height: 1.75;
+      }
+
+      a { color: var(--green); }
+      code {
+        padding: 0.12rem 0.36rem;
+        border-radius: 0.35rem;
+        background: #edf0ea;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.9em;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 17rem minmax(0, 1fr);
+        width: min(100%, 92rem);
+        min-height: 100vh;
+        margin: 0 auto;
+      }
+      .sidebar {
+        position: sticky;
+        top: 0;
+        align-self: start;
+        height: 100vh;
+        padding: 2rem 1.4rem;
+        overflow-y: auto;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 2rem;
+        color: var(--ink);
+        font-weight: 800;
+        text-decoration: none;
+      }
+      .brand-mark {
+        display: grid;
+        width: 2.3rem;
+        height: 2.3rem;
+        place-items: center;
+        border-radius: 0.8rem;
+        color: #fff;
+        background: var(--green);
+        box-shadow: 0 7px 18px rgba(31, 107, 79, 0.22);
+      }
+      .nav-label {
+        margin: 1.1rem 0 0.45rem;
+        color: #8a938a;
+        font-size: 0.7rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+      }
+      nav a {
+        display: block;
+        padding: 0.47rem 0.65rem;
+        border-radius: 0.55rem;
+        color: #59635a;
+        font-size: 0.86rem;
+        text-decoration: none;
+      }
+      nav a:hover { color: var(--green); background: rgba(255,255,255,0.65); }
+      main { min-width: 0; padding: 2.5rem 3rem 5rem; }
+      .hero {
+        position: relative;
+        overflow: hidden;
+        padding: clamp(2rem, 5vw, 4.5rem);
+        border: 1px solid rgba(31, 107, 79, 0.13);
+        border-radius: 2rem;
+        color: #f9fff9;
+        background: linear-gradient(135deg, #174c3a, #2c755a 58%, #4b8669);
+        box-shadow: var(--shadow);
+      }
+      .hero::after {
+        position: absolute;
+        right: -7rem;
+        bottom: -9rem;
+        width: 24rem;
+        height: 24rem;
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 50%;
+        box-shadow: 0 0 0 3rem rgba(255,255,255,0.035), 0 0 0 6rem rgba(255,255,255,0.025);
+        content: "";
+      }
+      .eyebrow {
+        margin: 0 0 1rem;
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        opacity: 0.8;
+      }
+      h1 {
+        max-width: 15ch;
+        margin: 0;
+        font-family: Georgia, "Yu Mincho", serif;
+        font-size: clamp(2.35rem, 6vw, 4.8rem);
+        font-weight: 500;
+        line-height: 1.05;
+        letter-spacing: -0.045em;
+      }
+      .hero p { max-width: 48rem; margin: 1.5rem 0 0; color: rgba(255,255,255,0.78); }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        margin-top: 1.8rem;
+      }
+      .meta span {
+        padding: 0.42rem 0.7rem;
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 999px;
+        background: rgba(255,255,255,0.08);
+        font-size: 0.76rem;
+      }
+      section {
+        scroll-margin-top: 1.5rem;
+        margin-top: 2.2rem;
+        padding: clamp(1.4rem, 3vw, 2.4rem);
+        border: 1px solid rgba(52, 64, 53, 0.1);
+        border-radius: 1.4rem;
+        background: rgba(255, 254, 249, 0.91);
+        box-shadow: 0 10px 30px rgba(45, 54, 46, 0.045);
+      }
+      h2 { margin: 0 0 1rem; font-size: 1.48rem; line-height: 1.35; }
+      h3 { margin: 1.8rem 0 0.65rem; font-size: 1.03rem; }
+      h4 { margin: 1.25rem 0 0.45rem; font-size: 0.94rem; }
+      p { margin: 0.55rem 0; }
+      ul, ol { margin: 0.55rem 0; padding-left: 1.4rem; }
+      li + li { margin-top: 0.28rem; }
+      .lead { color: var(--muted); }
+      .grid-2, .grid-3 {
+        display: grid;
+        gap: 1rem;
+        margin-top: 1rem;
+      }
+      .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .card {
+        padding: 1.15rem;
+        border: 1px solid var(--line);
+        border-radius: 1rem;
+        background: #fff;
+      }
+      .card h3, .card h4 { margin-top: 0; }
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.22rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 800;
+      }
+      .fixed { color: var(--green); background: var(--green-soft); }
+      .future { color: var(--blue); background: var(--blue-soft); }
+      .open { color: var(--orange); background: var(--orange-soft); }
+      .excluded { color: #70756f; background: #eceeea; }
+      .note, .warning {
+        margin-top: 1rem;
+        padding: 0.9rem 1rem;
+        border-left: 4px solid var(--green);
+        border-radius: 0.6rem;
+        background: var(--green-soft);
+      }
+      .warning { border-color: var(--orange); background: var(--orange-soft); }
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        align-items: stretch;
+        gap: 0.6rem;
+        margin-top: 1rem;
+      }
+      .flow-step {
+        position: relative;
+        min-height: 6.5rem;
+        padding: 0.9rem;
+        border: 1px solid var(--line);
+        border-radius: 0.9rem;
+        background: #fff;
+        font-size: 0.82rem;
+      }
+      .flow-step strong { display: block; margin-bottom: 0.35rem; color: var(--green); }
+      .table-wrap { width: 100%; margin-top: 0.8rem; overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+      th, td {
+        padding: 0.7rem 0.75rem;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th { color: #525d54; background: var(--soft); font-size: 0.76rem; white-space: nowrap; }
+      tr:last-child td { border-bottom: 0; }
+      .status-ok { color: var(--green); font-weight: 800; }
+      .status-open { color: var(--orange); font-weight: 800; }
+      .architecture {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr auto 1fr;
+        align-items: center;
+        gap: 0.75rem;
+        margin-top: 1rem;
+      }
+      .architecture .node {
+        min-height: 8rem;
+        padding: 1.2rem;
+        border: 1px solid var(--line);
+        border-radius: 1rem;
+        background: #fff;
+      }
+      .arrow { color: var(--green); font-size: 1.5rem; font-weight: 700; }
+      .formula {
+        margin: 0.8rem 0;
+        padding: 0.9rem 1rem;
+        overflow-x: auto;
+        border-radius: 0.75rem;
+        color: #eaf8ef;
+        background: #24382e;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.82rem;
+        white-space: nowrap;
+      }
+      .screen {
+        display: grid;
+        grid-template-columns: 10rem minmax(0, 1fr);
+        min-height: 18rem;
+        overflow: hidden;
+        border: 1px solid #cfd6ce;
+        border-radius: 1rem;
+        background: #fff;
+      }
+      .screen-nav { padding: 1rem; color: #dbe8df; background: #204f3c; font-size: 0.72rem; }
+      .screen-nav b { display: block; margin-bottom: 1rem; color: #fff; font-size: 0.94rem; }
+      .screen-nav div { margin: 0.55rem 0; }
+      .screen-main { padding: 1.1rem; }
+      .screen-head { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+      .mock-button { padding: 0.42rem 0.65rem; border-radius: 0.5rem; color: #fff; background: var(--green); font-size: 0.68rem; }
+      .mock-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.55rem; margin: 1rem 0; }
+      .mock-kpi { padding: 0.65rem; border: 1px solid var(--line); border-radius: 0.55rem; font-size: 0.64rem; }
+      .mock-kpi strong { display: block; margin-top: 0.3rem; font-size: 0.9rem; }
+      .mock-table { height: 7rem; border: 1px solid var(--line); border-radius: 0.55rem; background: repeating-linear-gradient(to bottom, #fff 0, #fff 1.65rem, #edf0eb 1.7rem); }
+      .checklist { list-style: none; padding-left: 0; }
+      .checklist li { position: relative; padding-left: 1.7rem; }
+      .checklist li::before {
+        position: absolute;
+        left: 0;
+        top: 0.33rem;
+        display: grid;
+        width: 1.05rem;
+        height: 1.05rem;
+        place-items: center;
+        border-radius: 50%;
+        color: #fff;
+        background: var(--green);
+        content: "✓";
+        font-size: 0.65rem;
+        font-weight: 900;
+      }
+      footer { padding: 2rem 0 0; color: #7e877f; font-size: 0.76rem; text-align: center; }
+
+      @media (max-width: 68rem) {
+        .layout { grid-template-columns: 1fr; }
+        .sidebar { position: static; width: 100%; height: auto; padding: 1rem 1.25rem 0; }
+        .brand { margin-bottom: 0.6rem; }
+        nav { display: flex; gap: 0.3rem; overflow-x: auto; padding-bottom: 0.75rem; }
+        nav .nav-label { display: none; }
+        nav a { flex: 0 0 auto; background: rgba(255,255,255,0.5); }
+        main { padding: 1rem 1.25rem 4rem; }
+      }
+      @media (max-width: 48rem) {
+        .grid-2, .grid-3, .flow, .architecture { grid-template-columns: 1fr; }
+        .arrow { transform: rotate(90deg); text-align: center; }
+        .hero { border-radius: 1.35rem; }
+        section { border-radius: 1rem; }
+        .screen { grid-template-columns: 1fr; }
+        .screen-nav { display: flex; gap: 0.8rem; overflow-x: auto; }
+        .screen-nav b { margin: 0; }
+        .screen-nav div { margin: 0; white-space: nowrap; }
+        .mock-kpis { grid-template-columns: 1fr; }
+      }
+      @media print {
+        body { background: #fff; font-size: 10pt; }
+        .layout { display: block; width: 100%; }
+        .sidebar { display: none; }
+        main { padding: 0; }
+        .hero { color: #fff !important; print-color-adjust: exact; }
+        section { break-inside: avoid; box-shadow: none; }
+        a { color: inherit; text-decoration: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <a class="brand" href="#top"><span class="brand-mark">C</span> Cake 設計書</a>
+        <nav aria-label="設計書内ナビゲーション">
+          <p class="nav-label">OVERVIEW</p>
+          <a href="#summary">1. 概要</a>
+          <a href="#scope">2. スコープ</a>
+          <a href="#architecture">3. システム構成</a>
+          <p class="nav-label">DESIGN</p>
+          <a href="#requirements">4. 機能設計</a>
+          <a href="#screens">5. 画面設計</a>
+          <a href="#settlement">6. 清算設計</a>
+          <a href="#import">7. CSV取込設計</a>
+          <a href="#data">8. データ設計</a>
+          <a href="#security">9. 認証・権限</a>
+          <p class="nav-label">DELIVERY</p>
+          <a href="#nonfunctional">10. 非機能要件</a>
+          <a href="#acceptance">11. 受入条件</a>
+          <a href="#open-items">12. 設計判断</a>
+        </nav>
+      </aside>
+
+      <main id="top">
+        <header class="hero">
+          <p class="eyebrow">Basic Design Document · Version 1.0</p>
+          <h1>家計を、ふたりで気持ちよく。</h1>
+          <p>Googleログイン、二人用共有ワークスペース、PayPay明細取込、重み付き共通費清算を備えるレスポンシブWebアプリケーションの基本設計書。</p>
+          <div class="meta">
+            <span>作成日: 2026-08-01</span>
+            <span>対象: PC / スマートフォン</span>
+            <span>構成: Next.js + Neon + Vercel</span>
+            <span>状態: 確定</span>
+          </div>
+        </header>
+
+        <section id="summary">
+          <span class="tag fixed">確定</span>
+          <h2>1. 概要</h2>
+          <p class="lead">本システムは、個人および二人で共有する家計をワークスペース単位で管理するWebアプリケーションである。</p>
+          <div class="grid-3">
+            <div class="card"><h3>入力</h3><p>手動登録・編集・削除に加え、PayPay CSVから支払い明細を取り込む。受け取りは手動登録できる。</p></div>
+            <div class="card"><h3>共有</h3><p>一つのアカウントで複数ワークスペースを持ち、共有用は招待した二人で利用する。</p></div>
+            <div class="card"><h3>清算</h3><p>共通支払いと共通収入を重みに応じて配分し、誰が誰へいくら支払うかを算出する。</p></div>
+          </div>
+          <h3>用語</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>用語</th><th>定義</th></tr></thead>
+            <tbody>
+              <tr><td>ワークスペース</td><td>明細、設定、清算を分離する家計管理単位。個人用または共有用。</td></tr>
+              <tr><td>共通費</td><td>共有ワークスペースの二人で負担する支払い、または二人に帰属する収入。</td></tr>
+              <tr><td>重み</td><td>正味共通費を二人へ配分する相対値。例: 6 と 4。</td></tr>
+              <tr><td>清算</td><td>実際の支払い・受け取りと目標負担額の差を解消するための送金額を確定する操作。</td></tr>
+              <tr><td>取引担当者</td><td>支払い時は支払者、受け取り時は受取者を表す。本設計上の内部的な総称。</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <section id="scope">
+          <h2>2. スコープ</h2>
+          <div class="grid-2">
+            <div class="card">
+              <span class="tag fixed">初期リリース</span>
+              <ul class="checklist">
+                <li>Googleアカウントによるログイン／ログアウト</li>
+                <li>個人・共有ワークスペースの作成と切り替え</li>
+                <li>メールアドレス指定による一名の招待と承認</li>
+                <li>取引明細の一覧、追加、編集、削除</li>
+                <li>PayPay CSVの支払い明細を対象とする確認画面付きインポート</li>
+                <li>取引先等に応じた費用区分のデフォルト設定</li>
+                <li>重み付きの共通費清算と清算完了</li>
+                <li>確認操作付きのワークスペース削除</li>
+              </ul>
+            </div>
+            <div class="card">
+              <span class="tag future">将来対応</span>
+              <ul>
+                <li>月次サマリ・グラフ</li>
+                <li>Notionへの記録・同期</li>
+                <li>Appleアカウントログイン</li>
+                <li>三人以上の共有ワークスペース</li>
+              </ul>
+              <p><span class="tag excluded">対象外</span> 実際の送金・決済代行は行わない。</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="architecture">
+          <span class="tag fixed">採用構成</span>
+          <h2>3. システム構成</h2>
+          <div class="architecture" role="img" aria-label="ブラウザ、Vercel、Neonのシステム構成">
+            <div class="node"><h3>ブラウザ</h3><p>PC・スマートフォン</p><p>レスポンシブUI<br />CSV選択・編集</p></div>
+            <div class="arrow">→</div>
+            <div class="node"><h3>Vercel</h3><p>Next.js App Router</p><p>画面・API・認可<br />清算計算・CSV検証</p></div>
+            <div class="arrow">→</div>
+            <div class="node"><h3>Neon</h3><p>PostgreSQL</p><p>ユーザー・ワークスペース<br />明細・ルール・清算履歴</p></div>
+          </div>
+          <div class="grid-2">
+            <div class="card"><h3>認証</h3><p>Google OAuthを利用する。Googleから取得する情報は識別子、氏名、メールアドレス、プロフィール画像に限定する。</p></div>
+            <div class="card"><h3>デプロイ</h3><p>Vercelへ配置し、Neonの接続文字列とGoogle OAuth情報を暗号化された環境変数として設定する。</p></div>
+          </div>
+          <div class="note">ブラウザからNeonへ直接接続しない。全ての更新はサーバー側でログイン状態とワークスペース所属を検証してから実行する。</div>
+          <div class="warning">ローカル・Preview環境では <code>AUTH_MODE=test</code> により、固定IDを持つテストユーザーA/Bを選択して通常のAuth.jsセッションを発行できる。Vercel Productionではサーバー側で常に無効化し、Googleログインだけを提供する。</div>
+        </section>
+
+        <section id="requirements">
+          <h2>4. 機能設計</h2>
+          <div class="table-wrap"><table>
+            <thead><tr><th>ID</th><th>機能</th><th>仕様</th><th>主な例外</th></tr></thead>
+            <tbody>
+              <tr><td>AUTH-01</td><td>Googleログイン</td><td>Google OAuthで認証し、初回ログイン時にユーザー情報をDBへ作成する。</td><td>拒否・期限切れ時はログイン画面へ戻し、理由を表示。</td></tr>
+              <tr><td>WS-01</td><td>ワークスペース作成</td><td>名称と種別（個人／共有）を指定。作成者をオーナーとして登録する。</td><td>同一名は許可。共有用の参加者上限は二人。</td></tr>
+              <tr><td>WS-02</td><td>招待</td><td>メールアドレスで一名を招待し、対象者がGoogleログイン後に承認する。</td><td>既参加者、三人目、自分自身への招待は禁止。</td></tr>
+              <tr><td>WS-03</td><td>重み設定</td><td>共有ワークスペースの各参加者に正の重みを設定する。</td><td>0以下、未入力は保存不可。</td></tr>
+              <tr><td>WS-04</td><td>ワークスペース削除</td><td>対象名の入力確認後、関連データを含めて削除する。</td><td>取り消し不可。処理前に再認証・所属を検証。</td></tr>
+              <tr><td>TX-01</td><td>明細一覧</td><td>ワークスペース単位で表示。日時、取引先、方法、種別、金額、担当者、費用区分、清算状態、取引IDを扱う。</td><td>大量件数に備えページ分割する。</td></tr>
+              <tr><td>TX-02</td><td>追加・編集</td><td>全項目をフォームで入力・更新する。金額は正の整数円として保存。</td><td>必須値・日時・金額・重複IDを検証。</td></tr>
+              <tr><td>TX-03</td><td>削除</td><td>確認後に対象明細を削除する。</td><td>清算済み明細は編集・削除不可。</td></tr>
+              <tr><td>IMP-01</td><td>CSV読込</td><td>PayPay CSVから「取引内容＝支払い」の行だけを抽出し、登録前の確認表を表示する。</td><td>形式不正、文字化け、必須列不足、重複を行単位で表示。</td></tr>
+              <tr><td>IMP-02</td><td>一括変更</td><td>確認表で複数行を選択し、費用区分と取引担当者を一括変更できる。</td><td>エラー行は登録不可。</td></tr>
+              <tr><td>RULE-01</td><td>デフォルトルール</td><td>取引先の部分一致条件に応じ、インポート時の費用区分を初期設定する。</td><td>優先順位が最も高い一致ルールを適用。</td></tr>
+              <tr><td>SET-01</td><td>清算計算</td><td>未清算の共通費を対象に、重みと実質負担から送金方向・金額を表示する。</td><td>対象0件の場合は完了操作不可。</td></tr>
+              <tr><td>SET-02</td><td>清算完了</td><td>対象明細に清算済みフラグを立て、計算スナップショットを履歴保存する。</td><td>同時更新による二重清算を防止。</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <section id="screens">
+          <h2>5. 画面設計</h2>
+          <p class="lead">PCでは左ナビゲーションと横長テーブル、スマートフォンでは下部ナビゲーションとカード／横スクロールを用いる。</p>
+          <div class="screen" aria-label="PC版明細画面の概略図">
+            <div class="screen-nav"><b>Cake</b><div>ホーム</div><div>取引明細</div><div>清算</div><div>取込</div><div>設定</div></div>
+            <div class="screen-main">
+              <div class="screen-head"><strong>ふたりの家計 ▾</strong><span class="mock-button">＋ 明細を追加</span></div>
+              <div class="mock-kpis"><div class="mock-kpi">今月の支払い<strong>¥84,320</strong></div><div class="mock-kpi">未清算の共通費<strong>¥31,240</strong></div><div class="mock-kpi">次の清算<strong>B → A ¥5,200</strong></div></div>
+              <div class="mock-table"></div>
+            </div>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>画面ID</th><th>画面</th><th>主な内容</th><th>スマートフォン対応</th></tr></thead>
+            <tbody>
+              <tr><td>SC-01</td><td>ログイン</td><td>サービス説明、Googleでログイン、利用規約・プライバシー導線。</td><td>一画面中央配置。</td></tr>
+              <tr><td>SC-02</td><td>ホーム</td><td>選択中ワークスペース、未清算額、清算結果、最近の明細、主要操作。</td><td>指標を縦積み。</td></tr>
+              <tr><td>SC-03</td><td>取引明細</td><td>検索、絞り込み、ページ分割、追加、行編集、削除。</td><td>主要項目をカード表示し、詳細を展開。</td></tr>
+              <tr><td>SC-04</td><td>明細フォーム</td><td>日時、取引先、方法、種別、金額、担当者、費用区分、取引ID。</td><td>全画面シート。</td></tr>
+              <tr><td>SC-05</td><td>CSV取込</td><td>支払い行を対象に、ファイル選択→プレビュー→一括変更→検証→登録結果。</td><td>操作欄を画面下に固定。</td></tr>
+              <tr><td>SC-06</td><td>清算</td><td>対象期間、対象明細、二人の内訳、送金方向・金額、完了ボタン、履歴。</td><td>計算内訳を縦積み。</td></tr>
+              <tr><td>SC-07</td><td>ワークスペース設定</td><td>名称、種別、参加者、招待、重み、デフォルトルール。</td><td>設定をセクション分割。</td></tr>
+              <tr><td>SC-08</td><td>招待承認</td><td>招待元・ワークスペース名を確認し、参加または辞退。</td><td>一画面中央配置。</td></tr>
+            </tbody>
+          </table></div>
+
+          <h3>明細一覧の列</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>表示名</th><th>形式／候補</th><th>備考</th></tr></thead>
+            <tbody>
+              <tr><td>取引日時</td><td><code>yyyy/mm/dd hh:mm:ss</code></td><td>保存はタイムゾーン付き日時、表示は日本時間を想定。</td></tr>
+              <tr><td>取引先</td><td>文字列</td><td>店舗名・相手名。</td></tr>
+              <tr><td>取引方法</td><td>文字列</td><td>PayPayカード、現金など。</td></tr>
+              <tr><td>取引種別</td><td>支払い／受け取り</td><td>CSVの出金・入金に対応。</td></tr>
+              <tr><td>取引金額</td><td>整数円</td><td>画面では桁区切りを表示。</td></tr>
+              <tr><td>支払者／受取者</td><td>参加者</td><td>種別に応じて見出しを切り替える。</td></tr>
+              <tr><td>費用区分</td><td>個人費／共通費</td><td>個人用ワークスペースでも保持する。</td></tr>
+              <tr><td>清算状態</td><td>未清算／清算済み／対象外</td><td>共通費のみ清算対象。個人費は対象外。</td></tr>
+              <tr><td>取引ID</td><td>文字列</td><td>PayPayでは取引番号を利用。手動追加時はアプリが自動発行。</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <section id="settlement">
+          <span class="tag fixed">二人限定</span>
+          <h2>6. 共通費の清算設計</h2>
+          <h3>対象</h3>
+          <ul>
+            <li>選択中の共有ワークスペースに属する。</li>
+            <li>費用区分が「共通費」である。</li>
+            <li>清算済みフラグが未設定である。</li>
+            <li>支払いと受け取りの両方を含む。</li>
+          </ul>
+          <h3>計算式</h3>
+          <div class="formula">正味共通費 = 共通支払い合計 − 共通受け取り合計</div>
+          <div class="formula">各人の目標負担 = 正味共通費 × 本人の重み ÷ 二人の重み合計</div>
+          <div class="formula">各人の実質負担 = 本人の支払い合計 − 本人の受け取り合計</div>
+          <div class="formula">各人の差額 = 実質負担 − 目標負担</div>
+          <p>差額が正の人は受取側、負の人は支払側とし、二人のため差額の絶対値は一致する。</p>
+
+          <h3>計算例（重み A:B = 6:4）</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th></th><th>A</th><th>B</th><th>合計</th></tr></thead>
+            <tbody>
+              <tr><td>共通支払い</td><td>10,000円</td><td>0円</td><td>10,000円</td></tr>
+              <tr><td>共通受け取り</td><td>0円</td><td>2,000円</td><td>2,000円</td></tr>
+              <tr><td>実質負担</td><td>10,000円</td><td>−2,000円</td><td>8,000円</td></tr>
+              <tr><td>目標負担</td><td>4,800円</td><td>3,200円</td><td>8,000円</td></tr>
+              <tr><td>差額</td><td class="status-ok">＋5,200円</td><td class="status-open">−5,200円</td><td>0円</td></tr>
+            </tbody>
+          </table></div>
+          <div class="note"><strong>表示結果:</strong> BがAへ5,200円支払う。</div>
+
+          <h3>清算完了処理</h3>
+          <ol>
+            <li>画面表示時点の対象明細と計算結果を再取得する。</li>
+            <li>完了直前に対象明細が未清算のままであることを再検証する。</li>
+            <li>清算履歴へ参加者、重み、集計値、送金方向・金額を保存する。</li>
+            <li>対象明細を同じDBトランザクション内で清算済みに更新する。</li>
+            <li>完了後は履歴を表示し、実際の送金は利用者が別途行う。</li>
+          </ol>
+          <div class="note">1円未満が生じる場合はAの目標負担を四捨五入し、Bの目標負担を正味共通費との差額として合計を一致させる。</div>
+        </section>
+
+        <section id="import">
+          <h2>7. PayPay CSV取込設計</h2>
+          <p>対象サンプル: <code>data/Transactions_20260701-20260715.csv</code></p>
+          <div class="flow">
+            <div class="flow-step"><strong>1. 選択</strong>CSVファイルと取込先ワークスペースを選択。</div>
+            <div class="flow-step"><strong>2. 解析</strong>ヘッダー検証。「取引内容＝支払い」の行だけを抽出。</div>
+            <div class="flow-step"><strong>3. 初期設定</strong>取引先等のルールを適用し、費用区分を設定。</div>
+            <div class="flow-step"><strong>4. 確認・編集</strong>専用表で行選択、一括変更、個別変更。</div>
+            <div class="flow-step"><strong>5. 登録</strong>再検証し、重複を除いて一括登録。</div>
+          </div>
+
+          <h3>CSVマッピング</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>PayPay列</th><th>アプリ項目</th><th>変換</th></tr></thead>
+            <tbody>
+              <tr><td>取引日</td><td>取引日時</td><td><code>yyyy/mm/dd hh:mm:ss</code>として解析。</td></tr>
+              <tr><td>出金金額（円）</td><td>取引金額</td><td>カンマと引用符を除去。値がある場合は「支払い」。</td></tr>
+              <tr><td>入金金額（円）</td><td>対象外</td><td>初期版のPayPay CSV取込では使用しない。</td></tr>
+              <tr><td>取引内容</td><td>取込判定</td><td>値が「支払い」と完全一致する行だけを対象とする。</td></tr>
+              <tr><td>取引先</td><td>取引先</td><td>原文を保持し、デフォルトルールの判定にも使用。</td></tr>
+              <tr><td>取引方法</td><td>取引方法</td><td>原文を保持。</td></tr>
+              <tr><td>利用者</td><td>参考情報</td><td>PayPayの「本人」はアプリ利用者へ自動対応できないため、取込画面で担当者を設定。</td></tr>
+              <tr><td>取引番号</td><td>取引ID</td><td>前後空白を除去し、重複判定に使用。</td></tr>
+            </tbody>
+          </table></div>
+
+          <h3>取込確認表</h3>
+          <ul>
+            <li>各行に「登録する」チェックを持ち、初期値は検証成功かつ未登録ならオン。</li>
+            <li>費用区分はルール適用後の値を表示し、利用者が登録前に変更できる。</li>
+            <li>複数行を選択し、「個人費へ変更」「共通費へ変更」「担当者を変更」を実行できる。</li>
+            <li>登録済み取引ID、形式不正、必須値不足を色と理由で表示する。</li>
+            <li>最終登録はサーバー側でも再度ファイル内容・権限・重複を検証する。</li>
+          </ul>
+          <div class="note">CSVファイル自体は永続保存せず、変換後の明細と取込日時・取込者などの監査情報のみ保存する方針とする。</div>
+        </section>
+
+        <section id="data">
+          <h2>8. データ設計</h2>
+          <p class="lead">主キーはUUID、日時はタイムゾーン付きで保存する。金額は浮動小数ではなく整数円で保持する。</p>
+          <h3>関連</h3>
+          <div class="formula">User ─&lt; WorkspaceMember &gt;─ Workspace ─&lt; Transaction ─&gt; Settlement</div>
+          <div class="formula">Workspace ─&lt; Invitation / DefaultRule / Settlement</div>
+
+          <h3>主要テーブル</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>テーブル</th><th>主要列</th><th>目的・制約</th></tr></thead>
+            <tbody>
+              <tr><td><code>users</code></td><td>id, google_subject, email, name, image_url, created_at</td><td>Google識別子とメールを一意に保持。</td></tr>
+              <tr><td><code>workspaces</code></td><td>id, name, type, owner_user_id, created_at, updated_at</td><td>typeはPERSONAL／SHARED。</td></tr>
+              <tr><td><code>workspace_members</code></td><td>workspace_id, user_id, role, weight, joined_at</td><td>複合一意制約。共有用はアプリ層とDB処理で最大二人。</td></tr>
+              <tr><td><code>invitations</code></td><td>id, workspace_id, email, token_hash, status, expires_at, invited_by</td><td>招待トークンは平文保存しない。状態はPENDING／ACCEPTED／DECLINED／EXPIRED。</td></tr>
+              <tr><td><code>transactions</code></td><td>id, workspace_id, occurred_at, merchant, method, type, amount_yen, actor_user_id, expense_class, settled_at, external_id, source</td><td>typeはPAYMENT／RECEIPT、expense_classはPERSONAL／SHARED。external_idで重複防止。</td></tr>
+              <tr><td><code>default_rules</code></td><td>id, workspace_id, value, expense_class, priority, enabled</td><td>取引先の部分一致でCSV取込時の初期値を設定。優先順位順に評価。</td></tr>
+              <tr><td><code>import_batches</code></td><td>id, workspace_id, imported_by, file_name, total_rows, imported_rows, skipped_rows, created_at</td><td>取込単位の結果を記録。CSV本文は保存しない。</td></tr>
+              <tr><td><code>settlements</code></td><td>id, workspace_id, payer_user_id, payee_user_id, amount_yen, weight_snapshot, calculation_snapshot, completed_by, completed_at</td><td>清算時点の計算根拠をJSONスナップショットとして保持。</td></tr>
+              <tr><td><code>settlement_transactions</code></td><td>settlement_id, transaction_id</td><td>どの明細がどの清算に含まれたかを固定。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>データ整合性</h3>
+          <ul>
+            <li><code>amount_yen &gt; 0</code>、<code>weight &gt; 0</code>を制約とする。</li>
+            <li>取引担当者は対象ワークスペースの参加者に限る。</li>
+            <li>共有ワークスペースへの参加確定は二人までとする。</li>
+            <li>清算済み明細と清算履歴の関連付けをDBトランザクションで一括更新する。</li>
+            <li>取引IDは同一ワークスペース内で一意とする。手動追加時はアプリが自動発行する。</li>
+          </ul>
+        </section>
+
+        <section id="security">
+          <h2>9. 認証・権限設計</h2>
+          <div class="grid-2">
+            <div class="card"><h3>認証</h3><ul><li>Google OAuthのみ。</li><li>セッションCookieはSecure、HttpOnly、SameSiteを設定。</li><li>状態変更APIはCSRF対策を有効化。</li><li>OAuth秘密情報はサーバー環境変数のみ。</li></ul></div>
+            <div class="card"><h3>認可</h3><ul><li>全APIでログインを必須化。</li><li>全操作でワークスペース所属を検証。</li><li>二人とも明細・取込・清算を操作可能。</li><li>招待・重み設定も二人が操作可能。</li></ul></div>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>操作</th><th>個人用メンバー</th><th>共有用メンバー</th><th>非メンバー</th></tr></thead>
+            <tbody>
+              <tr><td>明細参照・追加・編集・削除</td><td>可</td><td>可</td><td>不可</td></tr>
+              <tr><td>CSV取込</td><td>可</td><td>可</td><td>不可</td></tr>
+              <tr><td>清算計算・完了</td><td>対象外</td><td>可</td><td>不可</td></tr>
+              <tr><td>招待</td><td>対象外</td><td>可</td><td>不可</td></tr>
+              <tr><td>重み変更</td><td>対象外</td><td>可</td><td>不可</td></tr>
+            </tbody>
+          </table></div>
+          <h3>操作記録</h3>
+          <p>明細と設定に作成者・更新者・作成日時・更新日時を保持する。清算とCSV取込は専用履歴を残し、問題発生時に操作内容を追跡できるようにする。</p>
+        </section>
+
+        <section id="nonfunctional">
+          <h2>10. 非機能要件</h2>
+          <div class="table-wrap"><table>
+            <thead><tr><th>分類</th><th>方針</th></tr></thead>
+            <tbody>
+              <tr><td>対応環境</td><td>現行のChrome、Safari、Edge。PC幅とスマートフォン幅に対応する。</td></tr>
+              <tr><td>アクセシビリティ</td><td>キーボード操作、明確なフォーカス、ラベル、色以外の状態表現、十分なコントラストを確保する。</td></tr>
+              <tr><td>性能</td><td>一覧はサーバー側ページ分割。通常操作は体感1秒前後を目標とし、処理中状態を表示する。</td></tr>
+              <tr><td>CSV上限</td><td>ファイルサイズ・行数上限は実装前に決定。処理中にブラウザを固めない設計とする。</td></tr>
+              <tr><td>可用性</td><td>VercelとNeonの無料枠特性に依存。重要データの定期エクスポート手段を運用手順に含める。</td></tr>
+              <tr><td>セキュリティ</td><td>入力検証、パラメータ化SQL、認可、レート制限、秘密情報の非公開を徹底する。</td></tr>
+              <tr><td>日時・通貨</td><td>初期版は日本時間・日本円に固定する。</td></tr>
+              <tr><td>保守性</td><td>清算計算とCSV変換をUIから分離し、単体テスト可能な純粋関数として実装する。</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <section id="acceptance">
+          <h2>11. 主要受入条件</h2>
+          <ol>
+            <li>Googleアカウントでログインし、再訪時も本人のワークスペースだけが表示される。</li>
+            <li>一アカウントで個人用・共有用を複数作成し、データが混ざらず切り替えられる。</li>
+            <li>共有用へメール招待した相手が承認し、二人で同じ明細を操作できる。</li>
+            <li>明細の全指定列を一覧表示し、追加・編集・削除できる。</li>
+            <li>サンプルPayPay CSVから「取引内容＝支払い」の行だけをプレビューできる。</li>
+            <li>取込前にデフォルトルールが反映され、選択行の費用区分を一括変更できる。</li>
+            <li>同じ取引IDを再度取り込もうとした際に重複登録されず、理由が表示される。</li>
+            <li>Aが10,000円支払い、Bが2,000円受け取り、重み6:4の場合「BがAへ5,200円」と表示される。</li>
+            <li>清算完了後、対象明細だけが清算済みとなり、次回計算から除外される。</li>
+            <li>清算完了を同時に二回実行しても、二重の清算履歴が作成されない。</li>
+            <li>スマートフォンで主要操作が横幅からはみ出さず実行できる。</li>
+          </ol>
+        </section>
+
+        <section id="open-items">
+          <span class="tag fixed">確定</span>
+          <h2>12. 確定した設計判断</h2>
+          <p class="lead">Version 1.0で確定した初期リリースの設計判断を示す。</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>No.</th><th>設計判断</th><th>仕様</th></tr></thead>
+            <tbody>
+              <tr><td>D1</td><td>端数</td><td>Aを四捨五入し、Bは合計との差額。</td></tr>
+              <tr><td>D2</td><td>取引ID</td><td>同一ワークスペース内で重複禁止。手動明細は自動発行。</td></tr>
+              <tr><td>D3</td><td>清算済み明細</td><td>編集・削除禁止。初期版に清算取消は設けない。</td></tr>
+              <tr><td>D4</td><td>デフォルトルール</td><td>取引先の部分一致。優先順位が最も高い最初のルールを適用。</td></tr>
+              <tr><td>D5</td><td>招待</td><td>招待リンクをコピーして共有。メール自動送信は将来対応。</td></tr>
+              <tr><td>D6</td><td>ワークスペース</td><td>削除に対応。退出・所有者移管は初期版対象外。</td></tr>
+              <tr><td>D7</td><td>地域</td><td>日本時間・日本円に固定。</td></tr>
+              <tr><td>D8</td><td>CSV対象</td><td>取引内容が「支払い」の行のみ。受け取りは対象外。</td></tr>
+            </tbody>
+          </table></div>
+          <div class="note">本項の判断を基準として詳細設計・実装を行う。</div>
+        </section>
+
+        <footer>Cake 家計管理アプリ 基本設計書 · Version 1.0</footer>
+      </main>
+    </div>
+  </body>
+</html>
