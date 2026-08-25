@@ -86,7 +86,7 @@ AUTH_MODE=test
 
 ログイン画面で`テストユーザーA`または`テストユーザーB`を選べます。どちらも通常のAuth.jsセッションを発行するため、通常ブラウザとシークレットウィンドウを使って、招待や共有ワークスペースを二人の別ユーザーとして確認できます。
 
-テストユーザーは初回ログイン時に自動登録されます。ログイン前に登録しておく場合は、テスト用DBを接続した状態で次を実行します。
+テストユーザーは初回ログイン時に自動登録されます。次を実行すると、テストユーザーA・Bに加えて、両方が参加済みの`テスト共有家計`ワークスペースも登録されます。繰り返し実行しても重複しません。
 
 ```bash
 npm run db:seed:test
@@ -96,7 +96,14 @@ npm run db:seed:test
 
 ## Vercelへ配置
 
-1. このリポジトリをGitHubへpushし、VercelへImportします。
+### 初回設定
+
+1. このリポジトリをGitHubへpushしてVercelへImportするか、プロジェクトのルートで次を実行して既存のVercelプロジェクトと接続します。
+
+```bash
+npx vercel link
+```
+
 2. VercelのEnvironment Variablesへ次を登録します。
    - `DATABASE_URL`
    - `AUTH_SECRET`
@@ -111,7 +118,93 @@ https://あなたのドメイン/api/auth/callback/google
 ```
 
 4. `npm run db:setup`は初回に一度だけ、Neonの接続情報を設定した環境で実行します。
-5. VercelをDeployします。
+5. Vercelへデプロイします。
+
+### Previewへデプロイ
+
+Preview用DBの初期化、テストデータ登録、現在のローカルファイルのデプロイを順番に実行します。Gitへのpushは不要です。
+
+```bash
+npm run deploy:preview
+```
+
+コマンド完了時に表示される`https://...vercel.app`が、そのDeployment固有のPreview URLです。デプロイ時点でテストユーザーA・Bは`テスト共有家計`へ参加済みです。Preview環境には、Vercelで`Preview`を対象に設定した環境変数が使用されます。
+
+各処理を個別に実行する場合は次のコマンドを使用します。
+
+```bash
+npx vercel env run -e preview -- npm run db:setup
+npx vercel env run -e preview -- npm run db:seed:test
+npx vercel
+```
+
+### Productionへデプロイ
+
+Production環境へ公開するときだけ`--prod`を付けます。本番用の環境変数とDBが正しいことを確認してから実行してください。
+
+```bash
+npx vercel --prod
+```
+
+### Deploymentの確認
+
+Preview Deploymentの一覧を表示します。
+
+```bash
+npx vercel list --environment=preview
+```
+
+特定のDeploymentの状態や設定を確認します。
+
+```bash
+npx vercel inspect https://対象のpreview-url.vercel.app
+```
+
+Productionだけを一覧表示する場合は次を実行します。
+
+```bash
+npx vercel list --prod
+```
+
+### Preview Deploymentの再デプロイ
+
+同じDeploymentを再ビルドする場合は、対象URLを指定します。環境変数を変更した場合も再デプロイが必要です。
+
+```bash
+npx vercel redeploy https://対象のpreview-url.vercel.app
+```
+
+ローカルの最新ファイルを改めて配置する場合は、通常どおり新しいPreviewを作成します。
+
+```bash
+npx vercel
+```
+
+### Preview Deploymentの削除
+
+最初に一覧から削除対象のURLを確認します。
+
+```bash
+npx vercel list --environment=preview
+```
+
+プロジェクト名ではなく、削除したいDeploymentの完全なURLを指定します。
+
+```bash
+npx vercel remove https://対象のpreview-url.vercel.app
+```
+
+この操作で削除されるのは指定したVercel Deploymentだけです。Vercelの環境変数、Gitブランチ、手動作成したNeonの`preview`ブランチとそのデータは削除されません。
+
+### ローカルのVercel開発サーバー
+
+VercelのDevelopment環境変数を使ってローカル起動する場合は次を実行します。
+
+```bash
+npx vercel dev
+```
+
+停止するときは、起動したターミナルで`Ctrl+C`を押します。設定変更後に再起動する場合も、一度`Ctrl+C`で停止してから再度`npx vercel dev`を実行します。
 
 ## PayPay CSV
 
@@ -127,7 +220,8 @@ npm run build     # production build
 npm run lint      # ESLint
 npm test          # 清算・CSV解析テスト
 npm run db:setup  # DBスキーマ作成
-npm run db:seed:test # テストユーザーA・Bをテスト用DBへ登録
+npm run db:seed:test # テストユーザーA・Bと共有ワークスペースを登録
+npm run deploy:preview # Preview用DBを準備してVercelへデプロイ
 ```
 
 ## 清算ルール

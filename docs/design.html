@@ -227,21 +227,81 @@
       tr:last-child td { border-bottom: 0; }
       .status-ok { color: var(--green); font-weight: 800; }
       .status-open { color: var(--orange); font-weight: 800; }
-      .architecture {
+      .system-diagram {
         display: grid;
-        grid-template-columns: 1fr auto 1fr auto 1fr;
-        align-items: center;
-        gap: 0.75rem;
+        grid-template-columns: minmax(10rem, 0.9fr) 4.5rem minmax(20rem, 1.7fr) 4.5rem minmax(11rem, 0.95fr);
+        align-items: stretch;
+        gap: 0.6rem;
         margin-top: 1rem;
       }
-      .architecture .node {
-        min-height: 8rem;
-        padding: 1.2rem;
-        border: 1px solid var(--line);
-        border-radius: 1rem;
-        background: #fff;
+      .diagram-group {
+        padding: 0.85rem;
+        border: 1px dashed #b9c4ba;
+        border-radius: 1.1rem;
+        background: rgba(243, 245, 239, 0.72);
       }
-      .arrow { color: var(--green); font-size: 1.5rem; font-weight: 700; }
+      .diagram-group.platform {
+        border-style: solid;
+        border-color: rgba(31, 107, 79, 0.35);
+        background: var(--green-soft);
+      }
+      .diagram-title {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.5rem;
+        margin: 0 0 0.65rem;
+        color: #566158;
+        font-size: 0.7rem;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .diagram-title span { color: var(--green); letter-spacing: 0; text-transform: none; }
+      .diagram-stack { display: grid; gap: 0.65rem; }
+      .diagram-node {
+        padding: 0.85rem;
+        border: 1px solid var(--line);
+        border-radius: 0.8rem;
+        background: #fff;
+        box-shadow: 0 4px 12px rgba(45, 54, 46, 0.035);
+      }
+      .diagram-node strong { display: block; margin-bottom: 0.2rem; color: var(--ink); font-size: 0.88rem; }
+      .diagram-node small { display: block; color: var(--muted); font-size: 0.72rem; line-height: 1.5; }
+      .diagram-node.accent { border-color: rgba(49, 93, 145, 0.25); background: var(--blue-soft); }
+      .diagram-node.data { border-color: rgba(189, 100, 30, 0.25); background: var(--orange-soft); }
+      .diagram-arrow {
+        display: grid;
+        align-content: center;
+        justify-items: center;
+        color: var(--green);
+        font-size: 1.55rem;
+        font-weight: 800;
+        line-height: 1;
+        text-align: center;
+      }
+      .diagram-arrow small { margin-top: 0.45rem; color: var(--muted); font-size: 0.62rem; font-weight: 700; line-height: 1.35; }
+      .diagram-flow {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.55rem;
+      }
+      .diagram-flow .diagram-node { min-height: 6.2rem; }
+      .diagram-down {
+        padding: 0.3rem 0;
+        color: var(--green);
+        font-size: 1.15rem;
+        font-weight: 900;
+        text-align: center;
+      }
+      .diagram-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem 1rem;
+        margin: 0.9rem 0 0;
+        color: var(--muted);
+        font-size: 0.72rem;
+      }
+      .diagram-legend span::before { margin-right: 0.3rem; color: var(--green); content: "●"; }
       .formula {
         margin: 0.8rem 0;
         padding: 0.9rem 1rem;
@@ -301,8 +361,12 @@
         main { padding: 1rem 1.25rem 4rem; }
       }
       @media (max-width: 48rem) {
-        .grid-2, .grid-3, .flow, .architecture { grid-template-columns: 1fr; }
-        .arrow { transform: rotate(90deg); text-align: center; }
+        .grid-2, .grid-3, .flow { grid-template-columns: 1fr; }
+        .system-diagram { grid-template-columns: 1fr; }
+        .diagram-arrow { min-height: 3.2rem; transform: rotate(90deg); }
+        .diagram-arrow small { display: none; }
+        .diagram-flow { grid-template-columns: 1fr; }
+        .diagram-flow .diagram-node { min-height: 0; }
         .hero { border-radius: 1.35rem; }
         section { border-radius: 1rem; }
         .screen { grid-template-columns: 1fr; }
@@ -412,13 +476,42 @@
         <section id="architecture">
           <span class="tag fixed">採用構成</span>
           <h2>3. システム構成</h2>
-          <div class="architecture" role="img" aria-label="ブラウザ、Vercel、Neonのシステム構成">
-            <div class="node"><h3>ブラウザ</h3><p>PC・スマートフォン</p><p>レスポンシブUI<br />CSV選択・編集</p></div>
-            <div class="arrow">→</div>
-            <div class="node"><h3>Vercel</h3><p>Next.js App Router</p><p>画面・API・認可<br />清算計算・CSV検証</p></div>
-            <div class="arrow">→</div>
-            <div class="node"><h3>Neon</h3><p>PostgreSQL</p><p>ユーザー・ワークスペース<br />明細・ルール・清算履歴</p></div>
+          <p class="lead">利用者の操作、外部ファイル、認証、アプリケーション処理、永続化までを含む全体構成を示す。</p>
+          <div class="system-diagram" role="img" aria-label="利用者環境からVercel上のNext.jsアプリケーション、Google OAuthおよびNeon PostgreSQLへ接続する全体システム構成図">
+            <div class="diagram-group">
+              <p class="diagram-title">利用者環境 <span>PC / Smartphone</span></p>
+              <div class="diagram-stack">
+                <div class="diagram-node accent"><strong>Webブラウザ</strong><small>レスポンシブUI<br />取引・設定・清算操作</small></div>
+                <div class="diagram-down">↑</div>
+                <div class="diagram-node"><strong>PayPay CSV</strong><small>端末上で選択・解析<br />原本は保存しない</small></div>
+              </div>
+            </div>
+
+            <div class="diagram-arrow" aria-hidden="true">⇄<small>HTTPS<br />HTML / JSON</small></div>
+
+            <div class="diagram-group platform">
+              <p class="diagram-title">Vercel <span>Next.js 16 / React 19</span></p>
+              <div class="diagram-node accent"><strong>App Router / UI</strong><small>Server Components・Client Components<br />画面描画、入力、CSVプレビュー</small></div>
+              <div class="diagram-down">↕</div>
+              <div class="diagram-flow">
+                <div class="diagram-node"><strong>Auth.js</strong><small>セッション管理<br />Google / テスト認証</small></div>
+                <div class="diagram-node"><strong>Route Handler</strong><small><code>/api/app</code><br />入力検証・認可</small></div>
+                <div class="diagram-node"><strong>ドメイン処理</strong><small>Repository<br />清算計算・取込処理</small></div>
+              </div>
+            </div>
+
+            <div class="diagram-arrow" aria-hidden="true">⇄<small>OAuth<br />SQL over TLS</small></div>
+
+            <div class="diagram-group">
+              <p class="diagram-title">外部サービス</p>
+              <div class="diagram-stack">
+                <div class="diagram-node accent"><strong>Google OAuth</strong><small>本人認証<br />基本プロフィール・メール</small></div>
+                <div class="diagram-node data"><strong>Neon PostgreSQL</strong><small>ユーザー・ワークスペース<br />明細・ルール・招待・清算履歴</small></div>
+                <div class="diagram-node"><strong>環境変数</strong><small>DB接続・Auth秘密情報<br />Vercelで暗号化管理</small></div>
+              </div>
+            </div>
           </div>
+          <p class="diagram-legend"><span>ブラウザはDBへ直接接続しない</span><span>全更新でセッションと所属を検証</span><span>外部通信はTLSで保護</span></p>
           <div class="grid-2">
             <div class="card"><h3>認証</h3><p>Google OAuthを利用する。Googleから取得する情報は識別子、氏名、メールアドレス、プロフィール画像に限定する。</p></div>
             <div class="card"><h3>デプロイ</h3><p>Vercelへ配置し、Neonの接続文字列とGoogle OAuth情報を暗号化された環境変数として設定する。</p></div>

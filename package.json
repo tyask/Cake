@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "db:setup": "node scripts/setup-db.mjs",
     "db:seed:test": "tsx scripts/seed-test-users.ts",
+    "deploy:preview": "npx vercel env run -e preview -- npm run db:setup && npx vercel env run -e preview -- npm run db:seed:test && npx vercel",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
