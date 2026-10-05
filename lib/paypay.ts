@@ -1,5 +1,6 @@
 import Papa from "papaparse";
-import type { DefaultRule, ExpenseClass } from "./types";
+import { matchingDefaultRule, transactionDefaults } from "./expense-splits";
+import type { DefaultRule, ExpenseClass, SplitWeights, WorkspaceMember } from "./types";
 
 export interface PayPayPreviewRow {
   key: string;
@@ -10,6 +11,7 @@ export interface PayPayPreviewRow {
   amountYen: number;
   externalId: string;
   expenseClass: ExpenseClass;
+  splitWeights: SplitWeights;
   duplicate: boolean;
   error: string | null;
 }
@@ -30,11 +32,7 @@ function parseAmount(value: string | undefined) {
 }
 
 export function defaultExpenseClass(merchant: string, rules: DefaultRule[]): ExpenseClass {
-  const matched = [...rules]
-    .filter((rule) => rule.enabled)
-    .sort((a, b) => a.priority - b.priority)
-    .find((rule) => merchant.includes(rule.merchantContains));
-  return matched?.expenseClass ?? "PERSONAL";
+  return matchingDefaultRule(merchant, rules)?.expenseClass ?? "PERSONAL";
 }
 
 export function payPayDateToIso(value: string) {
@@ -48,6 +46,8 @@ export function parsePayPayCsv(
   text: string,
   rules: DefaultRule[],
   existingExternalIds: Set<string>,
+  members: WorkspaceMember[] = [],
+  actorUserId = "",
 ) {
   const parsed = Papa.parse<Record<string, string>>(text.replace(/^\uFEFF/, ""), {
     header: true,
@@ -84,7 +84,7 @@ export function parsePayPayCsv(
         method: row["取引方法"]?.trim() || "PayPay",
         amountYen,
         externalId,
-        expenseClass: defaultExpenseClass(merchant, rules),
+        ...transactionDefaults(merchant, rules, members, actorUserId),
         duplicate,
         error,
       };

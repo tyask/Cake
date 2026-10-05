@@ -5,12 +5,13 @@
 ## 主な機能
 
 - Googleアカウントでログイン
+- 管理者が登録した二人だけが利用可能（利用者と管理者権限はDBで管理）
 - 個人用・共有用ワークスペースの作成、切り替え、削除
 - 招待リンクによる二人目の参加
-- 取引明細の追加、編集、削除
-- PayPay CSVの支払い明細をプレビューし、複数行の費用区分を一括変更して取込
-- 取引先の部分一致による費用区分のデフォルトルール
-- 共通支払い・共通収入と重みから、誰が誰へいくら支払うかを計算
+- 取引明細の追加、編集、削除と、明細ごとの負担割合の設定
+- PayPay CSVの支払い明細をプレビューし、費用区分・負担割合を変更して取込
+- 取引先の部分一致による費用区分・負担割合のデフォルトルール（ワークスペース共有、ドラッグで優先順を変更）
+- 共通支払い・共通収入と明細ごとの割合から、誰が誰へいくら支払うかを計算
 - 清算完了と清算履歴
 
 基本設計は [docs/design.html](docs/design.html) にあります。
@@ -35,7 +36,7 @@
 1. [Google Cloud Console](https://console.cloud.google.com/)へGoogleアカウントでログインします。
 2. 新しいプロジェクトを作成します。
 3. Google Auth PlatformのBranding、Audience、Data Accessを設定します。
-4. Audienceは開発中なら`External`のテストモードにし、利用する二人のGoogleアカウントをテストユーザーへ追加します。
+4. Audienceは開発中なら`External`のテストモードにします。基本プロフィール・メールアドレスだけを要求する場合は、[Googleの仕様](https://support.google.com/cloud/answer/15549945?hl=ja)上、テストユーザーの一覧に載っていないアカウントも認証できます。Cakeの利用者制限は、Googleのテストユーザー設定ではなくCakeのDBで行います。
 5. OAuth Clientを`Web application`として作成します。
 6. ローカル用のAuthorized redirect URIへ次を追加します。
 
@@ -64,6 +65,7 @@ AUTH_SECRET=生成したランダム値
 AUTH_GOOGLE_ID=GoogleのClient ID
 AUTH_GOOGLE_SECRET=GoogleのClient secret
 AUTH_URL=http://localhost:3000
+AUTH_MODE=google
 ```
 
 ### 4. DBとアプリを起動
@@ -75,6 +77,16 @@ npm run dev
 ```
 
 [http://localhost:3000](http://localhost:3000)を開きます。
+
+### 利用者を管理する
+
+`npm run db:setup`は番号順に未適用のマイグレーションを実行し、適用履歴を`schema_migrations`へ保存します。既存DBにも更新時に実行してください。繰り返し実行しても登録済みの利用者や権限を初期状態へ戻しません。
+
+初回の利用者管理マイグレーションで、`t.yasu417@gmail.com`を管理者として登録します。このメールアドレスでGoogleログインし、設定の「利用者管理」からもう一人のGoogleアカウントのメールアドレスを登録してください。登録した人は、自分のGoogleアカウントでログインできます。Yahooなどのメールアドレスで作成したGoogleアカウントも、そのGoogleアカウントのメールアドレスを登録すれば利用できます。
+
+登録・利用停止を行えるのは管理者だけです。DBの`app_users.is_admin`で管理者権限、`app_users.is_enabled`で利用可否を管理し、有効な通常アカウントを二人までに制限します。メールアドレスの許可リストを環境変数へ設定する必要はありません。利用停止にしても、既存の取引やワークスペースの記録は保持します。停止後のアカウントは既存のセッションからも利用できなくなります。
+
+既存DBへこのマイグレーションを適用すると、指定された管理者以外の既存アカウントは利用不可になります。必要なもう一人を管理者画面から登録すると、既存のアカウントIDとデータを引き継いで再び利用できます。
 
 ### テストユーザーでログインする
 
@@ -92,7 +104,7 @@ AUTH_MODE=test
 npm run db:seed:test
 ```
 
-固定ユーザーは`test-a@cake.local`と`test-b@cake.local`です。Vercel Productionでは、誤って`AUTH_MODE=test`を設定してもテストログインは無効になります。
+固定ユーザーは`test-a@cake.local`と`test-b@cake.local`です。テストユーザーに管理者権限はなく、通常アカウント二人の上限にも含めません。Vercel Productionでは、誤って`AUTH_MODE=test`を設定してもテストログインは無効になります。Preview・ローカル用には本番と別のDB（Neonの別ブランチなど）を使用してください。
 
 ## Vercelへ配置
 
@@ -104,7 +116,7 @@ npm run db:seed:test
 npx vercel link
 ```
 
-2. VercelのEnvironment Variablesへ次を登録します。
+2. VercelのEnvironment Variablesへ、本番用の設定として`Production`を対象に次を登録します。Preview用の設定は下の「Previewへデプロイ」を参照してください。
    - `DATABASE_URL`
    - `AUTH_SECRET`
    - `AUTH_GOOGLE_ID`
@@ -117,30 +129,43 @@ npx vercel link
 https://あなたのドメイン/api/auth/callback/google
 ```
 
-4. `npm run db:setup`は初回に一度だけ、Neonの接続情報を設定した環境で実行します。
+4. `npm run db:setup`を本番のNeon接続情報が設定された環境で実行します。初回だけでなく、マイグレーションの追加された更新時にも実行してください。
 5. Vercelへデプロイします。
 
 ### Previewへデプロイ
 
-Preview用DBの初期化、テストデータ登録、現在のローカルファイルのデプロイを順番に実行します。Gitへのpushは不要です。
+Vercelのプロジェクト設定のEnvironment Variablesで、`Preview`を対象に次を登録します。
+
+- `DATABASE_URL`：Preview専用のNeon DBまたはブランチの接続文字列。本番用のDBとは分けてください。
+- `AUTH_SECRET`：`openssl rand -base64 32`で生成した値。
+- `AUTH_MODE=test`：テストユーザーA・Bのログインを有効にします。
+
+`AUTH_URL=http://localhost:3000`はローカル専用です。Previewには設定せず、VercelのURL自動検出を使用してください。固定URLを指定する場合は、そのPreviewの公開URLを設定します。
+
+VercelでSecretとして設定された環境変数の値は、CLIからローカルへ取得できない場合があります。`npx vercel env run`でDBの準備を行う必要はありません。SecretはVercel上のビルドで利用できるため、Previewのデプロイのために`.env.local`へ接続情報や認証キーをコピーする必要もありません。
+
+まだCLIでログイン・プロジェクトへの接続をしていない場合は、最初に次を実行します。
+
+```bash
+npx vercel login
+npx vercel link
+```
+
+現在のローカルファイルを送信してPreviewへデプロイします。Gitへのpushは不要です。
 
 ```bash
 npm run deploy:preview
 ```
 
-コマンド完了時に表示される`https://...vercel.app`が、そのDeployment固有のPreview URLです。デプロイ時点でテストユーザーA・Bは`テスト共有家計`へ参加済みです。Preview環境には、Vercelで`Preview`を対象に設定した環境変数が使用されます。
+Vercel上のビルドでPreview用DBへ未適用のマイグレーションを適用し、`AUTH_MODE=test`の場合はテストユーザーと共有ワークスペースを登録してから、アプリをビルドします。DB準備に失敗した場合はビルドを停止します。
 
-各処理を個別に実行する場合は次のコマンドを使用します。
+コマンド完了時に表示される`https://...vercel.app`が、そのDeployment固有のPreview URLです。`AUTH_MODE=test`なら、テストユーザーA・Bは`テスト共有家計`へ参加済みです。この二人に管理者権限はありません。
 
-```bash
-npx vercel env run -e preview -- npm run db:setup
-npx vercel env run -e preview -- npm run db:seed:test
-npx vercel
-```
+GoogleログインでPreviewを確認する場合は、Previewの`AUTH_MODE=google`と`AUTH_GOOGLE_ID`・`AUTH_GOOGLE_SECRET`を設定し、Google Cloud側にPreviewのコールバックURLを登録してください。この場合もマイグレーションは適用されますが、テストユーザーの登録は行いません。管理者による利用者登録はGoogleログインで確認できます。
 
 ### Productionへデプロイ
 
-Production環境へ公開するときだけ`--prod`を付けます。本番用の環境変数とDBが正しいことを確認してから実行してください。
+Production環境へ公開するときだけ`--prod`を付けます。本番用の環境変数とDBが正しいことを確認してから実行してください。ProductionのビルドはDBの更新やテストデータの登録を行わないため、必要なマイグレーションは公開前に`npm run db:setup`で適用します。
 
 ```bash
 npx vercel --prod
@@ -219,18 +244,27 @@ npm run dev       # 開発サーバー
 npm run build     # production build
 npm run lint      # ESLint
 npm test          # 清算・CSV解析テスト
-npm run db:setup  # DBスキーマ作成
+npm run db:setup  # 未適用のDBマイグレーションを適用
 npm run db:seed:test # テストユーザーA・Bと共有ワークスペースを登録
-npm run deploy:preview # Preview用DBを準備してVercelへデプロイ
+npm run deploy:preview # Vercel上でPreview用DBを準備してデプロイ
 ```
 
 ## 清算ルール
 
+設定の「共有費のデフォルト割合」は、新しい共有費の初期値です。明細ごとに割合を変更できます。個人費は支払者・受取者が1、相手が0になります。
+
+デフォルトルールはワークスペースの参加者全員で共有し、取引先が一致した上のルールから適用します。共有費のルールには独自の割合を設定するか、ワークスペースのデフォルト割合を使うかを選べます。割合は明細の保存時に記録されるため、後からデフォルト割合やルールを変更しても保存済みの明細は変わりません。
+
+既存の明細には、マイグレーション時のデフォルト割合を保存します。清算済みの明細では、その清算に保存された割合を使います。
+
 ```text
 正味共通費 = 共通支払い − 共通収入
-目標負担   = 正味共通費 × 本人の重み ÷ 重み合計
+明細の負担 = 明細の金額 × 本人の割合 ÷ 明細の割合合計（収入はマイナス）
+目標負担   = 共通明細の負担の合計
 実質負担   = 本人の支払い − 本人の受け取り
 差額       = 実質負担 − 目標負担
 ```
+
+一円未満の端数は合計してから丸め、二人の目標負担の合計が正味共通費と一致するようにします。
 
 差額が負の人から正の人へ、その絶対額を支払うよう表示します。清算完了はアプリ内のフラグ更新であり、実際の送金は行いません。

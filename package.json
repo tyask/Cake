@@ -5,18 +5,23 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:vercel": "node --import tsx scripts/vercel-build.ts",
     "start": "next start",
     "lint": "eslint .",
     "db:setup": "node scripts/setup-db.mjs",
     "db:seed:test": "tsx scripts/seed-test-users.ts",
-    "deploy:preview": "npx vercel env run -e preview -- npm run db:setup && npx vercel env run -e preview -- npm run db:seed:test && npx vercel",
+    "deploy:preview": "npx vercel",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@neondatabase/serverless": "^1.1.0",
     "next": "latest",
     "next-auth": "^5.0.0-beta.32",
     "papaparse": "^5.5.4",
+    "qrcode.react": "^4.2.0",
     "react": "latest",
     "react-dom": "latest",
     "zod": "^4.4.3"

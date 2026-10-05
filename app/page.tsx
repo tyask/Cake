@@ -6,10 +6,11 @@ import { getBootstrap } from "@/lib/repository";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ workspaceId?: string }> }) {
+export default async function Home({ searchParams }: { searchParams: Promise<{ workspaceId?: string; error?: string }> }) {
+  const { workspaceId, error } = await searchParams;
   const user = await getCurrentUser();
   const testAuth = isTestAuthEnabled();
-  if (!user) return <LoginScreen testAuth={testAuth} />;
+  if (!user) return <LoginScreen testAuth={testAuth} error={error} />;
 
   if (!process.env.DATABASE_URL) {
     return (
@@ -24,7 +25,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ w
     );
   }
 
-  const { workspaceId } = await searchParams;
   const initialData = await getBootstrap(user, workspaceId);
   return <Dashboard initialData={initialData} testAuth={testAuth} />;
 }

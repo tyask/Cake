@@ -1,11 +1,13 @@
 import { db } from "./db";
 import { calculateSettlement } from "./settlement";
+import { updateRegisteredProfile } from "./user-access";
 import type {
   AppUser,
   BootstrapData,
   DefaultRule,
   PendingInvitation,
   SettlementHistory,
+  SplitWeights,
   TransactionRecord,
   WorkspaceData,
   WorkspaceMember,
@@ -19,16 +21,7 @@ const nullableText = (value: unknown) => (value == null ? null : String(value));
 const number = (value: unknown) => Number(value ?? 0);
 
 export async function ensureUser(user: AppUser) {
-  const sql = db();
-  await sql`
-    INSERT INTO app_users (id, email, name, image_url)
-    VALUES (${user.id}, ${user.email.toLowerCase()}, ${user.name}, ${user.imageUrl})
-    ON CONFLICT (id) DO UPDATE SET
-      email = EXCLUDED.email,
-      name = EXCLUDED.name,
-      image_url = EXCLUDED.image_url,
-      updated_at = now()
-  `;
+  if (!await updateRegisteredProfile(user)) throw new Error("このアカウントはCakeを利用できません。");
 }
 
 export async function requireWorkspaceMember(workspaceId: string, userId: string) {
@@ -88,22 +81,22 @@ async function getWorkspaceData(
       FROM workspace_members wm
       JOIN app_users u ON u.id = wm.user_id
       WHERE wm.workspace_id = ${workspace.id}::uuid
-      ORDER BY wm.joined_at ASC
+      ORDER BY wm.joined_at ASC, wm.user_id ASC
     `,
     sql`
       SELECT t.id, t.occurred_at, t.merchant, t.method, t.type, t.amount_yen,
              t.actor_user_id, u.name AS actor_name, t.expense_class, t.settled_at,
-             t.external_id, t.source
+             t.external_id, t.source, t.split_weights
       FROM transactions t
       JOIN app_users u ON u.id = t.actor_user_id
       WHERE t.workspace_id = ${workspace.id}::uuid
       ORDER BY t.occurred_at DESC, t.created_at DESC
     `,
     sql`
-      SELECT id, merchant_contains, expense_class, priority, enabled
+      SELECT id, merchant_contains, expense_class, sort_order, split_weights, enabled
       FROM default_rules
       WHERE workspace_id = ${workspace.id}::uuid
-      ORDER BY priority ASC, created_at ASC
+      ORDER BY sort_order ASC, created_at ASC, id ASC
     `,
     sql`
       SELECT s.id, payer.name AS payer_name, payee.name AS payee_name,
@@ -135,6 +128,7 @@ async function getWorkspaceData(
     actorUserId: text(row.actor_user_id),
     actorName: text(row.actor_name),
     expenseClass: text(row.expense_class) as TransactionRecord["expenseClass"],
+    splitWeights: row.split_weights as SplitWeights,
     settledAt: row.settled_at ? new Date(text(row.settled_at)).toISOString() : null,
     externalId: text(row.external_id),
     source: text(row.source) as TransactionRecord["source"],
@@ -143,7 +137,8 @@ async function getWorkspaceData(
     id: text(row.id),
     merchantContains: text(row.merchant_contains),
     expenseClass: text(row.expense_class) as DefaultRule["expenseClass"],
-    priority: number(row.priority),
+    sortOrder: number(row.sort_order),
+    splitWeights: row.split_weights as SplitWeights | null,
     enabled: Boolean(row.enabled),
   }));
   const settlementHistory: SettlementHistory[] = (historyRows as Row[]).map((row) => ({

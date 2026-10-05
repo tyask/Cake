@@ -2,6 +2,8 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/current-user";
 import { getBootstrap, requireWorkspaceMember } from "@/lib/repository";
+import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
+import type { DefaultRule, ExpenseClass, SplitWeights } from "@/lib/types";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -30,6 +32,47 @@ export async function GET(request: Request) {
 const workspaceIdSchema = z.string().uuid();
 const expenseClassSchema = z.enum(["PERSONAL", "SHARED"]);
 const transactionTypeSchema = z.enum(["PAYMENT", "RECEIPT"]);
+const weightSchema = z.number().int().min(0).max(2_147_483_647);
+const splitWeightsSchema = z.record(z.string().min(1), weightSchema);
+
+async function splitContext(workspaceId: string) {
+  const sql = db();
+  const [memberRows, ruleRows] = await Promise.all([
+    sql`SELECT user_id, weight FROM workspace_members WHERE workspace_id = ${workspaceId}::uuid ORDER BY joined_at, user_id`,
+    sql`SELECT id, merchant_contains, expense_class, sort_order, split_weights, enabled FROM default_rules WHERE workspace_id = ${workspaceId}::uuid ORDER BY sort_order, created_at, id`,
+  ]);
+  return {
+    members: memberRows.map((row) => ({ id: String(row.user_id), weight: Number(row.weight) })),
+    rules: ruleRows.map((row): DefaultRule => ({
+      id: String(row.id), merchantContains: String(row.merchant_contains),
+      expenseClass: String(row.expense_class) as ExpenseClass, sortOrder: Number(row.sort_order),
+      splitWeights: row.split_weights as SplitWeights | null, enabled: Boolean(row.enabled),
+    })),
+  };
+}
+
+function resolveTransactionSplit(
+  input: { merchant: string; actorUserId: string; expenseClass?: ExpenseClass; splitWeights?: SplitWeights },
+  context: Awaited<ReturnType<typeof splitContext>>,
+) {
+  if (!context.members.some((member) => member.id === input.actorUserId)) throw new Error("取引担当者がワークスペースに参加していません。");
+  const defaults = transactionDefaults(input.merchant, context.rules, context.members, input.actorUserId);
+  const expenseClass = input.expenseClass ?? defaults.expenseClass;
+  const splitWeights = input.splitWeights === undefined
+    ? expenseClass === "PERSONAL"
+      ? personalSplitWeights(context.members, input.actorUserId)
+      : defaults.expenseClass === "SHARED" ? defaults.splitWeights : defaultSplitWeights(context.members)
+    : validateSplitWeights(input.splitWeights, context.members, expenseClass, input.actorUserId);
+  return { expenseClass, splitWeights };
+}
+
+function resolveRuleSplit(expenseClass: ExpenseClass, splitWeights: SplitWeights | null | undefined, members: { id: string }[]) {
+  if (expenseClass === "PERSONAL") {
+    if (splitWeights != null) throw new Error("個人費ルールの割合は、取引担当者が1、ほかの参加者が0です。");
+    return null;
+  }
+  return splitWeights == null ? null : validateSplitWeights(splitWeights, members);
+}
 
 export async function POST(request: Request) {
   try {
@@ -104,12 +147,13 @@ export async function POST(request: Request) {
     }
 
     if (action === "updateWeights") {
-      const input = z.object({ workspaceId: workspaceIdSchema, weights: z.array(z.object({ userId: z.string().min(1), weight: z.number().int().positive() })).length(2) }).parse(body);
+      const input = z.object({ workspaceId: workspaceIdSchema, weights: z.array(z.object({ userId: z.string().min(1), weight: weightSchema })).min(1).max(2) }).parse(body);
       const workspace = await requireWorkspaceMember(input.workspaceId, user.id);
-      if (workspace.type !== "SHARED") throw new Error("共有ワークスペースのみ重みを設定できます。");
+      if (workspace.type !== "SHARED") throw new Error("共有ワークスペースのみデフォルト割合を設定できます。");
       const memberRows = await sql`SELECT user_id FROM workspace_members WHERE workspace_id = ${input.workspaceId}::uuid`;
-      const memberIds = new Set(memberRows.map((row) => String(row.user_id)));
-      if (memberIds.size !== 2 || input.weights.some((item) => !memberIds.has(item.userId))) throw new Error("参加者情報が一致しません。");
+      const memberIds = memberRows.map((row) => String(row.user_id));
+      if (new Set(input.weights.map((item) => item.userId)).size !== input.weights.length) throw new Error("参加者が重複しています。");
+      validateSplitWeights(Object.fromEntries(input.weights.map((item) => [item.userId, item.weight])), memberIds);
       await sql.transaction(input.weights.map((item) => sql`UPDATE workspace_members SET weight = ${item.weight} WHERE workspace_id = ${input.workspaceId}::uuid AND user_id = ${item.userId}`));
       return Response.json({ ok: true });
     }
@@ -124,30 +168,46 @@ export async function POST(request: Request) {
         type: transactionTypeSchema,
         amountYen: z.number().int().positive(),
         actorUserId: z.string().min(1),
-        expenseClass: expenseClassSchema,
+        expenseClass: expenseClassSchema.optional(),
+        splitWeights: splitWeightsSchema.optional(),
       }).parse(body);
       await requireWorkspaceMember(input.workspaceId, user.id);
-      const actor = await sql`SELECT 1 FROM workspace_members WHERE workspace_id = ${input.workspaceId}::uuid AND user_id = ${input.actorUserId}`;
-      if (!actor[0]) throw new Error("取引担当者がワークスペースに参加していません。");
+      const context = await splitContext(input.workspaceId);
+      const previous = input.transactionId && input.splitWeights === undefined
+        ? (await sql`SELECT expense_class, actor_user_id, split_weights FROM transactions WHERE id = ${input.transactionId}::uuid AND workspace_id = ${input.workspaceId}::uuid AND settled_at IS NULL`)[0]
+        : null;
+      const split = resolveTransactionSplit({
+        ...input,
+        expenseClass: input.expenseClass ?? (previous ? String(previous.expense_class) as ExpenseClass : undefined),
+        splitWeights: previous && (input.expenseClass === undefined || input.expenseClass === previous.expense_class)
+          && (previous.expense_class === "SHARED" || input.actorUserId === previous.actor_user_id)
+          ? previous.split_weights as SplitWeights : input.splitWeights,
+      }, context);
       if (input.transactionId) {
-        const changed = await sql`
+        const results = await sql.transaction([
+          sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+          sql`
           UPDATE transactions SET occurred_at = ${input.occurredAt}::timestamptz, merchant = ${input.merchant},
             method = ${input.method}, type = ${input.type}, amount_yen = ${input.amountYen},
-            actor_user_id = ${input.actorUserId}, expense_class = ${input.expenseClass},
+            actor_user_id = ${input.actorUserId}, expense_class = ${split.expenseClass}, split_weights = ${JSON.stringify(split.splitWeights)}::jsonb,
             updated_by = ${user.id}, updated_at = now()
           WHERE id = ${input.transactionId}::uuid AND workspace_id = ${input.workspaceId}::uuid AND settled_at IS NULL
           RETURNING id
-        `;
-        if (!changed[0]) throw new Error("清算済み、または存在しない明細は編集できません。");
+          `,
+        ]);
+        if (!results[1][0]) throw new Error("清算済み、または存在しない明細は編集できません。");
       } else {
         const id = randomUUID();
-        await sql`
+        await sql.transaction([
+          sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+          sql`
           INSERT INTO transactions (id, workspace_id, occurred_at, merchant, method, type, amount_yen,
-            actor_user_id, expense_class, external_id, source, created_by, updated_by)
+            actor_user_id, expense_class, split_weights, external_id, source, created_by, updated_by)
           VALUES (${id}::uuid, ${input.workspaceId}::uuid, ${input.occurredAt}::timestamptz, ${input.merchant},
-            ${input.method}, ${input.type}, ${input.amountYen}, ${input.actorUserId}, ${input.expenseClass},
+            ${input.method}, ${input.type}, ${input.amountYen}, ${input.actorUserId}, ${split.expenseClass}, ${JSON.stringify(split.splitWeights)}::jsonb,
             ${`manual_${id}`}, 'MANUAL', ${user.id}, ${user.id})
-        `;
+          `,
+        ]);
       }
       return Response.json({ ok: true });
     }
@@ -155,26 +215,62 @@ export async function POST(request: Request) {
     if (action === "deleteTransaction") {
       const input = z.object({ workspaceId: workspaceIdSchema, transactionId: z.string().uuid() }).parse(body);
       await requireWorkspaceMember(input.workspaceId, user.id);
-      const deleted = await sql`
-        DELETE FROM transactions
-        WHERE id = ${input.transactionId}::uuid AND workspace_id = ${input.workspaceId}::uuid AND settled_at IS NULL
-        RETURNING id
-      `;
-      if (!deleted[0]) throw new Error("清算済み、または存在しない明細は削除できません。");
+      const results = await sql.transaction([
+        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+        sql`DELETE FROM transactions
+          WHERE id = ${input.transactionId}::uuid AND workspace_id = ${input.workspaceId}::uuid AND settled_at IS NULL
+          RETURNING id`,
+      ]);
+      if (!results[1][0]) throw new Error("清算済み、または存在しない明細は削除できません。");
       return Response.json({ ok: true });
     }
 
     if (action === "createRule") {
-      const input = z.object({ workspaceId: workspaceIdSchema, merchantContains: z.string().trim().min(1).max(120), expenseClass: expenseClassSchema, priority: z.number().int().min(0).max(9999) }).parse(body);
+      const input = z.object({ workspaceId: workspaceIdSchema, merchantContains: z.string().trim().min(1).max(120), expenseClass: expenseClassSchema, splitWeights: splitWeightsSchema.nullable().optional(), enabled: z.boolean().optional() }).parse(body);
       await requireWorkspaceMember(input.workspaceId, user.id);
-      await sql`INSERT INTO default_rules (workspace_id, merchant_contains, expense_class, priority, created_by) VALUES (${input.workspaceId}::uuid, ${input.merchantContains}, ${input.expenseClass}, ${input.priority}, ${user.id})`;
+      const context = await splitContext(input.workspaceId);
+      const splitWeights = resolveRuleSplit(input.expenseClass, input.splitWeights, context.members);
+      await sql.transaction([
+        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+        sql`INSERT INTO default_rules (workspace_id, merchant_contains, expense_class, sort_order, split_weights, enabled, created_by)
+          SELECT ${input.workspaceId}::uuid, ${input.merchantContains}, ${input.expenseClass}, COALESCE(MAX(sort_order), -1) + 1, ${splitWeights === null ? null : JSON.stringify(splitWeights)}::jsonb, ${input.enabled ?? true}, ${user.id}
+          FROM default_rules WHERE workspace_id = ${input.workspaceId}::uuid`,
+      ]);
+      return Response.json({ ok: true });
+    }
+
+    if (action === "updateRule") {
+      const input = z.object({ workspaceId: workspaceIdSchema, ruleId: z.string().uuid(), merchantContains: z.string().trim().min(1).max(120), expenseClass: expenseClassSchema, splitWeights: splitWeightsSchema.nullable().optional(), enabled: z.boolean().optional() }).parse(body);
+      await requireWorkspaceMember(input.workspaceId, user.id);
+      const context = await splitContext(input.workspaceId);
+      const previous = context.rules.find((rule) => rule.id === input.ruleId);
+      if (!previous) throw new Error("このワークスペースにルールがありません。");
+      const splitWeights = resolveRuleSplit(input.expenseClass, input.splitWeights === undefined && input.expenseClass === previous.expenseClass ? previous.splitWeights : input.splitWeights, context.members);
+      const results = await sql.transaction([
+        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+        sql`UPDATE default_rules SET merchant_contains = ${input.merchantContains}, expense_class = ${input.expenseClass}, split_weights = ${splitWeights === null ? null : JSON.stringify(splitWeights)}::jsonb, enabled = ${input.enabled ?? previous.enabled}
+          WHERE workspace_id = ${input.workspaceId}::uuid AND id = ${input.ruleId}::uuid RETURNING id`,
+      ]);
+      if (!results[1][0]) throw new Error("このワークスペースにルールがありません。");
+      return Response.json({ ok: true });
+    }
+
+    if (action === "reorderRules") {
+      const input = z.object({ workspaceId: workspaceIdSchema, ruleIds: z.array(z.string().uuid()).max(5000) }).parse(body);
+      await requireWorkspaceMember(input.workspaceId, user.id);
+      await sql`SELECT cake_reorder_default_rules(${input.workspaceId}::uuid, ${user.id}, ARRAY(SELECT value::uuid FROM jsonb_array_elements_text(${JSON.stringify(input.ruleIds)}::jsonb)))`;
       return Response.json({ ok: true });
     }
 
     if (action === "deleteRule") {
       const input = z.object({ workspaceId: workspaceIdSchema, ruleId: z.string().uuid() }).parse(body);
       await requireWorkspaceMember(input.workspaceId, user.id);
-      await sql`DELETE FROM default_rules WHERE id = ${input.ruleId}::uuid AND workspace_id = ${input.workspaceId}::uuid`;
+      await sql.transaction([
+        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+        sql`DELETE FROM default_rules WHERE id = ${input.ruleId}::uuid AND workspace_id = ${input.workspaceId}::uuid`,
+        sql`WITH ranked AS (SELECT id, (row_number() OVER (ORDER BY sort_order, created_at, id) - 1)::integer AS position FROM default_rules WHERE workspace_id = ${input.workspaceId}::uuid)
+          UPDATE default_rules r SET sort_order = ranked.position FROM ranked WHERE r.id = ranked.id`,
+      ]);
       return Response.json({ ok: true });
     }
 
@@ -183,21 +279,21 @@ export async function POST(request: Request) {
         occurredAt: z.string().datetime(), merchant: z.string().trim().min(1).max(240),
         method: z.string().trim().min(1).max(120), amountYen: z.number().int().positive(),
         externalId: z.string().trim().min(1).max(160), actorUserId: z.string().min(1),
-        expenseClass: expenseClassSchema,
+        expenseClass: expenseClassSchema.optional(), splitWeights: splitWeightsSchema.optional(),
       });
       const input = z.object({ workspaceId: workspaceIdSchema, fileName: z.string().min(1).max(240), totalRows: z.number().int().nonnegative(), items: z.array(itemSchema).max(2000) }).parse(body);
       await requireWorkspaceMember(input.workspaceId, user.id);
-      const memberRows = await sql`SELECT user_id FROM workspace_members WHERE workspace_id = ${input.workspaceId}::uuid`;
-      const memberIds = new Set(memberRows.map((row) => String(row.user_id)));
-      if (input.items.some((item) => !memberIds.has(item.actorUserId))) throw new Error("取引担当者が不正です。");
+      const context = await splitContext(input.workspaceId);
+      const items = input.items.map((item) => ({ ...item, ...resolveTransactionSplit(item, context) }));
       const batchId = randomUUID();
       const queries = [
+        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
         sql`INSERT INTO import_batches (id, workspace_id, imported_by, file_name, total_rows, imported_rows, skipped_rows) VALUES (${batchId}::uuid, ${input.workspaceId}::uuid, ${user.id}, ${input.fileName}, ${input.totalRows}, ${input.items.length}, ${Math.max(0, input.totalRows - input.items.length)})`,
-        ...input.items.map((item) => sql`
+        ...items.map((item) => sql`
           INSERT INTO transactions (workspace_id, occurred_at, merchant, method, type, amount_yen, actor_user_id,
-            expense_class, external_id, source, import_batch_id, created_by, updated_by)
+            expense_class, split_weights, external_id, source, import_batch_id, created_by, updated_by)
           VALUES (${input.workspaceId}::uuid, ${item.occurredAt}::timestamptz, ${item.merchant}, ${item.method}, 'PAYMENT',
-            ${item.amountYen}, ${item.actorUserId}, ${item.expenseClass}, ${item.externalId}, 'PAYPAY', ${batchId}::uuid, ${user.id}, ${user.id})
+            ${item.amountYen}, ${item.actorUserId}, ${item.expenseClass}, ${JSON.stringify(item.splitWeights)}::jsonb, ${item.externalId}, 'PAYPAY', ${batchId}::uuid, ${user.id}, ${user.id})
           ON CONFLICT (workspace_id, external_id) DO NOTHING
         `),
       ];
@@ -212,13 +308,25 @@ export async function POST(request: Request) {
       const result = latest.selected?.settlement;
       if (!result || result.transactionIds.length === 0) throw new Error("清算対象の明細がありません。");
       const settlementId = randomUUID();
+      const expectedTransactions = latest.selected!.transactions
+        .filter((transaction) => result.transactionIds.includes(transaction.id))
+        .sort((first, second) => first.id < second.id ? -1 : first.id > second.id ? 1 : 0)
+        .map((transaction) => ({
+          id: transaction.id, actorUserId: transaction.actorUserId, type: transaction.type,
+          amountYen: transaction.amountYen, expenseClass: transaction.expenseClass, splitWeights: transaction.splitWeights,
+        }));
+      const calculationSnapshot = {
+        ...result,
+        transactions: expectedTransactions,
+      };
       const queries = [
+        sql`SELECT cake_assert_settlement_snapshot(${input.workspaceId}::uuid, ${user.id}, ${JSON.stringify(expectedTransactions)}::jsonb)`,
         sql`
           INSERT INTO settlements (id, workspace_id, payer_user_id, payee_user_id, amount_yen,
             weight_snapshot, calculation_snapshot, completed_by)
           VALUES (${settlementId}::uuid, ${input.workspaceId}::uuid, ${result.payerUserId}, ${result.payeeUserId},
             ${result.amountYen}, ${JSON.stringify(result.people.map((person) => ({ userId: person.userId, weight: person.weight })))}::jsonb,
-            ${JSON.stringify(result)}::jsonb, ${user.id})
+            ${JSON.stringify(calculationSnapshot)}::jsonb, ${user.id})
         `,
         ...result.transactionIds.map((transactionId) => sql`
           INSERT INTO settlement_transactions (settlement_id, transaction_id)

@@ -1,4 +1,25 @@
 import type { SettlementResult, TransactionRecord, WorkspaceMember } from "./types";
+import { validateSplitWeights } from "./expense-splits";
+
+function gcd(a: bigint, b: bigint): bigint {
+  while (b !== BigInt(0)) [a, b] = [b, a % b];
+  return a < BigInt(0) ? -a : a;
+}
+
+function addFraction(first: [bigint, bigint], second: [bigint, bigint]): [bigint, bigint] {
+  const denominatorGcd = gcd(first[1], second[1]);
+  const numerator = first[0] * (second[1] / denominatorGcd) + second[0] * (first[1] / denominatorGcd);
+  const denominator = first[1] * (second[1] / denominatorGcd);
+  const divisor = gcd(numerator, denominator);
+  return [numerator / divisor, denominator / divisor];
+}
+
+/** Match Math.round, including negative halves, without binary floating-point drift. */
+function roundFraction([numerator, denominator]: [bigint, bigint]): number {
+  const quotient = numerator / denominator;
+  const remainder = numerator % denominator;
+  return Number(quotient + (remainder * BigInt(2) >= denominator ? BigInt(1) : remainder * BigInt(-2) > denominator ? BigInt(-1) : BigInt(0)));
+}
 
 export function calculateSettlement(
   members: WorkspaceMember[],
@@ -18,9 +39,21 @@ export function calculateSettlement(
     .filter((item) => item.type === "RECEIPT")
     .reduce((total, item) => total + item.amountYen, 0);
   const netTotal = paymentTotal - receiptTotal;
-  const weightTotal = members[0].weight + members[1].weight;
-
-  const firstTarget = Math.round((netTotal * members[0].weight) / weightTotal);
+  const firstBurden = targetTransactions.reduce<[bigint, bigint]>((total, item) => {
+    if (!members.some((member) => member.id === item.actorUserId)) {
+      throw new Error("清算対象の明細に参加者以外の担当者が含まれています。");
+    }
+    if (!Number.isSafeInteger(item.amountYen) || item.amountYen <= 0) {
+      throw new Error("清算対象の金額が不正です。");
+    }
+    const weights = validateSplitWeights(item.splitWeights, members);
+    const signedAmount = BigInt(item.type === "PAYMENT" ? item.amountYen : -item.amountYen);
+    return addFraction(total, [
+      signedAmount * BigInt(weights[members[0].id]),
+      BigInt(weights[members[0].id] + weights[members[1].id]),
+    ]);
+  }, [BigInt(0), BigInt(1)]);
+  const firstTarget = roundFraction(firstBurden);
   const targets = [firstTarget, netTotal - firstTarget];
   const people = members.map((member, index) => {
     const own = targetTransactions.filter((item) => item.actorUserId === member.id);
@@ -59,4 +92,3 @@ export function calculateSettlement(
     amountYen: payer ? Math.abs(payer.balance) : 0,
   };
 }
-

@@ -1,0 +1,238 @@
+.section {
+  margin-top: 1rem;
+}
+
+.description {
+  margin: 0 1.3rem .75rem;
+  color: var(--muted);
+  font-size: .74rem;
+  line-height: 1.7;
+}
+
+.error {
+  margin: .75rem 1.3rem;
+}
+
+.create {
+  margin: 1rem 1.3rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: .8rem;
+  background: #f7f9f5;
+}
+
+.create h3,
+.editForm h3 {
+  margin: 0 0 .8rem;
+  font-size: .8rem;
+}
+
+.form {
+  display: grid;
+  min-width: 0;
+  gap: .8rem;
+}
+
+.formFields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(8rem, .45fr);
+  gap: .8rem;
+}
+
+.formFields > label {
+  min-width: 0;
+  color: var(--muted);
+  font-size: .7rem;
+  font-weight: 700;
+}
+
+.checkbox,
+.enabled {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  color: var(--muted);
+  font-size: .7rem;
+}
+
+.checkbox input,
+.enabled input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--green);
+}
+
+.splitOptions {
+  display: grid;
+  gap: .6rem;
+}
+
+.personalNote {
+  margin: 0;
+  padding: .7rem;
+  border-radius: .6rem;
+  color: var(--muted);
+  background: #eef1ed;
+  font-size: .72rem;
+  line-height: 1.6;
+}
+
+.formActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: .5rem;
+}
+
+.list {
+  display: grid;
+  gap: .7rem;
+  margin: 1.25rem 1.3rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rule {
+  position: relative;
+  min-width: 0;
+  padding: .8rem;
+  border: 1px solid var(--line);
+  border-radius: .8rem;
+  background: var(--paper);
+}
+
+.dragging {
+  z-index: 2;
+  box-shadow: var(--shadow);
+  border-color: var(--green);
+}
+
+.ruleHead {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .6rem;
+}
+
+.dragHandle {
+  display: grid;
+  min-width: 2.3rem;
+  min-height: 2.6rem;
+  place-items: center;
+  padding: .3rem;
+  border: 1px solid #d9dfd8;
+  border-radius: .55rem;
+  color: var(--muted);
+  background: #fff;
+  cursor: grab;
+  font-size: 1.5rem;
+  touch-action: none;
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+.position {
+  color: var(--muted);
+  font-size: .72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary {
+  min-width: 0;
+  font-size: .76rem;
+}
+
+.summary > b {
+  display: block;
+  margin-bottom: .35rem;
+  overflow-wrap: anywhere;
+}
+
+.summary > small {
+  display: block;
+  margin-top: .35rem;
+  color: var(--muted);
+  font-size: .67rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .65rem;
+  margin-top: .65rem;
+}
+
+.moveButtons {
+  display: flex;
+  gap: .4rem;
+  margin-right: auto;
+}
+
+.moveButtons > button {
+  min-height: 2rem;
+  padding: .25rem .55rem;
+  border: 1px solid #d9dfd8;
+  border-radius: .5rem;
+  background: #fff;
+  cursor: pointer;
+  font-size: .67rem;
+}
+
+.editForm {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.empty,
+.footnote {
+  margin: 1rem 1.3rem 0;
+  color: var(--muted);
+  font-size: .7rem;
+  line-height: 1.7;
+}
+
+@media (max-width: 600px) {
+  .description,
+  .error,
+  .create,
+  .list,
+  .empty,
+  .footnote {
+    margin-left: .85rem;
+    margin-right: .85rem;
+  }
+
+  .create {
+    padding: .8rem;
+  }
+
+  .formFields {
+    grid-template-columns: 1fr;
+  }
+
+  .ruleHead {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    gap: .45rem;
+  }
+
+  .enabled {
+    grid-column: 3;
+  }
+
+  .rowActions {
+    gap: .5rem;
+  }
+
+  .formActions > button {
+    flex: 1;
+  }
+}

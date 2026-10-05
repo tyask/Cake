@@ -1,9 +1,10 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
-import { db } from "@/lib/db";
 import { isTestAuthEnabled } from "@/lib/auth-mode";
 import { findTestUser } from "@/lib/test-users";
+import { createAuthCallbacks } from "@/lib/auth-callbacks";
+import { ensureTestUser, findRegisteredUser, updateRegisteredProfile } from "@/lib/user-access";
 
 const testAuthEnabled = isTestAuthEnabled();
 
@@ -27,26 +28,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     : [Google],
   trustHost: true,
   session: { strategy: "jwt" },
-  pages: { signIn: "/" },
-  callbacks: {
-    session({ session, token }) {
-      if (session.user && token.sub) session.user.id = token.sub;
-      return session;
-    },
-  },
-  events: {
-    async signIn({ user }) {
-      if (!user.id || !user.email) return;
-      const sql = db();
-      await sql`
-        INSERT INTO app_users (id, email, name, image_url)
-        VALUES (${user.id}, ${user.email.toLowerCase()}, ${user.name ?? user.email}, ${user.image ?? null})
-        ON CONFLICT (id) DO UPDATE SET
-          email = EXCLUDED.email,
-          name = EXCLUDED.name,
-          image_url = EXCLUDED.image_url,
-          updated_at = now()
-      `;
-    },
-  },
+  pages: { signIn: "/", error: "/" },
+  callbacks: createAuthCallbacks({ ensureTestUser, findRegisteredUser, updateRegisteredProfile }),
 });

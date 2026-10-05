@@ -1,12 +1,19 @@
 export type WorkspaceType = "PERSONAL" | "SHARED";
 export type TransactionType = "PAYMENT" | "RECEIPT";
 export type ExpenseClass = "PERSONAL" | "SHARED";
+export type SplitWeights = Record<string, number>;
 
 export interface AppUser {
   id: string;
   email: string;
   name: string;
   imageUrl: string | null;
+  isAdmin?: boolean;
+}
+
+export interface RegisteredUser extends AppUser {
+  isAdmin: boolean;
+  isEnabled: boolean;
 }
 
 export interface WorkspaceSummary {
@@ -32,6 +39,7 @@ export interface TransactionRecord {
   actorUserId: string;
   actorName: string;
   expenseClass: ExpenseClass;
+  splitWeights: SplitWeights;
   settledAt: string | null;
   externalId: string;
   source: "MANUAL" | "PAYPAY";
@@ -41,7 +49,8 @@ export interface DefaultRule {
   id: string;
   merchantContains: string;
   expenseClass: ExpenseClass;
-  priority: number;
+  sortOrder: number;
+  splitWeights: SplitWeights | null;
   enabled: boolean;
 }
 
@@ -99,4 +108,3 @@ export interface BootstrapData {
   selected: WorkspaceData | null;
   pendingInvitations: PendingInvitation[];
 }
-
