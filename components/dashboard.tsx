@@ -7,12 +7,12 @@ import { UserManagement } from "./user-management";
 import { MobileAccessQr } from "./mobile-access-qr";
 import { SplitEditor } from "./split-editor";
 import { WorkspaceRules } from "./workspace-rules";
+import { TransactionsPanel } from "./transactions-panel";
 import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
 import { parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
 import type {
   BootstrapData,
   ExpenseClass,
-  TransactionRecord,
   TransactionType,
   WorkspaceData,
   WorkspaceType,
@@ -57,33 +57,56 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [workspaceModal, setWorkspaceModal] = useState(false);
-  const [transactionModal, setTransactionModal] = useState<TransactionRecord | "new" | null>(null);
+  const [transactionModal, setTransactionModal] = useState(false);
   const selected = data.selected;
+  const workspaceView = useRef({ workspaceId: initialData.selected?.workspace.id, generation: 0 });
+  const pendingRequests = useRef(0);
 
-  async function refresh(workspaceId = selected?.workspace.id) {
+  function startLoading() { pendingRequests.current += 1; setLoading(true); }
+  function finishLoading() { pendingRequests.current -= 1; setLoading(pendingRequests.current > 0); }
+
+  async function refresh(workspaceId = workspaceView.current.workspaceId, generation = workspaceView.current.generation) {
+    const desiredWorkspaceId = workspaceView.current.workspaceId;
     const response = await fetch(`/api/app${workspaceId ? `?workspaceId=${workspaceId}` : ""}`, { cache: "no-store" });
     const next = await response.json();
     if (!response.ok) throw new Error(next.error ?? "更新に失敗しました。");
+    // An autosave for a previous workspace must not replace the newly selected view.
+    if (generation !== workspaceView.current.generation || desiredWorkspaceId !== workspaceView.current.workspaceId) return false;
+    workspaceView.current.workspaceId = next.selected?.workspace.id;
     setData(next);
+    return true;
   }
 
   async function run(payload: Record<string, unknown>, success: string, workspaceId?: string) {
-    setLoading(true); setNotice(null);
+    const originWorkspaceId = typeof payload.workspaceId === "string" ? payload.workspaceId : selected?.workspace.id;
+    const generation = workspaceView.current.generation;
+    const isCurrentView = () => generation === workspaceView.current.generation && originWorkspaceId === workspaceView.current.workspaceId;
+    startLoading();
+    if (isCurrentView()) setNotice(null);
     try {
       const result = await postAction(payload);
-      await refresh(workspaceId ?? result.workspaceId ?? selected?.workspace.id);
-      setNotice(success);
+      if (isCurrentView()) {
+        const applied = await refresh(workspaceId ?? result.workspaceId ?? originWorkspaceId, generation);
+        if (applied && generation === workspaceView.current.generation) setNotice(success);
+      }
       return result;
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "処理に失敗しました。");
+      if (isCurrentView()) setNotice(error instanceof Error ? error.message : "処理に失敗しました。");
       throw error;
-    } finally { setLoading(false); }
+    } finally { finishLoading(); }
   }
 
   async function switchWorkspace(workspaceId: string) {
-    setLoading(true); setNotice(null);
-    try { await refresh(workspaceId); } catch (error) { setNotice(error instanceof Error ? error.message : "読込に失敗しました。"); }
-    finally { setLoading(false); }
+    const generation = workspaceView.current.generation + 1;
+    workspaceView.current = { workspaceId, generation };
+    startLoading(); setNotice(null);
+    try { await refresh(workspaceId, generation); }
+    catch (error) {
+      if (generation === workspaceView.current.generation) {
+        workspaceView.current = { workspaceId: selected?.workspace.id, generation: generation + 1 };
+        setNotice(error instanceof Error ? error.message : "読込に失敗しました。");
+      }
+    } finally { finishLoading(); }
   }
 
   return (
@@ -116,11 +139,11 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
         {testAuth && <div className="demo-banner">テストログインで使用中です（{data.user.name}）</div>}
         {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice(null)}>×</button></div>}
         {loading && <div className="loading-line" />}
-        {selected && tab === "home" && <HomePanel selected={selected} pending={data.pendingInvitations.length} setTab={setTab} add={() => setTransactionModal("new")} />}
-        {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} add={() => setTransactionModal("new")} edit={setTransactionModal} run={run} />}
+        {selected && tab === "home" && <HomePanel selected={selected} pending={data.pendingInvitations.length} setTab={setTab} add={() => setTransactionModal(true)} />}
+        {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} add={() => setTransactionModal(true)} run={run} />}
         {selected && tab === "import" && <ImportPanel key={selected.workspace.id} selected={selected} run={run} />}
         {selected && tab === "settlement" && <SettlementPanel key={selected.workspace.id} selected={selected} run={run} />}
-        {selected && tab === "settings" && <SettingsPanel key={selected.workspace.id} selected={selected} currentUserId={data.user.id} run={run} afterDelete={() => refresh()} />}
+        {selected && tab === "settings" && <SettingsPanel key={selected.workspace.id} selected={selected} currentUserId={data.user.id} run={run} afterDelete={async () => { await refresh(); }} />}
         {tab === "settings" && data.user.isAdmin === true && !testAuth && <>
           {!selected && <PageHeading eyebrow="SETTINGS" title="設定" description="Cakeを利用できる人を管理します。" />}
           <UserManagement />
@@ -129,7 +152,7 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
 
       <nav className="bottom-nav">{navItems.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}</nav>
       {workspaceModal && <WorkspaceModal close={() => setWorkspaceModal(false)} run={run} />}
-      {transactionModal && selected && <TransactionModal key={transactionModal === "new" ? "new" : transactionModal.id} value={transactionModal} selected={selected} currentUserId={data.user.id} close={() => setTransactionModal(null)} run={run} />}
+      {transactionModal && selected && <NewTransactionModal key={selected.workspace.id} selected={selected} currentUserId={data.user.id} close={() => setTransactionModal(false)} run={run} />}
     </div>
   );
 }
@@ -161,22 +184,6 @@ function HomePanel({ selected, pending, setTab, add }: { selected: WorkspaceData
         <button onClick={() => setTab("settlement")}><i>↔</i><span><b>清算を確認</b><small>ふたりの差額を計算</small></span></button>
       </section>
     </div>
-  </>;
-}
-
-function TransactionsPanel({ selected, add, edit, run }: { selected: WorkspaceData; add: () => void; edit: (item: TransactionRecord) => void; run: (payload: Record<string, unknown>, success: string) => Promise<unknown> }) {
-  const [query, setQuery] = useState("");
-  const [expense, setExpense] = useState("ALL");
-  const filtered = selected.transactions.filter((item) => (expense === "ALL" || item.expenseClass === expense) && item.merchant.toLowerCase().includes(query.toLowerCase()));
-  async function remove(item: TransactionRecord) {
-    if (!confirm(`${item.merchant}の明細を削除しますか？`)) return;
-    await run({ action: "deleteTransaction", workspaceId: selected.workspace.id, transactionId: item.id }, "明細を削除しました。");
-  }
-  return <>
-    <PageHeading eyebrow="TRANSACTIONS" title="取引明細" description="支払いと受け取りを、ワークスペース単位で管理します。" action={<button className="primary" onClick={add}>＋ 明細を追加</button>} />
-    <section className="panel table-panel"><div className="toolbar"><div className="search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="取引先を検索" /></div><select value={expense} onChange={(event) => setExpense(event.target.value)}><option value="ALL">すべての費用区分</option><option value="PERSONAL">個人費</option><option value="SHARED">共通費</option></select><span className="count">{filtered.length}件</span></div>
-      <div className="data-table-wrap"><table className="data-table"><thead><tr><th>取引日時</th><th>取引先 / 方法</th><th>種別</th><th>金額</th><th>担当者</th><th>費用区分</th><th>負担割合</th><th>清算</th><th>操作</th></tr></thead><tbody>{filtered.map((item) => <tr key={item.id}><td data-label="取引日時">{dateTime(item.occurredAt)}</td><td data-label="取引先"><b>{item.merchant}</b><small>{item.method}</small></td><td data-label="種別"><span className={`type-tag ${item.type.toLowerCase()}`}>{item.type === "PAYMENT" ? "支払い" : "受け取り"}</span></td><td data-label="金額" className={item.type === "RECEIPT" ? "positive" : ""}>{item.type === "PAYMENT" ? "−" : "+"}{money(item.amountYen)}</td><td data-label="担当者">{item.actorName}</td><td data-label="費用区分"><span className={`class-tag ${item.expenseClass.toLowerCase()}`}>{item.expenseClass === "SHARED" ? "共通費" : "個人費"}</span></td><td data-label="負担割合"><RatioSummary members={selected.members} item={item} /></td><td data-label="清算">{item.expenseClass === "PERSONAL" ? "対象外" : item.settledAt ? "清算済み" : <span className="unsettled">未清算</span>}</td><td data-label="操作"><div className="row-actions"><button disabled={!!item.settledAt} onClick={() => edit(item)}>編集</button><button disabled={!!item.settledAt} className="danger-text" onClick={() => remove(item)}>削除</button></div></td></tr>)}</tbody></table>{filtered.length === 0 && <Empty text="条件に一致する明細がありません" />}</div>
-    </section>
   </>;
 }
 
@@ -369,18 +376,17 @@ function WorkspaceModal({ close, run }: { close: () => void; run: (payload: Reco
   return <Modal title="ワークスペースを作成" close={close}><form onSubmit={async (event) => { event.preventDefault(); await run({ action: "createWorkspace", name, type }, "ワークスペースを作成しました。"); close(); }}><label>名前<input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} placeholder="例: ふたりの家計" /></label><fieldset><legend>種類</legend><label className={`choice ${type === "PERSONAL" ? "selected" : ""}`}><input type="radio" checked={type === "PERSONAL"} onChange={() => setType("PERSONAL")} /><span><b>個人用</b><small>自分だけで管理する家計</small></span></label><label className={`choice ${type === "SHARED" ? "selected" : ""}`}><input type="radio" checked={type === "SHARED"} onChange={() => setType("SHARED")} /><span><b>共有用</b><small>もう一人を招待して清算</small></span></label></fieldset><div className="modal-actions"><button type="button" className="secondary" onClick={close}>キャンセル</button><button className="primary">作成する</button></div></form></Modal>;
 }
 
-function TransactionModal({ value, selected, currentUserId, close, run }: { value: TransactionRecord | "new"; selected: WorkspaceData; currentUserId: string; close: () => void; run: (payload: Record<string, unknown>, success: string) => Promise<unknown> }) {
-  const item = value === "new" ? null : value;
-  const initialActor = item?.actorUserId ?? (selected.members.some((member) => member.id === currentUserId) ? currentUserId : selected.members[0]?.id ?? "");
-  const [occurredAt, setOccurredAt] = useState(inputDate(item?.occurredAt));
-  const [merchant, setMerchant] = useState(item?.merchant ?? "");
-  const [method, setMethod] = useState(item?.method ?? "現金");
-  const [type, setType] = useState<TransactionType>(item?.type ?? "PAYMENT");
-  const [amountYen, setAmountYen] = useState(item?.amountYen ?? 0);
+function NewTransactionModal({ selected, currentUserId, close, run }: { selected: WorkspaceData; currentUserId: string; close: () => void; run: (payload: Record<string, unknown>, success: string) => Promise<unknown> }) {
+  const initialActor = selected.members.some((member) => member.id === currentUserId) ? currentUserId : selected.members[0]?.id ?? "";
+  const [occurredAt, setOccurredAt] = useState(inputDate());
+  const [merchant, setMerchant] = useState("");
+  const [method, setMethod] = useState("現金");
+  const [type, setType] = useState<TransactionType>("PAYMENT");
+  const [amountYen, setAmountYen] = useState(0);
   const [actorUserId, setActorUserId] = useState(initialActor);
-  const [expenseClass, setExpenseClass] = useState<ExpenseClass>(item?.expenseClass ?? "PERSONAL");
-  const [splitWeights, setSplitWeights] = useState<SplitWeights>(() => item?.splitWeights ?? personalSplitWeights(selected.members, initialActor));
-  const [customized, setCustomized] = useState(Boolean(item));
+  const [expenseClass, setExpenseClass] = useState<ExpenseClass>("PERSONAL");
+  const [splitWeights, setSplitWeights] = useState<SplitWeights>(() => personalSplitWeights(selected.members, initialActor));
+  const [customized, setCustomized] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -390,16 +396,16 @@ function TransactionModal({ value, selected, currentUserId, close, run }: { valu
     setSplitWeights(defaults.splitWeights);
   }
 
-  return <Modal title={item ? "明細を編集" : "明細を追加"} close={close}>
+  return <Modal title="明細を追加" close={close}>
     <form onSubmit={async (event) => {
       event.preventDefault();
       setError(null);
       setSaving(true);
       try {
         validateSplitWeights(splitWeights, selected.members, expenseClass, actorUserId);
-        await run({ action: "saveTransaction", workspaceId: selected.workspace.id, transactionId: item?.id,
+        await run({ action: "saveTransaction", workspaceId: selected.workspace.id,
           occurredAt: jstInputToIso(occurredAt), merchant, method, type, amountYen, actorUserId, expenseClass, splitWeights },
-        item ? "明細を更新しました。" : "明細を追加しました。");
+        "明細を追加しました。");
         close();
       } catch (failure) {
         setError(failure instanceof Error ? failure.message : "明細を保存できませんでした。");
@@ -433,17 +439,13 @@ function TransactionModal({ value, selected, currentUserId, close, run }: { valu
         </div>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={close}>キャンセル</button><button className="primary" disabled={saving}>{saving ? "保存中…" : item ? "変更を保存" : "追加する"}</button></div>
+      <div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={close}>キャンセル</button><button className="primary" disabled={saving}>{saving ? "保存中…" : "追加する"}</button></div>
     </form>
   </Modal>;
 }
 
 function ratioMembers(members: WorkspaceMember[], expenseClass: ExpenseClass, actorUserId: string) {
   return expenseClass === "PERSONAL" ? [...members].sort((a, b) => Number(b.id === actorUserId) - Number(a.id === actorUserId)) : members;
-}
-
-function RatioSummary({ members, item }: { members: WorkspaceMember[]; item: TransactionRecord }) {
-  return <span className="ratio-summary">{ratioMembers(members, item.expenseClass, item.actorUserId).map((member) => `${member.name} ${item.splitWeights[member.id] ?? 0}`).join(" : ")}</span>;
 }
 
 function Modal({ title, close, children }: { title: string; close: () => void; children: React.ReactNode }) { return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><section className="modal" role="dialog" aria-modal="true" aria-label={title}><header><h2>{title}</h2><button onClick={close}>×</button></header>{children}</section></div>; }

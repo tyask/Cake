@@ -1,0 +1,12 @@
+Generation tool: built-in image_gen
+Transparent background: true
+Edit target: public/brand/cake-cheesecake-yen-scalloped-plate.png
+
+Use case: precise-object-edit
+Asset type: transparent PNG brand illustration for the Cake website homepage and icons.
+Input image: edit target is the yellow cheesecake slice on the ivory scalloped plate with a large yen symbol.
+Primary request: 円マークは、大きいもの1つではなく、小さいものをチーズケーキの側面にちりばめる。
+Change only the graphic on the cheesecake's broad visible cut face: completely remove the single large central "¥" and restore the pale buttery-yellow cheesecake texture beneath it. Replace it with SIX small, clean, clearly readable "¥" symbols scattered gracefully across this same creamy front face. Each symbol is about 15–18 percent of the face's height, much smaller than the previous symbol. Use restrained warm golden-ochre, like small decorative printed marks on the cake. Arrange them in a loose airy staggered pattern across two uneven rows, with generous gaps and clear margins from the cake's edges and biscuit base. Slight differences in angle, no more than about 8 degrees, may make the pattern natural, but preserve a coherent refined appearance. Each symbol must have a Y-shaped upper part and TWO separated horizontal crossbars. They are individual yen characters, never coins or enclosed in circles.
+Keep unchanged: exactly one cheesecake slice, its shape, proportions, position, viewing angle, golden-yellow top, pale-yellow filling, golden biscuit crust, warm hand-drawn watercolor-like texture, the entire elegant ivory ceramic scalloped plate with a fine gold rim, the contact shadow, and the composition. The cheesecake stays appetizing and visually dominant. The symbols appear ONLY on its creamy side, not on the top, plate, or background.
+Background: preserve genuinely transparent alpha outside the cake and plate. Retain the square canvas and existing framing.
+Constraints: edit only the yen motif. No single large yen symbol remains. No other letters, numbers, symbols, people, hands, cutlery, coins, fruit, decorations, additional objects or watermark. Make the overall impression softer, lighter and more decorative while retaining the yellow palette.

@@ -34,6 +34,11 @@ const expenseClassSchema = z.enum(["PERSONAL", "SHARED"]);
 const transactionTypeSchema = z.enum(["PAYMENT", "RECEIPT"]);
 const weightSchema = z.number().int().min(0).max(2_147_483_647);
 const splitWeightsSchema = z.record(z.string().min(1), weightSchema);
+const selectedTransactionsSchema = z.object({
+  workspaceId: workspaceIdSchema,
+  transactionIds: z.array(z.string().uuid()).min(1).max(5000)
+    .refine((ids) => new Set(ids.map((id) => id.toLowerCase())).size === ids.length, "同じ明細が重複しています。"),
+});
 
 async function splitContext(workspaceId: string) {
   const sql = db();
@@ -154,7 +159,10 @@ export async function POST(request: Request) {
       const memberIds = memberRows.map((row) => String(row.user_id));
       if (new Set(input.weights.map((item) => item.userId)).size !== input.weights.length) throw new Error("参加者が重複しています。");
       validateSplitWeights(Object.fromEntries(input.weights.map((item) => [item.userId, item.weight])), memberIds);
-      await sql.transaction(input.weights.map((item) => sql`UPDATE workspace_members SET weight = ${item.weight} WHERE workspace_id = ${input.workspaceId}::uuid AND user_id = ${item.userId}`));
+      await sql.transaction([
+        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+        ...input.weights.map((item) => sql`UPDATE workspace_members SET weight = ${item.weight} WHERE workspace_id = ${input.workspaceId}::uuid AND user_id = ${item.userId}`),
+      ]);
       return Response.json({ ok: true });
     }
 
@@ -225,6 +233,27 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
+    if (action === "deleteTransactions" || action === "applyTransactionRules") {
+      const input = selectedTransactionsSchema.parse(body);
+      await requireWorkspaceMember(input.workspaceId, user.id);
+      const rows = await sql`
+        SELECT cake_bulk_transactions(
+          ${input.workspaceId}::uuid, ${user.id},
+          ARRAY(SELECT value::uuid FROM jsonb_array_elements_text(${JSON.stringify(input.transactionIds)}::jsonb)),
+          ${action === "deleteTransactions" ? "DELETE" : "APPLY_RULES"}
+        ) AS result
+      `;
+      const result = rows[0].result as { affected: number; transactions?: Array<Record<string, unknown> & { occurredAt: string }> };
+      return Response.json(action === "deleteTransactions"
+        ? { ok: true, deleted: Number(result.affected) }
+        : {
+          ok: true, applied: Number(result.affected),
+          appliedTransactions: (result.transactions ?? []).map((transaction) => ({
+            ...transaction, occurredAt: new Date(transaction.occurredAt).toISOString(),
+          })),
+        });
+    }
+
     if (action === "createRule") {
       const input = z.object({ workspaceId: workspaceIdSchema, merchantContains: z.string().trim().min(1).max(120), expenseClass: expenseClassSchema, splitWeights: splitWeightsSchema.nullable().optional(), enabled: z.boolean().optional() }).parse(body);
       await requireWorkspaceMember(input.workspaceId, user.id);
@@ -272,6 +301,34 @@ export async function POST(request: Request) {
           UPDATE default_rules r SET sort_order = ranked.position FROM ranked WHERE r.id = ranked.id`,
       ]);
       return Response.json({ ok: true });
+    }
+
+    if (action === "deleteRules") {
+      const input = z.object({
+        workspaceId: workspaceIdSchema,
+        ruleIds: z.array(z.string().uuid()).min(1).max(5000)
+          .refine((ids) => new Set(ids).size === ids.length, "同じルールが重複しています。"),
+      }).parse(body);
+      await requireWorkspaceMember(input.workspaceId, user.id);
+      const requestedIds = JSON.stringify(input.ruleIds);
+      const targets = await sql`
+        SELECT id FROM default_rules
+        WHERE workspace_id = ${input.workspaceId}::uuid
+          AND id = ANY(ARRAY(SELECT value::uuid FROM jsonb_array_elements_text(${requestedIds}::jsonb)))
+      `;
+      if (targets.length !== input.ruleIds.length) {
+        throw new Error("選択したルールが見つかりません。画面を更新して選び直してください。");
+      }
+      const results = await sql.transaction([
+        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+        sql`DELETE FROM default_rules
+          WHERE workspace_id = ${input.workspaceId}::uuid
+            AND id = ANY(ARRAY(SELECT value::uuid FROM jsonb_array_elements_text(${requestedIds}::jsonb)))
+          RETURNING id`,
+        sql`WITH ranked AS (SELECT id, (row_number() OVER (ORDER BY sort_order, created_at, id) - 1)::integer AS position FROM default_rules WHERE workspace_id = ${input.workspaceId}::uuid)
+          UPDATE default_rules r SET sort_order = ranked.position FROM ranked WHERE r.id = ranked.id`,
+      ]);
+      return Response.json({ ok: true, deleted: results[1].length });
     }
 
     if (action === "bulkImport") {

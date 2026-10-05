@@ -1,0 +1,16 @@
+Generation tool: built-in image_gen
+Transparent background: true
+Reference image: previous Cake illustration, used for color and style only.
+
+Use case: logo-brand
+Asset type: reusable transparent PNG brand illustration for the Cake website homepage and app/favicon-style icon.
+Primary request: 黄色基調。中央に大きくチーズケーキを1ピースだけ描き、そのケーキに円マーク「¥」を大きく描く。人間は不要。ケーキと家計のダブルミーニングを、チーズケーキと円マークだけで表現する。
+Input image: the previous illustration is a reference ONLY for the warm yellow palette and welcoming hand-drawn feel. Create an entirely new minimal composition.
+Subject: exactly ONE appetizing triangular slice of cheesecake, viewed from a gentle three-quarter angle, filling approximately 75–80 percent of the square canvas. A broad creamy yellow vertical cut face of the cheesecake faces the viewer. Place one large, clean, clearly readable Japanese yen currency symbol "¥" directly on this cut face, as a flat warm dark-golden-brown printed or gently embossed mark. The symbol must have a Y-shaped upper part and TWO distinct parallel horizontal crossbars. It occupies roughly half of the visible cake face and remains readable at icon size.
+Cheesecake details: a simple smooth pale buttery-yellow cheesecake body, a slightly deeper golden-yellow top surface, and one neat thin golden biscuit crust layer at the bottom. Simple appetizing proportions with a strong triangular-slice silhouette, softly rounded edges. No chocolate cake, no layered sponge cake.
+Style/medium: polished minimal brand illustration with bold smooth ochre contours and rounded friendly forms, subtle hand-drawn softness, very restrained texture and shading. Clean flat shapes and clear contrast. Far simpler than the reference image.
+Composition/framing: centered single-object square composition, balanced empty margins for rounded app-icon crops. Keep the cheesecake and yen mark large and fully visible. Strong readable silhouette at small sizes.
+Color palette: sunshine yellow, butter yellow, golden ochre, a small amount of warm brown for the outline and yen symbol.
+Background: genuinely transparent alpha, no background canvas, no decorative frame, no opaque colored square, no checkerboard drawn into the image, no floor plane. No large drop shadow.
+Text (verbatim): "¥" only.
+Constraints: NO people, hands, faces, plates, utensils, tables, flowers, fruit, other cakes, notebooks, coins, savings jars, lettering "Cake", captions, or additional symbols. No watermark. Deliver only the single cheesecake slice bearing the yen mark on transparent background.

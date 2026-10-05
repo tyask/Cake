@@ -1,0 +1,17 @@
+Generation tool: built-in image_gen
+Transparent background: true
+Edit target: public/brand/cake-cheesecake-sharing.png
+
+Use case: style-transfer
+Asset type: reusable transparent PNG illustration for the Cake website homepage and icons.
+Input image: edit target is the single yellow cheesecake slice being cut with a knife, on an ivory scalloped plate.
+Primary request: ケーキの横・側面の切れ目をなくし、全体をもう少しファンシーで可愛らしい雰囲気にする。
+Required object correction: erase the incision or crack from ALL vertical side faces of the cheesecake completely. Restore one smooth uninterrupted pale-yellow face. The slice stays fully intact. The knife is only just starting to enter the TOP surface; allow a tiny subtle contact slot directly under its cutting edge, but NO cut line extending down a side and no separated piece. Retain exactly one cheesecake slice, one knife and one scalloped plate.
+New style: noticeably more whimsical and cute, like a charming Japanese illustrated stationery sticker or a gentle picture-book drawing. Use soft pastel colors, plump slightly rounded silhouettes, smooth friendly curves, light warm-ochre contours, simplified flat-color areas, a whisper of colored-pencil texture and soft cream highlights. Make the style visibly lighter, sweeter and more playful than the reference's highly textured rendering.
+Cake: preserve the triangular single-slice silhouette and three-quarter viewpoint. Pale butter-yellow filling with very few tiny subdued texture specks; warm pastel-yellow top with a delicate apricot baked edge, golden biscuit base simplified into a neat soft band. Slightly rounded corners, softly glowing appetizing surfaces, simple readable shapes.
+Knife: preserve the action of beginning to cut the top of the cake for sharing, with its cutting edge facing downward and only shallowly inserted. Make the knife about 25 percent smaller relative to the cake than in the input, so the cake is clearly dominant. Short friendly light blue-gray/silver blade, gently rounded tip, warm cream-yellow handle with a very simple smooth finish. It extends diagonally toward the upper right with plausible geometry, one blade joined to one handle. No hand.
+Plate: keep the elegant ivory-white ceramic plate, its broad scalloped flower-like edge and fine pale golden rim. Render it in the same soft cute illustration style, with very subtle warm-yellow shading and a delicate relief rim, no busy patterns.
+Composition/framing: square canvas, cake and plate centered and large, entire cake, knife handle and plate completely within frame, with modest clear transparent padding. Preserve the overall perspective and arrangement.
+Color palette: primarily pastel butter yellow, cream, pale honey yellow and a little apricot; only the blade uses light blue-gray. Gentle low-contrast shadows, enough outline contrast to stay readable as an icon.
+Background: genuinely transparent alpha outside the objects, preserve transparency. No backdrop, checkerboard, table or floor.
+Constraints: NO yen symbols or other currency marks, words, letters, numerals, faces on the food, people, hands, extra utensils, fruit, flowers, floating stars, extra objects or watermark. NO visible cracks or incision lines on the cake's side. Keep the illustration polished and uncluttered.

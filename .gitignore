@@ -10,6 +10,7 @@
 
 # local environment files
 .env*
+!.env.example
 
 # misc
 .DS_Store

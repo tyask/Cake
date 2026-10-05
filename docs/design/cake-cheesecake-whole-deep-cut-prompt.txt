@@ -1,0 +1,14 @@
+Generation tool: built-in image_gen
+Transparent background: true
+Edit target: public/brand/cake-cheesecake-whole-long-knife.png
+
+Use case: precise-object-edit
+Asset type: transparent PNG illustration for the Cake website homepage and icon.
+Input image: edit target is the whole yellow cheesecake on a scalloped plate, with a long slender cake knife barely entering the top.
+Primary request: 包丁をケーキの奥まで、もっと深く入れる。
+Change ONLY how deeply the existing knife enters the cake. Advance this same long slender knife farther toward the center and lower its cutting edge into the cheesecake. Make the action clearly look like an actual cut in progress: a substantial portion of the blade is buried in the cake, rather than only its tip touching the surface. Approximately the inner half of the blade length is engaged in the cake, and the lower half to two-thirds of the blade height in that engaged section is concealed beneath the top surface. The top of the cake must visibly overlap and occlude the inserted metal, establishing genuine depth. Leave only a narrow upper strip of the immersed blade visible along a radial path from the upper-right rim toward the center. The outer part of the blade and the ivory handle remain fully outside and clearly visible. Bring the handle a little closer to the top of the cake, preserving a natural diagonal direction toward the upper right.
+Preserve the actual knife's LONG THIN geometry, near-parallel edges, subtle fine serration, light silver-blue-gray metal, warm ivory handle and pale-gold collar. Do not replace it with a shorter or wider knife. The visible blade becomes partly hidden because it is inserted deeper, not because the knife was shortened.
+Cake interaction: a neat narrow incision visible ONLY immediately alongside the immersed blade on the TOP. The whole round cheesecake still has its complete circular shape with no wedge removed. ALL vertical sides remain smooth and unbroken, with NO incision down the front or side. No displaced slice or crumbs spilling out.
+Keep everything else unchanged: whole cheesecake size and shape, golden-yellow baked top, pale butter-yellow body, biscuit base with its existing gentle decorative texture, ivory scalloped plate with fine gold trim, soft fancy picture-book texture, yellow palette, elevated three-quarter viewpoint and framing.
+Background: preserve genuine transparent alpha, no backdrop, table or checkerboard. Keep the full plate, cake and handle within frame.
+Constraints: only adjust knife insertion depth and the necessary small top contact incision. No humans, hands, currency marks, text, extra utensils, objects, garnish, side cracks, missing cake portions or watermark.

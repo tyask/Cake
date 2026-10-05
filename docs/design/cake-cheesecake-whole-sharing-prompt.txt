@@ -1,0 +1,15 @@
+Generation tool: built-in image_gen
+Transparent background: true
+Edit target: public/brand/cake-cheesecake-sharing-fancy.png
+
+Use case: precise-object-edit
+Asset type: transparent PNG brand illustration for the Cake website homepage and icons.
+Input image: edit target is the pastel-yellow single cheesecake slice, knife and elegant scalloped plate.
+Primary request: ケーキを丸いホールのチーズケーキに変え、ケーキ用のナイフで切り分けようとしている感じにする。
+Cake change: replace the triangular slice with ONE whole round cheesecake, a complete circular cylindrical cake with no wedge removed, centered on the plate. Show it from a gentle elevated three-quarter view, with a clearly visible circular top rendered in perspective as an ellipse and an unbroken softly rounded front side. Pale butter-yellow creamy body, pastel golden-yellow baked top with a soft apricot edge, and a thin neat golden biscuit base. Keep it plump, appetizing and cute.
+Knife change: replace the broad triangular chef's knife with a graceful dedicated cake-slicing knife. A slender long silver/light-blue-gray blade with almost parallel edges, a gently rounded tip and a delicate subtly serrated lower cutting edge, joined to a simple warm-ivory handle with a restrained pale-gold collar. Make it elegant, soft and friendly in the same illustrated style. The knife is actively beginning a radial cut into the TOP of the whole cheesecake: its tip points toward the cake's center, the downward cutting edge is only shallowly pressed into the top, and the handle projects diagonally toward the upper right beyond the cake's rim. Clearly show the knife contacting and slightly entering the cake, not floating above or lying flat on it. Correct physical geometry for slicing a whole cake into shared portions. Knife narrower and visually subordinate to the cake.
+Cut details: only a tiny narrow contact slot immediately under the blade on the top. NO incision or crack down the vertical side of the cake. Do not outline a wedge, separate pieces, or show a missing slice. The whole cake remains intact because cutting is just beginning.
+Keep: the elegant ivory-white shallow plate with broad scalloped petal-like edges, fine muted gold rim and restrained relief, sized appropriately under the whole cake. Keep the soft pastel-yellow fancy picture-book/stationery illustration aesthetic, gently rounded forms, warm ochre outlines, subtle hand-drawn texture, creamy highlights and soft warm shading of the reference.
+Composition: a balanced square canvas. Whole cake centered and large; full plate, cake and entire knife handle visible, with clear modest transparent padding on every side. Clean silhouette suitable for a website illustration and small icon.
+Background: genuinely transparent alpha outside the cake, plate and knife. No opaque backdrop, table or checkerboard.
+Constraints: one WHOLE round cheesecake, one cake-slicing knife, one scalloped plate only. No triangular single slice, removed wedge, side cut lines, people, hands, faces, yen or other currency marks, text, numbers, cutlery other than the one knife, garnish, flowers, extra objects or watermark. Retain the yellow-based palette and whimsical gentle atmosphere.

@@ -8,7 +8,8 @@
 - 管理者が登録した二人だけが利用可能（利用者と管理者権限はDBで管理）
 - 個人用・共有用ワークスペースの作成、切り替え、削除
 - 招待リンクによる二人目の参加
-- 取引明細の追加、編集、削除と、明細ごとの負担割合の設定
+- 取引明細の追加、一覧での直接編集・自動保存、参加者ごとの負担割合の設定
+- チェックした明細の一括削除と「共有費ルールの適用」（清算済みは対象外）
 - PayPay CSVの支払い明細をプレビューし、費用区分・負担割合を変更して取込
 - 取引先の部分一致による費用区分・負担割合のデフォルトルール（ワークスペース共有、ドラッグで優先順を変更）
 - 共通支払い・共通収入と明細ごとの割合から、誰が誰へいくら支払うかを計算
@@ -144,11 +145,12 @@ Vercelのプロジェクト設定のEnvironment Variablesで、`Preview`を対�
 
 VercelでSecretとして設定された環境変数の値は、CLIからローカルへ取得できない場合があります。`npx vercel env run`でDBの準備を行う必要はありません。SecretはVercel上のビルドで利用できるため、Previewのデプロイのために`.env.local`へ接続情報や認証キーをコピーする必要もありません。
 
-まだCLIでログイン・プロジェクトへの接続をしていない場合は、最初に次を実行します。
+まだCLIにログインしていない場合は `npx vercel login` を実行します。ローカルに接続情報がない場合、`npm run deploy:preview` がVercelの接続手順を起動するので、利用するチームと既存の `cake` プロジェクトを選択してください。このプロジェクトではチームは `fumin1` です。接続情報は `.vercel/project.json` または `.vercel/repo.json` に保存され、次回から再利用します。Git連携済みの候補（`linked by git`）を選んだ場合の `.vercel/repo.json` にも対応しています。
+
+接続先を明示して先に設定する場合は、次を実行できます。[Vercelのプロジェクト接続](https://vercel.com/docs/cli/link)も参照してください。
 
 ```bash
-npx vercel login
-npx vercel link
+npx vercel link --scope fumin1 --project cake
 ```
 
 現在のローカルファイルを送信してPreviewへデプロイします。Gitへのpushは不要です。
@@ -157,11 +159,23 @@ npx vercel link
 npm run deploy:preview
 ```
 
+デプロイとビルドが成功すると、固定URL `https://cake-preview-fumin1.vercel.app` を新しいPreviewへ割り当てます。以後はこのURLをブックマークし、同じURLで最新版を開けます。ログ末尾の `Cake: 固定Preview URL:` でアクセス先を確認できます。デプロイやビルドに失敗した場合、固定URLは更新しません。
+
+固定URLの名前を変更する場合は、ローカルの `.env.local` にホスト名のみを設定します。未使用の名前、または自分が管理するドメインを使用してください。`CAKE_PREVIEW_ALIAS` はデプロイする端末用の設定なので、Vercelの環境変数への登録は不要です。
+
+```dotenv
+CAKE_PREVIEW_ALIAS=cake-preview-fumin1.vercel.app
+```
+
+固定URLの割り当てに失敗した場合は、コマンドに表示される `npx vercel alias set ...` を再実行できます。[Vercel公式のalias手順](https://vercel.com/kb/guide/how-to-alias-a-preview-deployment-using-the-cli)も参照してください。
+
+ビルドログを表示する場合は `npm run deploy:preview -- --logs`、新しくビルドし直す場合は `npm run deploy:preview -- --force` を使用できます。追加引数は `--logs`・`--force`・`--with-cache` に対応しています。
+
 Vercel上のビルドでPreview用DBへ未適用のマイグレーションを適用し、`AUTH_MODE=test`の場合はテストユーザーと共有ワークスペースを登録してから、アプリをビルドします。DB準備に失敗した場合はビルドを停止します。
 
-コマンド完了時に表示される`https://...vercel.app`が、そのDeployment固有のPreview URLです。`AUTH_MODE=test`なら、テストユーザーA・Bは`テスト共有家計`へ参加済みです。この二人に管理者権限はありません。
+作成されたDeployment固有のPreview URLもログに表示されます。`AUTH_MODE=test`なら、テストユーザーA・Bは`テスト共有家計`へ参加済みです。この二人に管理者権限はありません。
 
-GoogleログインでPreviewを確認する場合は、Previewの`AUTH_MODE=google`と`AUTH_GOOGLE_ID`・`AUTH_GOOGLE_SECRET`を設定し、Google Cloud側にPreviewのコールバックURLを登録してください。この場合もマイグレーションは適用されますが、テストユーザーの登録は行いません。管理者による利用者登録はGoogleログインで確認できます。
+GoogleログインでPreviewを確認する場合は、Previewの`AUTH_MODE=google`と`AUTH_GOOGLE_ID`・`AUTH_GOOGLE_SECRET`を設定し、Google Cloud側に固定URLのコールバックURL（初期値は `https://cake-preview-fumin1.vercel.app/api/auth/callback/google`）を登録してください。`AUTH_URL` を指定する場合も固定URLを設定します。この場合もマイグレーションは適用されますが、テストユーザーの登録は行いません。管理者による利用者登録はGoogleログインで確認できます。
 
 ### Productionへデプロイ
 
@@ -199,10 +213,10 @@ npx vercel list --prod
 npx vercel redeploy https://対象のpreview-url.vercel.app
 ```
 
-ローカルの最新ファイルを改めて配置する場合は、通常どおり新しいPreviewを作成します。
+ローカルの最新ファイルを改めて配置し、固定URLも更新する場合は次を実行します。
 
 ```bash
-npx vercel
+npm run deploy:preview
 ```
 
 ### Preview Deploymentの削除
@@ -253,7 +267,11 @@ npm run deploy:preview # Vercel上でPreview用DBを準備してデプロイ
 
 設定の「共有費のデフォルト割合」は、新しい共有費の初期値です。明細ごとに割合を変更できます。個人費は支払者・受取者が1、相手が0になります。
 
+取引明細は一覧の項目を直接編集できます。文字・金額・日時・割合は欄を離れるかEnterで保存し、種別・担当者・費用区分は変更するとすぐ保存します。清算済みの明細は編集・削除できません。
+
 デフォルトルールはワークスペースの参加者全員で共有し、取引先が一致した上のルールから適用します。共有費のルールには独自の割合を設定するか、ワークスペースのデフォルト割合を使うかを選べます。割合は明細の保存時に記録されるため、後からデフォルト割合やルールを変更しても保存済みの明細は変わりません。
+
+ルールは一覧の項目を直接編集でき、入力を確定すると自動保存します。右端のハンドルで並べ替え、左端のチェックボックスで選択したルールをまとめて削除できます。
 
 既存の明細には、マイグレーション時のデフォルト割合を保存します。清算済みの明細では、その清算に保存された割合を使います。
 
