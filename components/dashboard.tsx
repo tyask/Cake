@@ -7,13 +7,13 @@ import { UserManagement } from "./user-management";
 import { MobileAccessQr } from "./mobile-access-qr";
 import { SplitEditor } from "./split-editor";
 import { WorkspaceRules } from "./workspace-rules";
+import { CakeIcon } from "./cake-icon";
 import { TransactionsPanel } from "./transactions-panel";
 import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
 import { parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
 import type {
   BootstrapData,
   ExpenseClass,
-  TransactionType,
   WorkspaceData,
   WorkspaceType,
   SplitWeights,
@@ -112,7 +112,7 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
-        <div className="app-logo"><span>C</span><b>Cake</b></div>
+        <div className="app-logo"><CakeIcon decorative /><b>Cake</b></div>
         <div className="workspace-picker">
           <label>ワークスペース</label>
           <select value={selected?.workspace.id ?? ""} onChange={(event) => switchWorkspace(event.target.value)}>
@@ -135,7 +135,7 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
       </aside>
 
       <main className="app-main">
-        <header className="mobile-header"><div className="app-logo"><span>C</span><b>Cake</b></div><select value={selected?.workspace.id ?? ""} onChange={(event) => switchWorkspace(event.target.value)}>{data.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></header>
+        <header className="mobile-header"><div className="app-logo"><CakeIcon decorative size={34} /><b>Cake</b></div><select value={selected?.workspace.id ?? ""} onChange={(event) => switchWorkspace(event.target.value)}>{data.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></header>
         {testAuth && <div className="demo-banner">テストログインで使用中です（{data.user.name}）</div>}
         {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice(null)}>×</button></div>}
         {loading && <div className="loading-line" />}
@@ -157,8 +157,8 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
   );
 }
 
-function PageHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description?: string; action?: React.ReactNode }) {
-  return <div className="page-heading"><div><span>{eyebrow}</span><h1>{title}</h1>{description && <p>{description}</p>}</div>{action}</div>;
+function PageHeading({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: string; action?: React.ReactNode }) {
+  return <div className="page-heading"><div>{eyebrow && <span>{eyebrow}</span>}<h1>{title}</h1>{description && <p>{description}</p>}</div>{action}</div>;
 }
 
 function HomePanel({ selected, pending, setTab, add }: { selected: WorkspaceData; pending: number; setTab: (tab: Tab) => void; add: () => void }) {
@@ -167,7 +167,7 @@ function HomePanel({ selected, pending, setTab, add }: { selected: WorkspaceData
   const payments = monthTransactions.filter((item) => item.type === "PAYMENT").reduce((sum, item) => sum + item.amountYen, 0);
   const shared = selected.transactions.filter((item) => item.expenseClass === "SHARED" && !item.settledAt).reduce((sum, item) => sum + (item.type === "PAYMENT" ? item.amountYen : -item.amountYen), 0);
   return <>
-    <PageHeading eyebrow="OVERVIEW" title={`おかえりなさい`} description={`${selected.workspace.name}のいまを、ひと目で確認できます。`} action={<button className="primary" onClick={add}>＋ 明細を追加</button>} />
+    <div className="home-actions"><button className="primary" onClick={add}>＋ 明細を追加</button></div>
     {pending > 0 && <button className="invite-alert" onClick={() => setTab("settings")}>あなた宛ての招待が{pending}件あります <span>確認する →</span></button>}
     <div className="kpi-grid">
       <article className="kpi"><span>今月の支払い</span><strong>{money(payments)}</strong><small>{monthTransactions.length}件の取引</small></article>
@@ -263,7 +263,7 @@ function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload
         <th><input type="checkbox" aria-label="取込対象をすべて選択" disabled={saving}
           checked={selectedCount > 0 && selectedCount === rows.filter((row) => !row.error && !row.duplicate).length}
           onChange={(event) => setRows((current) => current.map((row) => row.error || row.duplicate ? row : { ...row, selected: event.target.checked }))} /></th>
-        <th>取引日時</th><th>取引先</th><th>方法</th><th>金額</th><th>費用区分</th><th>負担割合</th><th>状態</th>
+        <th>取引日時</th><th>取引先</th><th>方法</th><th>金額</th><th>費用区分</th><th>支払い割合</th><th>状態</th>
       </tr></thead><tbody>{rows.map((row) => <tr key={row.key} className={!row.selected ? "muted-row" : ""}>
         <td><input type="checkbox" aria-label={`${row.merchant}を取り込む`} checked={row.selected} disabled={saving || !!row.error || row.duplicate}
           onChange={(event) => setRows((current) => current.map((item) => item.key === row.key ? { ...item, selected: event.target.checked } : item))} /></td>
@@ -272,7 +272,7 @@ function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload
           onChange={(event) => setRows((current) => current.map((item) => item.key === row.key ? changeClass(item, event.target.value as ExpenseClass) : item))}>
           <option value="PERSONAL">個人費</option><option value="SHARED">共通費</option>
         </select></td>
-        <td data-label="負担割合"><SplitEditor compact label={`${row.merchant}の負担割合`}
+        <td data-label="支払い割合"><SplitEditor compact label={`${row.merchant}の支払い割合`} amountYen={row.amountYen}
           members={ratioMembers(selected.members, row.expenseClass, actorId)} value={row.splitWeights} disabled={saving || row.expenseClass === "PERSONAL"}
           onChange={(splitWeights) => setRows((current) => current.map((item) => item.key === row.key ? { ...item, splitWeights } : item))} /></td>
         <td data-label="状態">{row.duplicate ? <span className="error-tag">登録済み</span> : row.error ? <span className="error-tag">{row.error}</span> : <span className="success-tag">登録可能</span>}</td>
@@ -381,7 +381,6 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
   const [occurredAt, setOccurredAt] = useState(inputDate());
   const [merchant, setMerchant] = useState("");
   const [method, setMethod] = useState("現金");
-  const [type, setType] = useState<TransactionType>("PAYMENT");
   const [amountYen, setAmountYen] = useState(0);
   const [actorUserId, setActorUserId] = useState(initialActor);
   const [expenseClass, setExpenseClass] = useState<ExpenseClass>("PERSONAL");
@@ -404,7 +403,7 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
       try {
         validateSplitWeights(splitWeights, selected.members, expenseClass, actorUserId);
         await run({ action: "saveTransaction", workspaceId: selected.workspace.id,
-          occurredAt: jstInputToIso(occurredAt), merchant, method, type, amountYen, actorUserId, expenseClass, splitWeights },
+          occurredAt: jstInputToIso(occurredAt), merchant, method, type: "PAYMENT", amountYen, actorUserId, expenseClass, splitWeights },
         "明細を追加しました。");
         close();
       } catch (failure) {
@@ -418,9 +417,8 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
           if (!customized) applyDefaults(event.target.value);
         }} /></label>
         <label>取引方法<input required maxLength={120} value={method} onChange={(event) => setMethod(event.target.value)} /></label>
-        <label>取引種別<select value={type} onChange={(event) => setType(event.target.value as TransactionType)}><option value="PAYMENT">支払い</option><option value="RECEIPT">受け取り</option></select></label>
         <label>金額（円）<input type="number" required min="1" step="1" value={amountYen || ""} onChange={(event) => setAmountYen(Number(event.target.value))} /></label>
-        <label>{type === "PAYMENT" ? "支払者" : "受取者"}<select value={actorUserId} onChange={(event) => {
+        <label>支払者<select value={actorUserId} onChange={(event) => {
           const nextActor = event.target.value;
           setActorUserId(nextActor);
           if (expenseClass === "PERSONAL") setSplitWeights(personalSplitWeights(selected.members, nextActor));
@@ -432,9 +430,9 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
           setCustomized(true);
         }}><option value="PERSONAL">個人費</option><option value="SHARED">共通費</option></select></label>
         <div className="full">
-          <SplitEditor members={ratioMembers(selected.members, expenseClass, actorUserId)} value={splitWeights}
+          <SplitEditor inline label={`支払い割合（${selected.members.map((member) => member.name).join(", ")}）`} amountYen={amountYen} members={selected.members} value={splitWeights}
             disabled={expenseClass === "PERSONAL" || saving} onChange={(next) => { setSplitWeights(next); setCustomized(true); }} />
-          <p className="ratio-note">{expenseClass === "PERSONAL" ? "個人費は支払者・受取者が1、相手が0です。" : "この明細の負担割合で清算します。"}</p>
+          <p className="ratio-note">{expenseClass === "PERSONAL" ? "個人費は支払者の負担が100%になります。" : "割合・金額のどちらでも設定できます。もう一人の分は自動で計算します。"}</p>
           <button type="button" className="text-button" disabled={saving} onClick={() => { applyDefaults(); setCustomized(false); }}>取引先のルールを適用</button>
         </div>
       </div>

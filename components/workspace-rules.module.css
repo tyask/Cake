@@ -2,30 +2,30 @@
 .description { margin: 0 1.3rem .55rem; color: var(--muted); font-size: .72rem; line-height: 1.65; }
 .error, .rowError { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; margin: .65rem 1.3rem; }
 .rowError { margin: .65rem 0 0 1.7rem; }
-.create { margin: 1rem 1.3rem .85rem; padding: .85rem; border: 1px solid var(--line); border-radius: .7rem; background: #f7f9f5; }
+.create { margin: 1rem 1.3rem .85rem; padding: .85rem; border: 1px solid var(--line); border-radius: .7rem; background: var(--surface-muted); }
 .create h3 { margin: 0 0 .65rem; font-size: .75rem; }
 .createLine, .ruleLine { display: grid; grid-template-columns: minmax(8rem, 1.4fr) 5.8rem minmax(10rem, 1.1fr) auto auto; align-items: center; gap: .65rem; min-width: 0; }
 .ruleLine { grid-template-columns: 1.1rem minmax(8rem, 1.4fr) 5.8rem minmax(10rem, 1.1fr) auto 2.2rem; }
 .merchant, .expenseClass, .ratios > label { display: grid; min-width: 0; gap: .3rem; color: var(--muted); font-size: .61rem; font-weight: 700; }
 .merchant > span, .ratios > label > span { min-width: 0; overflow-wrap: anywhere; }
-.section .merchant input, .section .expenseClass select, .section .ratios input { width: 100%; min-width: 0; min-height: 2.15rem; margin: 0; padding: .4rem .5rem; border: 1px solid #dce2db; border-radius: .5rem; font-size: .74rem; font-weight: 400; }
+.section .merchant input, .section .expenseClass select, .section .ratios input { width: 100%; min-width: 0; min-height: 2.15rem; margin: 0; padding: .4rem .5rem; border: 1px solid var(--line-strong); border-radius: .5rem; font-size: .74rem; font-weight: 400; }
 .ratios { display: flex; align-items: end; gap: .4rem; min-width: 0; }
 .ratios > label { flex: 1 1 0; }
-.section .ratios input:disabled { color: #77847b; background: #f1f3ee; }
+.section .ratios input:disabled { color: var(--disabled-ink); background: var(--surface-disabled); }
 .personalRatio { color: var(--muted); font-size: .68rem; line-height: 1.6; overflow-wrap: anywhere; }
 .personalRatio b { color: var(--ink); }
 .options { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .55rem; min-width: 0; max-width: 12rem; }
 .checkbox, .selection { display: inline-flex; align-items: center; gap: .3rem; color: var(--muted); font-size: .64rem; white-space: nowrap; }
-.section .checkbox input, .section .selection input { width: 1rem; height: 1rem; margin: 0; padding: 0; accent-color: var(--green); }
+.section .checkbox input, .section .selection input { width: 1rem; height: 1rem; margin: 0; padding: 0; accent-color: var(--brand); }
 .saveStatus, .failed { color: var(--muted); font-size: .6rem; white-space: nowrap; }
 .failed { color: var(--red); }
 .section .addButton { min-height: 2.2rem; align-self: end; padding: .4rem .8rem; font-size: .74rem; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin: .85rem 1.3rem; color: var(--muted); font-size: .66rem; }
-.bulkDelete { min-height: 2rem; margin-left: auto; padding: .35rem .65rem; border: 1px solid #e7d0ca; border-radius: .5rem; color: var(--red); background: #fff; cursor: pointer; font-size: .68rem; }
+.bulkDelete { min-height: 2rem; margin-left: auto; padding: .35rem .65rem; border: 1px solid #e7d0ca; border-radius: .5rem; color: var(--red); background: var(--paper); cursor: pointer; font-size: .68rem; }
 .list { display: grid; gap: .45rem; margin: 0 1.3rem; padding: 0; list-style: none; }
 .rule { position: relative; min-width: 0; padding: .65rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--paper); }
-.dragging { z-index: 2; box-shadow: var(--shadow); border-color: var(--green); }
-.dragHandle { display: grid; width: 2.2rem; min-height: 2.2rem; place-items: center; padding: .2rem; border: 1px solid #d9dfd8; border-radius: .5rem; color: var(--muted); background: #fff; cursor: grab; font-size: 1.3rem; touch-action: none; }
+.dragging { z-index: 2; box-shadow: var(--shadow); border-color: var(--accent); }
+.dragHandle { display: grid; width: 2.2rem; min-height: 2.2rem; place-items: center; padding: .2rem; border: 1px solid var(--line-strong); border-radius: .5rem; color: var(--muted); background: var(--paper); cursor: grab; font-size: 1.3rem; touch-action: none; }
 .dragHandle:active { cursor: grabbing; }
 .empty, .footnote { margin: .85rem 1.3rem 0; color: var(--muted); font-size: .68rem; line-height: 1.6; }
 

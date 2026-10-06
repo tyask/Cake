@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { transactionActorPatch, transactionDateInput, transactionDateToIso, transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues } from "@/lib/transaction-editing";
-import type { ExpenseClass, SplitWeights, TransactionRecord, TransactionType, WorkspaceData, WorkspaceMember } from "@/lib/types";
+import type { ExpenseClass, SplitWeights, TransactionRecord, WorkspaceData, WorkspaceMember } from "@/lib/types";
 import styles from "./transactions-panel.module.css";
+import { SplitEditor } from "./split-editor";
 
 type RunAction = (payload: Record<string, unknown>, success: string) => Promise<unknown>;
 type SaveTransaction = (id: string, getValues: () => TransactionValues) => Promise<TransactionValues>;
@@ -13,6 +14,7 @@ type BulkAction = "deleteTransactions" | "applyTransactionRules";
 
 const money = (value: number) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(value);
 const dateTime = (value: string) => new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(value));
+const splitLabel = (members: WorkspaceMember[]) => `支払い割合（${members.map((member) => member.name).join(", ")}）`;
 
 function signature(values: TransactionValues): string {
   return JSON.stringify([values.occurredAt, values.merchant, values.method, values.type, values.amountYen, values.actorUserId, values.expenseClass, Object.entries(values.splitWeights).sort(([a], [b]) => a.localeCompare(b))]);
@@ -140,7 +142,7 @@ function TransactionList({ selected, add, run }: { selected: WorkspaceData; add:
   }
 
   return <>
-    <div className="page-heading"><div><span>TRANSACTIONS</span><h1>取引明細</h1><p>一覧から直接編集できます。文字・金額・日時・割合は欄を離れるかEnterで保存し、選択項目はすぐ保存します。</p></div><button className="primary" disabled={busy} onClick={add}>＋ 明細を追加</button></div>
+    <div className="page-heading"><div><span>TRANSACTIONS</span><h1>取引明細</h1><p>一覧から直接編集できます。支払い割合は割合・金額から選べます。欄を離れるかEnterで保存し、選択項目はすぐ保存します。</p></div><button className="primary" disabled={busy} onClick={add}>＋ 明細を追加</button></div>
     <section className={"panel " + styles.panel} aria-busy={pending > 0 || busy}>
       <div className={styles.toolbar}>
         <label className={styles.search}><span aria-hidden="true">⌕</span><input aria-label="取引先を検索" placeholder="取引先を検索" value={query} disabled={busy} onChange={(event) => setQuery(event.target.value)} /></label>
@@ -157,8 +159,8 @@ function TransactionList({ selected, add, run }: { selected: WorkspaceData; add:
       {bulkNotice && <p role="status" className={styles.bulkNotice}>{bulkNotice}</p>}
       <p className={styles.note}>清算済みの明細は選択・変更できません。絞り込み後も選択を保持します。編集中の明細は編集を終えるまで表示します。</p>
       <div className={styles.tableWrap}><table className={styles.table} aria-label="取引明細">
-        <colgroup><col className={styles.selectionColumn} /><col className={styles.dateColumn} /><col className={styles.merchantColumn} /><col className={styles.methodColumn} /><col className={styles.typeColumn} /><col className={styles.amountColumn} /><col className={styles.actorColumn} /><col className={styles.classColumn} />{selected.members.map((member) => <col key={member.id} className={styles.ratioColumn} />)}<col className={styles.settlementColumn} /><col className={styles.sourceColumn} /></colgroup>
-        <thead><tr><th className={styles.selectionCell}><SelectAllCheckbox checked={allVisibleChecked} partial={checkedVisibleCount > 0 && !allVisibleChecked} disabled={busy || visibleEditable.length === 0} onChange={toggleVisible} /></th><th>取引日時</th><th>取引先</th><th>方法</th><th>種別</th><th>金額（円）</th><th>担当者</th><th>費用区分</th>{selected.members.map((member) => <th key={member.id} title={member.name + "の負担割合"}>{member.name}の割合</th>)}<th>清算</th><th>登録元</th></tr></thead>
+        <colgroup><col className={styles.selectionColumn} /><col className={styles.dateColumn} /><col className={styles.merchantColumn} /><col className={styles.methodColumn} /><col className={styles.amountColumn} /><col className={styles.actorColumn} /><col className={styles.classColumn} /><col className={styles.ratioColumn} /><col className={styles.settlementColumn} /></colgroup>
+        <thead><tr><th className={styles.selectionCell}><SelectAllCheckbox checked={allVisibleChecked} partial={checkedVisibleCount > 0 && !allVisibleChecked} disabled={busy || visibleEditable.length === 0} onChange={toggleVisible} /></th><th>取引日時</th><th>取引先</th><th>方法</th><th>金額（円）</th><th>支払者</th><th>費用区分</th><th>{splitLabel(selected.members)}</th><th>清算</th></tr></thead>
         <tbody>{visible.map((item) => <EditableTransaction key={item.id} item={item} members={selected.members} pinnedOutsideFilter={!matches(item)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} register={register} onPin={onPin} onSave={save} />)}</tbody>
       </table></div>
       {visible.length === 0 && <p className={styles.empty}>条件に一致する明細がありません。</p>}
@@ -337,19 +339,18 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell}><input aria-label="取引日時" type="datetime-local" step="0.001" required value={dateDraft ?? transactionDateInput(draft.occurredAt)} title={dateDraft ?? transactionDateInput(draft.occurredAt)} disabled={busy} onChange={(event) => changeDate(event.target.value)} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
     <td data-label="取引先"><input aria-label="取引先" required maxLength={240} value={draft.merchant} disabled={busy} onChange={(event) => change({ merchant: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
     <td data-label="方法"><input aria-label="取引方法" required maxLength={120} value={draft.method} disabled={busy} onChange={(event) => change({ method: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
-    <td data-label="種別"><select aria-label="取引種別" value={draft.type} disabled={busy} onChange={(event) => change({ type: event.target.value as TransactionType }, true)}><option value="PAYMENT">支払い</option><option value="RECEIPT">受け取り</option></select></td>
     <td data-label="金額（円）"><input aria-label="金額（円）" type="number" required min="1" max="2147483647" step="1" value={draft.amountYen} disabled={busy} onChange={(event) => change({ amountYen: Number(event.target.value) })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
     <td data-label={draft.type === "PAYMENT" ? "支払者" : "受取者"}><select aria-label={draft.type === "PAYMENT" ? "支払者" : "受取者"} value={draft.actorUserId} disabled={busy} onChange={(event) => change(transactionActorPatch(currentValues(), event.target.value, members), true)}>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></td>
     <td data-label="費用区分"><select aria-label="費用区分" value={draft.expenseClass} disabled={busy} onChange={(event) => change(transactionExpensePatch(currentValues(), event.target.value as ExpenseClass, members), true)}><option value="PERSONAL">個人費</option><option value="SHARED">共有費</option></select></td>
-    {members.map((member) => <td key={member.id} data-label={member.name + "の割合"}><input aria-label={member.name + "の割合"} type="number" required min="0" max="2147483647" step="1" value={draft.splitWeights[member.id] ?? 0} disabled={busy || draft.expenseClass === "PERSONAL"}
-      onChange={(event) => change({ splitWeights: { ...currentValues().splitWeights, [member.id]: Number(event.target.value) } })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>)}
-    <td data-label="清算"><span className={draft.expenseClass === "SHARED" ? styles.unsettled : styles.muted}>{draft.expenseClass === "PERSONAL" ? "対象外" : "未清算"}</span></td>
-    <td data-label="登録元" className={styles.sourceCell}>
-      {item.source === "PAYPAY" ? "PayPay取込" : "手動"}
+    <td data-label={splitLabel(members)} className={styles.splitCell + " " + styles.fullCell}>
+      <SplitEditor compact inline label="支払い割合" members={members} value={draft.splitWeights} amountYen={draft.amountYen}
+        disabled={busy || draft.expenseClass === "PERSONAL"} onChange={(splitWeights) => change({ splitWeights })} onCommit={requestCommit} />
+    </td>
+    <td data-label="清算" className={styles.settlementCell}><span className={draft.expenseClass === "SHARED" ? styles.unsettled : styles.muted}>{draft.expenseClass === "PERSONAL" ? "対象外" : "未清算"}</span>
       {(pending > 0 || applyingRules) && <span className={styles.savingIndicator} role="status" aria-label="保存中"><span className={styles.spinner} aria-hidden="true" /></span>}
     </td>
   </tr>
-    {(error || pinnedOutsideFilter) && <tr className={styles.feedbackRow} data-feedback-for={item.id}><td colSpan={10 + members.length} className={styles.feedbackCell}>
+    {(error || pinnedOutsideFilter) && <tr className={styles.feedbackRow} data-feedback-for={item.id}><td colSpan={9} className={styles.feedbackCell}>
       {pinnedOutsideFilter && <small className={styles.filterHint}>編集中のため表示</small>}
       {error && <div className={styles.error} role="alert">{error}<button type="button" className="text-button" disabled={busy || pending > 0} onClick={requestCommit}>再試行</button></div>}
     </td></tr>}
@@ -362,12 +363,10 @@ function SettledTransaction({ item, members }: { item: TransactionRecord; member
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell} title={dateTime(item.occurredAt)}>{dateTime(item.occurredAt)}</td>
     <td data-label="取引先"><b>{item.merchant}</b></td>
     <td data-label="方法">{item.method}</td>
-    <td data-label="種別">{item.type === "PAYMENT" ? "支払い" : "受け取り"}</td>
-    <td data-label="金額（円）">{item.type === "PAYMENT" ? "−" : "+"}{money(item.amountYen)}</td>
+    <td data-label="金額（円）">{money(item.amountYen)}</td>
     <td data-label={item.type === "PAYMENT" ? "支払者" : "受取者"}>{item.actorName}</td>
     <td data-label="費用区分">{item.expenseClass === "PERSONAL" ? "個人費" : "共有費"}</td>
-    {members.map((member) => <td key={member.id} data-label={member.name + "の割合"}>{item.splitWeights[member.id] ?? 0}</td>)}
+    <td data-label={splitLabel(members)} className={styles.splitCell + " " + styles.fullCell}><SplitEditor compact inline label="支払い割合" members={members} value={item.splitWeights} amountYen={item.amountYen} /></td>
     <td data-label="清算">清算済み</td>
-    <td data-label="登録元" className={styles.sourceCell}>{item.source === "PAYPAY" ? "PayPay取込" : "手動"}</td>
   </tr>;
 }

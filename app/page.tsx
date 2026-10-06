@@ -1,5 +1,6 @@
 import { LoginScreen } from "@/components/login-screen";
 import { Dashboard } from "@/components/dashboard";
+import { CakeIcon } from "@/components/cake-icon";
 import { getCurrentUser } from "@/lib/current-user";
 import { isTestAuthEnabled } from "@/lib/auth-mode";
 import { getBootstrap } from "@/lib/repository";
@@ -16,7 +17,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ w
     return (
       <main className="setup-page">
         <section className="setup-card">
-          <span className="brand-icon">C</span>
+          <CakeIcon size={48} className="setup-icon" />
           <p className="kicker">SETUP REQUIRED</p>
           <h1>データベースを接続してください</h1>
           <p><code>.env.example</code>を参考にNeonの接続情報と<code>AUTH_SECRET</code>を設定し、<code>npm run db:setup</code>を実行してください。</p>
