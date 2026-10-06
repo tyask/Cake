@@ -10,7 +10,7 @@ const members: WorkspaceMember[] = [
 const base: TransactionRecord = {
   id: "one", occurredAt: "2026-10-06T23:15:00.125Z", merchant: "スーパー", method: "現金",
   type: "PAYMENT", amountYen: 1001, actorUserId: "a", actorName: "A", expenseClass: "SHARED",
-  splitWeights: { a: 6, b: 4 }, settledAt: null, externalId: null, source: "MANUAL",
+  splitWeights: { a: 6, b: 4 }, settledAt: null, externalId: "filter-test", source: "MANUAL", memo: "",
 };
 
 test("同じ列はOR、複数列はANDで照合し、空の選択は0件になる", () => {
@@ -60,4 +60,12 @@ test("候補の件数は現在表示中の明細だけを数え、非表示の�
     { value: "スーパー", label: "スーパー", count: 1 },
   ]);
   assert.ok(transactionFilterOptions(items, "merchant", members, []).every(option => option.count === 0));
+});
+
+test("メモは改行を含む値と空白を区別し、清算済みの明細も絞り込める", () => {
+  const item = { ...base, memo: "立替分\n確認済み", settledAt: "2026-10-07T00:00:00Z" };
+  assert.equal(matchesTransactionFilters(item, { memo: [item.memo] }, members), true);
+  assert.equal(matchesTransactionFilters(item, { memo: [""] }, members), false);
+  assert.deepEqual(transactionFilterOptions([base, item], "memo", members).find(option => option.value === ""),
+    { value: "", label: "（空白）", count: 1 });
 });

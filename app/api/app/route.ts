@@ -5,6 +5,8 @@ import { getBootstrap, requireWorkspaceMember } from "@/lib/repository";
 import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
 import type { DefaultRule, ExpenseClass, SplitWeights } from "@/lib/types";
 import { z } from "zod";
+import { transactionMemoInputSchema } from "@/lib/transaction-memo";
+import { transactionRecord } from "@/lib/transaction-record";
 
 export const runtime = "nodejs";
 
@@ -43,11 +45,11 @@ const selectedTransactionsSchema = z.object({
 async function splitContext(workspaceId: string) {
   const sql = db();
   const [memberRows, ruleRows] = await Promise.all([
-    sql`SELECT user_id, weight FROM workspace_members WHERE workspace_id = ${workspaceId}::uuid ORDER BY joined_at, user_id`,
+    sql`SELECT wm.user_id, wm.weight, u.name FROM workspace_members wm JOIN app_users u ON u.id = wm.user_id WHERE wm.workspace_id = ${workspaceId}::uuid ORDER BY wm.joined_at, wm.user_id`,
     sql`SELECT id, merchant_contains, expense_class, sort_order, split_weights, enabled FROM default_rules WHERE workspace_id = ${workspaceId}::uuid ORDER BY sort_order, created_at, id`,
   ]);
   return {
-    members: memberRows.map((row) => ({ id: String(row.user_id), weight: Number(row.weight) })),
+    members: memberRows.map((row) => ({ id: String(row.user_id), weight: Number(row.weight), name: String(row.name) })),
     rules: ruleRows.map((row): DefaultRule => ({
       id: String(row.id), merchantContains: String(row.merchant_contains),
       expenseClass: String(row.expense_class) as ExpenseClass, sortOrder: Number(row.sort_order),
@@ -166,6 +168,21 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
+    if (action === "saveTransactionMemo") {
+      const input = transactionMemoInputSchema.parse(body);
+      await requireWorkspaceMember(input.workspaceId, user.id);
+      const results = await sql.transaction([
+        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+        sql`
+          UPDATE transactions SET memo = ${input.memo}, updated_by = ${user.id}, updated_at = now()
+          WHERE id = ${input.transactionId}::uuid AND workspace_id = ${input.workspaceId}::uuid
+          RETURNING id, memo
+        `,
+      ]);
+      if (!results[1][0]) throw new Error("明細が存在しません。");
+      return Response.json({ ok: true, transactionId: String(results[1][0].id), memo: String(results[1][0].memo) });
+    }
+
     if (action === "saveTransaction") {
       const input = z.object({
         workspaceId: workspaceIdSchema,
@@ -191,6 +208,7 @@ export async function POST(request: Request) {
           && (previous.expense_class === "SHARED" || input.actorUserId === previous.actor_user_id)
           ? previous.split_weights as SplitWeights : input.splitWeights,
       }, context);
+      let saved: Record<string, unknown>;
       if (input.transactionId) {
         const results = await sql.transaction([
           sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
@@ -200,13 +218,14 @@ export async function POST(request: Request) {
             actor_user_id = ${input.actorUserId}, expense_class = ${split.expenseClass}, split_weights = ${JSON.stringify(split.splitWeights)}::jsonb,
             updated_by = ${user.id}, updated_at = now()
           WHERE id = ${input.transactionId}::uuid AND workspace_id = ${input.workspaceId}::uuid AND settled_at IS NULL
-          RETURNING id
+          RETURNING *
           `,
         ]);
         if (!results[1][0]) throw new Error("清算済み、または存在しない明細は編集できません。");
+        saved = results[1][0];
       } else {
         const id = randomUUID();
-        await sql.transaction([
+        const results = await sql.transaction([
           sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
           sql`
           INSERT INTO transactions (id, workspace_id, occurred_at, merchant, method, type, amount_yen,
@@ -214,10 +233,12 @@ export async function POST(request: Request) {
           VALUES (${id}::uuid, ${input.workspaceId}::uuid, ${input.occurredAt}::timestamptz, ${input.merchant},
             ${input.method}, ${input.type}, ${input.amountYen}, ${input.actorUserId}, ${split.expenseClass}, ${JSON.stringify(split.splitWeights)}::jsonb,
             ${`manual_${id}`}, 'MANUAL', ${user.id}, ${user.id})
+          RETURNING *
           `,
         ]);
+        saved = results[1][0];
       }
-      return Response.json({ ok: true });
+      return Response.json({ ok: true, transaction: transactionRecord(saved, context.members.find(member => member.id === input.actorUserId)!.name) });
     }
 
     if (action === "deleteTransaction") {

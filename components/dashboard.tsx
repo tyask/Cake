@@ -11,6 +11,7 @@ import { CakeIcon } from "./cake-icon";
 import { TransactionsPanel } from "./transactions-panel";
 import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
 import { parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
+import { applyTransactionUpdate } from "@/lib/transaction-updates";
 import type {
   BootstrapData,
   ExpenseClass,
@@ -61,17 +62,21 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
   const selected = data.selected;
   const workspaceView = useRef({ workspaceId: initialData.selected?.workspace.id, generation: 0 });
   const pendingRequests = useRef(0);
+  const dataRevision = useRef(0);
+  const refreshRequest = useRef(0);
 
   function startLoading() { pendingRequests.current += 1; setLoading(true); }
   function finishLoading() { pendingRequests.current -= 1; setLoading(pendingRequests.current > 0); }
 
   async function refresh(workspaceId = workspaceView.current.workspaceId, generation = workspaceView.current.generation) {
+    const requestId = ++refreshRequest.current;
+    const revision = dataRevision.current;
     const desiredWorkspaceId = workspaceView.current.workspaceId;
     const response = await fetch(`/api/app${workspaceId ? `?workspaceId=${workspaceId}` : ""}`, { cache: "no-store" });
     const next = await response.json();
     if (!response.ok) throw new Error(next.error ?? "更新に失敗しました。");
     // An autosave for a previous workspace must not replace the newly selected view.
-    if (generation !== workspaceView.current.generation || desiredWorkspaceId !== workspaceView.current.workspaceId) return false;
+    if (generation !== workspaceView.current.generation || desiredWorkspaceId !== workspaceView.current.workspaceId || revision !== dataRevision.current || requestId !== refreshRequest.current) return false;
     workspaceView.current.workspaceId = next.selected?.workspace.id;
     setData(next);
     return true;
@@ -82,12 +87,22 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
     const generation = workspaceView.current.generation;
     const isCurrentView = () => generation === workspaceView.current.generation && originWorkspaceId === workspaceView.current.workspaceId;
     startLoading();
+    if (isCurrentView()) dataRevision.current += 1;
     if (isCurrentView()) setNotice(null);
     try {
       const result = await postAction(payload);
       if (isCurrentView()) {
-        const applied = await refresh(workspaceId ?? result.workspaceId ?? originWorkspaceId, generation);
-        if (applied && generation === workspaceView.current.generation) setNotice(success);
+        dataRevision.current += 1;
+        if (payload.action === "saveTransaction" && result.transaction && originWorkspaceId) {
+          setData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, { transaction: result.transaction }) : current);
+          setNotice(success);
+        } else if (payload.action === "saveTransactionMemo" && result.transactionId && typeof result.memo === "string" && originWorkspaceId) {
+          setData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, { transactionId: result.transactionId, memo: result.memo }) : current);
+          setNotice(success);
+        } else {
+          const applied = await refresh(workspaceId ?? result.workspaceId ?? originWorkspaceId, generation);
+          if (applied && generation === workspaceView.current.generation) setNotice(success);
+        }
       }
       return result;
     } catch (error) {
@@ -109,6 +124,16 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
     } finally { finishLoading(); }
   }
 
+  function openTab(next: Tab) {
+    if (next === tab) return;
+    setTab(next);
+    startLoading();
+    const generation = workspaceView.current.generation;
+    void refresh().catch(error => {
+      if (generation === workspaceView.current.generation) setNotice(error instanceof Error ? error.message : "読込に失敗しました。");
+    }).finally(finishLoading);
+  }
+
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
@@ -121,7 +146,7 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
           <button className="small-link" onClick={() => setWorkspaceModal(true)}>＋ 新しく作成</button>
         </div>
         <nav className="app-nav">
-          {navItems.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}
+          {navItems.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => openTab(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}
         </nav>
         <div className="sidebar-footer">
           <MobileAccessQr />
@@ -139,7 +164,7 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
         {testAuth && <div className="demo-banner">テストログインで使用中です（{data.user.name}）</div>}
         {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice(null)}>×</button></div>}
         {loading && <div className="loading-line" />}
-        {selected && tab === "home" && <HomePanel selected={selected} pending={data.pendingInvitations.length} setTab={setTab} add={() => setTransactionModal(true)} />}
+        {selected && tab === "home" && <HomePanel selected={selected} pending={data.pendingInvitations.length} setTab={openTab} add={() => setTransactionModal(true)} />}
         {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} add={() => setTransactionModal(true)} run={run} />}
         {selected && tab === "import" && <ImportPanel key={selected.workspace.id} selected={selected} run={run} />}
         {selected && tab === "settlement" && <SettlementPanel key={selected.workspace.id} selected={selected} run={run} />}
@@ -150,7 +175,7 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
         </>}
       </main>
 
-      <nav className="bottom-nav">{navItems.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}</nav>
+      <nav className="bottom-nav">{navItems.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => openTab(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}</nav>
       {workspaceModal && <WorkspaceModal close={() => setWorkspaceModal(false)} run={run} />}
       {transactionModal && selected && <NewTransactionModal key={selected.workspace.id} selected={selected} currentUserId={data.user.id} close={() => setTransactionModal(false)} run={run} />}
     </div>

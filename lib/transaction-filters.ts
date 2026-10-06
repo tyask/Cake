@@ -11,6 +11,7 @@ export const transactionColumns = [
   { id: "expenseClass", label: "費用区分" },
   { id: "splitWeights", label: "支払い割合" },
   { id: "settlement", label: "清算" },
+  { id: "memo", label: "メモ" },
 ] as const;
 
 export type TransactionColumn = typeof transactionColumns[number]["id"];
@@ -25,6 +26,7 @@ export function transactionFilterValue(item: TransactionRecord, column: Transact
     }
     case "merchant": return { value: item.merchant, label: item.merchant };
     case "method": return { value: item.method, label: item.method };
+    case "memo": return { value: item.memo, label: item.memo || "（空白）" };
     case "amountYen": return { value: String(item.amountYen), label: item.amountYen.toLocaleString("ja-JP") + "円" };
     case "actorUserId": return { value: item.actorUserId, label: members.find(member => member.id === item.actorUserId)?.name ?? item.actorName };
     case "expenseClass": return { value: item.expenseClass, label: item.expenseClass === "PERSONAL" ? "個人費" : "共有費" };

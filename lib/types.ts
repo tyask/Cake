@@ -34,6 +34,7 @@ export interface TransactionRecord {
   occurredAt: string;
   merchant: string;
   method: string;
+  memo: string;
   type: TransactionType;
   amountYen: number;
   actorUserId: string;

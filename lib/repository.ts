@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { calculateSettlement } from "./settlement";
+import { transactionRecord } from "./transaction-record";
 import { updateRegisteredProfile } from "./user-access";
 import type {
   AppUser,
@@ -86,7 +87,7 @@ async function getWorkspaceData(
     sql`
       SELECT t.id, t.occurred_at, t.merchant, t.method, t.type, t.amount_yen,
              t.actor_user_id, u.name AS actor_name, t.expense_class, t.settled_at,
-             t.external_id, t.source, t.split_weights
+             t.external_id, t.source, t.split_weights, t.memo
       FROM transactions t
       JOIN app_users u ON u.id = t.actor_user_id
       WHERE t.workspace_id = ${workspace.id}::uuid
@@ -118,21 +119,7 @@ async function getWorkspaceData(
     weight: number(row.weight),
     role: text(row.role) as WorkspaceMember["role"],
   }));
-  const transactions: TransactionRecord[] = (transactionRows as Row[]).map((row) => ({
-    id: text(row.id),
-    occurredAt: new Date(text(row.occurred_at)).toISOString(),
-    merchant: text(row.merchant),
-    method: text(row.method),
-    type: text(row.type) as TransactionRecord["type"],
-    amountYen: number(row.amount_yen),
-    actorUserId: text(row.actor_user_id),
-    actorName: text(row.actor_name),
-    expenseClass: text(row.expense_class) as TransactionRecord["expenseClass"],
-    splitWeights: row.split_weights as SplitWeights,
-    settledAt: row.settled_at ? new Date(text(row.settled_at)).toISOString() : null,
-    externalId: text(row.external_id),
-    source: text(row.source) as TransactionRecord["source"],
-  }));
+  const transactions: TransactionRecord[] = (transactionRows as Row[]).map(row => transactionRecord(row));
   const rules: DefaultRule[] = (ruleRows as Row[]).map((row) => ({
     id: text(row.id),
     merchantContains: text(row.merchant_contains),

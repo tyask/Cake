@@ -13,7 +13,7 @@ function transaction(overrides: Partial<TransactionRecord>): TransactionRecord {
     id: crypto.randomUUID(), occurredAt: new Date().toISOString(), merchant: "テスト", method: "現金",
     type: "PAYMENT", amountYen: 1, actorUserId: "a", actorName: "A", expenseClass: "SHARED",
     splitWeights: { a: 6, b: 4 },
-    settledAt: null, externalId: crypto.randomUUID(), source: "MANUAL", ...overrides,
+    settledAt: null, externalId: crypto.randomUUID(), source: "MANUAL", memo: "", ...overrides,
   };
 }
 

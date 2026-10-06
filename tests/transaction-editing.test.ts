@@ -14,7 +14,7 @@ const record: TransactionRecord = {
   id: "transaction", occurredAt: "2026-10-05T09:15:37.123Z", merchant: "スーパー",
   method: "PayPay", type: "PAYMENT", amountYen: 1234, actorUserId: "a", actorName: "A",
   expenseClass: "SHARED", splitWeights: { a: 2, b: 3 }, settledAt: null,
-  externalId: "paypay-reference", source: "PAYPAY",
+  externalId: "paypay-reference", source: "PAYPAY", memo: "共有のお買い物",
 };
 
 test("一覧の日時はJSTで表示し、日付をまたいでも秒・ミリ秒を保持する", () => {

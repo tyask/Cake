@@ -40,7 +40,7 @@ test("円で指定した支払い分が既存の清算計算にも正確に反�
   const transaction: TransactionRecord = {
     id: "amount-split", occurredAt: "2026-10-06T00:00:00Z", merchant: "スーパー", method: "現金", type: "PAYMENT", amountYen: 1001,
     actorUserId: "a", actorName: "A", expenseClass: "SHARED", splitWeights: changeSplitAmount(1001, 700, "a", { a: 1, b: 1 }, members),
-    settledAt: null, externalId: "amount-split-test", source: "MANUAL",
+    settledAt: null, externalId: "amount-split-test", source: "MANUAL", memo: "",
   };
   const result = calculateSettlement(members, [transaction])!;
   assert.deepEqual(result.people.map((person) => person.target), [700, 301]);
