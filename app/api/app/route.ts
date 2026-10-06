@@ -5,7 +5,7 @@ import { getBootstrap, requireWorkspaceMember } from "@/lib/repository";
 import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
 import type { DefaultRule, ExpenseClass, SplitWeights } from "@/lib/types";
 import { z } from "zod";
-import { transactionMemoInputSchema } from "@/lib/transaction-memo";
+import { transactionMemoInputSchema, transactionMemoSchema } from "@/lib/transaction-memo";
 import { transactionRecord } from "@/lib/transaction-record";
 
 export const runtime = "nodejs";
@@ -195,7 +195,8 @@ export async function POST(request: Request) {
         actorUserId: z.string().min(1),
         expenseClass: expenseClassSchema.optional(),
         splitWeights: splitWeightsSchema.optional(),
-      }).parse(body);
+        memo: transactionMemoSchema.optional(),
+      }).refine(input => !input.transactionId || input.memo === undefined, "メモの更新は専用の保存処理を使用してください。").parse(body);
       await requireWorkspaceMember(input.workspaceId, user.id);
       const context = await splitContext(input.workspaceId);
       const previous = input.transactionId && input.splitWeights === undefined
@@ -229,10 +230,10 @@ export async function POST(request: Request) {
           sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
           sql`
           INSERT INTO transactions (id, workspace_id, occurred_at, merchant, method, type, amount_yen,
-            actor_user_id, expense_class, split_weights, external_id, source, created_by, updated_by)
+            actor_user_id, expense_class, split_weights, external_id, source, created_by, updated_by, memo)
           VALUES (${id}::uuid, ${input.workspaceId}::uuid, ${input.occurredAt}::timestamptz, ${input.merchant},
             ${input.method}, ${input.type}, ${input.amountYen}, ${input.actorUserId}, ${split.expenseClass}, ${JSON.stringify(split.splitWeights)}::jsonb,
-            ${`manual_${id}`}, 'MANUAL', ${user.id}, ${user.id})
+            ${`manual_${id}`}, 'MANUAL', ${user.id}, ${user.id}, ${input.memo ?? ""})
           RETURNING *
           `,
         ]);

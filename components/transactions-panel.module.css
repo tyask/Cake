@@ -1,4 +1,5 @@
 .panel { overflow: hidden; }
+.table .mobileSummary { display: none; }
 .activeFilters { display: flex; flex-wrap: wrap; gap: .4rem; padding: .7rem 1rem; border-bottom: 1px solid var(--line); }
 .activeFilters button { max-width: 100%; padding: .3rem .55rem; border: 1px solid var(--line-strong); border-radius: 1rem; color: var(--accent); background: var(--accent-soft); font: inherit; font-size: .68rem; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .columnHeader { display: flex; align-items: center; justify-content: space-between; gap: .3rem; width: 100%; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
@@ -89,6 +90,18 @@
   .table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .7rem; width: 100%; margin-bottom: .55rem; padding: .8rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--paper); }
   .table td { display: block; min-width: 0; padding: 0; border: 0; }
   .table td::before { display: block; margin-bottom: .3rem; color: var(--muted); font-size: .62rem; content: attr(data-label); }
+  .table .mobileSummary { display: flex; grid-column: 1 / -1; align-items: center; gap: .65rem; }
+  .table .mobileSummary::before { display: none; }
+  .table .transactionRow > .selectionCell { display: none; }
+  .table .transactionRow[data-expanded="false"] > td:not(.mobileSummary) { display: none; }
+  .summaryButton { display: flex; align-items: center; gap: .65rem; width: 100%; min-width: 0; padding: .15rem 0; border: 0; color: var(--ink); background: transparent; text-align: left; cursor: pointer; }
+  .summaryName { flex: 1; min-width: 0; }
+  .summaryName b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .82rem; }
+  .summaryName small { display: block; margin-top: .25rem; color: var(--muted); font-size: .61rem; line-height: 1.5; }
+  .summaryAmount { flex-shrink: 0; text-align: right; }
+  .summaryAmount strong { display: block; font-size: .86rem; }
+  .summaryAmount small { display: block; margin-top: .25rem; color: var(--muted); font-size: .61rem; }
+  .summaryChevron { flex-shrink: 0; color: var(--muted); font-size: 1rem; }
   .table .fullCell { grid-column: 1 / -1; }
   .table .splitCell :global(.split-editor-compact) { max-width: none; }
   .table input, .table select { min-height: 2.3rem; font-size: .78rem; }
@@ -106,3 +119,7 @@
 @media (prefers-reduced-motion: reduce) {
   .spinner { animation: none; }
 }
+
+.settledSplit { display: flex; gap: 1rem; font-size: inherit; }
+.settledSplit > span { display: grid; gap: .2rem; }
+.settledSplit small { color: var(--muted); font-size: .62rem; }

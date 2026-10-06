@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 import { transactionActorPatch, transactionDateInput, transactionDateToIso, transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues } from "@/lib/transaction-editing";
 import type { ExpenseClass, SplitWeights, TransactionRecord, WorkspaceData, WorkspaceMember } from "@/lib/types";
 import styles from "./transactions-panel.module.css";
+import { splitAmounts } from "@/lib/split-allocations";
 import { SplitEditor } from "./split-editor";
 import { TransactionFilterDialog } from "./transaction-filter-dialog";
 import { SelectionCheckbox } from "./selection-checkbox";
@@ -20,6 +21,20 @@ type BulkAction = "deleteTransactions" | "applyTransactionRules";
 const money = (value: number) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(value);
 const dateTime = (value: string) => new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(value));
 const splitLabel = (members: WorkspaceMember[]) => `支払い割合（${members.map((member) => member.name).join(", ")}）`;
+const summaryDate = (value: string) => new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
+
+function MobileTransactionSummary({ item, expanded, onToggle, checked, busy, onSelect }: {
+  item: TransactionRecord; expanded: boolean; onToggle: () => void; checked: boolean; busy: boolean; onSelect: () => void;
+}) {
+  return <td className={styles.mobileSummary} colSpan={10} data-selection>
+    <input className={styles.checkbox} type="checkbox" aria-label={item.merchant + "の明細を選択"} checked={checked} disabled={busy || !!item.settledAt} onChange={onSelect} />
+    <button type="button" className={styles.summaryButton} aria-expanded={expanded} aria-label={item.merchant + "の詳細を" + (expanded ? "閉じる" : "開く")} onClick={onToggle}>
+      <span className={styles.summaryName}><b>{item.merchant}</b><small>{summaryDate(item.occurredAt)} · {item.actorName}</small></span>
+      <span className={styles.summaryAmount}><strong>{money(item.amountYen)}</strong><small>{item.expenseClass === "PERSONAL" ? "個人費" : item.settledAt ? "清算済み" : "共有費"}</small></span>
+      <span className={styles.summaryChevron} aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
+    </button>
+  </td>;
+}
 
 function signature(values: TransactionValues): string {
   return JSON.stringify([values.occurredAt, values.merchant, values.method, values.type, values.amountYen, values.actorUserId, values.expenseClass, Object.entries(values.splitWeights).sort(([a], [b]) => a.localeCompare(b))]);
@@ -209,6 +224,7 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
   onMemoPin: (id: string, pinned: boolean) => void;
 }) {
   const [changes, setChanges] = useState<Partial<TransactionValues>>({});
+  const [mobileExpanded, setMobileExpanded] = useState(false);
   const changesRef = useRef<Partial<TransactionValues>>({});
   const [dateDraft, setDateDraft] = useState<string | null>(null);
   const dateDraftRef = useRef<string | null>(null);
@@ -293,6 +309,7 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
       setError(null);
     }).catch((failure) => {
       errorRef.current = true;
+      setMobileExpanded(true);
       setError(failure instanceof Error ? failure.message : "明細を保存できませんでした。入力内容は保持しています。");
       throw failure;
     }).finally(() => {
@@ -357,12 +374,13 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
     if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); requestCommit(); }
   }
 
-  if (item.settledAt) return <SettledTransaction item={item} members={members} busy={busy} pinnedOutsideFilter={pinnedOutsideFilter} onSaveMemo={onSaveMemo} onMemoPin={onMemoPin} />;
+  if (item.settledAt) return <SettledTransaction item={item} members={members} busy={busy} pinnedOutsideFilter={pinnedOutsideFilter} onSaveMemo={onSaveMemo} onMemoPin={onMemoPin} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} onMemoError={() => setMobileExpanded(true)} />;
 
   const currentValues = () => ({ ...baseRef.current, ...changesRef.current });
-  return <><tr ref={rowRef} data-transaction-id={item.id}
+  return <><tr ref={rowRef} className={styles.transactionRow} data-transaction-id={item.id} data-expanded={mobileExpanded}
     onFocusCapture={(event) => syncPin(editorFocused(event.target))}
     onBlurCapture={(event) => syncPin(editorFocused(event.relatedTarget))}>
+    <MobileTransactionSummary item={{ ...item, ...draft, actorName: members.find(member => member.id === draft.actorUserId)?.name ?? item.actorName }} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} checked={checked} busy={busy} onSelect={() => onSelect(item.id)} />
     <td data-label="選択" className={styles.selectionCell} data-selection><input className={styles.checkbox} type="checkbox" aria-label={item.merchant + "の明細を選択"} checked={checked} disabled={busy} onChange={() => onSelect(item.id)} /></td>
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell}><input aria-label="取引日時" type="datetime-local" step="0.001" required value={dateDraft ?? transactionDateInput(draft.occurredAt)} title={dateDraft ?? transactionDateInput(draft.occurredAt)} disabled={busy} onChange={(event) => changeDate(event.target.value)} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
     <td data-label="取引先"><input aria-label="取引先" required maxLength={240} value={draft.merchant} disabled={busy} onChange={(event) => change({ merchant: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
@@ -376,7 +394,7 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
     </td>
     <td data-label="清算" className={styles.settlementCell}><span className={draft.expenseClass === "SHARED" ? styles.unsettled : styles.muted}>{draft.expenseClass === "PERSONAL" ? "対象外" : "未清算"}</span>
     </td>
-    <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={draft.merchant} memo={item.memo} disabled={busy} updating={pending > 0 || applyingRules} onSave={onSaveMemo} onPin={onMemoPin} /></td>
+    <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={draft.merchant} memo={item.memo} disabled={busy} updating={pending > 0 || applyingRules} onSave={onSaveMemo} onPin={onMemoPin} onError={() => setMobileExpanded(true)} /></td>
   </tr>
     {(error || pinnedOutsideFilter) && <tr className={styles.feedbackRow} data-feedback-for={item.id}><td colSpan={10} className={styles.feedbackCell}>
       {pinnedOutsideFilter && <small className={styles.filterHint}>編集中のため表示</small>}
@@ -385,11 +403,15 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
   </>;
 }
 
-function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMemo, onMemoPin }: {
+function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMemo, onMemoPin, expanded, onToggle, onMemoError }: {
   item: TransactionRecord; members: WorkspaceMember[]; busy: boolean; pinnedOutsideFilter: boolean;
   onSaveMemo: SaveTransactionMemo; onMemoPin: (id: string, pinned: boolean) => void;
+  expanded: boolean; onToggle: () => void; onMemoError: () => void;
 }) {
-  return <tr data-transaction-id={item.id} className={styles.settled}>
+  const amounts = splitAmounts(item.amountYen, item.splitWeights, members);
+  const percentages = splitAmounts(1000, item.splitWeights, members);
+  return <tr data-transaction-id={item.id} data-expanded={expanded} className={styles.settled + " " + styles.transactionRow}>
+    <MobileTransactionSummary item={item} expanded={expanded} onToggle={onToggle} checked={false} busy={busy} onSelect={() => {}} />
     <td data-label="選択" className={styles.selectionCell} data-selection><input className={styles.checkbox} type="checkbox" aria-label={item.merchant + "の明細を選択"} checked={false} disabled /></td>
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell} title={dateTime(item.occurredAt)}>{dateTime(item.occurredAt)}</td>
     <td data-label="取引先"><b>{item.merchant}</b></td>
@@ -397,9 +419,9 @@ function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMe
     <td data-label="金額（円）">{money(item.amountYen)}</td>
     <td data-label={item.type === "PAYMENT" ? "支払者" : "受取者"}>{item.actorName}</td>
     <td data-label="費用区分">{item.expenseClass === "PERSONAL" ? "個人費" : "共有費"}</td>
-    <td data-label={splitLabel(members)} className={styles.splitCell + " " + styles.fullCell}><SplitEditor compact inline label="支払い割合" members={members} value={item.splitWeights} amountYen={item.amountYen} /></td>
+    <td data-label={splitLabel(members)} className={styles.splitCell + " " + styles.fullCell}><span className={styles.settledSplit}>{members.map(member => <span key={member.id}><span>{money(amounts[member.id])}</span><small>{percentages[member.id] / 10}%</small></span>)}</span></td>
     <td data-label="清算">清算済み</td>
-    <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={item.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} />
+    <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={item.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} onError={onMemoError} />
       {pinnedOutsideFilter && <small className={styles.filterHint}>編集中のため表示</small>}
     </td>
   </tr>;

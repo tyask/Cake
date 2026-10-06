@@ -6,7 +6,7 @@ import styles from "./transactions-panel.module.css";
 
 export type SaveTransactionMemo = (id: string, memo: string) => Promise<string>;
 
-export function TransactionMemoEditor({ id, merchant, memo, disabled, updating = false, onSave, onPin }: {
+export function TransactionMemoEditor({ id, merchant, memo, disabled, updating = false, onSave, onPin, onError }: {
   id: string;
   merchant: string;
   memo: string;
@@ -14,6 +14,7 @@ export function TransactionMemoEditor({ id, merchant, memo, disabled, updating =
   updating?: boolean;
   onSave: SaveTransactionMemo;
   onPin: (id: string, pinned: boolean) => void;
+  onError?: () => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const draftRef = useRef<string | null>(null);
@@ -63,7 +64,7 @@ export function TransactionMemoEditor({ id, merchant, memo, disabled, updating =
       if (draftRef.current === captured) { draftRef.current = null; setDraft(null); }
     } catch (failure) {
       errorRef.current = true;
-      if (mounted.current) setError(failure instanceof Error ? failure.message : "メモを保存できませんでした。");
+      if (mounted.current) { setError(failure instanceof Error ? failure.message : "メモを保存できませんでした。"); onError?.(); }
     } finally {
       savingRef.current = false;
       if (mounted.current) {

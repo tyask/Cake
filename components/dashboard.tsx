@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { signOut } from "next-auth/react";
 import { UserManagement } from "./user-management";
 import { MobileAccessQr } from "./mobile-access-qr";
@@ -9,8 +9,9 @@ import { SplitEditor } from "./split-editor";
 import { WorkspaceRules } from "./workspace-rules";
 import { CakeIcon } from "./cake-icon";
 import { TransactionsPanel } from "./transactions-panel";
-import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
+import { defaultSplitWeights, matchingDefaultRule, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
 import { parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
+import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
 import { applyTransactionUpdate } from "@/lib/transaction-updates";
 import type {
   BootstrapData,
@@ -197,11 +198,11 @@ function HomePanel({ selected, pending, setTab, add }: { selected: WorkspaceData
     <div className="kpi-grid">
       <article className="kpi"><span>今月の支払い</span><strong>{money(payments)}</strong><small>{monthTransactions.length}件の取引</small></article>
       <article className="kpi"><span>未清算の共通費</span><strong>{money(shared)}</strong><small>{selected.transactions.filter((item) => item.expenseClass === "SHARED" && !item.settledAt).length}件が対象</small></article>
-      <article className="kpi accent"><span>次の清算</span><strong>{selected.settlement?.payerName && selected.settlement.payeeName ? `${selected.settlement.payerName} → ${selected.settlement.payeeName}` : "清算なし"}</strong><small>{selected.settlement ? money(selected.settlement.amountYen) : "現在差額はありません"}</small></article>
+      <article className="kpi accent"><span>次の清算</span>{selected.settlement?.payerName && selected.settlement.payeeName ? <div className="next-settlement"><div className="settlement-person"><span className="settlement-avatar" aria-hidden="true">{Array.from(selected.settlement.payerName)[0]}</span><div><small>支払う人</small><b>{selected.settlement.payerName}</b></div></div><div className="settlement-transfer"><span className="settlement-arrow" aria-hidden="true">↓</span><strong>{selected.settlement.amountYen.toLocaleString("ja-JP")}<small>円</small></strong></div><div className="settlement-person"><span className="settlement-avatar payee" aria-hidden="true">{Array.from(selected.settlement.payeeName)[0]}</span><div><small>受け取る人</small><b>{selected.settlement.payeeName}</b></div></div></div> : <><strong>清算なし</strong><small>現在差額はありません</small></>}</article>
     </div>
     <div className="content-grid">
       <section className="panel recent"><div className="panel-head"><div><span>RECENT</span><h2>最近の取引</h2></div><button className="text-button" onClick={() => setTab("transactions")}>すべて見る →</button></div>
-        <div className="recent-list">{selected.transactions.slice(0, 6).map((item) => <div className="recent-row" key={item.id}><span className={`tx-icon ${item.type.toLowerCase()}`}>{item.type === "PAYMENT" ? "↗" : "↙"}</span><span className="recent-name"><b>{item.merchant}</b><small>{dateTime(item.occurredAt)} · {item.actorName}</small></span><span className="recent-class">{item.expenseClass === "SHARED" ? "共通費" : "個人費"}</span><strong className={item.type === "RECEIPT" ? "positive" : ""}>{item.type === "PAYMENT" ? "−" : "+"}{money(item.amountYen)}</strong></div>)}{selected.transactions.length === 0 && <Empty text="まだ取引がありません" />}</div>
+        <div className="recent-list">{selected.transactions.slice(0, 6).map((item) => <div className="recent-row" key={item.id}><span className="recent-name"><b>{item.merchant}</b><small>{dateTime(item.occurredAt)} · {item.actorName}</small></span><span className="recent-class">{item.expenseClass === "SHARED" ? "共通費" : "個人費"}</span><strong className={item.type === "RECEIPT" ? "positive" : ""}>{money(item.amountYen)}</strong></div>)}{selected.transactions.length === 0 && <Empty text="まだ取引がありません" />}</div>
       </section>
       <section className="panel quick"><div className="panel-head"><div><span>QUICK ACTIONS</span><h2>すぐにできること</h2></div></div>
         <button onClick={add}><i>＋</i><span><b>明細を追加</b><small>現金や受け取りを手動登録</small></span></button>
@@ -418,19 +419,22 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
   const [method, setMethod] = useState("現金");
   const [amountYen, setAmountYen] = useState(0);
   const [actorUserId, setActorUserId] = useState(initialActor);
-  const [expenseClass, setExpenseClass] = useState<ExpenseClass>("PERSONAL");
-  const [splitWeights, setSplitWeights] = useState<SplitWeights>(() => personalSplitWeights(selected.members, initialActor));
+  const [expenseClass, setExpenseClass] = useState<ExpenseClass>("SHARED");
+  const [splitWeights, setSplitWeights] = useState<SplitWeights>(() => defaultSplitWeights(selected.members));
+  const [memo, setMemo] = useState("");
   const [customized, setCustomized] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function applyDefaults(nextMerchant = merchant, nextActor = actorUserId) {
-    const defaults = transactionDefaults(nextMerchant, selected.rules, selected.members, nextActor);
+    const defaults = matchingDefaultRule(nextMerchant, selected.rules)
+      ? transactionDefaults(nextMerchant, selected.rules, selected.members, nextActor)
+      : { expenseClass: "SHARED" as const, splitWeights: defaultSplitWeights(selected.members) };
     setExpenseClass(defaults.expenseClass);
     setSplitWeights(defaults.splitWeights);
   }
 
-  return <Modal title="明細を追加" close={close}>
+  return <Modal title="明細を追加" close={close} className="transaction-modal">
     <form onSubmit={async (event) => {
       event.preventDefault();
       setError(null);
@@ -438,7 +442,7 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
       try {
         validateSplitWeights(splitWeights, selected.members, expenseClass, actorUserId);
         await run({ action: "saveTransaction", workspaceId: selected.workspace.id,
-          occurredAt: jstInputToIso(occurredAt), merchant, method, type: "PAYMENT", amountYen, actorUserId, expenseClass, splitWeights },
+          occurredAt: jstInputToIso(occurredAt), merchant, method, type: "PAYMENT", amountYen, actorUserId, expenseClass, splitWeights, memo },
         "明細を追加しました。");
         close();
       } catch (failure) {
@@ -458,7 +462,7 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
           setActorUserId(nextActor);
           if (expenseClass === "PERSONAL") setSplitWeights(personalSplitWeights(selected.members, nextActor));
         }}>{selected.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
-        <label className="full">費用区分<select value={expenseClass} onChange={(event) => {
+        <label>費用区分<select value={expenseClass} onChange={(event) => {
           const nextClass = event.target.value as ExpenseClass;
           setExpenseClass(nextClass);
           setSplitWeights(nextClass === "PERSONAL" ? personalSplitWeights(selected.members, actorUserId) : defaultSplitWeights(selected.members));
@@ -467,10 +471,11 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
         <div className="full">
           <SplitEditor inline label={`支払い割合（${selected.members.map((member) => member.name).join(", ")}）`} amountYen={amountYen} members={selected.members} value={splitWeights}
             disabled={expenseClass === "PERSONAL" || saving} onChange={(next) => { setSplitWeights(next); setCustomized(true); }} />
-          <p className="ratio-note">{expenseClass === "PERSONAL" ? "個人費は支払者の負担が100%になります。" : "割合・金額のどちらでも設定できます。もう一人の分は自動で計算します。"}</p>
+          <p className="ratio-note">{expenseClass === "PERSONAL" ? "個人費は支払者の負担が100%になります。" : "割合・金額で設定できます。相手の分は自動計算します。"}</p>
           <button type="button" className="text-button" disabled={saving} onClick={() => { applyDefaults(); setCustomized(false); }}>取引先のルールを適用</button>
         </div>
       </div>
+      <label className="new-transaction-memo">メモ<textarea maxLength={MAX_TRANSACTION_MEMO_LENGTH} value={memo} disabled={saving} onChange={(event) => setMemo(event.target.value)} rows={2} /></label>
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={close}>キャンセル</button><button className="primary" disabled={saving}>{saving ? "保存中…" : "追加する"}</button></div>
     </form>
@@ -481,5 +486,11 @@ function ratioMembers(members: WorkspaceMember[], expenseClass: ExpenseClass, ac
   return expenseClass === "PERSONAL" ? [...members].sort((a, b) => Number(b.id === actorUserId) - Number(a.id === actorUserId)) : members;
 }
 
-function Modal({ title, close, children }: { title: string; close: () => void; children: React.ReactNode }) { return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><section className="modal" role="dialog" aria-modal="true" aria-label={title}><header><h2>{title}</h2><button onClick={close}>×</button></header>{children}</section></div>; }
+function Modal({ title, close, children, className = "" }: { title: string; close: () => void; children: React.ReactNode; className?: string }) {
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previous; };
+  }, []);
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><section className={`modal ${className}`} role="dialog" aria-modal="true" aria-label={title}><header><h2>{title}</h2><button onClick={close}>×</button></header>{children}</section></div>; }
 function Empty({ text }: { text: string }) { return <div className="empty"><span>○</span><p>{text}</p></div>; }
