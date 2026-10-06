@@ -1,9 +1,26 @@
 .panel { overflow: hidden; }
-.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; padding: 1rem; border-bottom: 1px solid var(--line); }
-.search { display: flex; align-items: center; gap: .45rem; width: min(22rem, 100%); padding: .55rem .7rem; border: 1px solid var(--line); border-radius: .6rem; }
-.search input { width: 100%; min-width: 0; border: 0; background: transparent; font-size: .78rem; }
-.toolbar > select { min-width: 0; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--paper); font-size: .74rem; }
-.count { margin-left: auto; color: var(--muted); font-size: .7rem; }
+.activeFilters { display: flex; flex-wrap: wrap; gap: .4rem; padding: .7rem 1rem; border-bottom: 1px solid var(--line); }
+.activeFilters button { max-width: 100%; padding: .3rem .55rem; border: 1px solid var(--line-strong); border-radius: 1rem; color: var(--accent); background: var(--accent-soft); font: inherit; font-size: .68rem; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.columnHeader { display: flex; align-items: center; justify-content: space-between; gap: .3rem; width: 100%; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.columnHeader[data-active="true"] { color: var(--accent-dark); }
+.filterDialog { width: min(26rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); margin: auto; padding: 1.2rem; border: 1px solid var(--line-strong); border-radius: 1rem; color: var(--ink); background: var(--paper); box-shadow: 0 1rem 4rem #402b1926; overflow-y: auto; }
+.filterDialog::backdrop { background: #30241655; }
+.filterTitle { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: 1rem; }
+.filterTitle h2 { margin: 0; font-size: 1rem; }
+.filterTitle button { padding: .25rem .5rem; border: 0; color: var(--muted); background: transparent; font: inherit; font-size: 1.3rem; cursor: pointer; }
+.filterColumn { display: flex; align-items: center; gap: .7rem; margin-bottom: .7rem; color: var(--muted); font-size: .75rem; }
+.filterColumn select, .filterSearch { width: 100%; min-width: 0; padding: .55rem .7rem; border: 1px solid var(--line-strong); border-radius: .5rem; color: var(--ink); background: var(--paper); font: inherit; font-size: .8rem; }
+.filterChoices { display: flex; align-items: center; gap: .6rem; margin: .8rem 0; color: var(--accent); font-size: .75rem; cursor: pointer; }
+.filterChoices input.checkbox { flex-shrink: 0; width: 1rem; height: 1rem; margin: 0; padding: 0; accent-color: var(--brand); cursor: pointer; }
+.filterCountNote { margin: 0 0 .5rem; color: var(--muted); font-size: .65rem; line-height: 1.5; }
+.filterOptions { max-height: min(18rem, 40dvh); overflow-y: auto; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.filterOptions label { display: flex; align-items: center; gap: .6rem; padding: .7rem .2rem; font-size: .8rem; cursor: pointer; }
+.filterOptions input { flex-shrink: 0; width: 1rem; height: 1rem; margin: 0; accent-color: var(--brand); }
+.filterOptions span { overflow-wrap: anywhere; }
+.filterOptions small { margin-left: auto; flex-shrink: 0; color: var(--muted); font-size: .65rem; }
+.filterOptions p { color: var(--muted); font-size: .8rem; }
+.filterActions { display: flex; align-items: center; justify-content: space-between; gap: .7rem; margin-top: 1rem; }
+.filterActions > button:first-child { padding: .4rem 0; border: 0; color: var(--muted); background: transparent; font: inherit; font-size: .7rem; cursor: pointer; }
 .bulkBar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .7rem 1rem; border-bottom: 1px solid var(--line); background: var(--accent-soft); font-size: .7rem; }
 .bulkBar > span { margin-right: auto; color: var(--accent); font-weight: 800; }
 .bulkBar > button { min-height: 2rem; padding: .35rem .55rem; border: 1px solid var(--line-strong); border-radius: .5rem; color: var(--accent); background: var(--paper); cursor: pointer; font-size: .67rem; }
@@ -50,15 +67,17 @@
 .empty { margin: 0; padding: 2rem 1rem; color: var(--muted); font-size: .8rem; text-align: center; }
 
 @media (max-width: 48rem) {
-  .toolbar, .bulkBar { padding: .85rem; }
-  .search { width: 100%; }
-  .toolbar > select { max-width: calc(100% - 3rem); }
+  .bulkBar { padding: .85rem; }
   .bulkBar > span { flex-basis: 100%; }
   .bulkBar > button { min-height: 2.3rem; font-size: .72rem; }
   .note, .bulkError, .bulkNotice { margin-left: .85rem; margin-right: .85rem; }
   .tableWrap { overflow: visible; padding: .45rem; }
   .table { display: block; width: 100%; min-width: 0; }
-  .table colgroup, .table thead { display: none; }
+  .table colgroup { display: none; }
+  .table thead { display: block; overflow-x: auto; }
+  .table thead tr { display: flex; gap: .4rem; width: max-content; margin: 0 0 .55rem; padding: 0; border: 0; background: transparent; }
+  .table thead th { border-radius: .45rem; }
+  .table thead .selectionCell { display: none; }
   .table tbody { display: block; width: 100%; }
   .table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .7rem; width: 100%; margin-bottom: .55rem; padding: .8rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--paper); }
   .table td { display: block; min-width: 0; padding: 0; border: 0; }

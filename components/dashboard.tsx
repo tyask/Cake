@@ -187,8 +187,13 @@ function HomePanel({ selected, pending, setTab, add }: { selected: WorkspaceData
   </>;
 }
 
+const importFormats = {
+  PAYPAY: { label: "PayPay", parse: parsePayPayCsv },
+};
+
 function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload: Record<string, unknown>, success: string) => Promise<unknown> }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [format, setFormat] = useState<keyof typeof importFormats>("PAYPAY");
   const [rows, setRows] = useState<PayPayPreviewRow[]>([]);
   const [fileName, setFileName] = useState("");
   const [actorId, setActorId] = useState(selected.members[0]?.id ?? "");
@@ -201,7 +206,7 @@ function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload
     try {
       const text = await file.text();
       const existing = new Set(selected.transactions.map((item) => item.externalId));
-      setRows(parsePayPayCsv(text, selected.rules, existing, selected.members, actorId));
+      setRows(importFormats[format].parse(text, selected.rules, existing, selected.members, actorId));
       setFileName(file.name);
       setError(null);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "CSVを読み込めませんでした。"); }
@@ -241,11 +246,16 @@ function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload
   }
 
   return <>
-    <PageHeading eyebrow="IMPORT" title="PayPay明細を取込" description="費用区分と負担割合を確認してから、支払い明細を登録します。" />
+    <PageHeading eyebrow="IMPORT" title="明細を取込" description="費用区分と負担割合を確認してから、支払い明細を登録します。" />
+    <section className="panel import-format">
+      <label>ファイル形式<select value={format} disabled={saving || rows.length > 0} onChange={event => setFormat(event.target.value as keyof typeof importFormats)}>
+        {Object.entries(importFormats).map(([value, item]) => <option key={value} value={value}>{item.label}</option>)}
+      </select></label>
+    </section>
     {rows.length === 0 ? <section className="panel upload-panel"
       onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); choose(event.dataTransfer.files[0]); }}>
       <div className="upload-icon">⇧</div><h2>CSVファイルをここにドロップ</h2>
-      <p>またはファイル選択からPayPayの取引履歴を指定してください。</p>
+      <p>またはファイル選択から{importFormats[format].label}の取引履歴を指定してください。</p>
       <button className="primary" onClick={() => inputRef.current?.click()}>ファイルを選択</button>
       <input ref={inputRef} hidden type="file" accept=".csv,text/csv" onChange={(event) => choose(event.target.files?.[0])} />
       <small>取引内容が「支払い」の行のみ対象 · CSVは保存されません</small>

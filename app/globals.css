@@ -144,6 +144,9 @@ code { padding: .12rem .35rem; border-radius: .3rem; background: var(--surface-m
 .split-editor-inline .split-editor-fields > select { width: 100%; min-width: 0; margin: 0; padding: .4rem .3rem; border: 1px solid var(--line-strong); border-radius: .45rem; color: var(--ink); background: var(--paper); font: inherit; font-size: .72rem; }
 .ratio-note { margin: .6rem 0 .8rem; color: var(--muted); font-size: .7rem; line-height: 1.7; }
 .ratio-summary { display: block; max-width: 13rem; white-space: normal; line-height: 1.6; }
+.import-format { margin-bottom: 1rem; padding: 1rem; }
+.import-format label { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; color: var(--muted); font-size: .75rem; font-weight: 700; }
+.import-format select { width: min(16rem, 100%); min-width: 0; padding: .55rem .7rem; border: 1px solid var(--line-strong); border-radius: .6rem; color: var(--ink); background: var(--paper); font: inherit; }
 .settings-error, .import-error { margin: .8rem 1.3rem; }
 
 @media (max-width: 70rem) {
