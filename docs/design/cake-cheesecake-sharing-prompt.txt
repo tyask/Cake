@@ -1,0 +1,16 @@
+Generation tool: built-in image_gen
+Transparent background: true
+Edit target: public/brand/cake-cheesecake-yen-pattern.png
+
+Use case: precise-object-edit
+Asset type: transparent PNG illustration for the Cake website homepage and icon.
+Input image: edit target is the yellow cheesecake slice bearing several small yen symbols, on an elegant ivory scalloped ceramic plate.
+Primary request: 円マークをすべて外し、ケーキに包丁を入れて、分けようとしているイラストにする。人間は描かない。
+Changes:
+1. Completely remove ALL yen symbols from the creamy front cut face and naturally restore the plain pale-yellow cheesecake texture. No currency marks, money motifs or text anywhere.
+2. Add ONE ordinary kitchen knife actively cutting across the cheesecake near the first third of the triangular slice, measured from its pointed end. The knife's straight cutting edge faces down and is partially pressed into the top of the cake; the blade plane is upright as it normally is when slicing food. Show the lower part of the blade inserted into a narrow cut across the top surface. A thin corresponding cut line continues a short way down the visible front side, making the intention to divide the slice clear. The small tip portion is still attached; this is the beginning of cutting to share, not two separated slices.
+Knife design: clearly recognizable silver-gray chef's knife blade with a soft highlight and an understated warm honey-brown wooden handle. The handle extends naturally toward the upper right, entirely visible within the canvas. Correct perspective, one blade connected to one handle, contact with the cake is physically plausible. Show the broad side of the blade slightly obliquely. The action is gentle and culinary, with the edge slicing downward, not a tip stabbing vertically. Do not include a hand.
+Keep unchanged: the cheesecake's recognizable single triangular-slice shape, golden-yellow top, buttery-yellow filling, golden biscuit crust, existing size and viewing angle, appetizing watercolor-like hand-drawn illustration style, and the elegant ivory ceramic plate with broad softly scalloped edges and a fine muted gold rim. Match the new knife to the same illustration style. Preserve the small contact shadow on the plate.
+Composition: keep cake and plate centered and large in a square frame. Allow sufficient transparent margin around the full cake, plate and knife; uniformly reduce the composition only if needed to avoid cropping the knife handle. The cake remains the main visual focus, while the knife and narrow incision communicate sharing.
+Background: preserve genuine transparent alpha, no background canvas or table.
+Constraints: no people, hands, faces, yen symbols, coins, words, numbers, decorative motion marks, other utensils, garnish, extra cakes or watermark. One cheesecake slice, one knife, one plate only. Retain the warm yellow-based palette and refined friendly atmosphere.

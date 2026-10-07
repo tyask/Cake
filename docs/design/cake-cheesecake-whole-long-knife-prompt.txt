@@ -1,0 +1,13 @@
+Generation tool: built-in image_gen
+Transparent background: true
+Edit target: public/brand/cake-cheesecake-whole-sharing.png
+
+Use case: precise-object-edit
+Asset type: transparent PNG illustration for the Cake website homepage and icon.
+Input image: edit target is the whole pastel-yellow cheesecake on its scalloped plate with a short tapered knife entering the top.
+Primary request: ケーキ用ナイフの刃をもっと長く細くする。
+Change ONLY the knife's shape and proportions. Replace the existing short tapered blade with a clearly LONG, SLENDER professional cake-slicing knife blade. The silver blade should be approximately 2.5 times the length of its handle, and its length-to-height ratio should be approximately 9:1. The blade's upper and lower edges run almost parallel, giving it a slim ribbon-like rectangular profile of nearly constant narrow width from heel to tip. The tip is gently rounded. Use a straight fine cutting edge with extremely subtle fine serration, not large scallops. Show a soft light blue-gray metallic blade and the same simple warm-ivory handle with a pale-gold collar. Reduce the handle's visual bulk slightly if needed.
+Keep the knife entering the TOP of the cake to begin sharing it. The cutting edge faces downward and is shallowly pressed into the cake, the tip points toward the center of the cake and the handle extends to the upper right. Show the long visible blade as a clear slender continuous form from its contact point near the cake's center to its handle outside the rim. Adjust the knife to a slightly shallower diagonal and uniformly scale the composition down a little if required to keep the full longer knife inside the square canvas. Never crop the blade or handle.
+Keep unchanged: the ONE complete round whole cheesecake, warm pastel butter-yellow filling, golden baked top, unbroken side with no cut line, neat biscuit base, soft fancy picture-book illustration texture, the elegant ivory scalloped plate and its fine gold edging. Retain the existing elevated three-quarter viewpoint and friendly yellow palette. No missing slice or separated portions. Only a tiny contact slot directly under the blade on the cake's top.
+Background: preserve genuine transparent alpha outside the objects. Clear modest transparent margins, no backdrop or table.
+Constraints: one whole cheesecake, one long slim cake knife, one plate. No triangular chef's knife profile, broad wedge-shaped blade, oversized handle, side incisions, people, hands, faces, currency symbols, text, extra objects, garnish or watermark. The cake remains the main focus.

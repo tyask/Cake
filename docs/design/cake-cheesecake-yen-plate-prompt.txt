@@ -1,0 +1,13 @@
+Generation tool: built-in image_gen
+Transparent background: true
+Edit target: public/brand/cake-cheesecake-yen.png
+
+Use case: precise-object-edit
+Asset type: transparent PNG illustration for the Cake website homepage and small icons.
+Input image: edit target is the provided single cheesecake slice with a large yen symbol.
+Primary request: 今の黄色いチーズケーキ1ピースを、シンプルな白いお皿に乗せる。
+Change only: add one plain shallow white ceramic dessert plate under the cheesecake. The plate is round, seen as a gentle ellipse in the same three-quarter perspective as the existing cake. Warm white/ivory surface with a very restrained pale golden outline and a thin rim, no decorations or patterns. The plate width is about 1.2 times the cheesecake's width. The cake rests naturally on the center of the plate, with a small contact shadow contained on the plate.
+Keep unchanged: exactly one triangular cheesecake slice, the same shape, viewing angle, golden-yellow top, pale buttery-yellow filling, golden biscuit base, warm hand-drawn texture, and the existing large dark-golden-brown "¥" on the visible front cut face. Keep the symbol's Y-shaped upper part and two clearly separated horizontal bars. Keep the symbol as large and readable as in the input.
+Composition: retain a square canvas. Uniformly scale the entire cake down only as much as necessary to fit the complete plate and cake together, centered, with a small comfortable transparent margin. No cropping. The cake and yen symbol remain visually dominant, while the plate is understated and clearly visible around the lower edge.
+Background: preserve genuinely transparent alpha outside the combined cake and plate. No opaque backdrop, no drawn checkerboard, no table or floor.
+Constraints: add ONLY the plate and its small contact shadow. No humans, hands, utensils, fruit, garnishes, coins, extra cakes, captions, logos, or watermark. The only text/symbol is the original "¥".

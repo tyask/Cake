@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Cake 家計管理アプリ 詳細設計書</title>
+    <style>
+      :root {
+        --ink: #20231f;
+        --muted: #657066;
+        --line: #dfe4dc;
+        --paper: #fffef9;
+        --soft: #f3f5ef;
+        --green: #1f6b4f;
+        --green-soft: #e4f2eb;
+        --orange: #bd641e;
+        --orange-soft: #fff0df;
+        --blue: #315d91;
+        --blue-soft: #eaf1fa;
+        --red: #a43d35;
+        --shadow: 0 18px 55px rgba(45, 54, 46, 0.09);
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 8% 4%, rgba(255, 206, 116, 0.2), transparent 24rem),
+          radial-gradient(circle at 92% 18%, rgba(91, 163, 128, 0.15), transparent 28rem),
+          #f4f1e9;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", sans-serif;
+        line-height: 1.7;
+      }
+      a { color: var(--green); }
+      code {
+        padding: 0.12rem 0.36rem;
+        border-radius: 0.35rem;
+        background: #edf0ea;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.9em;
+      }
+      .layout { display: grid; grid-template-columns: 18rem minmax(0, 1fr); width: min(100%, 96rem); min-height: 100vh; margin: 0 auto; }
+      .sidebar { position: sticky; top: 0; align-self: start; height: 100vh; padding: 2rem 1.4rem; overflow-y: auto; }
+      .brand { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.5rem; color: var(--ink); font-weight: 800; text-decoration: none; }
+      .brand-mark { display: grid; width: 2.3rem; height: 2.3rem; place-items: center; border-radius: 0.8rem; color: #fff; background: var(--green); box-shadow: 0 7px 18px rgba(31, 107, 79, 0.22); }
+      .back-link { display: block; margin: -0.7rem 0 1.2rem 3.05rem; color: var(--muted); font-size: 0.75rem; text-decoration: none; }
+      .nav-label { margin: 1rem 0 0.4rem; color: #8a938a; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.12em; }
+      nav a { display: block; padding: 0.43rem 0.65rem; border-radius: 0.55rem; color: #59635a; font-size: 0.82rem; text-decoration: none; }
+      nav a:hover { color: var(--green); background: rgba(255,255,255,0.65); }
+      main { min-width: 0; padding: 2.5rem 3rem 5rem; }
+      .hero { padding: clamp(2rem, 5vw, 4.2rem); border-radius: 2rem; color: #f9fff9; background: linear-gradient(135deg, #173e4c, #245d66 58%, #427c77); box-shadow: var(--shadow); }
+      .eyebrow { margin: 0 0 1rem; font-size: 0.76rem; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.8; }
+      h1 { max-width: 16ch; margin: 0; font-family: Georgia, "Yu Mincho", serif; font-size: clamp(2.25rem, 6vw, 4.5rem); font-weight: 500; line-height: 1.05; letter-spacing: -0.045em; }
+      .hero > p:not(.eyebrow) { max-width: 52rem; margin: 1.4rem 0 0; color: rgba(255,255,255,0.8); }
+      .meta { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.6rem; }
+      .meta span { padding: 0.4rem 0.7rem; border: 1px solid rgba(255,255,255,0.15); border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 0.75rem; }
+      section { scroll-margin-top: 1.5rem; margin-top: 2.2rem; padding: clamp(1.4rem, 3vw, 2.4rem); border: 1px solid rgba(52, 64, 53, 0.1); border-radius: 1.4rem; background: rgba(255, 254, 249, 0.93); box-shadow: 0 10px 30px rgba(45, 54, 46, 0.045); }
+      h2 { margin: 0 0 1rem; font-size: 1.48rem; line-height: 1.35; }
+      h3 { margin: 1.8rem 0 0.65rem; font-size: 1.04rem; }
+      h4 { margin: 1.2rem 0 0.4rem; font-size: 0.92rem; }
+      p { margin: 0.55rem 0; }
+      ul, ol { margin: 0.55rem 0; padding-left: 1.4rem; }
+      li + li { margin-top: 0.28rem; }
+      .lead { color: var(--muted); }
+      .tag { display: inline-flex; padding: 0.22rem 0.55rem; border-radius: 999px; color: var(--green); background: var(--green-soft); font-size: 0.72rem; font-weight: 800; }
+      .tag.asis { color: var(--blue); background: var(--blue-soft); }
+      .grid-2, .grid-3 { display: grid; gap: 1rem; margin-top: 1rem; }
+      .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .card { padding: 1.05rem; border: 1px solid var(--line); border-radius: 0.9rem; background: #fff; }
+      .card h3, .card h4 { margin-top: 0; }
+      .table-wrap { width: 100%; margin-top: 0.8rem; overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+      th, td { padding: 0.65rem 0.7rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+      th { color: #525d54; background: var(--soft); font-size: 0.73rem; white-space: nowrap; }
+      tr:last-child td { border-bottom: 0; }
+      .path { color: var(--blue); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; white-space: nowrap; }
+      .note, .warning { margin-top: 1rem; padding: 0.9rem 1rem; border-left: 4px solid var(--green); border-radius: 0.6rem; background: var(--green-soft); }
+      .warning { border-color: var(--orange); background: var(--orange-soft); }
+      .code-block { margin: 0.8rem 0; padding: 0.9rem 1rem; overflow-x: auto; border-radius: 0.75rem; color: #eaf8ef; background: #24382e; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.78rem; line-height: 1.6; white-space: pre; }
+      .layers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.7rem; margin-top: 1rem; }
+      .layer { position: relative; min-height: 9rem; padding: 1rem; border: 1px solid var(--line); border-radius: 0.9rem; background: #fff; }
+      .layer::after { position: absolute; right: -0.58rem; top: 43%; z-index: 2; color: var(--green); content: "→"; font-size: 1.15rem; font-weight: 900; }
+      .layer:last-child::after { display: none; }
+      .layer strong { display: block; margin-bottom: 0.35rem; color: var(--green); }
+      .layer small { color: var(--muted); }
+      .data-flow-list { display: grid; gap: 1rem; margin-top: 1rem; }
+      .data-flow {
+        padding: 1rem;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 1rem;
+        background: linear-gradient(145deg, #fff, #fbfcf8);
+      }
+      .data-flow-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 0.75rem; }
+      .data-flow-head h3 { margin: 0; }
+      .data-flow-head small { color: var(--muted); font-size: 0.7rem; }
+      .dfd-lane { margin: 0.65rem 0 0.3rem; color: var(--green); font-size: 0.65rem; font-weight: 900; letter-spacing: 0.08em; }
+      .dfd-track { display: flex; align-items: stretch; gap: 0.35rem; }
+      .dfd-node {
+        display: grid;
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: 6.8rem;
+        align-content: center;
+        padding: 0.72rem;
+        border: 1px solid var(--line);
+        border-radius: 0.75rem;
+        background: #fff;
+      }
+      .dfd-node strong { display: block; color: var(--ink); font-size: 0.8rem; line-height: 1.35; }
+      .dfd-node small { display: block; margin-top: 0.3rem; color: var(--muted); font-size: 0.67rem; line-height: 1.45; }
+      .dfd-node.source { border-color: rgba(49, 93, 145, 0.28); background: var(--blue-soft); }
+      .dfd-node.process { border-color: rgba(31, 107, 79, 0.28); background: var(--green-soft); }
+      .dfd-node.store { border: 3px double rgba(189, 100, 30, 0.38); background: var(--orange-soft); }
+      .dfd-node.output { border-color: rgba(31, 107, 79, 0.35); box-shadow: inset 0 -3px 0 rgba(31, 107, 79, 0.15); }
+      .dfd-arrow { display: grid; flex: 0 0 3.8rem; align-content: center; justify-items: center; color: var(--green); text-align: center; }
+      .dfd-arrow b { font-size: 1.2rem; line-height: 1; }
+      .dfd-arrow small { margin-top: 0.3rem; color: var(--muted); font-size: 0.57rem; font-weight: 700; line-height: 1.25; }
+      .dfd-boundary { margin-top: 0.7rem; padding-top: 0.6rem; border-top: 1px dashed #bdc7bd; color: var(--muted); font-size: 0.68rem; }
+      .dfd-boundary b { color: var(--green); }
+      .sequence { margin-top: 1rem; counter-reset: seq; }
+      .sequence > div { display: grid; grid-template-columns: 2rem minmax(8rem, 0.45fr) 1.2rem minmax(0, 1fr); align-items: start; gap: 0.45rem; padding: 0.55rem 0; border-bottom: 1px solid var(--line); }
+      .sequence > div:last-child { border-bottom: 0; }
+      .sequence > div::before { display: grid; width: 1.6rem; height: 1.6rem; place-items: center; border-radius: 50%; color: #fff; background: var(--green); content: counter(seq); counter-increment: seq; font-size: 0.7rem; font-weight: 900; }
+      .sequence b { font-size: 0.82rem; }
+      .sequence i { color: var(--green); font-style: normal; font-weight: 900; }
+      .sequence span { color: var(--muted); font-size: 0.8rem; }
+      .state-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; margin-top: 0.8rem; }
+      .state-flow span { padding: 0.45rem 0.65rem; border: 1px solid var(--line); border-radius: 0.55rem; background: #fff; font-size: 0.78rem; }
+      .state-flow i { color: var(--green); font-style: normal; font-weight: 900; }
+      .check { color: var(--green); font-weight: 800; }
+      .caution { color: var(--orange); font-weight: 800; }
+      footer { padding: 2rem 0 0; color: #7e877f; font-size: 0.76rem; text-align: center; }
+      @media (max-width: 72rem) {
+        .layout { grid-template-columns: 1fr; }
+        .sidebar { position: static; width: 100%; height: auto; padding: 1rem 1.25rem 0; }
+        .brand { margin-bottom: 0.3rem; }
+        .back-link { margin: 0 0 0.7rem 3.05rem; }
+        nav { display: flex; gap: 0.3rem; overflow-x: auto; padding-bottom: 0.75rem; }
+        nav .nav-label { display: none; }
+        nav a { flex: 0 0 auto; background: rgba(255,255,255,0.55); }
+        main { padding: 1rem 1.25rem 4rem; }
+      }
+      @media (max-width: 50rem) {
+        .grid-2, .grid-3, .layers { grid-template-columns: 1fr; }
+        .layer { min-height: 0; }
+        .layer::after { right: 50%; top: auto; bottom: -1.25rem; transform: rotate(90deg); }
+        .data-flow-head { display: block; }
+        .data-flow-head small { display: block; margin-top: 0.2rem; }
+        .dfd-track { flex-direction: column; }
+        .dfd-node { flex: 0 0 auto; width: 100%; min-height: 5.4rem; }
+        .dfd-arrow { min-height: 2.8rem; flex-basis: auto; }
+        .dfd-arrow b { transform: rotate(90deg); }
+        .sequence > div { grid-template-columns: 2rem 1fr; }
+        .sequence i { display: none; }
+        .sequence span { grid-column: 2; }
+        .hero { border-radius: 1.35rem; }
+        section { border-radius: 1rem; }
+      }
+      @media print {
+        body { background: #fff; font-size: 9pt; }
+        .layout { display: block; width: 100%; }
+        .sidebar { display: none; }
+        main { padding: 0; }
+        .hero { color: #fff !important; print-color-adjust: exact; }
+        section { break-inside: auto; box-shadow: none; }
+        h2, h3 { break-after: avoid; }
+        table, .card, .layer { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <a class="brand" href="#top"><span class="brand-mark">C</span> Cake 詳細設計</a>
+        <a class="back-link" href="./design.html">← 基本設計書へ</a>
+        <nav aria-label="詳細設計書内ナビゲーション">
+          <p class="nav-label">OVERVIEW</p>
+          <a href="#policy">1. 文書方針</a>
+          <a href="#architecture">2. 実装構成</a>
+          <a href="#data-flows">2.1 データフロー</a>
+          <a href="#modules">3. モジュール設計</a>
+          <a href="#routes">4. ルート設計</a>
+          <p class="nav-label">APPLICATION</p>
+          <a href="#auth">5. 認証設計</a>
+          <a href="#api">6. API設計</a>
+          <a href="#client">7. クライアント設計</a>
+          <a href="#domain">8. ドメイン処理</a>
+          <p class="nav-label">DATA & QUALITY</p>
+          <a href="#repository">9. データアクセス</a>
+          <a href="#database">10. DB物理設計</a>
+          <a href="#types">11. 型設計</a>
+          <a href="#errors">12. 例外・整合性</a>
+          <a href="#tests">13. テスト・運用</a>
+        </nav>
+      </aside>
+
+      <main id="top">
+        <header class="hero">
+          <p class="eyebrow">Source-level Detail Design · Version 1.0</p>
+          <h1>コードから辿れる、実装の設計図。</h1>
+          <p>Next.jsアプリケーションのルート、コンポーネント、APIアクション、ドメイン関数、型、SQLスキーマをソースコード単位で定義する。</p>
+          <div class="meta">
+            <span>作成日: 2026-08-03</span>
+            <span>対象: 現行リポジトリ</span>
+            <span>粒度: ファイル / 関数 / API / テーブル</span>
+            <span>基準: As-Is実装</span>
+          </div>
+        </header>
+
+        <section id="policy">
+          <span class="tag asis">As-Is</span>
+          <h2>1. 文書方針</h2>
+          <p class="lead">本書は <a href="./design.html">基本設計書</a> を実装へ対応付ける詳細設計書であり、記載内容は2026-08-03時点のソースコードを正とする。</p>
+          <div class="grid-3">
+            <div class="card"><h3>対象</h3><p><code>app/</code>、<code>components/</code>、<code>lib/</code>、<code>auth.ts</code>、DBマイグレーション、セットアップスクリプト、単体テスト。</p></div>
+            <div class="card"><h3>表記</h3><p>TypeScript上の名前、HTTPのアクション名、DBの物理名はコードと同じ英字表記を使用する。</p></div>
+            <div class="card"><h3>変更時の扱い</h3><p>API入力、型、DB制約、計算式を変更した場合は、対応する本書の表とテスト観点も同時に更新する。</p></div>
+          </div>
+          <div class="note">本書は実装済み挙動を記録する。基本設計にのみ存在し、まだコード化されていない仕様は詳細設計へ混在させない。</div>
+        </section>
+
+        <section id="architecture">
+          <h2>2. 実装構成と依存方向</h2>
+          <div class="layers" role="img" aria-label="UI、HTTP境界、アプリケーション処理、データストアの依存方向">
+            <div class="layer"><strong>UI / Routes</strong><small><code>app/</code><br /><code>components/</code><br />RSC、Client Components、画面状態</small></div>
+            <div class="layer"><strong>HTTP / Auth</strong><small><code>app/api/</code><br /><code>auth.ts</code><br />セッション、Zod検証、アクション振分</small></div>
+            <div class="layer"><strong>Application / Domain</strong><small><code>lib/repository.ts</code><br /><code>lib/paypay.ts</code><br /><code>lib/settlement.ts</code></small></div>
+            <div class="layer"><strong>Infrastructure</strong><small><code>lib/db.ts</code><br />Neon PostgreSQL<br />Google OAuth</small></div>
+          </div>
+          <h3>実行境界</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>境界</th><th>実行場所</th><th>責務</th><th>禁止事項</th></tr></thead>
+            <tbody>
+              <tr><td>Server Component</td><td>Next.jsサーバー</td><td>セッション取得、初期データ取得、初期画面の分岐。</td><td>ブラウザAPIの使用。</td></tr>
+              <tr><td>Client Component</td><td>ブラウザ</td><td>画面状態、入力、Fetch、CSV解析・プレビュー。</td><td>DB接続文字列や秘密情報の参照。</td></tr>
+              <tr><td>Route Handler</td><td>Node.js Runtime</td><td>認証、入力検証、認可、SQL更新、JSON応答。</td><td>クライアント入力の無検証利用。</td></tr>
+              <tr><td>Pure Domain Function</td><td>呼出元に従う</td><td>CSV変換、費用区分判定、清算計算。</td><td>DBや画面状態への副作用。</td></tr>
+            </tbody>
+          </table></div>
+          <div class="warning"><code>lib/paypay.ts</code> はClient Componentから読み込まれるためブラウザ実行、<code>lib/settlement.ts</code> はRepositoryから読み込まれるためサーバー実行となる。</div>
+        </section>
+
+        <section id="data-flows">
+          <span class="tag">Data Flow</span>
+          <h2>2.1 主要データフロー</h2>
+          <p class="lead">矢印上の文字は境界を越えて受け渡すデータ、箱内はデータを保持または変換する主体を表す。</p>
+          <div class="data-flow-list">
+            <div class="data-flow">
+              <div class="data-flow-head"><h3>A. 初期表示・再取得</h3><small>画面要求からBootstrapData生成まで</small></div>
+              <p class="dfd-lane">REQUEST / QUERY</p>
+              <div class="dfd-track" role="img" aria-label="ブラウザの画面要求を認証し、RepositoryからNeonへ問い合わせるデータフロー">
+                <div class="dfd-node source"><strong>Webブラウザ</strong><small>workspaceId<br />Session Cookie</small></div>
+                <div class="dfd-arrow"><b>→</b><small>GET /</small></div>
+                <div class="dfd-node process"><strong>Home / Auth.js</strong><small>Session → AppUser<br />選択IDを抽出</small></div>
+                <div class="dfd-arrow"><b>→</b><small>AppUser<br />workspaceId</small></div>
+                <div class="dfd-node process"><strong>getBootstrap</strong><small>ユーザー同期・所属確認<br />取得Queryを組立</small></div>
+                <div class="dfd-arrow"><b>→</b><small>parameterized<br />SQL</small></div>
+                <div class="dfd-node store"><strong>Neon PostgreSQL</strong><small>users / workspaces<br />transactions / rules</small></div>
+              </div>
+              <p class="dfd-lane">RESPONSE / VIEW MODEL</p>
+              <div class="dfd-track" role="img" aria-label="NeonのSQL結果をRepositoryで変換・計算し、BootstrapDataとしてDashboardへ渡すデータフロー">
+                <div class="dfd-node store"><strong>Neon PostgreSQL</strong><small>SQL result rows<br />日時・数値・nullable値</small></div>
+                <div class="dfd-arrow"><b>→</b><small>rows</small></div>
+                <div class="dfd-node process"><strong>getBootstrap</strong><small>DTO変換・並列取得<br />calculateSettlement</small></div>
+                <div class="dfd-arrow"><b>→</b><small>typed object</small></div>
+                <div class="dfd-node output"><strong>BootstrapData</strong><small>user / workspaces / selected<br />pendingInvitations</small></div>
+                <div class="dfd-arrow"><b>→</b><small>initialData<br />or GET JSON</small></div>
+                <div class="dfd-node output"><strong>Dashboard</strong><small>initialData<br />画面Stateへ保持</small></div>
+              </div>
+              <div class="dfd-boundary"><b>サーバー境界:</b> Session CookieとDB行はブラウザへ直接渡さず、必要項目だけをBootstrapDataへ変換する。</div>
+            </div>
+
+            <div class="data-flow">
+              <div class="data-flow-head"><h3>B. 画面からの更新</h3><small>フォーム入力から再描画まで</small></div>
+              <div class="dfd-track" role="img" aria-label="フォーム入力をJSONとしてAPIへ送り、検証後にNeonへ保存し、再取得結果で画面を更新するデータフロー">
+                <div class="dfd-node source"><strong>フォーム State</strong><small>action<br />workspaceId<br />入力フィールド</small></div>
+                <div class="dfd-arrow"><b>→</b><small>POST JSON</small></div>
+                <div class="dfd-node process"><strong>Route Handler</strong><small>Session認証<br />Zod入力検証<br />所属・業務検証</small></div>
+                <div class="dfd-arrow"><b>→</b><small>SQL command</small></div>
+                <div class="dfd-node store"><strong>Neon Transaction</strong><small>INSERT / UPDATE / DELETE<br />制約・一意性検証</small></div>
+                <div class="dfd-arrow"><b>→</b><small>{ ok }<br />or { error }</small></div>
+                <div class="dfd-node process"><strong>run / refresh</strong><small>成功後にGET /api/app<br />BootstrapDataを再取得</small></div>
+                <div class="dfd-arrow"><b>→</b><small>new data</small></div>
+                <div class="dfd-node output"><strong>Dashboard State</strong><small>全体を置換<br />notice / error表示</small></div>
+              </div>
+              <div class="dfd-boundary"><b>信頼境界:</b> HTML入力制約を通過していても、APIで同じ値を再検証してからDBを更新する。</div>
+            </div>
+
+            <div class="data-flow">
+              <div class="data-flow-head"><h3>C. PayPay CSV取込</h3><small>CSV原本は利用者端末から出さない</small></div>
+              <div class="dfd-track" role="img" aria-label="端末のPayPay CSVをブラウザ内で解析し、選択した変換済み明細だけをAPI経由でNeonへ保存するデータフロー">
+                <div class="dfd-node source"><strong>PayPay CSV</strong><small>端末上のFile<br />CSV原本文字列</small></div>
+                <div class="dfd-arrow"><b>→</b><small>File.text()</small></div>
+                <div class="dfd-node process"><strong>parsePayPayCsv</strong><small>PapaParse・Header検証<br />支払い抽出・Rule適用</small></div>
+                <div class="dfd-arrow"><b>→</b><small>PreviewRow[]</small></div>
+                <div class="dfd-node output"><strong>取込プレビュー</strong><small>選択・担当者<br />費用区分を編集</small></div>
+                <div class="dfd-arrow"><b>→</b><small>選択items<br />JSON 最大2000件</small></div>
+                <div class="dfd-node process"><strong>bulkImport</strong><small>再検証・所属確認<br />重複はDO NOTHING</small></div>
+                <div class="dfd-arrow"><b>→</b><small>Transaction</small></div>
+                <div class="dfd-node store"><strong>Neon PostgreSQL</strong><small>import_batches<br />transactions</small></div>
+              </div>
+              <div class="dfd-boundary"><b>保存境界:</b> サーバーへ送るのは変換・選択済み明細とファイル名・件数だけ。CSV本文は送信・保存しない。</div>
+            </div>
+
+            <div class="data-flow">
+              <div class="data-flow-head"><h3>D. 清算計算・完了</h3><small>参照時は純粋計算、完了時だけ永続化</small></div>
+              <div class="dfd-track" role="img" aria-label="Neonの参加者と未清算明細から清算結果を計算して画面へ表示し、完了時に履歴と明細状態を一括保存するデータフロー">
+                <div class="dfd-node store"><strong>Neon PostgreSQL</strong><small>members<br />未清算SHARED transactions</small></div>
+                <div class="dfd-arrow"><b>→</b><small>DTO arrays</small></div>
+                <div class="dfd-node process"><strong>calculateSettlement</strong><small>支払・受取集計<br />重み配分・差額計算</small></div>
+                <div class="dfd-arrow"><b>→</b><small>SettlementResult</small></div>
+                <div class="dfd-node output"><strong>清算画面</strong><small>payer / payee<br />amount / 内訳</small></div>
+                <div class="dfd-arrow"><b>→</b><small>完了要求</small></div>
+                <div class="dfd-node process"><strong>completeSettlement</strong><small>最新データで再計算<br />対象transactionIds固定</small></div>
+                <div class="dfd-arrow"><b>→</b><small>atomic<br />Transaction</small></div>
+                <div class="dfd-node store"><strong>清算データ</strong><small>settlements + 関連<br />transactions.settled_at</small></div>
+              </div>
+              <div class="dfd-boundary"><b>整合性境界:</b> 計算Snapshot、対象明細との関連、settled_atを同一Transactionで保存し、transaction_idの一意制約で二重清算を防ぐ。</div>
+            </div>
+          </div>
+        </section>
+
+        <section id="modules">
+          <h2>3. モジュール設計</h2>
+          <h3>ルート・認証</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>ファイル</th><th>公開要素</th><th>責務</th><th>主な依存</th></tr></thead>
+            <tbody>
+              <tr><td class="path">app/layout.tsx</td><td><code>RootLayout</code></td><td>日本語HTML、全体CSS、Metadataを設定。</td><td><code>app/globals.css</code></td></tr>
+              <tr><td class="path">app/page.tsx</td><td><code>Home</code></td><td>ログイン有無とDB設定を判定し、ログイン画面またはDashboardを描画。</td><td><code>getCurrentUser</code>、<code>getBootstrap</code></td></tr>
+              <tr><td class="path">app/invite/[token]/page.tsx</td><td><code>InvitePage</code></td><td>URLトークンとログイン状態をInviteCardへ渡す。</td><td><code>getCurrentUser</code>、<code>isTestAuthEnabled</code></td></tr>
+              <tr><td class="path">app/api/app/route.ts</td><td><code>GET</code>、<code>POST</code></td><td>アプリケーションJSON API。Node.js Runtime固定。</td><td>Zod、Repository、Neon、Node Crypto</td></tr>
+              <tr><td class="path">app/api/auth/[...nextauth]/route.ts</td><td><code>GET</code>、<code>POST</code></td><td>Auth.jsが提供する認証エンドポイントを公開。</td><td><code>auth.ts</code></td></tr>
+              <tr><td class="path">auth.ts</td><td><code>handlers</code>、<code>auth</code>、<code>signIn</code>、<code>signOut</code></td><td>認証Provider、JWTセッション、ユーザー同期イベントを構成。</td><td>NextAuth、Google/Credentials、Neon</td></tr>
+            </tbody>
+          </table></div>
+
+          <h3>UIコンポーネント</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>ファイル</th><th>コンポーネント</th><th>責務</th></tr></thead>
+            <tbody>
+              <tr><td class="path">components/dashboard.tsx</td><td><code>Dashboard</code></td><td>アプリ全体のクライアント状態、タブ遷移、API呼出、モーダル制御。</td></tr>
+              <tr><td class="path">components/dashboard.tsx</td><td><code>HomePanel</code> / <code>TransactionsPanel</code> / <code>ImportPanel</code> / <code>SettlementPanel</code> / <code>SettingsPanel</code></td><td>機能タブごとの表示と操作。</td></tr>
+              <tr><td class="path">components/dashboard.tsx</td><td><code>WorkspaceModal</code> / <code>TransactionModal</code> / <code>Modal</code></td><td>ワークスペース・明細入力と共通ダイアログ枠。</td></tr>
+              <tr><td class="path">components/login-screen.tsx</td><td><code>LoginScreen</code></td><td>GoogleまたはテストProviderへのログイン導線。</td></tr>
+              <tr><td class="path">components/invite-card.tsx</td><td><code>InviteCard</code></td><td>招待トークンの承認API呼出とログイン導線。</td></tr>
+              <tr><td class="path">components/test-login-buttons.tsx</td><td><code>TestLoginButtons</code></td><td>固定テストユーザーをCredentials Providerへ渡す。</td></tr>
+            </tbody>
+          </table></div>
+
+          <h3>ライブラリ</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>ファイル</th><th>主要関数</th><th>責務</th></tr></thead>
+            <tbody>
+              <tr><td class="path">lib/db.ts</td><td><code>db()</code></td><td><code>DATABASE_URL</code>からNeonクライアントを遅延生成し、プロセス内で再利用。</td></tr>
+              <tr><td class="path">lib/current-user.ts</td><td><code>getCurrentUser()</code></td><td>Auth.js Sessionをアプリの<code>AppUser</code>へ変換。</td></tr>
+              <tr><td class="path">lib/auth-mode.ts</td><td><code>isTestAuthEnabled()</code>、<code>getAuthMode()</code></td><td>Productionでテスト認証を強制無効化。</td></tr>
+              <tr><td class="path">lib/repository.ts</td><td><code>ensureUser()</code>、<code>requireWorkspaceMember()</code>、<code>getBootstrap()</code></td><td>参照系SQL、ユーザー同期、認可用所属確認、DTO組立。</td></tr>
+              <tr><td class="path">lib/paypay.ts</td><td><code>parsePayPayCsv()</code>、<code>payPayDateToIso()</code>、<code>defaultExpenseClass()</code></td><td>PayPay CSVの解析、検証、プレビュー行への変換。</td></tr>
+              <tr><td class="path">lib/settlement.ts</td><td><code>calculateSettlement()</code></td><td>未清算共通費から二人間の清算結果を算出。</td></tr>
+              <tr><td class="path">lib/types.ts</td><td>型・Interface群</td><td>UI、API参照結果、ドメイン関数間の共通データ契約。</td></tr>
+              <tr><td class="path">lib/test-users.ts</td><td><code>TEST_USERS</code>、<code>findTestUser()</code></td><td>開発・Preview専用の固定ユーザー定義。</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <section id="routes">
+          <h2>4. ルート・レンダリング設計</h2>
+          <div class="table-wrap"><table>
+            <thead><tr><th>URL</th><th>方式</th><th>入力</th><th>処理・出力</th></tr></thead>
+            <tbody>
+              <tr><td><code>/</code></td><td>動的RSC<br /><code>force-dynamic</code></td><td>Query <code>workspaceId?</code></td><td>未ログインはLoginScreen。DB未設定はセットアップ案内。ログイン済みはBootstrapDataを取得してDashboard。</td></tr>
+              <tr><td><code>/invite/[token]</code></td><td>RSC + Client Component</td><td>64文字の招待トークン想定</td><td>InviteCardを描画。承認後は対象ワークスペース付きの<code>/</code>へ遷移。</td></tr>
+              <tr><td><code>/api/auth/[...nextauth]</code></td><td>Auth.js Handler</td><td>OAuth / Credentialsプロトコル</td><td>ログイン、コールバック、セッション、ログアウト。</td></tr>
+              <tr><td><code>/api/app</code> GET</td><td>Route Handler</td><td>Query <code>workspaceId?</code></td><td>認証済みユーザーのBootstrapDataをJSONで返却。</td></tr>
+              <tr><td><code>/api/app</code> POST</td><td>Route Handler</td><td>JSON <code>{ action, ... }</code></td><td>アクション別に検証・更新し、成功JSONまたは<code>{ error }</code>を返却。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>初期表示シーケンス</h3>
+          <div class="sequence">
+            <div><b>Browser</b><i>→</i><span><code>GET /?workspaceId=...</code> を要求。</span></div>
+            <div><b>Home</b><i>→</i><span><code>getCurrentUser()</code>でAuth.jsセッションをAppUserへ変換。</span></div>
+            <div><b>Repository</b><i>→</i><span><code>getBootstrap()</code>がユーザー同期、所属一覧、選択ワークスペース、保留招待を取得。</span></div>
+            <div><b>Domain</b><i>→</i><span>共有ワークスペースなら取得したメンバーと明細から<code>calculateSettlement()</code>を実行。</span></div>
+            <div><b>Dashboard</b><i>←</i><span>BootstrapDataを初期Propsとして受け取り、以後の操作はFetchで更新。</span></div>
+          </div>
+        </section>
+
+        <section id="auth">
+          <h2>5. 認証・セッション詳細設計</h2>
+          <div class="grid-2">
+            <div class="card"><h3>Googleモード</h3><ul><li><code>AUTH_MODE</code>が<code>test</code>以外、またはVercel Production。</li><li>NextAuthのGoogle Providerを一つ登録。</li><li>JWTセッション戦略を使用。</li><li>Session Callbackで<code>token.sub</code>を<code>session.user.id</code>へ設定。</li></ul></div>
+            <div class="card"><h3>テストモード</h3><ul><li><code>AUTH_MODE=test</code>かつ<code>VERCEL_ENV !== production</code>。</li><li>Credentials Provider <code>test-login</code>を登録。</li><li><code>testUserKey</code>を固定ユーザーA/Bへ解決。</li><li>Productionでは設定ミスがあっても常に無効。</li></ul></div>
+          </div>
+          <h3>ログイン後のユーザー同期</h3>
+          <div class="sequence">
+            <div><b>Provider</b><i>→</i><span>識別子、メール、表示名、画像URLをNextAuthへ返す。</span></div>
+            <div><b>signIn event</b><i>→</i><span>IDとメールが存在する場合、<code>app_users</code>へUPSERT。</span></div>
+            <div><b>Session</b><i>→</i><span>JWT SubjectをユーザーIDとして画面・APIから使用。</span></div>
+            <div><b>API</b><i>→</i><span><code>currentUser()</code>が未認証なら例外「ログインが必要です。」。</span></div>
+          </div>
+          <div class="note">認証は本人確認、認可はワークスペース所属確認として分離する。更新系アクションは原則として<code>requireWorkspaceMember()</code>を通過する。</div>
+        </section>
+
+        <section id="api">
+          <h2>6. アプリケーションAPI詳細設計</h2>
+          <h3>共通仕様</h3>
+          <ul>
+            <li>Runtimeは<code>nodejs</code>。Node標準の<code>crypto</code>でUUID・招待トークン・SHA-256を生成する。</li>
+            <li>POST Bodyは<code>Record&lt;string, unknown&gt;</code>として読み、<code>action</code>と各入力をZodで検証する。</li>
+            <li>成功は原則HTTP 200。POST失敗はHTTP 400、GET失敗はHTTP 401で<code>{ "error": "メッセージ" }</code>を返す。</li>
+            <li>SQLはNeon tagged templateを使い、値をパラメータ化する。</li>
+          </ul>
+          <h3>GET</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>入力</th><th>処理</th><th>出力</th></tr></thead>
+            <tbody><tr><td><code>workspaceId?: string</code></td><td>ログイン必須。<code>getBootstrap(user, workspaceId)</code>を実行。</td><td><code>BootstrapData</code>。指定IDが所属一覧にない場合は一覧先頭を選択。</td></tr></tbody>
+          </table></div>
+
+          <h3>POSTアクション一覧</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>action</th><th>主な入力・検証</th><th>更新処理</th><th>成功応答</th></tr></thead>
+            <tbody>
+              <tr><td><code>createWorkspace</code></td><td><code>name</code> 1〜80文字、<code>type</code> PERSONAL/SHARED。</td><td>UUIDを生成し、workspacesとOWNER memberを一括Transactionで作成。</td><td><code>{ ok, workspaceId }</code></td></tr>
+              <tr><td><code>updateWorkspace</code></td><td>UUID、所属、名称1〜80文字。</td><td>名称と<code>updated_at</code>を更新。</td><td><code>{ ok }</code></td></tr>
+              <tr><td><code>deleteWorkspace</code></td><td>UUID、所属、<code>confirmationName</code>完全一致。</td><td>workspacesを削除。関連は外部キーCASCADE。</td><td><code>{ ok }</code></td></tr>
+              <tr><td><code>createInvite</code></td><td>共有用、所属、Email形式、本人以外、参加者2人未満。</td><td>32 byte tokenを生成。SHA-256だけを保存し、有効期限7日でUPSERT。</td><td><code>{ ok, invitePath }</code></td></tr>
+              <tr><td><code>acceptInvite</code></td><td>token 64文字、Hash一致、PENDING、期限内、ログインEmail一致、2人未満。</td><td>MEMBER追加と招待ACCEPTED更新をTransaction実行。</td><td><code>{ ok, workspaceId }</code></td></tr>
+              <tr><td><code>updateWeights</code></td><td>共有用、所属、正整数2件、DB上の2参加者とID一致。</td><td>各memberのweightをTransactionで更新。</td><td><code>{ ok }</code></td></tr>
+              <tr><td><code>saveTransaction</code></td><td>UUID、ISO日時、文字数、正整数円、Enum、actorが参加者。</td><td>IDありは未清算行だけUPDATE。なしは<code>manual_UUID</code>をexternal_idとしてINSERT。</td><td><code>{ ok }</code></td></tr>
+              <tr><td><code>deleteTransaction</code></td><td>workspace/transaction UUID、所属。</td><td>対象workspaceかつ未清算行だけDELETE。</td><td><code>{ ok }</code></td></tr>
+              <tr><td><code>createRule</code></td><td>文字列1〜120、費用区分、priority 0〜9999。</td><td>default_rulesへINSERT。</td><td><code>{ ok }</code></td></tr>
+              <tr><td><code>deleteRule</code></td><td>workspace/rule UUID、所属。</td><td>対象workspaceのruleだけDELETE。</td><td><code>{ ok }</code></td></tr>
+              <tr><td><code>bulkImport</code></td><td>fileName 1〜240、totalRows非負、items最大2000、各actorが参加者。</td><td>import_batchesとPAYPAY明細をTransactionで登録。重複external_idは無視。</td><td><code>{ ok, imported }</code></td></tr>
+              <tr><td><code>completeSettlement</code></td><td>workspace UUID、所属、再取得時に清算対象あり。</td><td>履歴、対象関連、対象明細のsettled_at更新をTransaction実行。</td><td><code>{ ok }</code></td></tr>
+            </tbody>
+          </table></div>
+          <div class="warning"><code>bulkImport</code>の<code>imported</code>とimport_batches.imported_rowsは要求items件数であり、競合により<code>ON CONFLICT DO NOTHING</code>となった実挿入件数ではない。</div>
+        </section>
+
+        <section id="client">
+          <h2>7. クライアント状態・画面詳細設計</h2>
+          <h3>Dashboardの状態</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>State</th><th>型・初期値</th><th>用途</th></tr></thead>
+            <tbody>
+              <tr><td><code>data</code></td><td><code>BootstrapData</code> / initialData</td><td>画面全体の参照モデル。更新後のGETで全置換。</td></tr>
+              <tr><td><code>tab</code></td><td><code>home | transactions | settlement | import | settings</code></td><td>表示パネルを切替。</td></tr>
+              <tr><td><code>modal</code></td><td><code>null | workspace | transaction | TransactionRecord</code></td><td>作成・追加・編集ダイアログ制御。</td></tr>
+              <tr><td><code>busy</code></td><td><code>boolean</code></td><td>API処理中の状態表示。</td></tr>
+              <tr><td><code>notice</code></td><td><code>string | null</code></td><td>成功メッセージ。</td></tr>
+              <tr><td><code>error</code></td><td><code>string | null</code></td><td>API・入力処理のエラー表示。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>共通API呼出</h3>
+          <div class="sequence">
+            <div><b>postAction</b><i>→</i><span>JSONで<code>POST /api/app</code>。非2xxなら応答のerrorを例外化。</span></div>
+            <div><b>run</b><i>→</i><span>busy開始、既存メッセージを消去し、postActionを実行。</span></div>
+            <div><b>refresh</b><i>→</i><span>成功後に選択workspaceId付きGETを実行し、BootstrapDataを置換。</span></div>
+            <div><b>UI</b><i>←</i><span>成功noticeまたは例外messageを表示し、finallyでbusy解除。</span></div>
+          </div>
+          <h3>タブ別責務</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>タブ</th><th>コンポーネント</th><th>参照</th><th>更新アクション</th></tr></thead>
+            <tbody>
+              <tr><td>ホーム</td><td><code>HomePanel</code></td><td>指標、最近5件、保留招待数、清算概要。</td><td>明細モーダル起動、各タブ遷移。</td></tr>
+              <tr><td>取引明細</td><td><code>TransactionsPanel</code></td><td>全明細。</td><td>saveTransaction、deleteTransaction。</td></tr>
+              <tr><td>CSV取込</td><td><code>ImportPanel</code></td><td>既存external_id、ルール、参加者。</td><td>ブラウザ解析、一括費用区分変更、bulkImport。</td></tr>
+              <tr><td>清算</td><td><code>SettlementPanel</code></td><td>SettlementResult、履歴。</td><td>completeSettlement。</td></tr>
+              <tr><td>設定</td><td><code>SettingsPanel</code></td><td>workspace、members、rules。</td><td>名称、重み、招待、ルール、workspace削除。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>日時・金額表示</h3>
+          <ul>
+            <li><code>money()</code>: <code>Intl.NumberFormat("ja-JP", { currency: "JPY" })</code>で表示。</li>
+            <li><code>dateTime()</code>: <code>Asia/Tokyo</code>タイムゾーンで年月日時分を表示。</li>
+            <li><code>inputDate()</code>: ISO日時を日本時間の<code>datetime-local</code>形式へ変換。</li>
+            <li><code>jstInputToIso()</code>: 入力値へ<code>+09:00</code>を付け、UTC ISO文字列へ変換。</li>
+          </ul>
+        </section>
+
+        <section id="domain">
+          <h2>8. ドメイン処理詳細設計</h2>
+          <h3>PayPay CSV解析</h3>
+          <p><code>parsePayPayCsv(text, rules, existingExternalIds): PayPayPreviewRow[]</code></p>
+          <div class="state-flow"><span>BOM除去</span><i>→</i><span>PapaParse</span><i>→</i><span>必須Header検証</span><i>→</i><span>「支払い」抽出</span><i>→</i><span>行検証・Rule適用</span><i>→</i><span>Preview</span></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>処理</th><th>仕様</th></tr></thead>
+            <tbody>
+              <tr><td>必須列</td><td>取引日、出金金額（円）、取引内容、取引先、取引方法、取引番号。欠落時はファイル全体を例外。</td></tr>
+              <tr><td>対象行</td><td>取引内容をtrimした値が<code>支払い</code>と完全一致する行だけ。</td></tr>
+              <tr><td>金額</td><td>カンマと前後空白を除去し、数字だけを許可。正整数でなければ行エラー。</td></tr>
+              <tr><td>重複</td><td>既存external ID Setに含まれる行は<code>duplicate=true</code>、初期選択OFF。</td></tr>
+              <tr><td>デフォルト区分</td><td>enabled ruleをpriority昇順にし、merchant部分一致の先頭を採用。未一致はPERSONAL。</td></tr>
+              <tr><td>日時</td><td><code>yyyy/MM/dd HH:mm:ss</code>を正規表現検証し、JSTとしてISOへ変換。</td></tr>
+              <tr><td>原本</td><td>FileReaderで文字列化するだけで、CSV本文をサーバー・DBへ送信しない。</td></tr>
+            </tbody>
+          </table></div>
+
+          <h3>清算計算</h3>
+          <p><code>calculateSettlement(members, transactions): SettlementResult | null</code></p>
+          <ol>
+            <li>メンバーがちょうど2人でなければ<code>null</code>。</li>
+            <li><code>expenseClass === SHARED</code>かつ<code>settledAt === null</code>の明細だけを抽出。0件なら<code>null</code>。</li>
+            <li><code>paymentTotal</code>、<code>receiptTotal</code>、<code>netTotal = paymentTotal - receiptTotal</code>を集計。</li>
+            <li>先頭メンバーの目標負担を<code>Math.round(netTotal × weight / weightTotal)</code>で算出し、二人目は残額。</li>
+            <li>各人の<code>actual = payments - receipts</code>、<code>balance = actual - target</code>を算出。</li>
+            <li>balanceが負の人をpayer、正の人をpayeeとし、送金額はpayerの絶対値。該当者なしはID/Nameがnull、金額0。</li>
+          </ol>
+          <div class="code-block">targetTransactions = SHARED && !settledAt
+netTotal          = ΣPAYMENT - ΣRECEIPT
+firstTarget       = round(netTotal × firstWeight / weightTotal)
+secondTarget      = netTotal - firstTarget
+actual            = ownPayments - ownReceipts
+balance           = actual - target
+amountYen         = abs(payer.balance)</div>
+          <h3>清算完了</h3>
+          <div class="state-flow"><span>Bootstrap再取得</span><i>→</i><span>対象ID固定</span><i>→</i><span>履歴Snapshot</span><i>→</i><span>関連行INSERT</span><i>→</i><span>明細settled_at更新</span></div>
+          <p>全クエリを一つのNeon Transactionで実行する。<code>settlement_transactions.transaction_id</code>のUNIQUE制約により、同じ明細を二重に清算しようとしたTransactionは失敗する。</p>
+        </section>
+
+        <section id="repository">
+          <h2>9. Repository・データ取得設計</h2>
+          <h3><code>getBootstrap()</code>の構築規則</h3>
+          <div class="sequence">
+            <div><b>ensureUser</b><i>→</i><span>app_usersをID基準でUPSERT。メールは小文字化。</span></div>
+            <div><b>listWorkspaces</b><i>→</i><span>本人所属だけを更新日時・作成日時の降順で取得し、全member数を集計。</span></div>
+            <div><b>initial workspace</b><i>→</i><span>所属0件なら「個人の家計」とOWNER membershipをCTEで作成後、再取得。</span></div>
+            <div><b>select</b><i>→</i><span>requestedWorkspaceIdに一致する所属、なければ一覧先頭。</span></div>
+            <div><b>parallel read</b><i>→</i><span>選択workspace詳細とメール宛の保留招待を並列取得。</span></div>
+          </div>
+          <h3><code>getWorkspaceData()</code>の並列Query</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>取得対象</th><th>Join・順序</th><th>DTO</th></tr></thead>
+            <tbody>
+              <tr><td>members</td><td>workspace_members + app_users、joined_at昇順。</td><td><code>WorkspaceMember[]</code></td></tr>
+              <tr><td>transactions</td><td>transactions + actor user、occurred_at/created_at降順。</td><td><code>TransactionRecord[]</code></td></tr>
+              <tr><td>rules</td><td>default_rules、priority/created_at昇順。</td><td><code>DefaultRule[]</code></td></tr>
+              <tr><td>history</td><td>settlements + payer/payee、completed_at降順、最大20件。</td><td><code>SettlementHistory[]</code></td></tr>
+            </tbody>
+          </table></div>
+          <p>SQL行は<code>Record&lt;string, unknown&gt;</code>として受け、<code>text</code>、<code>nullableText</code>、<code>number</code>でDTOへ明示変換する。日時はISO文字列へ正規化する。</p>
+          <div class="note"><code>requireWorkspaceMember(workspaceId, userId)</code>はworkspacesとworkspace_membersのJOIN結果を返す。行がなければ認可例外を送出し、参照・更新の共通ガードとして使う。</div>
+        </section>
+
+        <section id="database">
+          <h2>10. データベース物理設計</h2>
+          <p class="lead">PostgreSQL。UUID生成に<code>pgcrypto</code>を使用し、日時は<code>timestamptz</code>、金額は整数円で保持する。</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>テーブル</th><th>主キー</th><th>主要制約・Index</th><th>削除連鎖</th></tr></thead>
+            <tbody>
+              <tr><td><code>app_users</code></td><td>text <code>id</code></td><td>email UNIQUE、email/name NOT NULL。</td><td>member・actor参照に応じる。</td></tr>
+              <tr><td><code>workspaces</code></td><td>uuid</td><td>name 1〜80、type PERSONAL/SHARED、owner FK。</td><td>workspace配下をCASCADE。</td></tr>
+              <tr><td><code>workspace_members</code></td><td>(workspace_id, user_id)</td><td>role Enum、weight &gt; 0。TriggerでPERSONAL=1人、SHARED=2人上限。</td><td>workspace/user削除でCASCADE。</td></tr>
+              <tr><td><code>invitations</code></td><td>uuid</td><td>token_hash UNIQUE、(workspace,email) UNIQUE、status Enum。</td><td>workspace削除でCASCADE。</td></tr>
+              <tr><td><code>import_batches</code></td><td>uuid</td><td>件数・file_name・imported_byを保持。</td><td>workspace削除でCASCADE。</td></tr>
+              <tr><td><code>transactions</code></td><td>uuid</td><td>(workspace_id,external_id) UNIQUE、amount &gt; 0、type/class/source Enum。日付・未清算Index。</td><td>workspace削除でCASCADE、batch削除でSET NULL。</td></tr>
+              <tr><td><code>default_rules</code></td><td>uuid</td><td>merchant 1〜120、class Enum、priority Index。</td><td>workspace削除でCASCADE。</td></tr>
+              <tr><td><code>settlements</code></td><td>uuid</td><td>amount &gt;= 0、weight/calculation JSONB。</td><td>workspace削除でCASCADE。</td></tr>
+              <tr><td><code>settlement_transactions</code></td><td>(settlement_id, transaction_id)</td><td>transaction_id UNIQUEで一明細一清算。</td><td>settlement削除でCASCADE。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>参加者上限Trigger</h3>
+          <ol>
+            <li>INSERT前にworkspace_id文字列のhashでtransaction advisory lockを取得。</li>
+            <li>workspace typeと現在member数を取得。</li>
+            <li>PERSONALで1人以上、SHAREDで2人以上ならDB例外。</li>
+          </ol>
+          <h3>初期化</h3>
+          <p><code>scripts/setup-db.mjs</code>が<code>DATABASE_URL</code>を検証し、<code>db/migrations/001_initial.sql</code>全体をNeonへ送信する。DDLは<code>IF NOT EXISTS</code>を基本とし、Triggerは再作成する。</p>
+        </section>
+
+        <section id="types">
+          <h2>11. TypeScript型設計</h2>
+          <h3>列挙型</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>型</th><th>値</th><th>対応DB列</th></tr></thead>
+            <tbody>
+              <tr><td><code>WorkspaceType</code></td><td>PERSONAL | SHARED</td><td>workspaces.type</td></tr>
+              <tr><td><code>TransactionType</code></td><td>PAYMENT | RECEIPT</td><td>transactions.type</td></tr>
+              <tr><td><code>ExpenseClass</code></td><td>PERSONAL | SHARED</td><td>transactions/default_rules.expense_class</td></tr>
+            </tbody>
+          </table></div>
+          <h3>DTO関係</h3>
+          <div class="code-block">BootstrapData
+├─ user: AppUser
+├─ workspaces: WorkspaceSummary[]
+├─ selected: WorkspaceData | null
+│  ├─ workspace: WorkspaceSummary
+│  ├─ members: WorkspaceMember[]
+│  ├─ transactions: TransactionRecord[]
+│  ├─ rules: DefaultRule[]
+│  ├─ settlement: SettlementResult | null
+│  └─ settlementHistory: SettlementHistory[]
+└─ pendingInvitations: PendingInvitation[]</div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>型</th><th>用途・重要フィールド</th></tr></thead>
+            <tbody>
+              <tr><td><code>AppUser</code></td><td>id、email、name、nullable imageUrl。</td></tr>
+              <tr><td><code>WorkspaceMember</code></td><td>AppUserを拡張し、正整数weightとOWNER/MEMBER role。</td></tr>
+              <tr><td><code>TransactionRecord</code></td><td>ISO occurredAt、整数amountYen、actor、nullable settledAt、externalId、source。</td></tr>
+              <tr><td><code>SettlementPerson</code></td><td>payments、receipts、actual、target、balanceの一人分内訳。</td></tr>
+              <tr><td><code>SettlementResult</code></td><td>対象transactionIds、集計、people、payer/payee、amountYen。</td></tr>
+              <tr><td><code>PayPayPreviewRow</code></td><td>UI選択状態、変換後フィールド、duplicate、行errorを保持。</td></tr>
+            </tbody>
+          </table></div>
+          <p><code>types/next-auth.d.ts</code>でNextAuth Session Userへ必須の<code>id: string</code>をDeclaration Mergingする。</p>
+        </section>
+
+        <section id="errors">
+          <h2>12. 例外・認可・整合性設計</h2>
+          <div class="table-wrap"><table>
+            <thead><tr><th>分類</th><th>検出箇所</th><th>扱い</th></tr></thead>
+            <tbody>
+              <tr><td>未認証</td><td><code>currentUser()</code></td><td>GETは401、POSTは共通catchにより400。画面はLoginScreen。</td></tr>
+              <tr><td>入力不正</td><td>Zod / CSV関数 / HTML制約</td><td>サーバーはZod messageまたは業務messageをJSON返却。クライアントはerror表示。</td></tr>
+              <tr><td>非所属</td><td><code>requireWorkspaceMember()</code></td><td>処理を中止し「操作する権限がありません」。</td></tr>
+              <tr><td>清算済み編集</td><td>UPDATE/DELETEの<code>settled_at IS NULL</code></td><td>RETURNING 0件を業務例外へ変換。</td></tr>
+              <tr><td>CSV重複</td><td>クライアントSet + DB UNIQUE</td><td>事前に選択不可。競合時もDBでDO NOTHING。</td></tr>
+              <tr><td>二重清算</td><td>transaction_id UNIQUE</td><td>Neon Transaction全体を失敗させ、中途半端な履歴・更新を残さない。</td></tr>
+              <tr><td>DB未設定</td><td><code>db()</code> / Home</td><td>Homeは設定案内、サーバー関数は明示例外。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>現行コード上の権限境界</h3>
+          <ul>
+            <li class="check">既存workspaceを対象とする更新は、招待承認を除き所属確認を実施する。</li>
+            <li class="check">actorUserIdは対象workspaceのmemberであることを追加検証する。</li>
+            <li class="check">招待トークンは平文保存せずSHA-256 Hashで照合する。</li>
+            <li class="caution">OWNER専用操作は実装されておらず、所属メンバーは名称変更・招待・重み変更・workspace削除を実行できる。</li>
+            <li class="caution">workspace削除前の再認証は実装されておらず、名称一致と所属のみを検証する。</li>
+          </ul>
+          <div class="warning">上記の注意点は仕様提案ではなく、現行ソースの境界を明示したものである。権限仕様を変更する場合はAPI条件、UI表示、受入条件を合わせて変更する。</div>
+        </section>
+
+        <section id="tests">
+          <h2>13. テスト・ビルド・運用設計</h2>
+          <h3>自動テスト</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>ファイル</th><th>対象</th><th>検証内容</th></tr></thead>
+            <tbody>
+              <tr><td class="path">tests/paypay.test.ts</td><td>CSVドメイン関数</td><td>支払い行だけの抽出、JST→ISO変換、非対象行除外、rule優先順位、既存IDの選択不可。</td></tr>
+              <tr><td class="path">tests/settlement.test.ts</td><td>清算ドメイン関数</td><td>6:4の送金額、個人費・清算済み除外、1円端数の配分。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>コマンド</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>コマンド</th><th>目的</th></tr></thead>
+            <tbody>
+              <tr><td><code>npm test</code></td><td><code>tsx --test tests/*.test.ts</code>で純粋関数の単体テスト。</td></tr>
+              <tr><td><code>npm run lint</code></td><td>ESLintでTypeScript/React/Next.js規約を検査。</td></tr>
+              <tr><td><code>npm run build</code></td><td>Next.js Production buildと型・ルート整合性を検証。</td></tr>
+              <tr><td><code>npm run db:setup</code></td><td>初期DDLを接続先DBへ適用。</td></tr>
+              <tr><td><code>npm run db:seed:test</code></td><td>固定テストユーザーA/BをUPSERT。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>環境変数</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>変数</th><th>必須</th><th>用途</th></tr></thead>
+            <tbody>
+              <tr><td><code>DATABASE_URL</code></td><td>実データ操作時</td><td>Neon PostgreSQL接続文字列。SSL接続を想定。</td></tr>
+              <tr><td><code>AUTH_SECRET</code></td><td>必須</td><td>Auth.jsの署名・暗号化秘密情報。</td></tr>
+              <tr><td><code>AUTH_GOOGLE_ID</code> / <code>AUTH_GOOGLE_SECRET</code></td><td>Googleモード</td><td>Google OAuth Client資格情報。</td></tr>
+              <tr><td><code>AUTH_URL</code></td><td>環境依存</td><td>Auth.jsの公開基準URL。</td></tr>
+              <tr><td><code>AUTH_MODE</code></td><td>任意</td><td><code>test</code>で開発・PreviewのCredentials認証を有効化。</td></tr>
+              <tr><td><code>VERCEL_ENV</code></td><td>Vercel自動</td><td><code>production</code>時にテスト認証を強制無効化。</td></tr>
+            </tbody>
+          </table></div>
+          <div class="note">詳細設計に影響する変更の最低確認セットは <code>npm test</code>、<code>npm run lint</code>、<code>npm run build</code> とする。DB制約変更時は別環境でマイグレーション適用も確認する。</div>
+        </section>
+
+        <footer>Cake 家計管理アプリ 詳細設計書 · Version 1.0 · Source baseline 2026-08-03</footer>
+      </main>
+    </div>
+  </body>
+</html>

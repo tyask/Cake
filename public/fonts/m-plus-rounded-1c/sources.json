@@ -1,0 +1,49 @@
+{
+  "family": "M PLUS Rounded 1c",
+  "format": "WOFF2",
+  "characters": "Complete character maps from the original font files; no text subset.",
+  "license": "SIL Open Font License 1.1",
+  "licenseSource": "https://raw.githubusercontent.com/google/fonts/main/ofl/roundedmplus1c/OFL.txt",
+  "assets": [
+    {
+      "weight": 400,
+      "file": "m-plus-rounded-1c-400.woff2",
+      "bytes": 1017100,
+      "mappedCharacters": 8201,
+      "sha256": "8981c6e74e91e50d052d59ef74a97518acb6d3595ba27a48cd3d5e8f534ae904",
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/roundedmplus1c/RoundedMplus1c-Regular.ttf"
+    },
+    {
+      "weight": 500,
+      "file": "m-plus-rounded-1c-500.woff2",
+      "bytes": 1024848,
+      "mappedCharacters": 8201,
+      "sha256": "29efa8c4a8d47a45579114687dad6adf603dc02bbd402a2374a16024a24499a2",
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/roundedmplus1c/RoundedMplus1c-Medium.ttf"
+    },
+    {
+      "weight": 700,
+      "file": "m-plus-rounded-1c-700.woff2",
+      "bytes": 1109204,
+      "mappedCharacters": 8201,
+      "sha256": "a007dc5e61070189752990d9eeebeeb67961411236740e71951b18c99cd48141",
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/roundedmplus1c/RoundedMplus1c-Bold.ttf"
+    },
+    {
+      "weight": 800,
+      "file": "m-plus-rounded-1c-800.woff2",
+      "bytes": 1132292,
+      "mappedCharacters": 8201,
+      "sha256": "003caa43fc545dc537ad73220da29432445788af4bc3a866b20774caff78a9da",
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/roundedmplus1c/RoundedMplus1c-ExtraBold.ttf"
+    },
+    {
+      "weight": 900,
+      "file": "m-plus-rounded-1c-900.woff2",
+      "bytes": 1011728,
+      "mappedCharacters": 8201,
+      "sha256": "20174cdb7db48d6e35f6fb839de0e9574ccd3e4d59c7fecba2cefe361352ae2a",
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/roundedmplus1c/RoundedMplus1c-Black.ttf"
+    }
+  ]
+}

@@ -1,29 +1,31 @@
-export default function Home() {
-  return (
-    <main>
-      <section className="card">
-        <span className="badge">Next.js × Vercel</span>
-        <h1>
-          Hello,
-          <br />
-          Next.js!
-        </h1>
-        <p>
-          サンプルアプリが正常に動作しています。
-          <br />
-          ここから、あなたのアイデアを形にしていきましょう。
-        </p>
-        <a
-          className="button"
-          href="https://nextjs.org/docs"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Next.js のドキュメントを見る
-          <span aria-hidden="true">↗</span>
-        </a>
-      </section>
-      <p className="footer">Built with Next.js</p>
-    </main>
-  );
+import { LoginScreen } from "@/components/login-screen";
+import { Dashboard } from "@/components/dashboard";
+import { CakeIcon } from "@/components/cake-icon";
+import { getCurrentUser } from "@/lib/current-user";
+import { isTestAuthEnabled } from "@/lib/auth-mode";
+import { getBootstrap } from "@/lib/repository";
+
+export const dynamic = "force-dynamic";
+
+export default async function Home({ searchParams }: { searchParams: Promise<{ workspaceId?: string; error?: string }> }) {
+  const { workspaceId, error } = await searchParams;
+  const user = await getCurrentUser();
+  const testAuth = isTestAuthEnabled();
+  if (!user) return <LoginScreen testAuth={testAuth} error={error} />;
+
+  if (!process.env.DATABASE_URL) {
+    return (
+      <main className="setup-page">
+        <section className="setup-card">
+          <CakeIcon size={48} className="setup-icon" />
+          <p className="kicker">SETUP REQUIRED</p>
+          <h1>データベースを接続してください</h1>
+          <p><code>.env.example</code>を参考にNeonの接続情報と<code>AUTH_SECRET</code>を設定し、<code>npm run db:setup</code>を実行してください。</p>
+        </section>
+      </main>
+    );
+  }
+
+  const initialData = await getBootstrap(user, workspaceId);
+  return <Dashboard initialData={initialData} testAuth={testAuth} />;
 }

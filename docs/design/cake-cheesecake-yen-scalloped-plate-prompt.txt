@@ -1,0 +1,13 @@
+Generation tool: built-in image_gen
+Transparent background: true
+Edit target: public/brand/cake-cheesecake-yen-plate.png
+
+Use case: precise-object-edit
+Asset type: transparent brand illustration for the Cake website homepage and small icons.
+Input image: edit target is the existing yellow cheesecake slice with a large "¥", on a plain white round dessert plate.
+Primary request: 今のお皿を、もう少しおしゃれで上品なカフェの陶器皿に変える。
+Change only the plate: replace the plain round white plate with an elegant ivory ceramic dessert plate with a softly scalloped outer edge. The scallops are broad, smooth, shallow curves, reminiscent of delicate flower petals, not sharp points. A very fine muted golden-ochre line follows the scalloped perimeter. The center is warm ivory, the subtly fluted rim has a faint buttery-yellow glaze. The plate is tasteful, light, handmade-looking, understated and refined, with no painted pictures or busy decoration. The rim may have a few restrained curved relief grooves following its broad scallops. Shallow shape, soft ceramic finish, viewed as an ellipse in the same perspective as the current plate. Keep it wide enough to support the cake comfortably but subordinate to the cake.
+Keep unchanged: the exact cheesecake slice, its placement, perspective, size, shape, warm watercolor-like hand-drawn texture, yellow palette, biscuit crust, and the LARGE dark-golden "¥" on its cut face. Preserve the yen symbol exactly, with two horizontal crossbars and a Y-shaped upper part. Do not regenerate or reshape the cake. Preserve the rest of the composition.
+Composition: centered single slice resting naturally on the new plate, the entire scalloped plate visible within the square canvas with a transparent margin. Retain the small contact shadow on the plate.
+Background: preserve genuine transparent alpha outside the cake and plate. No background canvas, no drawn checkerboard, no table.
+Constraints: only change the plate design. No cutlery, people, flowers, garnish, lettering, extra symbols, extra cakes, watermark or other objects. The plate should remain easy to understand when scaled down to an icon.
