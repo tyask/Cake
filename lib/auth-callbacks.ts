@@ -35,7 +35,8 @@ export function createAuthCallbacks(store: UserAccessStore): NonNullable<NextAut
       const registered = await store.findRegisteredUser(email);
       if (!registered?.isEnabled || isTestIdentity(registered)) return false;
       return store.updateRegisteredProfile({
-        id: registered.id, email, name: user.name ?? registered.name, imageUrl: user.image ?? null,
+        // Names are managed in Cake; a provider login must keep the saved name.
+        id: registered.id, email, name: registered.name, imageUrl: user.image ?? null,
       });
     },
     async jwt({ token, account, user, profile }) {

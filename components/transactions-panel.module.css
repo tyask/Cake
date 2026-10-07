@@ -36,9 +36,6 @@
 .memoColumn { width: 12rem; }
 .memoEditor textarea { display: block; width: 100%; min-width: 0; min-height: 3rem; padding: .4rem; border: 1px solid var(--line-strong); border-radius: .45rem; color: var(--ink); background: var(--paper); font: inherit; font-size: .72rem; resize: vertical; }
 .memoEditor textarea:disabled { color: var(--disabled-ink); background: var(--surface-disabled); }
-.memoInputRow { display: flex; align-items: center; gap: .5rem; }
-.memoInputRow textarea { flex: 1; }
-.memoStatus { display: inline-flex; align-items: center; flex-shrink: 0; width: 1rem; min-height: 1rem; }
 .memoEditor textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .selectionColumn { width: 2.25rem; }
 .dateColumn { width: 9rem; }
@@ -51,6 +48,9 @@
 .splitCell :global(.split-editor) { margin: 0; }
 .splitCell :global(.split-editor) > legend { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .settlementColumn { width: 5.25rem; }
+.updateStatusColumn { width: 2.25rem; }
+.table .updateStatusCell { text-align: center; vertical-align: middle; }
+.summaryUpdateStatus { display: inline-flex; flex-shrink: 0; align-items: center; width: 1rem; min-height: 1rem; }
 .table th { padding: .7rem .45rem; color: var(--muted); background: var(--surface-muted); font-size: .63rem; font-weight: 800; text-align: left; }
 .table td { padding: .55rem .45rem; border-top: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
 .table td > b { display: block; }
@@ -85,7 +85,7 @@
   .table thead { display: block; overflow-x: auto; }
   .table thead tr { display: flex; gap: .4rem; width: max-content; margin: 0 0 .55rem; padding: 0; border: 0; background: transparent; }
   .table thead th { border-radius: .45rem; }
-  .table thead .selectionCell { display: none; }
+  .table thead .selectionCell, .table .updateStatusCell { display: none; }
   .table tbody { display: block; width: 100%; }
   .table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .7rem; width: 100%; margin-bottom: .55rem; padding: .8rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--paper); }
   .table td { display: block; min-width: 0; padding: 0; border: 0; }

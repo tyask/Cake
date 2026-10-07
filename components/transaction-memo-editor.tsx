@@ -6,15 +6,15 @@ import styles from "./transactions-panel.module.css";
 
 export type SaveTransactionMemo = (id: string, memo: string) => Promise<string>;
 
-export function TransactionMemoEditor({ id, merchant, memo, disabled, updating = false, onSave, onPin, onError }: {
+export function TransactionMemoEditor({ id, merchant, memo, disabled, onSave, onPin, onError, onSavingChange }: {
   id: string;
   merchant: string;
   memo: string;
   disabled: boolean;
-  updating?: boolean;
   onSave: SaveTransactionMemo;
   onPin: (id: string, pinned: boolean) => void;
   onError?: () => void;
+  onSavingChange: (saving: boolean) => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const draftRef = useRef<string | null>(null);
@@ -35,8 +35,8 @@ export function TransactionMemoEditor({ id, merchant, memo, disabled, updating =
   useLayoutEffect(() => { baseRef.current = base; incomingRef.current = memo; }, [base, memo]);
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; onPin(id, false); };
-  }, [id, onPin]);
+    return () => { mounted.current = false; onPin(id, false); onSavingChange(false); };
+  }, [id, onPin, onSavingChange]);
 
   function syncPin() {
     const next = focused.current || savingRef.current || errorRef.current || draftRef.current !== null;
@@ -54,6 +54,7 @@ export function TransactionMemoEditor({ id, merchant, memo, disabled, updating =
     saveAgain.current = false;
     savingRef.current = true;
     setSaving(true);
+    onSavingChange(true);
     errorRef.current = false; setError(null); syncPin();
     try {
       const source = baseRef.current;
@@ -69,6 +70,7 @@ export function TransactionMemoEditor({ id, merchant, memo, disabled, updating =
       savingRef.current = false;
       if (mounted.current) {
         setSaving(false);
+        onSavingChange(false);
         syncPin();
         if (saveAgain.current && !errorRef.current) { saveAgain.current = false; void commit(); }
       }
@@ -76,7 +78,6 @@ export function TransactionMemoEditor({ id, merchant, memo, disabled, updating =
   }
 
   return <div className={styles.memoEditor} data-memo-editor>
-    <div className={styles.memoInputRow}>
     <textarea aria-label={merchant + "のメモ"} placeholder="メモ" rows={2} maxLength={MAX_TRANSACTION_MEMO_LENGTH}
       title="入力欄を離れるかCtrl+Enterで保存" value={draft ?? base} disabled={disabled}
       onChange={event => { draftRef.current = event.target.value; setDraft(event.target.value); errorRef.current = false; setError(null); syncPin(); }}
@@ -87,10 +88,6 @@ export function TransactionMemoEditor({ id, merchant, memo, disabled, updating =
         syncPin();
       }}
       onKeyDown={event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); void commit(); } }} />
-      <span className={styles.memoStatus}>
-        {(saving || updating) && <span className={styles.savingIndicator} role="status" aria-label="保存中"><span className={styles.spinner} aria-hidden="true" /></span>}
-      </span>
-    </div>
     {error && <div className={styles.error} role="alert">{error}<button type="button" className="text-button" disabled={disabled || saving} onClick={() => { void commit(); }}>再試行</button></div>}
   </div>;
 }

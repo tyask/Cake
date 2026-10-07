@@ -32,7 +32,6 @@ async function main() {
       VALUES (${user.id}, ${user.email}, ${user.name}, NULL, false, true)
       ON CONFLICT (id) DO UPDATE SET
         email = EXCLUDED.email,
-        name = EXCLUDED.name,
         is_admin = false,
         is_enabled = true,
         updated_at = now()

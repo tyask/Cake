@@ -3,11 +3,13 @@
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { signOut } from "next-auth/react";
+import { PersonalSettings } from "./personal-settings";
 import { UserManagement } from "./user-management";
 import { MobileAccessQr } from "./mobile-access-qr";
 import { SplitEditor } from "./split-editor";
 import { WorkspaceRules } from "./workspace-rules";
 import { CakeIcon } from "./cake-icon";
+import { ImportPreviewTable } from "./import-preview-table";
 import { TransactionsPanel } from "./transactions-panel";
 import { defaultSplitWeights, matchingDefaultRule, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
 import { parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
@@ -19,7 +21,6 @@ import type {
   WorkspaceData,
   WorkspaceType,
   SplitWeights,
-  WorkspaceMember,
 } from "@/lib/types";
 
 type Tab = "home" | "transactions" | "import" | "settlement" | "settings";
@@ -169,10 +170,14 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
         {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} add={() => setTransactionModal(true)} run={run} />}
         {selected && tab === "import" && <ImportPanel key={selected.workspace.id} selected={selected} run={run} />}
         {selected && tab === "settlement" && <SettlementPanel key={selected.workspace.id} selected={selected} run={run} />}
-        {selected && tab === "settings" && <SettingsPanel key={selected.workspace.id} selected={selected} currentUserId={data.user.id} run={run} afterDelete={async () => { await refresh(); }} />}
-        {tab === "settings" && data.user.isAdmin === true && !testAuth && <>
-          {!selected && <PageHeading eyebrow="SETTINGS" title="設定" description="Cakeを利用できる人を管理します。" />}
-          <UserManagement />
+        {tab === "settings" && <>
+          <PageHeading title="設定" />
+          <PersonalSettings key={`${data.user.id}-${data.user.name}`} user={data.user} run={run} />
+          {selected && <section className="settings-group" aria-labelledby="workspace-settings-title">
+            <div className="settings-group-heading"><h2 id="workspace-settings-title">ワークスペース設定</h2><p>{selected.workspace.name}の情報・共有費の割合・ルールを設定します。</p></div>
+            <SettingsPanel key={selected.workspace.id} selected={selected} currentUserId={data.user.id} run={run} afterDelete={async () => { await refresh(); }} />
+          </section>}
+          {data.user.isAdmin === true && !testAuth && <UserManagement />}
         </>}
       </main>
 
@@ -295,24 +300,11 @@ function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload
         <button disabled={saving} onClick={() => bulk("PERSONAL")}>個人費に変更</button><button disabled={saving} onClick={() => bulk("SHARED")}>共通費に変更</button>
         <button disabled={saving} className="text-button" onClick={() => { setRows([]); setFileName(""); }}>やり直す</button>
       </div>
-      <div className="data-table-wrap"><table className="data-table import-preview"><thead><tr>
-        <th><input type="checkbox" aria-label="取込対象をすべて選択" disabled={saving}
-          checked={selectedCount > 0 && selectedCount === rows.filter((row) => !row.error && !row.duplicate).length}
-          onChange={(event) => setRows((current) => current.map((row) => row.error || row.duplicate ? row : { ...row, selected: event.target.checked }))} /></th>
-        <th>取引日時</th><th>取引先</th><th>方法</th><th>金額</th><th>費用区分</th><th>支払い割合</th><th>状態</th>
-      </tr></thead><tbody>{rows.map((row) => <tr key={row.key} className={!row.selected ? "muted-row" : ""}>
-        <td><input type="checkbox" aria-label={`${row.merchant}を取り込む`} checked={row.selected} disabled={saving || !!row.error || row.duplicate}
-          onChange={(event) => setRows((current) => current.map((item) => item.key === row.key ? { ...item, selected: event.target.checked } : item))} /></td>
-        <td data-label="取引日時">{row.occurredAt}</td><td data-label="取引先"><b>{row.merchant}</b></td><td data-label="方法">{row.method}</td><td data-label="金額">{money(row.amountYen)}</td>
-        <td data-label="費用区分"><select aria-label={`${row.merchant}の費用区分`} disabled={saving} value={row.expenseClass}
-          onChange={(event) => setRows((current) => current.map((item) => item.key === row.key ? changeClass(item, event.target.value as ExpenseClass) : item))}>
-          <option value="PERSONAL">個人費</option><option value="SHARED">共通費</option>
-        </select></td>
-        <td data-label="支払い割合"><SplitEditor compact label={`${row.merchant}の支払い割合`} amountYen={row.amountYen}
-          members={ratioMembers(selected.members, row.expenseClass, actorId)} value={row.splitWeights} disabled={saving || row.expenseClass === "PERSONAL"}
-          onChange={(splitWeights) => setRows((current) => current.map((item) => item.key === row.key ? { ...item, splitWeights } : item))} /></td>
-        <td data-label="状態">{row.duplicate ? <span className="error-tag">登録済み</span> : row.error ? <span className="error-tag">{row.error}</span> : <span className="success-tag">登録可能</span>}</td>
-      </tr>)}</tbody></table></div>
+      <ImportPreviewTable rows={rows} members={selected.members} actorId={actorId} saving={saving}
+        onSelect={(key, checked) => setRows(current => current.map(row => row.key === key ? { ...row, selected: checked } : row))}
+        onSelectAll={checked => setRows(current => current.map(row => row.error || row.duplicate ? row : { ...row, selected: checked }))}
+        onChangeClass={(key, expenseClass) => setRows(current => current.map(row => row.key === key ? changeClass(row, expenseClass) : row))}
+        onChangeSplit={(key, splitWeights) => setRows(current => current.map(row => row.key === key ? { ...row, splitWeights } : row))} />
       {error && <p className="import-error form-error" role="alert">{error}</p>}
       <div className="sticky-actions"><button className="secondary" disabled={saving} onClick={() => { setRows([]); setFileName(""); }}>キャンセル</button>
         <button className="primary" disabled={saving || selectedCount === 0} onClick={submit}>{saving ? "登録中…" : `選択した${selectedCount}件を登録`}</button>
@@ -371,7 +363,6 @@ function SettingsPanel({ selected, currentUserId, run, afterDelete }: { selected
   }
 
   return <>
-    <PageHeading eyebrow="SETTINGS" title="ワークスペース設定" description="デフォルト割合とルールを参加者全員で共有します。" />
     <div className="settings-grid">
       <section className="panel settings-section">
         <div className="panel-head"><div><span>GENERAL</span><h2>基本情報</h2></div></div>
@@ -480,10 +471,6 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
       <div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={close}>キャンセル</button><button className="primary" disabled={saving}>{saving ? "保存中…" : "追加する"}</button></div>
     </form>
   </Modal>;
-}
-
-function ratioMembers(members: WorkspaceMember[], expenseClass: ExpenseClass, actorUserId: string) {
-  return expenseClass === "PERSONAL" ? [...members].sort((a, b) => Number(b.id === actorUserId) - Number(a.id === actorUserId)) : members;
 }
 
 function Modal({ title, close, children, className = "" }: { title: string; close: () => void; children: React.ReactNode; className?: string }) {

@@ -56,6 +56,20 @@ test("登録済みGoogle利用者だけを許可し、プロフィール更新�
   });
 });
 
+test("Cakeで設定したユーザー名はGoogle再ログイン後もセッションで使う", async () => {
+  await withAuthMode("google", "production", async () => {
+    const saved = { ...admin, name: "Cakeで決めた名前" };
+    const { callbacks, state } = fixture(saved);
+    const google = googleInput();
+    const input = { ...google, user: { ...google.user, image: "google-photo.png" } };
+    assert.equal(await callbacks.signIn!(input), true);
+    assert.equal(state.updates[0].name, saved.name);
+    assert.equal(state.updates[0].imageUrl, input.user.image);
+    const sessionUser = await resolveSessionUser(saved, async () => state.user);
+    assert.equal(sessionUser?.name, saved.name);
+  });
+});
+
 test("未確認・確認フラグ欠落・異なるメールではDB照合や登録を行わない", async () => {
   await withAuthMode("google", "production", async () => {
     for (const profile of [

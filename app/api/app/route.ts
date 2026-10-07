@@ -7,6 +7,8 @@ import type { DefaultRule, ExpenseClass, SplitWeights } from "@/lib/types";
 import { z } from "zod";
 import { transactionMemoInputSchema, transactionMemoSchema } from "@/lib/transaction-memo";
 import { transactionRecord } from "@/lib/transaction-record";
+import { updateProfileInputSchema } from "@/lib/user-profile";
+import { updateDisplayName, UserAccessError } from "@/lib/user-access";
 
 export const runtime = "nodejs";
 
@@ -18,7 +20,7 @@ async function currentUser() {
 
 function errorResponse(error: unknown, status = 400) {
   const message = error instanceof Error ? error.message : "処理に失敗しました。";
-  return Response.json({ error: message }, { status });
+  return Response.json({ error: message }, { status: error instanceof UserAccessError ? error.status : status });
 }
 
 export async function GET(request: Request) {
@@ -87,6 +89,11 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const action = z.string().parse(body.action);
     const sql = db();
+
+    if (action === "updateProfile") {
+      const input = updateProfileInputSchema.parse(body);
+      return Response.json({ ok: true, user: await updateDisplayName(user, input.name) });
+    }
 
     if (action === "createWorkspace") {
       const input = z.object({ name: z.string().trim().min(1).max(80), type: z.enum(["PERSONAL", "SHARED"]) }).parse(body);

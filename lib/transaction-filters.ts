@@ -10,8 +10,8 @@ export const transactionColumns = [
   { id: "actorUserId", label: "支払者" },
   { id: "expenseClass", label: "費用区分" },
   { id: "splitWeights", label: "支払い割合" },
-  { id: "settlement", label: "清算" },
   { id: "memo", label: "メモ" },
+  { id: "settlement", label: "清算" },
 ] as const;
 
 export type TransactionColumn = typeof transactionColumns[number]["id"];

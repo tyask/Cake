@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { db } from "./db";
 import { TEST_USERS } from "./test-users";
+import { profileNameSchema } from "./user-profile";
 import type { AppUser, RegisteredUser } from "./types";
 
 export function normalizeEmail(value: unknown): string | null {
@@ -47,11 +48,28 @@ export async function updateRegisteredProfile(user: AppUser): Promise<boolean> {
   const email = normalizeEmail(user.email);
   if (!email) return false;
   const rows = await db()`
-    UPDATE app_users SET name = ${user.name}, image_url = ${user.imageUrl}, updated_at = now()
+    UPDATE app_users SET image_url = ${user.imageUrl}, updated_at = now()
     WHERE id = ${user.id} AND email = ${email} AND is_enabled = true
     RETURNING id
   `;
   return rows.length === 1;
+}
+
+export async function updateDisplayName(user: AppUser, name: string): Promise<AppUser> {
+  const nextName = profileNameSchema.parse(name);
+  const email = normalizeEmail(user.email);
+  if (!email) throw new UserAccessError("ユーザー情報を確認できません。", 401);
+  const rows = await db()`
+    UPDATE app_users SET name = ${nextName}, updated_at = now()
+    WHERE id = ${user.id} AND email = ${email} AND is_enabled = true
+    RETURNING *
+  `;
+  if (!rows[0]) throw new UserAccessError("ユーザー情報を確認できません。", 401);
+  const saved = registeredUser(rows[0]);
+  return {
+    id: saved.id, email: saved.email, name: saved.name, imageUrl: saved.imageUrl,
+    isAdmin: isTestIdentity(saved) ? false : saved.isAdmin,
+  };
 }
 
 export async function ensureTestUser(user: AppUser): Promise<boolean> {
@@ -60,7 +78,7 @@ export async function ensureTestUser(user: AppUser): Promise<boolean> {
     INSERT INTO app_users (id, email, name, image_url, is_admin, is_enabled)
     VALUES (${user.id}, ${user.email}, ${user.name}, NULL, false, true)
     ON CONFLICT (id) DO UPDATE SET
-      name = EXCLUDED.name, is_admin = false, is_enabled = true, updated_at = now()
+      is_admin = false, is_enabled = true, updated_at = now()
     WHERE app_users.email = EXCLUDED.email
     RETURNING id
   `;
