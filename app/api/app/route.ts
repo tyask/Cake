@@ -26,8 +26,10 @@ function errorResponse(error: unknown, status = 400) {
 export async function GET(request: Request) {
   try {
     const user = await currentUser();
-    const workspaceId = new URL(request.url).searchParams.get("workspaceId");
-    return Response.json(await getBootstrap(user, workspaceId));
+    const params = new URL(request.url).searchParams;
+    const workspaceId = params.get("workspaceId");
+    const scope = z.enum(["full", "metadata"]).parse(params.get("scope") ?? "full");
+    return Response.json(await getBootstrap(user, workspaceId, scope));
   } catch (error) {
     return errorResponse(error, 401);
   }
