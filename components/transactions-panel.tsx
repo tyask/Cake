@@ -8,7 +8,9 @@ import { splitAmounts } from "@/lib/split-allocations";
 import { SplitEditor } from "./split-editor";
 import { TransactionFilterDialog } from "./transaction-filter-dialog";
 import { SelectionCheckbox } from "./selection-checkbox";
-import { TransactionMemoEditor, type SaveTransactionMemo } from "./transaction-memo-editor";
+import { TransactionMemoEditor, type SaveTransactionMemo, type TransactionMemoHandle } from "./transaction-memo-editor";
+import { RefreshButton } from "./refresh-button";
+import { refreshTransactionEditors } from "@/lib/transaction-refresh";
 import { transactionMemoSchema } from "@/lib/transaction-memo";
 import { matchesTransactionFilters, transactionColumns, transactionFilterOptions, type TransactionColumn } from "@/lib/transaction-filters";
 import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } from "./transaction-table";
@@ -19,6 +21,14 @@ type SaveTransaction = (id: string, getValues: () => TransactionValues) => Promi
 type AcknowledgedSave = { sources: string[]; values: TransactionValues };
 type RowHandle = { freeze: (value: boolean) => void; flush: () => Promise<void>; acceptRules: (values: TransactionValues) => void };
 type BulkAction = "deleteTransactions" | "applyTransactionRules";
+type TransactionListProps = {
+  selected: WorkspaceData;
+  userId: string;
+  add: () => void;
+  run: RunAction;
+  onRefresh: (prepare: () => Promise<void>) => Promise<void>;
+  refreshing: boolean;
+};
 
 const money = (value: number) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(value);
 const dateTime = (value: string) => new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(value));
@@ -36,11 +46,11 @@ function fieldEqual(left: unknown, right: unknown): boolean {
   return Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((key) => a[key] === b[key]);
 }
 
-export function TransactionsPanel({ selected, userId, add, run }: { selected: WorkspaceData; userId: string; add: () => void; run: RunAction }) {
-  return <TransactionList key={`${userId}:${selected.workspace.id}`} selected={selected} userId={userId} add={add} run={run} />;
+export function TransactionsPanel(props: TransactionListProps) {
+  return <TransactionList key={`${props.userId}:${props.selected.workspace.id}`} {...props} />;
 }
 
-function TransactionList({ selected, userId, add, run }: { selected: WorkspaceData; userId: string; add: () => void; run: RunAction }) {
+function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: TransactionListProps) {
   const [columnFilters, setColumnFilters] = useTransactionFilters(userId, selected.workspace.id);
   const [filterColumn, setFilterColumn] = useState<TransactionColumn | null>(null);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => new Set());
@@ -50,8 +60,10 @@ function TransactionList({ selected, userId, add, run }: { selected: WorkspaceDa
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkNotice, setBulkNotice] = useState<string | null>(null);
+  const [preparingRefresh, setPreparingRefresh] = useState(false);
   const queue = useRef<Promise<void>>(Promise.resolve());
   const bulkBusyRef = useRef(false);
+  const refreshBusyRef = useRef(false);
   const handles = useRef(new Map<string, RowHandle>());
   const currentSelected = useRef(selected);
   useLayoutEffect(() => { currentSelected.current = selected; }, [selected]);
@@ -84,7 +96,7 @@ function TransactionList({ selected, userId, add, run }: { selected: WorkspaceDa
   const checkedVisibleCount = visibleEditable.filter((item) => selectedIds.has(item.id)).length;
   const allVisibleChecked = visibleEditable.length > 0 && checkedVisibleCount === visibleEditable.length;
   const hiddenCheckedCount = checkedIds.filter((id) => !visible.some((item) => item.id === id)).length;
-  const busy = bulkAction !== null;
+  const busy = bulkAction !== null || preparingRefresh || refreshing;
   const filteredColumns = transactionColumns.filter(column => columnFilters[column.id] !== undefined);
 
   function setColumnFilter(column: TransactionColumn, values: string[] | undefined) {
@@ -114,7 +126,7 @@ function TransactionList({ selected, userId, add, run }: { selected: WorkspaceDa
   });
 
   function toggle(id: string) {
-    if (bulkBusyRef.current) return;
+    if (bulkBusyRef.current || refreshBusyRef.current) return;
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -123,7 +135,7 @@ function TransactionList({ selected, userId, add, run }: { selected: WorkspaceDa
   }
 
   function toggleVisible() {
-    if (bulkBusyRef.current) return;
+    if (bulkBusyRef.current || refreshBusyRef.current) return;
     setSelectedIds((current) => {
       const next = new Set(current);
       for (const item of visibleEditable) {
@@ -134,7 +146,7 @@ function TransactionList({ selected, userId, add, run }: { selected: WorkspaceDa
   }
 
   async function performBulk(action: BulkAction) {
-    if (bulkBusyRef.current || checkedIds.length === 0) return;
+    if (bulkBusyRef.current || refreshBusyRef.current || refreshing || checkedIds.length === 0) return;
     const ids = [...checkedIds];
     if (action === "deleteTransactions" && !confirm("選択した" + ids.length + "件の明細を削除しますか？")) return;
     bulkBusyRef.current = true;
@@ -165,8 +177,20 @@ function TransactionList({ selected, userId, add, run }: { selected: WorkspaceDa
     }
   }
 
+  async function requestRefresh() {
+    if (bulkBusyRef.current || refreshBusyRef.current || refreshing) return;
+    refreshBusyRef.current = true;
+    setPreparingRefresh(true);
+    try {
+      await refreshTransactionEditors([...handles.current.values()], () => queue.current, onRefresh);
+    } finally {
+      refreshBusyRef.current = false;
+      setPreparingRefresh(false);
+    }
+  }
+
   return <>
-    <div className="page-heading"><div><span>TRANSACTIONS</span><h1>取引明細</h1><p>一覧から直接編集できます。支払い割合は割合・金額から選べます。欄を離れるかEnterで保存し、選択項目はすぐ保存します。</p></div><button className="primary" disabled={busy} onClick={add}>＋ 明細を追加</button></div>
+    <div className="page-heading"><div><span>TRANSACTIONS</span><h1>取引明細</h1><p>一覧から直接編集できます。支払い割合は割合・金額から選べます。欄を離れるかEnterで保存し、選択項目はすぐ保存します。</p></div><div className="page-actions"><RefreshButton refreshing={preparingRefresh || refreshing} disabled={bulkAction !== null} onClick={() => { void requestRefresh(); }} /><button className="primary" disabled={busy} onClick={add}>＋ 明細を追加</button></div></div>
     <section className={"panel " + styles.panel} aria-busy={pending > 0 || busy}>
       {filteredColumns.length > 0 && <div className={styles.activeFilters}>{filteredColumns.map(column => {
         const labels = new Map(transactionFilterOptions(selected.transactions, column.id, selected.members).map(option => [option.value, option.label]));
@@ -221,6 +245,11 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
   const pendingRef = useRef(0);
   const inFlight = useRef(new Set<Promise<void>>());
   const frozenRef = useRef(false);
+  const memoHandle = useRef<TransactionMemoHandle | null>(null);
+  const registerMemo = useCallback((handle: TransactionMemoHandle | null) => {
+    memoHandle.current = handle;
+    handle?.freeze(frozenRef.current);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const errorRef = useRef(false);
   const rowRef = useRef<HTMLTableRowElement>(null);
@@ -315,14 +344,15 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
 
   async function flush() {
     while (inFlight.current.size > 0) await Promise.all([...inFlight.current]);
-    if (itemRef.current.settledAt) throw new Error("清算済みの明細は変更できません。");
-    await commit();
+    if (!itemRef.current.settledAt) await commit();
+    else if (Object.keys(changesRef.current).length > 0 || dateDraftRef.current !== null || errorRef.current) throw new Error("清算済みの明細は変更できません。入力内容は保持しています。");
     while (inFlight.current.size > 0) await Promise.all([...inFlight.current]);
+    await memoHandle.current?.flush();
   }
 
   useLayoutEffect(() => {
     register(item.id, {
-      freeze: (value) => { frozenRef.current = value; },
+      freeze: (value) => { frozenRef.current = value; memoHandle.current?.freeze(value); },
       flush,
       acceptRules: (values) => {
         acceptSaved(values);
@@ -361,7 +391,7 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
     if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); requestCommit(); }
   }
 
-  if (item.settledAt) return <SettledTransaction item={item} members={members} busy={busy} pinnedOutsideFilter={pinnedOutsideFilter} onSaveMemo={onSaveMemo} onMemoPin={onMemoPin} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} onMemoError={() => setMobileExpanded(true)} updating={pending > 0 || memoSaving} onMemoSavingChange={setMemoSaving} />;
+  if (item.settledAt) return <SettledTransaction item={item} members={members} busy={busy} pinnedOutsideFilter={pinnedOutsideFilter} onSaveMemo={onSaveMemo} onMemoPin={onMemoPin} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} onMemoError={() => setMobileExpanded(true)} updating={pending > 0 || memoSaving} onMemoSavingChange={setMemoSaving} registerMemo={registerMemo} />;
 
   const currentValues = () => ({ ...baseRef.current, ...changesRef.current });
   const updating = pending > 0 || applyingRules || memoSaving;
@@ -380,7 +410,7 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
       <SplitEditor compact inline label="支払い割合" members={members} value={draft.splitWeights} amountYen={draft.amountYen}
         disabled={busy || draft.expenseClass === "PERSONAL"} onChange={(splitWeights) => change({ splitWeights })} onCommit={requestCommit} />
     </td>
-    <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={draft.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} onError={() => setMobileExpanded(true)} onSavingChange={setMemoSaving} /></td>
+    <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={draft.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} onError={() => setMobileExpanded(true)} onSavingChange={setMemoSaving} register={registerMemo} /></td>
     <td data-label="清算" className={styles.settlementCell}><span className={draft.expenseClass === "SHARED" ? styles.unsettled : styles.muted}>{draft.expenseClass === "PERSONAL" ? "対象外" : "未清算"}</span>
     </td>
     <td className={styles.updateStatusCell}><SavingIndicator active={updating} /></td>
@@ -392,11 +422,12 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
   </>;
 }
 
-function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMemo, onMemoPin, expanded, onToggle, onMemoError, updating, onMemoSavingChange }: {
+function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMemo, onMemoPin, expanded, onToggle, onMemoError, updating, onMemoSavingChange, registerMemo }: {
   item: TransactionRecord; members: WorkspaceMember[]; busy: boolean; pinnedOutsideFilter: boolean;
   onSaveMemo: SaveTransactionMemo; onMemoPin: (id: string, pinned: boolean) => void;
   expanded: boolean; onToggle: () => void; onMemoError: () => void;
   updating: boolean; onMemoSavingChange: (saving: boolean) => void;
+  registerMemo: (handle: TransactionMemoHandle | null) => void;
 }) {
   const amounts = splitAmounts(item.amountYen, item.splitWeights, members);
   const percentages = splitAmounts(1000, item.splitWeights, members);
@@ -410,7 +441,7 @@ function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMe
     <td data-label={item.type === "PAYMENT" ? "支払者" : "受取者"}>{item.actorName}</td>
     <td data-label="費用区分">{item.expenseClass === "PERSONAL" ? "個人費" : "共有費"}</td>
     <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}><span className={styles.settledSplit}>{members.map(member => <span key={member.id}><span>{money(amounts[member.id])}</span><small>{percentages[member.id] / 10}%</small></span>)}</span></td>
-    <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={item.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} onError={onMemoError} onSavingChange={onMemoSavingChange} />
+    <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={item.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} onError={onMemoError} onSavingChange={onMemoSavingChange} register={registerMemo} />
       {pinnedOutsideFilter && <small className={styles.filterHint}>編集中のため表示</small>}
     </td>
     <td data-label="清算">清算済み</td>
