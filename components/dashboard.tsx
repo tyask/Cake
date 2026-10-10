@@ -16,7 +16,7 @@ import { parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/pa
 import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
 import { applyTransactionUpdate } from "@/lib/transaction-updates";
 import { bootstrapScopeForTab, mergeBootstrapMetadata, type DashboardTab } from "@/lib/bootstrap";
-import { MAX_DUPLICATE_CHECK_IDS } from "@/lib/import-duplicates";
+import { applyPayPayDuplicateChecks, MAX_DUPLICATE_CHECK_IDS, type ExistingPayPayTransaction } from "@/lib/import-duplicates";
 import type {
   BootstrapData,
   BootstrapMetadata,
@@ -122,7 +122,9 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
           setNotice(success);
         } else {
           const applied = await refresh(workspaceId ?? result.workspaceId ?? originWorkspaceId, generation);
-          if (applied && generation === workspaceView.current.generation) setNotice(success);
+          if (applied && generation === workspaceView.current.generation) {
+            setNotice(payload.action === "bulkImport" ? `${result.imported}件を取り込みました。` : success);
+          }
         }
       }
       return result;
@@ -187,7 +189,7 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
         {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice(null)}>×</button></div>}
         {loading && <div className="loading-line" />}
         {selected && tab === "home" && <HomePanel selected={selected} pending={data.pendingInvitations.length} setTab={openTab} add={() => setTransactionModal(true)} />}
-        {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} add={() => setTransactionModal(true)} run={run} />}
+        {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} userId={data.user.id} add={() => setTransactionModal(true)} run={run} />}
         {selected && tab === "import" && <ImportPanel key={selected.workspace.id} selected={selected} run={run} />}
         {selected && tab === "settlement" && <SettlementPanel key={selected.workspace.id} selected={selected} run={run} />}
         {tab === "settings" && <>
@@ -267,8 +269,8 @@ function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload
       const text = await file.text();
       if (requestId !== fileRequest.current) return;
       const parsed = importFormats[format].parse(text, selected.rules, new Set(), selected.members, actorId);
-      const externalIds = [...new Set(parsed.map(row => row.externalId).filter(Boolean))];
-      const existing = new Set<string>();
+      const externalIds = [...new Set(parsed.filter(row => !row.error).map(row => row.externalId).filter(Boolean))];
+      const existing: ExistingPayPayTransaction[] = [];
       for (let offset = 0; offset < externalIds.length; offset += MAX_DUPLICATE_CHECK_IDS) {
         const response = await fetch("/api/import/duplicates", {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -277,10 +279,10 @@ function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload
         const result = await response.json();
         if (requestId !== fileRequest.current) return;
         if (!response.ok) throw new Error(result.error ?? "重複の確認に失敗しました。");
-        for (const id of result.externalIds as string[]) existing.add(id);
+        existing.push(...result.transactions as ExistingPayPayTransaction[]);
       }
       if (requestId !== fileRequest.current) return;
-      setRows(parsed.map(row => ({ ...row, duplicate: existing.has(row.externalId), selected: !row.error && !existing.has(row.externalId) })));
+      setRows(applyPayPayDuplicateChecks(parsed, existing));
       setFileName(file.name);
       setError(null);
     } catch (failure) {
@@ -316,7 +318,7 @@ function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload
         splitWeights: validateSplitWeights(row.splitWeights, selected.members, row.expenseClass, actorId),
       }));
       if (items.length === 0) { setError("登録する行を選択してください。"); return; }
-      await run({ action: "bulkImport", workspaceId: selected.workspace.id, fileName, totalRows: rows.length, items }, `${items.length}件を取り込みました。`);
+      await run({ action: "bulkImport", workspaceId: selected.workspace.id, fileName, totalRows: rows.length, items }, "明細を取り込みました。");
       setRows([]);
       setFileName("");
     } catch (failure) { setError(failure instanceof Error ? failure.message : "明細を登録できませんでした。"); }

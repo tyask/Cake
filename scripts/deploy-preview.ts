@@ -29,8 +29,26 @@ function previewAlias(environment: DeployEnvironment): string {
 }
 
 function deploymentUrl(stdout: string): string {
-  const output = stdout.trim();
   try {
+    let output = stdout.trim();
+    if (output.startsWith("{")) {
+      const record = (value: unknown): Record<string, unknown> => {
+        if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error();
+        return value as Record<string, unknown>;
+      };
+      const payload = record(JSON.parse(output));
+      // CLI JSON is either a deployment object or the non-interactive envelope.
+      let deployment = payload;
+      if ("deployment" in payload) {
+        if (payload.status !== "ok" || payload.error != null) throw new Error();
+        deployment = record(payload.deployment);
+      } else if ("status" in payload) throw new Error();
+      if (typeof deployment.id !== "string" || !deployment.id.trim()
+        || deployment.readyState !== "READY" || !(deployment.target === null || deployment.target === "preview")
+        || deployment.error != null || deployment.aliasError != null || typeof deployment.url !== "string") throw new Error();
+      // Preview is represented by a null target in the Vercel deployment API.
+      output = deployment.url;
+    }
     if (/\s/.test(output) || !output.startsWith("https://")) throw new Error();
     const url = new URL(output);
     if (!hostPattern.test(url.hostname) || url.username || url.password || url.port
@@ -145,7 +163,7 @@ export async function runPreviewDeployment({
 
   log("Cake: Previewのデプロイとビルド完了を待ちます。");
   let deployed: VercelCommandResult;
-  try { deployed = await execute(["vercel", "deploy", "--target", "preview", ...args, ...scopeArgs], true); }
+  try { deployed = await execute(["vercel", "deploy", "--target", "preview", "--format", "json", ...args, ...scopeArgs], true); }
   catch {
     throw new Error("Previewのデプロイを実行できませんでした。Vercel CLIの設定を確認してください。固定URLは更新していません。");
   }

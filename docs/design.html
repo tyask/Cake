@@ -411,14 +411,15 @@
 
       <main id="top">
         <header class="hero">
-          <p class="eyebrow">Basic Design Document · Version 1.0</p>
+          <p class="eyebrow">Basic Design Document · Version 1.1</p>
           <h1>家計を、ふたりで気持ちよく。</h1>
-          <p>Googleログイン、二人用共有ワークスペース、PayPay明細取込、重み付き共通費清算を備えるレスポンシブWebアプリケーションの基本設計書。</p>
+          <p>Googleログイン、二人用共有ワークスペース、PayPay明細取込、明細ごとの負担割合による共通費清算を備えるレスポンシブWebアプリケーションの基本設計書。</p>
           <div class="meta">
             <span>作成日: 2026-08-01</span>
+            <span>更新日: 2026-10-10</span>
             <span>対象: PC / スマートフォン</span>
             <span>構成: Next.js + Neon + Vercel</span>
-            <span>状態: 確定</span>
+            <span>状態: 現行実装に同期</span>
           </div>
         </header>
 
@@ -426,10 +427,11 @@
           <span class="tag fixed">確定</span>
           <h2>1. 概要</h2>
           <p class="lead">本システムは、個人および二人で共有する家計をワークスペース単位で管理するWebアプリケーションである。</p>
+          <p>この文書は現在の実装・マイグレーション・テストを基準とする。項目・API・計算の詳細は<a href="detail-design.html">詳細設計書</a>、セットアップ・検証・デプロイの操作手順は<a href="../README.md">README</a>を参照する。</p>
           <div class="grid-3">
-            <div class="card"><h3>入力</h3><p>手動登録・編集・削除に加え、PayPay CSVから支払い明細を取り込む。受け取りは手動登録できる。</p></div>
+            <div class="card"><h3>入力</h3><p>支払いの手動登録、一覧での直接編集・メモ保存・一括操作、PayPay CSVの支払い明細取込に対応する。データと清算処理は受け取りも扱うが、現在の追加画面は支払い専用。</p></div>
             <div class="card"><h3>共有</h3><p>一つのアカウントで複数ワークスペースを持ち、共有用は招待した二人で利用する。</p></div>
-            <div class="card"><h3>清算</h3><p>共通支払いと共通収入を重みに応じて配分し、誰が誰へいくら支払うかを算出する。</p></div>
+            <div class="card"><h3>清算</h3><p>共通支払いと共通収入を各明細の保存済み割合で配分し、誰が誰へいくら支払うかを算出する。</p></div>
           </div>
           <h3>用語</h3>
           <div class="table-wrap"><table>
@@ -437,7 +439,7 @@
             <tbody>
               <tr><td>ワークスペース</td><td>明細、設定、清算を分離する家計管理単位。個人用または共有用。</td></tr>
               <tr><td>共通費</td><td>共有ワークスペースの二人で負担する支払い、または二人に帰属する収入。</td></tr>
-              <tr><td>重み</td><td>正味共通費を二人へ配分する相対値。例: 6 と 4。</td></tr>
+              <tr><td>負担割合（重み）</td><td>明細ごとに保存する参加者間の相対値。例: 6 と 4。ワークスペースの割合は新しい共有費の初期値に用いる。</td></tr>
               <tr><td>清算</td><td>実際の支払い・受け取りと目標負担額の差を解消するための送金額を確定する操作。</td></tr>
               <tr><td>取引担当者</td><td>支払い時は支払者、受け取り時は受取者を表す。本設計上の内部的な総称。</td></tr>
             </tbody>
@@ -448,25 +450,28 @@
           <h2>2. スコープ</h2>
           <div class="grid-2">
             <div class="card">
-              <span class="tag fixed">初期リリース</span>
+              <span class="tag fixed">実装済み</span>
               <ul class="checklist">
                 <li>Googleアカウントによるログイン／ログアウト</li>
+                <li>管理者による利用者登録・利用停止と個人設定での表示名変更</li>
                 <li>個人・共有ワークスペースの作成と切り替え</li>
                 <li>メールアドレス指定による一名の招待と承認</li>
-                <li>取引明細の一覧、追加、編集、削除</li>
+                <li>取引明細の一覧、追加、直接編集・自動保存、メモ、一括削除・ルール適用</li>
+                <li>列ごとの値による絞り込みとユーザー・ワークスペース別の条件保存</li>
                 <li>PayPay CSVの支払い明細を対象とする確認画面付きインポート</li>
-                <li>取引先等に応じた費用区分のデフォルト設定</li>
-                <li>重み付きの共通費清算と清算完了</li>
+                <li>取引先に応じた費用区分・負担割合の共有ルールと優先順の並べ替え</li>
+                <li>明細ごとの割合による共通費清算、清算完了、最新20件の清算履歴</li>
                 <li>確認操作付きのワークスペース削除</li>
               </ul>
             </div>
             <div class="card">
               <span class="tag future">将来対応</span>
               <ul>
-                <li>月次サマリ・グラフ</li>
+                <li>月次集計の拡充・グラフ（現在はホームに支払い指標を表示）</li>
                 <li>Notionへの記録・同期</li>
                 <li>Appleアカウントログイン</li>
                 <li>三人以上の共有ワークスペース</li>
+                <li>受け取りの入力UI、清算取消、招待辞退、メール自動送信</li>
               </ul>
               <p><span class="tag excluded">対象外</span> 実際の送金・決済代行は行わない。</p>
             </div>
@@ -495,7 +500,7 @@
               <div class="diagram-down">↕</div>
               <div class="diagram-flow">
                 <div class="diagram-node"><strong>Auth.js</strong><small>セッション管理<br />Google / テスト認証</small></div>
-                <div class="diagram-node"><strong>Route Handler</strong><small><code>/api/app</code><br />入力検証・認可</small></div>
+                <div class="diagram-node"><strong>Route Handler</strong><small>画面・更新／重複確認／利用者管理<br />入力検証・認可</small></div>
                 <div class="diagram-node"><strong>ドメイン処理</strong><small>Repository<br />清算計算・取込処理</small></div>
               </div>
             </div>
@@ -511,13 +516,18 @@
               </div>
             </div>
           </div>
-          <p class="diagram-legend"><span>ブラウザはDBへ直接接続しない</span><span>全更新でセッションと所属を検証</span><span>外部通信はTLSで保護</span></p>
+          <p class="diagram-legend"><span>ブラウザはDBへ直接接続しない</span><span>利用可否と操作ごとの権限を検証</span><span>外部通信はTLSで保護</span></p>
           <div class="grid-2">
-            <div class="card"><h3>認証</h3><p>Google OAuthを利用する。Googleから取得する情報は識別子、氏名、メールアドレス、プロフィール画像に限定する。</p></div>
+            <div class="card"><h3>認証</h3><p>Google OAuthの基本プロフィール・メールを用い、事前登録された有効な利用者だけを認証する。Cakeの内部ユーザーIDをセッションに保持し、表示名はCakeの設定を維持する。</p></div>
             <div class="card"><h3>デプロイ</h3><p>Vercelへ配置し、Neonの接続文字列とGoogle OAuth情報を暗号化された環境変数として設定する。</p></div>
           </div>
-          <div class="note">ブラウザからNeonへ直接接続しない。全ての更新はサーバー側でログイン状態とワークスペース所属を検証してから実行する。</div>
+          <div class="note">通常APIはセッションとDB上の利用可否を確認する。ワークスペースの参照・更新は所属、招待承認はトークン・宛先メール・期限、利用者管理は管理者権限を検証する。</div>
           <div class="warning">ローカル・Preview環境では <code>AUTH_MODE=test</code> により、固定IDを持つテストユーザーA/Bを選択して通常のAuth.jsセッションを発行できる。Vercel Productionではサーバー側で常に無効化し、Googleログインだけを提供する。</div>
+          <h3>画面ごとのデータ取得</h3>
+          <p>初回表示、ワークスペース切替、ホーム・取引明細・清算への移動は<code>full</code>で明細・清算・履歴まで取得する。取込・設定への移動と保存後は<code>metadata</code>でユーザー、ワークスペース一覧、招待、選択先、参加者、ルールを取得する。同じワークスペースでは取得済みの明細・清算・履歴を保持し、選択先が変われば全データを再取得する。</p>
+          <p>通常のログイン済み<code>GET /api/app</code>は利用可否確認と画面用の集約取得を各1 SQLで行い、<code>full</code>・<code>metadata</code>ともに2 SQL・2回のNeon往復となる。初めてのワークスペース作成などでは追加処理がある。読込ではプロフィールをDBへ書き戻さない。</p>
+          <h3>Preview・Productionの配置</h3>
+          <p>修正と必要な検証が完了したら<code>npm run deploy:preview</code>で現在のローカルファイルをVercel Previewへ配置し、成功後に固定URL <code>https://cake-preview-fumin1.vercel.app</code>を更新する。Preview専用DBを使い、ビルド時に未適用マイグレーション、テスト認証時のテストデータ登録、アプリビルドの順に実行する。ProductionのビルドはDB準備を行わず、公開前にマイグレーションを適用する。具体的な環境設定と操作はREADME、作業規則は<code>AGENTS.md</code>に従う。</p>
         </section>
 
         <section id="requirements">
@@ -525,19 +535,21 @@
           <div class="table-wrap"><table>
             <thead><tr><th>ID</th><th>機能</th><th>仕様</th><th>主な例外</th></tr></thead>
             <tbody>
-              <tr><td>AUTH-01</td><td>Googleログイン</td><td>Google OAuthで認証し、初回ログイン時にユーザー情報をDBへ作成する。</td><td>拒否・期限切れ時はログイン画面へ戻し、理由を表示。</td></tr>
+              <tr><td>AUTH-01</td><td>Googleログイン</td><td>Googleの確認済みメールがDB上の有効な登録者と一致する場合に認証する。</td><td>未登録・利用停止・認証失敗はログイン不可。</td></tr>
+              <tr><td>AUTH-02</td><td>利用者管理・個人設定</td><td>管理者が通常利用者を登録・停止し、各利用者が表示名を変更できる。</td><td>有効な通常利用者は管理者を含め二人まで。管理者の停止は不可。</td></tr>
               <tr><td>WS-01</td><td>ワークスペース作成</td><td>名称と種別（個人／共有）を指定。作成者をオーナーとして登録する。</td><td>同一名は許可。共有用の参加者上限は二人。</td></tr>
-              <tr><td>WS-02</td><td>招待</td><td>メールアドレスで一名を招待し、対象者がGoogleログイン後に承認する。</td><td>既参加者、三人目、自分自身への招待は禁止。</td></tr>
-              <tr><td>WS-03</td><td>重み設定</td><td>共有ワークスペースの各参加者に正の重みを設定する。</td><td>0以下、未入力は保存不可。</td></tr>
-              <tr><td>WS-04</td><td>ワークスペース削除</td><td>対象名の入力確認後、関連データを含めて削除する。</td><td>取り消し不可。処理前に再認証・所属を検証。</td></tr>
-              <tr><td>TX-01</td><td>明細一覧</td><td>ワークスペース単位で表示。日時、取引先、方法、種別、金額、担当者、費用区分、清算状態、取引IDを扱う。</td><td>大量件数に備えページ分割する。</td></tr>
-              <tr><td>TX-02</td><td>追加・編集</td><td>全項目をフォームで入力・更新する。金額は正の整数円として保存。</td><td>必須値・日時・金額・重複IDを検証。</td></tr>
-              <tr><td>TX-03</td><td>削除</td><td>確認後に対象明細を削除する。</td><td>清算済み明細は編集・削除不可。</td></tr>
-              <tr><td>IMP-01</td><td>CSV読込</td><td>PayPay CSVから「取引内容＝支払い」の行だけを抽出し、登録前の確認表を表示する。</td><td>形式不正、文字化け、必須列不足、重複を行単位で表示。</td></tr>
-              <tr><td>IMP-02</td><td>一括変更</td><td>確認表で複数行を選択し、費用区分と取引担当者を一括変更できる。</td><td>エラー行は登録不可。</td></tr>
-              <tr><td>RULE-01</td><td>デフォルトルール</td><td>取引先の部分一致条件に応じ、インポート時の費用区分を初期設定する。</td><td>優先順位が最も高い一致ルールを適用。</td></tr>
-              <tr><td>SET-01</td><td>清算計算</td><td>未清算の共通費を対象に、重みと実質負担から送金方向・金額を表示する。</td><td>対象0件の場合は完了操作不可。</td></tr>
-              <tr><td>SET-02</td><td>清算完了</td><td>対象明細に清算済みフラグを立て、計算スナップショットを履歴保存する。</td><td>同時更新による二重清算を防止。</td></tr>
+              <tr><td>WS-02</td><td>招待</td><td>宛先メールを指定して有効期限7日の招待リンクを発行し、対象者がログイン後に承認する。同じ宛先への再発行は旧リンクを置き換える。</td><td>自分自身・三人目の招待は不可。Google認証では事前の利用者登録も必要。</td></tr>
+              <tr><td>WS-03</td><td>デフォルト割合</td><td>共有費の初期値となる参加者ごとの重みを設定する。保存済み明細の割合は変えない。</td><td>0以上の整数で、全員0は不可。画面での変更は二人参加後。</td></tr>
+              <tr><td>WS-04</td><td>名称変更・削除</td><td>参加者が名称を変更でき、対象名の入力と確認後に関連データごと削除できる。作成後の種別変更は不可。</td><td>削除取消は不可。セッション・利用可否・所属を確認する。</td></tr>
+              <tr><td>TX-01</td><td>明細一覧・絞り込み</td><td>ワークスペースの全明細を表示し、列ごとの候補値を選択して絞り込む。条件は端末内に保存する。</td><td>ページ分割なし。編集中・保存中・保存失敗の行は条件外でも保持する。</td></tr>
+              <tr><td>TX-02</td><td>追加・直接編集</td><td>支払いをモーダルから追加。一覧の日時・取引先・方法・金額・担当者・費用区分・割合を編集し自動保存する。</td><td>清算済みの金額・割合等は変更不可。種別・取引IDは一覧で編集しない。</td></tr>
+              <tr><td>TX-03</td><td>メモ</td><td>最大2,000文字のメモを独立した保存処理で更新する。</td><td>清算済みもメモは編集可。保存失敗時は入力を保持し再試行できる。</td></tr>
+              <tr><td>TX-04</td><td>選択明細の一括操作</td><td>チェックした未清算明細を確認後に削除、または現在の共有費ルールで費用区分・割合を更新する。</td><td>一度に最大5,000件。対象不足・清算済み混在等では全件を中止する。</td></tr>
+              <tr><td>IMP-01</td><td>CSV読込</td><td>PayPay CSVから「取引内容＝支払い」の行だけを抽出し、登録前の確認表を表示する。</td><td>必須ヘッダー不足は読込を中止。日時・金額・必須値・重複は行単位で表示。</td></tr>
+              <tr><td>IMP-02</td><td>確認・変更・登録</td><td>支払者を取込全体に指定し、選択行の費用区分を一括変更できる。行ごとに割合・負担金額を調整して登録する。</td><td>エラー・登録済み行は選択不可。一度の登録は最大2,000明細。</td></tr>
+              <tr><td>RULE-01</td><td>共有費ルール</td><td>取引先の部分一致で費用区分と割合を決める。共有の一覧で追加・直接編集・有効化・並べ替え・一括削除できる。</td><td>有効な一致ルールのうち先頭を採用。更新だけでは既存明細へ適用しない。</td></tr>
+              <tr><td>SET-01</td><td>清算計算</td><td>二人参加中の共有ワークスペースの全未清算共通費から、各明細の保存済み割合と実質負担で送金を算出する。</td><td>期間指定なし。対象0件なら完了不可、送金額0円でも対象があれば完了可。</td></tr>
+              <tr><td>SET-02</td><td>清算完了</td><td>サーバーで最新データを再取得し、対象と割合を含む計算結果を履歴へ保存して、同一トランザクションで清算済みにする。</td><td>再取得後の対象変更・二重清算を検出したら全体を中止する。</td></tr>
             </tbody>
           </table></div>
         </section>
@@ -545,8 +557,8 @@
         <section id="screens">
           <h2>5. 画面設計</h2>
           <p class="lead">PCでは左ナビゲーションと横長テーブル、スマートフォンでは下部ナビゲーションとカード／横スクロールを用いる。</p>
-          <div class="screen" aria-label="PC版明細画面の概略図">
-            <div class="screen-nav"><b>Cake</b><div>ホーム</div><div>取引明細</div><div>清算</div><div>取込</div><div>設定</div></div>
+          <div class="screen" aria-label="PC版ホーム画面の概略図">
+            <div class="screen-nav"><b>Cake</b><div>ホーム</div><div>取引明細</div><div>取込</div><div>清算</div><div>設定</div></div>
             <div class="screen-main">
               <div class="screen-head"><strong>ふたりの家計 ▾</strong><span class="mock-button">＋ 明細を追加</span></div>
               <div class="mock-kpis"><div class="mock-kpi">今月の支払い<strong>¥84,320</strong></div><div class="mock-kpi">未清算の共通費<strong>¥31,240</strong></div><div class="mock-kpi">次の清算<strong>B → A ¥5,200</strong></div></div>
@@ -556,14 +568,14 @@
           <div class="table-wrap"><table>
             <thead><tr><th>画面ID</th><th>画面</th><th>主な内容</th><th>スマートフォン対応</th></tr></thead>
             <tbody>
-              <tr><td>SC-01</td><td>ログイン</td><td>サービス説明、Googleでログイン、利用規約・プライバシー導線。</td><td>一画面中央配置。</td></tr>
-              <tr><td>SC-02</td><td>ホーム</td><td>選択中ワークスペース、未清算額、清算結果、最近の明細、主要操作。</td><td>指標を縦積み。</td></tr>
-              <tr><td>SC-03</td><td>取引明細</td><td>検索、絞り込み、ページ分割、追加、行編集、削除。</td><td>主要項目をカード表示し、詳細を展開。</td></tr>
-              <tr><td>SC-04</td><td>明細フォーム</td><td>日時、取引先、方法、種別、金額、担当者、費用区分、取引ID。</td><td>全画面シート。</td></tr>
-              <tr><td>SC-05</td><td>CSV取込</td><td>支払い行を対象に、ファイル選択→プレビュー→一括変更→検証→登録結果。</td><td>操作欄を画面下に固定。</td></tr>
-              <tr><td>SC-06</td><td>清算</td><td>対象期間、対象明細、二人の内訳、送金方向・金額、完了ボタン、履歴。</td><td>計算内訳を縦積み。</td></tr>
-              <tr><td>SC-07</td><td>ワークスペース設定</td><td>名称、種別、参加者、招待、重み、デフォルトルール。</td><td>設定をセクション分割。</td></tr>
-              <tr><td>SC-08</td><td>招待承認</td><td>招待元・ワークスペース名を確認し、参加または辞退。</td><td>一画面中央配置。</td></tr>
+              <tr><td>SC-01</td><td>ログイン</td><td>Cakeロゴ、Googleログイン、同意文、認証エラー。テスト認証時はA/Bの選択ボタン。</td><td>一画面中央配置。</td></tr>
+              <tr><td>SC-02</td><td>ホーム</td><td>今月の支払い、未清算の共通費、次の清算、最近6件の明細、招待件数、主要操作。</td><td>指標を縦積み。</td></tr>
+              <tr><td>SC-03</td><td>取引明細</td><td>列フィルタ、追加、直接編集・自動保存、割合・金額、メモ、選択明細の一括削除・ルール適用。</td><td>取引先・日時・金額等の概要をカード表示し、編集欄を展開。</td></tr>
+              <tr><td>SC-04</td><td>明細追加モーダル</td><td>日時、取引先、方法、金額、支払者、費用区分、割合・金額、メモ。支払い固定、IDは自動発行。</td><td>幅を画面内に収め、モーダル内を縦スクロール。</td></tr>
+              <tr><td>SC-05</td><td>CSV取込</td><td>PayPay形式、ファイル選択・ドロップ、重複確認、支払者指定、選択行の費用区分変更、行ごとの割合調整、登録。</td><td>明細カードの詳細を展開し、登録操作欄を固定。</td></tr>
+              <tr><td>SC-06</td><td>清算</td><td>共通支払い・収入、正味共通費、二人の負担、送金方向・金額、確認付き完了、最新20件の履歴。</td><td>計算内訳を縦積み。</td></tr>
+              <tr><td>SC-07</td><td>設定</td><td>表示名・ログアウト、ワークスペース名称・種別表示・参加者・招待・デフォルト割合・共有費ルール・削除、管理者のみ利用者管理。</td><td>設定をセクション分割。</td></tr>
+              <tr><td>SC-08</td><td>招待承認</td><td>招待されたアカウントでログインし、トークンを使って承認する。一般的な招待案内を表示し、辞退操作はない。</td><td>一画面中央配置。</td></tr>
             </tbody>
           </table></div>
 
@@ -571,17 +583,28 @@
           <div class="table-wrap"><table>
             <thead><tr><th>表示名</th><th>形式／候補</th><th>備考</th></tr></thead>
             <tbody>
-              <tr><td>取引日時</td><td><code>yyyy/mm/dd hh:mm:ss</code></td><td>保存はタイムゾーン付き日時、表示は日本時間を想定。</td></tr>
+              <tr><td>選択</td><td>チェックボックス</td><td>未清算明細だけ選択可能。見えている対象の全選択と選択解除に対応。</td></tr>
+              <tr><td>取引日時</td><td>日本時間の日時</td><td>DBはタイムゾーン付き日時。一覧の入力は秒・ミリ秒を扱う。</td></tr>
               <tr><td>取引先</td><td>文字列</td><td>店舗名・相手名。</td></tr>
               <tr><td>取引方法</td><td>文字列</td><td>PayPayカード、現金など。</td></tr>
-              <tr><td>取引種別</td><td>支払い／受け取り</td><td>CSVの出金・入金に対応。</td></tr>
-              <tr><td>取引金額</td><td>整数円</td><td>画面では桁区切りを表示。</td></tr>
-              <tr><td>支払者／受取者</td><td>参加者</td><td>種別に応じて見出しを切り替える。</td></tr>
+              <tr><td>取引金額</td><td>整数円</td><td>整数入力。概要・清算済みの表示では桁区切りを用いる。</td></tr>
+              <tr><td>支払者</td><td>参加者</td><td>受け取り明細の場合も同じ列で受取者を表示・編集する。</td></tr>
               <tr><td>費用区分</td><td>個人費／共通費</td><td>個人用ワークスペースでも保持する。</td></tr>
+              <tr><td>支払い割合（参加者名）</td><td>割合（%）／金額（円）</td><td>一人の値を変えると相手の分を自動計算。個人費は担当者100%、清算済みは参照のみ。</td></tr>
+              <tr><td>メモ</td><td>最大2,000文字</td><td>空欄可。清算済みも編集可能。</td></tr>
               <tr><td>清算状態</td><td>未清算／清算済み／対象外</td><td>共通費のみ清算対象。個人費は対象外。</td></tr>
-              <tr><td>取引ID</td><td>文字列</td><td>PayPayでは取引番号を利用。手動追加時はアプリが自動発行。</td></tr>
+              <tr><td>更新状態</td><td>保存中の表示</td><td>失敗時は行の近くに理由と再試行操作を表示。</td></tr>
             </tbody>
           </table></div>
+          <p>取引種別と外部取引IDはデータとして保持するが、現在の一覧の表示列・編集欄には含めない。PayPay IDは日本時間の取引日時と取引番号から<code>PayPay_YYYYMMDDHHMMSS_{取引番号}</code>を生成し、日時編集後も保持する。手動追加は<code>manual_{UUID}</code>を自動発行する。</p>
+          <h3>直接編集・一括操作</h3>
+          <p>手動追加画面は支払い・共通費・デフォルト割合を初期値とし、取引先に一致するルールがあれば反映する。費用区分・割合を手動調整した後は自動適用を止め、「取引先のルールを適用」で初期値を再適用できる。</p>
+          <p>入力欄を離れるかEnterで保存し、担当者・費用区分の選択は即時保存する。メモは入力欄を離れるかCtrl+Enterで独立して保存し、ほかの項目の保存から上書きしない。保存失敗時は入力を保持する。</p>
+          <p>絞り込み後も選択を保持し、非表示の選択件数を表示する。一括操作前に選択行の編集を保存し、処理中は編集を止める。削除またはルール適用は選択全体をDB内で検証・更新する。ルールに一致しない明細は個人費になる。</p>
+          <h3>取引明細のフィルタ保存</h3>
+          <p>各列の候補値は検索・複数選択でき、同じ列の選択値はOR、異なる列の条件はANDで組み合わせる。候補の件数は現在表示中の明細を基準とする。編集・メモ入力中の行は条件外になっても編集終了まで表示する。</p>
+          <p>列ごとの絞り込み条件はブラウザの<code>localStorage</code>へ自動保存し、別の画面から戻ったときや再読み込み後に復元する。ログインユーザーとワークスペースごとに保存を分け、すべての絞り込みを解除すると保存済み条件も削除する。</p>
+          <p>条件はサーバーへ保存せず、別の端末・ブラウザへ同期しない。ブラウザのサイトデータを削除すると初期状態に戻る。保存領域が利用できない場合や保存内容が壊れている場合も、画面上の絞り込み操作を継続できる。</p>
         </section>
 
         <section id="settlement">
@@ -590,18 +613,22 @@
           <h3>対象</h3>
           <ul>
             <li>選択中の共有ワークスペースに属する。</li>
+            <li>ワークスペースに二人の参加者がいる。</li>
             <li>費用区分が「共通費」である。</li>
             <li>清算済みフラグが未設定である。</li>
             <li>支払いと受け取りの両方を含む。</li>
           </ul>
           <h3>計算式</h3>
           <div class="formula">正味共通費 = 共通支払い合計 − 共通受け取り合計</div>
-          <div class="formula">各人の目標負担 = 正味共通費 × 本人の重み ÷ 二人の重み合計</div>
+          <div class="formula">各明細の負担 = 符号付き金額 × 明細に保存した本人の重み ÷ 明細に保存した二人の重み合計</div>
+          <div class="formula">Aの目標負担 = 全対象明細のA負担を合算して1円単位に丸める<br />Bの目標負担 = 正味共通費 − Aの目標負担</div>
           <div class="formula">各人の実質負担 = 本人の支払い合計 − 本人の受け取り合計</div>
           <div class="formula">各人の差額 = 実質負担 − 目標負担</div>
           <p>差額が正の人は受取側、負の人は支払側とし、二人のため差額の絶対値は一致する。</p>
+          <p>支払いは正、受け取りは負の金額として配分する。A・Bの順序は参加日時、同日時なら内部ユーザーIDで固定する。負担割合は明細の保存値を使い、現在のデフォルト割合やルール設定は清算時に再適用しない。</p>
+          <p>重みは0以上の整数で全員0は不可。個人費は担当者1・相手0を保存し清算対象から除外する。二人目の参加時は過去明細・固定割合ルールの新参加者を0で補い、記録済みの配分を維持する。</p>
 
-          <h3>計算例（重み A:B = 6:4）</h3>
+          <h3>計算例（両明細の保存済み割合 A:B = 6:4）</h3>
           <div class="table-wrap"><table>
             <thead><tr><th></th><th>A</th><th>B</th><th>合計</th></tr></thead>
             <tbody>
@@ -613,16 +640,18 @@
             </tbody>
           </table></div>
           <div class="note"><strong>表示結果:</strong> BがAへ5,200円支払う。</div>
+          <p>同じ支払い・受け取りでも、支払いを6:4、受け取りを1:1で保存した場合は、Aの目標負担が6,000−1,000＝5,000円、Bが3,000円となり、BがAへ5,000円支払う。</p>
 
           <h3>清算完了処理</h3>
           <ol>
-            <li>画面表示時点の対象明細と計算結果を再取得する。</li>
-            <li>完了直前に対象明細が未清算のままであることを再検証する。</li>
-            <li>清算履歴へ参加者、重み、集計値、送金方向・金額を保存する。</li>
+            <li>利用者が確認した後、サーバーで最新の対象明細と計算結果を再取得する。</li>
+            <li>DBトランザクション内でワークスペースをロックし、再取得した対象と現在の対象（担当者・種別・金額・費用区分・保存割合を含む）が一致することを確認する。</li>
+            <li>清算履歴へ参加者、集計値、送金方向・金額、対象明細とその保存割合を含む計算スナップショットを保存する。現在のデフォルト重みも互換用のスナップショットとして保持する。</li>
             <li>対象明細を同じDBトランザクション内で清算済みに更新する。</li>
             <li>完了後は履歴を表示し、実際の送金は利用者が別途行う。</li>
           </ol>
-          <div class="note">1円未満が生じる場合はAの目標負担を四捨五入し、Bの目標負担を正味共通費との差額として合計を一致させる。</div>
+          <div class="note">各明細では丸めず、整数分数で正確に合算してからAの目標負担を最も近い整数円に丸める。ちょうど0.5円の端数は正の方向に丸める（<code>Math.round</code>相当）。Bは正味共通費との差額として二人の合計を一致させる。一覧の金額配分表示は明細内で合計を一致させるための表示計算であり、清算は保存済みの割合で計算する。</div>
+          <p>清算対象があれば送金額0円でも完了できる。対象変更や二重清算では処理全体をロールバックする。期間を指定した清算や清算取消は提供しない。</p>
         </section>
 
         <section id="import">
@@ -631,7 +660,7 @@
           <div class="flow">
             <div class="flow-step"><strong>1. 選択</strong>CSVファイルと取込先ワークスペースを選択。</div>
             <div class="flow-step"><strong>2. 解析</strong>ヘッダー検証。「取引内容＝支払い」の行だけを抽出。</div>
-            <div class="flow-step"><strong>3. 初期設定</strong>取引先等のルールを適用し、費用区分を設定。</div>
+            <div class="flow-step"><strong>3. 初期設定</strong>取引先のルールから費用区分と割合を設定し、重複を確認。</div>
             <div class="flow-step"><strong>4. 確認・編集</strong>専用表で行選択、一括変更、個別変更。</div>
             <div class="flow-step"><strong>5. 登録</strong>再検証し、重複を除いて一括登録。</div>
           </div>
@@ -640,31 +669,33 @@
           <div class="table-wrap"><table>
             <thead><tr><th>PayPay列</th><th>アプリ項目</th><th>変換</th></tr></thead>
             <tbody>
-              <tr><td>取引日</td><td>取引日時</td><td><code>yyyy/mm/dd hh:mm:ss</code>として解析。</td></tr>
+              <tr><td>取引日</td><td>取引日時</td><td><code>yyyy/mm/dd hh:mm:ss</code>を日本時間として検証し、ISO日時へ変換。</td></tr>
               <tr><td>出金金額（円）</td><td>取引金額</td><td>カンマと引用符を除去。値がある場合は「支払い」。</td></tr>
               <tr><td>入金金額（円）</td><td>対象外</td><td>初期版のPayPay CSV取込では使用しない。</td></tr>
-              <tr><td>取引内容</td><td>取込判定</td><td>値が「支払い」と完全一致する行だけを対象とする。</td></tr>
-              <tr><td>取引先</td><td>取引先</td><td>原文を保持し、デフォルトルールの判定にも使用。</td></tr>
-              <tr><td>取引方法</td><td>取引方法</td><td>原文を保持。</td></tr>
-              <tr><td>利用者</td><td>参考情報</td><td>PayPayの「本人」はアプリ利用者へ自動対応できないため、取込画面で担当者を設定。</td></tr>
-              <tr><td>取引番号</td><td>取引ID</td><td>前後空白を除去し、重複判定に使用。</td></tr>
+              <tr><td>取引内容</td><td>取込判定</td><td>前後空白を除いた値が「支払い」と完全一致する行だけを対象とする。</td></tr>
+              <tr><td>取引先</td><td>取引先</td><td>前後空白を除去し、ルール判定にも使用。</td></tr>
+              <tr><td>取引方法</td><td>取引方法</td><td>前後空白を除去。空欄は「PayPay」。</td></tr>
+              <tr><td>利用者</td><td>未使用</td><td>CSVの値には対応付けず、取込画面で全行に共通の支払者を指定。</td></tr>
+              <tr><td>取引番号</td><td>外部ID</td><td>前後空白を除去し、日本時間の取引日を秒まで含む<code>YYYYMMDDHHMMSS</code>へ正規化して、<code>PayPay_{取引日}_{取引番号}</code>を生成。ワークスペース内の重複判定に使用。</td></tr>
             </tbody>
           </table></div>
 
           <h3>取込確認表</h3>
           <ul>
             <li>各行に「登録する」チェックを持ち、初期値は検証成功かつ未登録ならオン。</li>
-            <li>費用区分はルール適用後の値を表示し、利用者が登録前に変更できる。</li>
-            <li>複数行を選択し、「個人費へ変更」「共通費へ変更」「担当者を変更」を実行できる。</li>
+            <li>有効な一致ルールのうち優先順の先頭を適用し、費用区分・割合を表示する。一致なしは個人費。共通費ルールの割合未指定時はワークスペースのデフォルト割合を用いる。</li>
+            <li>複数行を選択して「個人費へ変更」「共通費へ変更」を実行できる。支払者は取込全体で指定し、行ごとの費用区分と割合・負担金額も調整できる。取引日時・取引先・方法・取引金額は確認表では参照のみ。</li>
             <li>登録済み取引ID、形式不正、必須値不足を色と理由で表示する。</li>
-            <li>最終登録はサーバー側でも再度ファイル内容・権限・重複を検証する。</li>
+            <li>CSV解析はブラウザで行い、既存IDを専用APIで最大2,000件ずつ確認する。最終登録では選択した構造化明細だけを送信し、サーバー側で項目・所属・担当者・割合・重複を再検証する。</li>
+            <li>CSV内の同じID・同じ金額・同じ取引先の繰り返しは後続行を選択不可とする。金額・取引先が異なる衝突は該当行をエラーにする。DB登録時の衝突は取込全体を中止し、内容が一致する既存重複は省略する。</li>
+            <li>一度の登録は最大2,000明細。登録件数とスキップ件数を取込履歴へ記録する。スキップ数には対象支払い行の未選択・不正・重複などを含む。</li>
           </ul>
           <div class="note">CSVファイル自体は永続保存せず、変換後の明細と取込日時・取込者などの監査情報のみ保存する方針とする。</div>
         </section>
 
         <section id="data">
           <h2>8. データ設計</h2>
-          <p class="lead">主キーはUUID、日時はタイムゾーン付きで保存する。金額は浮動小数ではなく整数円で保持する。</p>
+          <p class="lead">ワークスペース・明細・招待・清算等のIDはUUID、ユーザーIDはtext、参加者・清算明細は複合キーとする。日時はタイムゾーン付き、金額は整数円、負担割合は参加者IDをキーとするJSONで保存する。</p>
           <h3>関連</h3>
           <div class="formula">User ─&lt; WorkspaceMember &gt;─ Workspace ─&lt; Transaction ─&gt; Settlement</div>
           <div class="formula">Workspace ─&lt; Invitation / DefaultRule / Settlement</div>
@@ -673,45 +704,52 @@
           <div class="table-wrap"><table>
             <thead><tr><th>テーブル</th><th>主要列</th><th>目的・制約</th></tr></thead>
             <tbody>
-              <tr><td><code>users</code></td><td>id, google_subject, email, name, image_url, created_at</td><td>Google識別子とメールを一意に保持。</td></tr>
+              <tr><td><code>app_users</code></td><td>id, email, name, image_url, is_admin, is_enabled, created_at, updated_at</td><td>内部ユーザーIDと正規化した一意のメールを保持。DBで管理者権限・利用可否を管理。</td></tr>
               <tr><td><code>workspaces</code></td><td>id, name, type, owner_user_id, created_at, updated_at</td><td>typeはPERSONAL／SHARED。</td></tr>
-              <tr><td><code>workspace_members</code></td><td>workspace_id, user_id, role, weight, joined_at</td><td>複合一意制約。共有用はアプリ層とDB処理で最大二人。</td></tr>
-              <tr><td><code>invitations</code></td><td>id, workspace_id, email, token_hash, status, expires_at, invited_by</td><td>招待トークンは平文保存しない。状態はPENDING／ACCEPTED／DECLINED／EXPIRED。</td></tr>
-              <tr><td><code>transactions</code></td><td>id, workspace_id, occurred_at, merchant, method, type, amount_yen, actor_user_id, expense_class, settled_at, external_id, source</td><td>typeはPAYMENT／RECEIPT、expense_classはPERSONAL／SHARED。external_idで重複防止。</td></tr>
-              <tr><td><code>default_rules</code></td><td>id, workspace_id, value, expense_class, priority, enabled</td><td>取引先の部分一致でCSV取込時の初期値を設定。優先順位順に評価。</td></tr>
+              <tr><td><code>workspace_members</code></td><td>workspace_id, user_id, role, weight, joined_at</td><td>複合主キー。weightは共有費のデフォルト重み。個人用一人・共有用最大二人をDBでも強制。</td></tr>
+              <tr><td><code>invitations</code></td><td>id, workspace_id, email, token_hash, status, expires_at, invited_by</td><td>トークンのハッシュを保存。現在はPENDINGからACCEPTEDへ更新し、期限を日時で判定。DBにはDECLINED／EXPIREDも許容するが更新操作はない。</td></tr>
+              <tr><td><code>transactions</code></td><td>id, workspace_id, occurred_at, merchant, method, type, amount_yen, actor_user_id, expense_class, split_weights, memo, settled_at, external_id, source</td><td>PAYMENT／RECEIPTとPERSONAL／SHAREDを保持。明細固有の割合・メモを保存し、workspace_idとexternal_idの組で重複防止。</td></tr>
+              <tr><td><code>default_rules</code></td><td>id, workspace_id, merchant_contains, expense_class, sort_order, split_weights, enabled, priority</td><td>取引先の部分一致で費用区分・割合の初期値を決定。sort_orderの昇順で評価。priorityは旧バージョン互換用に同期。</td></tr>
               <tr><td><code>import_batches</code></td><td>id, workspace_id, imported_by, file_name, total_rows, imported_rows, skipped_rows, created_at</td><td>取込単位の結果を記録。CSV本文は保存しない。</td></tr>
               <tr><td><code>settlements</code></td><td>id, workspace_id, payer_user_id, payee_user_id, amount_yen, weight_snapshot, calculation_snapshot, completed_by, completed_at</td><td>清算時点の計算根拠をJSONスナップショットとして保持。</td></tr>
               <tr><td><code>settlement_transactions</code></td><td>settlement_id, transaction_id</td><td>どの明細がどの清算に含まれたかを固定。</td></tr>
+              <tr><td><code>app_user_access_guard</code></td><td>singleton, revision</td><td>有効な通常利用者の人数変更を直列化し、同時登録でも上限二人を保持する内部テーブル。</td></tr>
+              <tr><td><code>schema_migrations</code></td><td>name, applied_at</td><td>番号付きマイグレーションの適用履歴。未適用分だけを順番に実行。</td></tr>
             </tbody>
           </table></div>
           <h3>データ整合性</h3>
           <ul>
-            <li><code>amount_yen &gt; 0</code>、<code>weight &gt; 0</code>を制約とする。</li>
+            <li>取引金額は正の整数円（PostgreSQL integerの範囲）、清算金額は0円以上。割合は0以上の整数で全員0をAPI側で禁止する。</li>
+            <li>各明細の割合は参加者ID集合と一致させ、個人費は担当者1・それ以外0とする。デフォルト変更で保存済み割合を書き換えない。</li>
             <li>取引担当者は対象ワークスペースの参加者に限る。</li>
             <li>共有ワークスペースへの参加確定は二人までとする。</li>
+            <li>有効な通常利用者は管理者を含め二人までとする。固定テストユーザーA/Bは人数上限から除外する。</li>
             <li>清算済み明細と清算履歴の関連付けをDBトランザクションで一括更新する。</li>
             <li>取引IDは同一ワークスペース内で一意とする。手動追加時はアプリが自動発行する。</li>
+            <li>適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。現行スキーマは001〜006の適用結果。</li>
           </ul>
         </section>
 
         <section id="security">
           <h2>9. 認証・権限設計</h2>
           <div class="grid-2">
-            <div class="card"><h3>認証</h3><ul><li>Google OAuthのみ。</li><li>セッションCookieはSecure、HttpOnly、SameSiteを設定。</li><li>状態変更APIはCSRF対策を有効化。</li><li>OAuth秘密情報はサーバー環境変数のみ。</li></ul></div>
-            <div class="card"><h3>認可</h3><ul><li>全APIでログインを必須化。</li><li>全操作でワークスペース所属を検証。</li><li>二人とも明細・取込・清算を操作可能。</li><li>招待・重み設定も二人が操作可能。</li></ul></div>
+            <div class="card"><h3>認証</h3><ul><li>通常はGoogle OAuth。ローカル・Previewのテスト認証は別モード。</li><li>確認済みメールの有効な登録者だけを許可し、Auth.jsのJWTセッションを使用。</li><li>セッションからアプリ利用者を解決する都度、DBの利用可否を確認。</li><li>OAuth秘密情報とDB接続情報はサーバー環境変数のみ。</li></ul></div>
+            <div class="card"><h3>認可</h3><ul><li>アプリデータAPIはログインを必須化。</li><li>ワークスペースの操作は所属を検証し、二人とも明細・取込・清算・設定・削除を操作可能。</li><li>招待承認は宛先・トークン・期限を検証。</li><li>利用者管理はDBの管理者権限を再確認。変更APIはOriginとJSON形式も確認。</li></ul></div>
           </div>
           <div class="table-wrap"><table>
             <thead><tr><th>操作</th><th>個人用メンバー</th><th>共有用メンバー</th><th>非メンバー</th></tr></thead>
             <tbody>
-              <tr><td>明細参照・追加・編集・削除</td><td>可</td><td>可</td><td>不可</td></tr>
+              <tr><td>明細参照・追加・編集・一括操作</td><td>可</td><td>可</td><td>不可</td></tr>
               <tr><td>CSV取込</td><td>可</td><td>可</td><td>不可</td></tr>
               <tr><td>清算計算・完了</td><td>対象外</td><td>可</td><td>不可</td></tr>
               <tr><td>招待</td><td>対象外</td><td>可</td><td>不可</td></tr>
-              <tr><td>重み変更</td><td>対象外</td><td>可</td><td>不可</td></tr>
+              <tr><td>共有費デフォルト割合の変更</td><td>対象外</td><td>可</td><td>不可</td></tr>
+              <tr><td>ルール編集・並べ替え・名称変更・削除</td><td>可</td><td>可</td><td>不可</td></tr>
             </tbody>
           </table></div>
+          <p>明細の金額・割合等の編集と削除は未清算のみ。メモは清算状態にかかわらず更新できる。利用者の登録・停止はワークスペースの所有者とは独立した管理者専用操作であり、通常メンバーやテストユーザーに権限を付与しない。</p>
           <h3>操作記録</h3>
-          <p>明細と設定に作成者・更新者・作成日時・更新日時を保持する。清算とCSV取込は専用履歴を残し、問題発生時に操作内容を追跡できるようにする。</p>
+          <p>明細は作成者・更新者・作成日時・更新日時、ワークスペースは所有者・作成日時・更新日時、ルールは作成者・作成日時を保持する。清算とCSV取込は専用履歴に完了者／取込者と日時・計算結果／登録件数を残す。汎用の全操作履歴や各項目の変更前後履歴は持たない。</p>
         </section>
 
         <section id="nonfunctional">
@@ -721,54 +759,67 @@
             <tbody>
               <tr><td>対応環境</td><td>現行のChrome、Safari、Edge。PC幅とスマートフォン幅に対応する。</td></tr>
               <tr><td>アクセシビリティ</td><td>キーボード操作、明確なフォーカス、ラベル、色以外の状態表現、十分なコントラストを確保する。</td></tr>
-              <tr><td>性能</td><td>一覧はサーバー側ページ分割。通常操作は体感1秒前後を目標とし、処理中状態を表示する。</td></tr>
-              <tr><td>CSV上限</td><td>ファイルサイズ・行数上限は実装前に決定。処理中にブラウザを固めない設計とする。</td></tr>
-              <tr><td>可用性</td><td>VercelとNeonの無料枠特性に依存。重要データの定期エクスポート手段を運用手順に含める。</td></tr>
-              <tr><td>セキュリティ</td><td>入力検証、パラメータ化SQL、認可、レート制限、秘密情報の非公開を徹底する。</td></tr>
-              <tr><td>日時・通貨</td><td>初期版は日本時間・日本円に固定する。</td></tr>
+              <tr><td>性能</td><td>画面に応じてfull／metadataを使い分け、画面データを集約SQLで取得する。明細は全件取得してブラウザで絞り込む。読込・保存中を表示する。</td></tr>
+              <tr><td>CSV・一括操作上限</td><td>取込登録・重複確認は1リクエスト最大2,000明細／ID、明細一括操作・ルール順序指定は最大5,000件。ファイルサイズ・ブラウザ側解析行数の明示上限はない。</td></tr>
+              <tr><td>可用性</td><td>VercelとNeonの利用環境に依存。アプリ内のデータエクスポート機能は提供していない。Previewは本番と別のDBを使う。</td></tr>
+              <tr><td>セキュリティ</td><td>入力検証、パラメータ化SQL、操作ごとの認可、秘密情報のサーバー管理を行う。アプリ共通のレート制限は実装していない。</td></tr>
+              <tr><td>日時・通貨</td><td>取引日時の入力・表示とPayPay ID生成は日本時間、通貨は日本円。ホームの今月指標はブラウザのローカル月番号で抽出する（現在は年を比較しない）。</td></tr>
+              <tr><td>DB計測</td><td>DBクエリ・トランザクションのアプリ側所要時間を構造化JSONログへ記録する。SQL本文・パラメーター・行データはログへ出さない。</td></tr>
               <tr><td>保守性</td><td>清算計算とCSV変換をUIから分離し、単体テスト可能な純粋関数として実装する。</td></tr>
             </tbody>
           </table></div>
+          <h3>DBクエリの所要時間ログ</h3>
+          <p><code>DB_QUERY_LOG</code>の<code>all</code>は成功・失敗をすべて、<code>slow</code>は遅い成功とすべての失敗、<code>off</code>は出力なし。未設定時はPreview・ローカル開発で<code>all</code>、Productionおよびそれ以外で<code>slow</code>。遅い判定の閾値は<code>DB_SLOW_QUERY_MS</code>（既定500ミリ秒）。</p>
+          <p>計測時間はNeon往復・DB処理・結果解析を含み、トランザクションは一括実行の総時間を1件で記録する。匿名クエリハッシュ、固定テーブル名、SQL文数、成否等を含むが、エラーメッセージも記録しない。API全体や画面全体の所要時間とは異なる。運用方法とログ項目はREADMEを参照する。</p>
         </section>
 
         <section id="acceptance">
           <h2>11. 主要受入条件</h2>
           <ol>
-            <li>Googleアカウントでログインし、再訪時も本人のワークスペースだけが表示される。</li>
+            <li>登録済みの有効なGoogleアカウントでログインし、本人のワークスペースだけが表示される。未登録・利用停止のアカウントは既存セッションからも利用できない。</li>
+            <li>管理者のみ通常利用者を登録・停止でき、同時登録でも有効な通常アカウントは二人を超えない。表示名の変更はGoogle再ログインでも維持する。</li>
             <li>一アカウントで個人用・共有用を複数作成し、データが混ざらず切り替えられる。</li>
-            <li>共有用へメール招待した相手が承認し、二人で同じ明細を操作できる。</li>
-            <li>明細の全指定列を一覧表示し、追加・編集・削除できる。</li>
+            <li>共有用で指定メール宛ての招待リンクを作成し、有効な宛先利用者が承認すると、二人で同じ明細を操作できる。</li>
+            <li>支払いを追加し、一覧の編集可能な項目を自動保存できる。保存失敗時に入力が保持され再試行できる。</li>
+            <li>列ごとの絞り込み条件をユーザー・ワークスペース別に保存・復元でき、編集中の明細と絞り込み後の選択が保持される。</li>
+            <li>未清算の選択明細を一括削除・ルール適用できる。対象不足や清算済み混在で部分的な更新は発生しない。</li>
             <li>サンプルPayPay CSVから「取引内容＝支払い」の行だけをプレビューできる。</li>
-            <li>取込前にデフォルトルールが反映され、選択行の費用区分を一括変更できる。</li>
-            <li>同じ取引IDを再度取り込もうとした際に重複登録されず、理由が表示される。</li>
-            <li>Aが10,000円支払い、Bが2,000円受け取り、重み6:4の場合「BがAへ5,200円」と表示される。</li>
+            <li>取込前にルールの費用区分・割合が反映され、支払者指定、選択行の費用区分一括変更、行ごとの割合・負担金額調整ができる。</li>
+            <li>同じ日本時間の取引日・取引番号を再度取り込もうとした際に重複登録されず、理由が表示される。取引番号が同じでも日時が異なれば別明細として登録できる。</li>
+            <li>Aが10,000円支払い、Bが2,000円受け取り、両明細の保存割合6:4なら「BがAへ5,200円」。受け取りだけ1:1なら5,000円。デフォルト変更は保存済み明細の清算額を変えない。</li>
             <li>清算完了後、対象明細だけが清算済みとなり、次回計算から除外される。</li>
             <li>清算完了を同時に二回実行しても、二重の清算履歴が作成されない。</li>
+            <li>清算済み明細の金額・割合等の編集と削除は拒否されるが、メモだけは更新できる。</li>
+            <li>取込・設定は明細を取得せずメタデータを更新し、ホーム・明細・清算へ戻ると共有相手の変更を再取得する。</li>
             <li>スマートフォンで主要操作が横幅からはみ出さず実行できる。</li>
           </ol>
         </section>
 
         <section id="open-items">
           <span class="tag fixed">確定</span>
-          <h2>12. 確定した設計判断</h2>
-          <p class="lead">Version 1.0で確定した初期リリースの設計判断を示す。</p>
+          <h2>12. 現行の設計判断</h2>
+          <p class="lead">Version 1.1では、2026-10-10時点の実装に合わせた設計判断と制約を示す。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>No.</th><th>設計判断</th><th>仕様</th></tr></thead>
             <tbody>
-              <tr><td>D1</td><td>端数</td><td>Aを四捨五入し、Bは合計との差額。</td></tr>
-              <tr><td>D2</td><td>取引ID</td><td>同一ワークスペース内で重複禁止。手動明細は自動発行。</td></tr>
-              <tr><td>D3</td><td>清算済み明細</td><td>編集・削除禁止。初期版に清算取消は設けない。</td></tr>
-              <tr><td>D4</td><td>デフォルトルール</td><td>取引先の部分一致。優先順位が最も高い最初のルールを適用。</td></tr>
+              <tr><td>D1</td><td>端数</td><td>明細の保存割合による負担を正確に合算してAをMath.round相当に丸め、Bは正味合計との差額。</td></tr>
+              <tr><td>D2</td><td>取引ID</td><td>主キーはUUID。PayPayの外部IDは<code>PayPay_YYYYMMDDHHMMSS_{取引番号}</code>（日本時間）とし、同一ワークスペース内で重複禁止。取込後の編集でも保持する。手動明細は自動発行。</td></tr>
+              <tr><td>D3</td><td>清算済み明細</td><td>金額・割合等の編集と削除は不可。メモは編集可能。清算取消はない。</td></tr>
+              <tr><td>D4</td><td>共有費ルール</td><td>取引先の部分一致で費用区分・割合を設定。有効な最初の一致を適用し、ドラッグ・キーボードで順序を変更。設定変更は既存明細へ自動適用しない。</td></tr>
               <tr><td>D5</td><td>招待</td><td>招待リンクをコピーして共有。メール自動送信は将来対応。</td></tr>
-              <tr><td>D6</td><td>ワークスペース</td><td>削除に対応。退出・所有者移管は初期版対象外。</td></tr>
-              <tr><td>D7</td><td>地域</td><td>日本時間・日本円に固定。</td></tr>
+              <tr><td>D6</td><td>ワークスペース</td><td>名称変更・削除に対応。種別変更・退出・所有者移管は提供しない。</td></tr>
+              <tr><td>D7</td><td>地域</td><td>日本時間での取引日時の入力・表示と日本円。ホームの月指標には現在のブラウザの月番号を使用。</td></tr>
               <tr><td>D8</td><td>CSV対象</td><td>取引内容が「支払い」の行のみ。受け取りは対象外。</td></tr>
+              <tr><td>D9</td><td>利用者制限</td><td>通常の有効アカウントは管理者を含め二人まで。テストA/Bは別扱いでProductionでは無効。</td></tr>
+              <tr><td>D10</td><td>割合の保持</td><td>各明細に割合を保存する。デフォルトは新しい共有費の初期値。既存明細へ変更を反映する場合は明示的なルール適用を行う。</td></tr>
+              <tr><td>D11</td><td>フィルタ</td><td>列ごとの値を端末内へ自動保存。ユーザー・ワークスペース単位で分離し、端末間同期はしない。</td></tr>
+              <tr><td>D12</td><td>Preview</td><td>修正・検証後にdeploy:previewで配置し、成功したPreviewへ固定URLを割り当てる。Productionへの配置は明示依頼時。</td></tr>
             </tbody>
           </table></div>
-          <div class="note">本項の判断を基準として詳細設計・実装を行う。</div>
+          <div class="note">仕様変更時は本書と詳細設計を更新し、運用が変わる場合はREADMEも更新する。</div>
         </section>
 
-        <footer>Cake 家計管理アプリ 基本設計書 · Version 1.0</footer>
+        <footer>Cake 家計管理アプリ 基本設計書 · Version 1.1 · 更新日 2026-10-10</footer>
       </main>
     </div>
   </body>

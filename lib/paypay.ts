@@ -1,6 +1,10 @@
 import Papa from "papaparse";
 import { matchingDefaultRule, transactionDefaults } from "./expense-splits";
+import { applyPayPayDuplicateChecks } from "./import-duplicates";
+import { payPayDateToIso, payPayExternalId } from "./paypay-id";
 import type { DefaultRule, ExpenseClass, SplitWeights, WorkspaceMember } from "./types";
+
+export { payPayDateToIso } from "./paypay-id";
 
 export interface PayPayPreviewRow {
   key: string;
@@ -35,13 +39,6 @@ export function defaultExpenseClass(merchant: string, rules: DefaultRule[]): Exp
   return matchingDefaultRule(merchant, rules)?.expenseClass ?? "PERSONAL";
 }
 
-export function payPayDateToIso(value: string) {
-  const normalized = value.trim();
-  const match = normalized.match(/^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}:\d{2}:\d{2})$/);
-  if (!match) throw new Error(`日時形式が不正です: ${normalized || "空欄"}`);
-  return new Date(`${match[1]}-${match[2]}-${match[3]}T${match[4]}+09:00`).toISOString();
-}
-
 export function parsePayPayCsv(
   text: string,
   rules: DefaultRule[],
@@ -59,11 +56,20 @@ export function parsePayPayCsv(
     throw new Error(`必要な列がありません: ${missingHeaders.join("、")}`);
   }
 
-  return parsed.data
+  const rows = parsed.data
     .filter((row) => row["取引内容"]?.trim() === "支払い")
     .map((row, index): PayPayPreviewRow => {
       const occurredAt = row["取引日"]?.trim() ?? "";
-      const externalId = row["取引番号"]?.trim() ?? "";
+      const transactionNumber = row["取引番号"]?.trim() ?? "";
+      let externalId = "";
+      let identityError: string | null = null;
+      if (occurredAt && transactionNumber) {
+        try {
+          externalId = payPayExternalId(payPayDateToIso(occurredAt), transactionNumber);
+        } catch (failure) {
+          identityError = failure instanceof Error ? failure.message : "取引IDを作成できません";
+        }
+      }
       const merchant = row["取引先"]?.trim() ?? "";
       const amountYen = parseAmount(row["出金金額（円）"]);
       const duplicate = existingExternalIds.has(externalId);
@@ -71,11 +77,9 @@ export function parsePayPayCsv(
         ? "取引日がありません"
         : !merchant
           ? "取引先がありません"
-          : !externalId
+          : !transactionNumber
             ? "取引番号がありません"
-            : !Number.isInteger(amountYen) || amountYen <= 0
-              ? "出金金額が不正です"
-              : null;
+            : identityError ?? (!Number.isInteger(amountYen) || amountYen <= 0 ? "出金金額が不正です" : null);
       return {
         key: `${externalId || "row"}-${index}`,
         selected: !duplicate && !error,
@@ -89,4 +93,5 @@ export function parsePayPayCsv(
         error,
       };
     });
+  return applyPayPayDuplicateChecks(rows);
 }

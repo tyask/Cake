@@ -200,11 +200,11 @@
 
       <main id="top">
         <header class="hero">
-          <p class="eyebrow">Source-level Detail Design · Version 1.0</p>
+          <p class="eyebrow">Source-level Detail Design · Version 1.1</p>
           <h1>コードから辿れる、実装の設計図。</h1>
           <p>Next.jsアプリケーションのルート、コンポーネント、APIアクション、ドメイン関数、型、SQLスキーマをソースコード単位で定義する。</p>
           <div class="meta">
-            <span>作成日: 2026-08-03</span>
+            <span>更新日: 2026-10-10</span>
             <span>対象: 現行リポジトリ</span>
             <span>粒度: ファイル / 関数 / API / テーブル</span>
             <span>基準: As-Is実装</span>
@@ -214,7 +214,7 @@
         <section id="policy">
           <span class="tag asis">As-Is</span>
           <h2>1. 文書方針</h2>
-          <p class="lead">本書は <a href="./design.html">基本設計書</a> を実装へ対応付ける詳細設計書であり、記載内容は2026-08-03時点のソースコードを正とする。</p>
+          <p class="lead">本書は <a href="./design.html">基本設計書</a> を実装へ対応付ける詳細設計書であり、記載内容は2026-10-10時点のソースコードを正とする。</p>
           <div class="grid-3">
             <div class="card"><h3>対象</h3><p><code>app/</code>、<code>components/</code>、<code>lib/</code>、<code>auth.ts</code>、DBマイグレーション、セットアップスクリプト、単体テスト。</p></div>
             <div class="card"><h3>表記</h3><p>TypeScript上の名前、HTTPのアクション名、DBの物理名はコードと同じ英字表記を使用する。</p></div>
@@ -241,7 +241,7 @@
               <tr><td>Pure Domain Function</td><td>呼出元に従う</td><td>CSV変換、費用区分判定、清算計算。</td><td>DBや画面状態への副作用。</td></tr>
             </tbody>
           </table></div>
-          <div class="warning"><code>lib/paypay.ts</code> はClient Componentから読み込まれるためブラウザ実行、<code>lib/settlement.ts</code> はRepositoryから読み込まれるためサーバー実行となる。</div>
+          <div class="note"><code>lib/paypay.ts</code>はブラウザでCSVを解析する。純粋関数の<code>lib/settlement.ts</code>はRepositoryでの参照・清算処理に加え、ブラウザで保存済み明細の応答を反映するときにも呼び出す。</div>
         </section>
 
         <section id="data-flows">
@@ -255,17 +255,17 @@
               <div class="dfd-track" role="img" aria-label="ブラウザの画面要求を認証し、RepositoryからNeonへ問い合わせるデータフロー">
                 <div class="dfd-node source"><strong>Webブラウザ</strong><small>workspaceId<br />Session Cookie</small></div>
                 <div class="dfd-arrow"><b>→</b><small>GET /</small></div>
-                <div class="dfd-node process"><strong>Home / Auth.js</strong><small>Session → AppUser<br />選択IDを抽出</small></div>
+                <div class="dfd-node process"><strong>Home / Auth.js</strong><small>Session・DB利用可否 → AppUser<br />選択IDを抽出</small></div>
                 <div class="dfd-arrow"><b>→</b><small>AppUser<br />workspaceId</small></div>
-                <div class="dfd-node process"><strong>getBootstrap</strong><small>ユーザー同期・所属確認<br />取得Queryを組立</small></div>
+                <div class="dfd-node process"><strong>getBootstrap</strong><small>所属先の選択<br />scope別の集約SQLを組立</small></div>
                 <div class="dfd-arrow"><b>→</b><small>parameterized<br />SQL</small></div>
-                <div class="dfd-node store"><strong>Neon PostgreSQL</strong><small>users / workspaces<br />transactions / rules</small></div>
+                <div class="dfd-node store"><strong>Neon PostgreSQL</strong><small>app_users / workspaces<br />transactions / default_rules</small></div>
               </div>
               <p class="dfd-lane">RESPONSE / VIEW MODEL</p>
               <div class="dfd-track" role="img" aria-label="NeonのSQL結果をRepositoryで変換・計算し、BootstrapDataとしてDashboardへ渡すデータフロー">
                 <div class="dfd-node store"><strong>Neon PostgreSQL</strong><small>SQL result rows<br />日時・数値・nullable値</small></div>
                 <div class="dfd-arrow"><b>→</b><small>rows</small></div>
-                <div class="dfd-node process"><strong>getBootstrap</strong><small>DTO変換・並列取得<br />calculateSettlement</small></div>
+                <div class="dfd-node process"><strong>getBootstrap</strong><small>集約JSON → DTO変換<br />full時にcalculateSettlement</small></div>
                 <div class="dfd-arrow"><b>→</b><small>typed object</small></div>
                 <div class="dfd-node output"><strong>BootstrapData</strong><small>user / workspaces / selected<br />pendingInvitations</small></div>
                 <div class="dfd-arrow"><b>→</b><small>initialData<br />or GET JSON</small></div>
@@ -282,10 +282,10 @@
                 <div class="dfd-node process"><strong>Route Handler</strong><small>Session認証<br />Zod入力検証<br />所属・業務検証</small></div>
                 <div class="dfd-arrow"><b>→</b><small>SQL command</small></div>
                 <div class="dfd-node store"><strong>Neon Transaction</strong><small>INSERT / UPDATE / DELETE<br />制約・一意性検証</small></div>
-                <div class="dfd-arrow"><b>→</b><small>{ ok }<br />or { error }</small></div>
-                <div class="dfd-node process"><strong>run / refresh</strong><small>成功後にGET /api/app<br />BootstrapDataを再取得</small></div>
+                <div class="dfd-arrow"><b>→</b><small>{ ok, ...確定値 }<br />or { error }</small></div>
+                <div class="dfd-node process"><strong>run / refresh</strong><small>明細・メモは確定値を反映<br />他の更新はscope別GET</small></div>
                 <div class="dfd-arrow"><b>→</b><small>new data</small></div>
-                <div class="dfd-node output"><strong>Dashboard State</strong><small>全体を置換<br />notice / error表示</small></div>
+                <div class="dfd-node output"><strong>Dashboard State</strong><small>確定値または取得結果を反映<br />notice表示</small></div>
               </div>
               <div class="dfd-boundary"><b>信頼境界:</b> HTML入力制約を通過していても、APIで同じ値を再検証してからDBを更新する。</div>
             </div>
@@ -299,7 +299,7 @@
                 <div class="dfd-arrow"><b>→</b><small>PreviewRow[]</small></div>
                 <div class="dfd-node output"><strong>取込プレビュー</strong><small>選択・担当者<br />費用区分を編集</small></div>
                 <div class="dfd-arrow"><b>→</b><small>選択items<br />JSON 最大2000件</small></div>
-                <div class="dfd-node process"><strong>bulkImport</strong><small>再検証・所属確認<br />重複はDO NOTHING</small></div>
+                <div class="dfd-node process"><strong>bulkImport</strong><small>再検証・所属確認<br />重複内容の一致確認</small></div>
                 <div class="dfd-arrow"><b>→</b><small>Transaction</small></div>
                 <div class="dfd-node store"><strong>Neon PostgreSQL</strong><small>import_batches<br />transactions</small></div>
               </div>
@@ -309,7 +309,7 @@
             <div class="data-flow">
               <div class="data-flow-head"><h3>D. 清算計算・完了</h3><small>参照時は純粋計算、完了時だけ永続化</small></div>
               <div class="dfd-track" role="img" aria-label="Neonの参加者と未清算明細から清算結果を計算して画面へ表示し、完了時に履歴と明細状態を一括保存するデータフロー">
-                <div class="dfd-node store"><strong>Neon PostgreSQL</strong><small>members<br />未清算SHARED transactions</small></div>
+                <div class="dfd-node store"><strong>Neon PostgreSQL</strong><small>workspace_members<br />未清算SHARED transactions</small></div>
                 <div class="dfd-arrow"><b>→</b><small>DTO arrays</small></div>
                 <div class="dfd-node process"><strong>calculateSettlement</strong><small>支払・受取集計<br />重み配分・差額計算</small></div>
                 <div class="dfd-arrow"><b>→</b><small>SettlementResult</small></div>
@@ -319,7 +319,7 @@
                 <div class="dfd-arrow"><b>→</b><small>atomic<br />Transaction</small></div>
                 <div class="dfd-node store"><strong>清算データ</strong><small>settlements + 関連<br />transactions.settled_at</small></div>
               </div>
-              <div class="dfd-boundary"><b>整合性境界:</b> 計算Snapshot、対象明細との関連、settled_atを同一Transactionで保存し、transaction_idの一意制約で二重清算を防ぐ。</div>
+              <div class="dfd-boundary"><b>整合性境界:</b> ワークスペース行をロックして計算対象の現在値とSnapshotを比較し、履歴・対象明細との関連・settled_atを同一Transactionで保存する。transaction_idの一意制約でも二重清算を防ぐ。</div>
             </div>
           </div>
         </section>
@@ -328,42 +328,44 @@
           <h2>3. モジュール設計</h2>
           <h3>ルート・認証</h3>
           <div class="table-wrap"><table>
-            <thead><tr><th>ファイル</th><th>公開要素</th><th>責務</th><th>主な依存</th></tr></thead>
+            <thead><tr><th>ファイル</th><th>公開要素・責務</th></tr></thead>
             <tbody>
-              <tr><td class="path">app/layout.tsx</td><td><code>RootLayout</code></td><td>日本語HTML、全体CSS、Metadataを設定。</td><td><code>app/globals.css</code></td></tr>
-              <tr><td class="path">app/page.tsx</td><td><code>Home</code></td><td>ログイン有無とDB設定を判定し、ログイン画面またはDashboardを描画。</td><td><code>getCurrentUser</code>、<code>getBootstrap</code></td></tr>
-              <tr><td class="path">app/invite/[token]/page.tsx</td><td><code>InvitePage</code></td><td>URLトークンとログイン状態をInviteCardへ渡す。</td><td><code>getCurrentUser</code>、<code>isTestAuthEnabled</code></td></tr>
-              <tr><td class="path">app/api/app/route.ts</td><td><code>GET</code>、<code>POST</code></td><td>アプリケーションJSON API。Node.js Runtime固定。</td><td>Zod、Repository、Neon、Node Crypto</td></tr>
-              <tr><td class="path">app/api/auth/[...nextauth]/route.ts</td><td><code>GET</code>、<code>POST</code></td><td>Auth.jsが提供する認証エンドポイントを公開。</td><td><code>auth.ts</code></td></tr>
-              <tr><td class="path">auth.ts</td><td><code>handlers</code>、<code>auth</code>、<code>signIn</code>、<code>signOut</code></td><td>認証Provider、JWTセッション、ユーザー同期イベントを構成。</td><td>NextAuth、Google/Credentials、Neon</td></tr>
+              <tr><td>app/layout.tsx / app/page.tsx</td><td><code>RootLayout</code>で日本語HTML・Metadata・CSSを設定。<code>Home</code>でセッション、ログイン画面、初期BootstrapDataを処理。</td></tr>
+              <tr><td>app/invite/[token]/page.tsx</td><td><code>InvitePage</code>でトークン・ログイン状態・テスト認証設定をInviteCardへ渡す。</td></tr>
+              <tr><td>app/api/app/route.ts</td><td><code>GET</code>でscope別参照、<code>POST</code>でアクション別入力検証・所属確認・更新。</td></tr>
+              <tr><td>app/api/admin/users/route.ts</td><td>管理者専用の利用者一覧・登録・利用停止。毎回DB権限を確認。</td></tr>
+              <tr><td>app/api/import/duplicates/route.ts</td><td>選択workspace内の外部IDを照合し、既存の金額・取引先・sourceを返す。</td></tr>
+              <tr><td>app/api/auth/[...nextauth]/route.ts / auth.ts</td><td>Auth.js HandlerとGoogle / test-login Provider、JWTセッション、<code>createAuthCallbacks</code>を構成。</td></tr>
             </tbody>
           </table></div>
-
           <h3>UIコンポーネント</h3>
           <div class="table-wrap"><table>
-            <thead><tr><th>ファイル</th><th>コンポーネント</th><th>責務</th></tr></thead>
+            <thead><tr><th>ファイル</th><th>責務</th></tr></thead>
             <tbody>
-              <tr><td class="path">components/dashboard.tsx</td><td><code>Dashboard</code></td><td>アプリ全体のクライアント状態、タブ遷移、API呼出、モーダル制御。</td></tr>
-              <tr><td class="path">components/dashboard.tsx</td><td><code>HomePanel</code> / <code>TransactionsPanel</code> / <code>ImportPanel</code> / <code>SettlementPanel</code> / <code>SettingsPanel</code></td><td>機能タブごとの表示と操作。</td></tr>
-              <tr><td class="path">components/dashboard.tsx</td><td><code>WorkspaceModal</code> / <code>TransactionModal</code> / <code>Modal</code></td><td>ワークスペース・明細入力と共通ダイアログ枠。</td></tr>
-              <tr><td class="path">components/login-screen.tsx</td><td><code>LoginScreen</code></td><td>GoogleまたはテストProviderへのログイン導線。</td></tr>
-              <tr><td class="path">components/invite-card.tsx</td><td><code>InviteCard</code></td><td>招待トークンの承認API呼出とログイン導線。</td></tr>
-              <tr><td class="path">components/test-login-buttons.tsx</td><td><code>TestLoginButtons</code></td><td>固定テストユーザーをCredentials Providerへ渡す。</td></tr>
+              <tr><td>components/dashboard.tsx</td><td><code>Dashboard</code>、<code>HomePanel</code>、<code>ImportPanel</code>、<code>SettlementPanel</code>、<code>SettingsPanel</code>、<code>WorkspaceModal</code>、<code>NewTransactionModal</code>、<code>Modal</code>。画面State・遷移・API・新規登録。</td></tr>
+              <tr><td>components/transactions-panel.tsx / transaction-table.tsx</td><td>明細一覧のインライン編集、行ごとの保存状態、一括選択・削除・ルール適用。<code>TransactionTable</code>は明細/取込の共通表枠とモバイル要約。</td></tr>
+              <tr><td>components/transaction-filter-dialog.tsx / use-transaction-filters.ts</td><td>列候補の選択、列内OR・列間AND条件、ユーザー/workspace別のブラウザ保存。</td></tr>
+              <tr><td>components/transaction-memo-editor.tsx</td><td>清算済みを含むメモ専用の編集・保存・再試行。</td></tr>
+              <tr><td>components/split-editor.tsx / import-preview-table.tsx / selection-checkbox.tsx</td><td>割合または円での分担入力、CSVプレビュー編集、選択チェック。</td></tr>
+              <tr><td>components/workspace-rules.tsx</td><td>ルールのインライン編集・追加・一括削除、ドラッグ/キーボードによる適用順変更。</td></tr>
+              <tr><td>components/personal-settings.tsx / user-management.tsx</td><td>本人の表示名変更と、管理者だけの利用者登録・停止UI。</td></tr>
+              <tr><td>components/login-screen.tsx / invite-card.tsx / test-login-buttons.tsx</td><td>ログイン、招待承認、固定テストユーザーA/Bへのログイン導線。</td></tr>
+              <tr><td>components/cake-icon.tsx / mobile-access-qr.tsx</td><td>CakeのSVGアイコンと現在のoriginのルートURLを開くQRコード。</td></tr>
             </tbody>
           </table></div>
-
           <h3>ライブラリ</h3>
           <div class="table-wrap"><table>
-            <thead><tr><th>ファイル</th><th>主要関数</th><th>責務</th></tr></thead>
+            <thead><tr><th>ファイル</th><th>主要処理</th></tr></thead>
             <tbody>
-              <tr><td class="path">lib/db.ts</td><td><code>db()</code></td><td><code>DATABASE_URL</code>からNeonクライアントを遅延生成し、プロセス内で再利用。</td></tr>
-              <tr><td class="path">lib/current-user.ts</td><td><code>getCurrentUser()</code></td><td>Auth.js Sessionをアプリの<code>AppUser</code>へ変換。</td></tr>
-              <tr><td class="path">lib/auth-mode.ts</td><td><code>isTestAuthEnabled()</code>、<code>getAuthMode()</code></td><td>Productionでテスト認証を強制無効化。</td></tr>
-              <tr><td class="path">lib/repository.ts</td><td><code>ensureUser()</code>、<code>requireWorkspaceMember()</code>、<code>getBootstrap()</code></td><td>参照系SQL、ユーザー同期、認可用所属確認、DTO組立。</td></tr>
-              <tr><td class="path">lib/paypay.ts</td><td><code>parsePayPayCsv()</code>、<code>payPayDateToIso()</code>、<code>defaultExpenseClass()</code></td><td>PayPay CSVの解析、検証、プレビュー行への変換。</td></tr>
-              <tr><td class="path">lib/settlement.ts</td><td><code>calculateSettlement()</code></td><td>未清算共通費から二人間の清算結果を算出。</td></tr>
-              <tr><td class="path">lib/types.ts</td><td>型・Interface群</td><td>UI、API参照結果、ドメイン関数間の共通データ契約。</td></tr>
-              <tr><td class="path">lib/test-users.ts</td><td><code>TEST_USERS</code>、<code>findTestUser()</code></td><td>開発・Preview専用の固定ユーザー定義。</td></tr>
+              <tr><td>lib/db.ts / db-query-logging.ts</td><td><code>db()</code>でNeonクライアントを遅延生成・再利用。<code>instrumentDatabase()</code>で単発/Transactionの実行時間と安全な識別情報を記録。</td></tr>
+              <tr><td>lib/current-user.ts / auth-callbacks.ts / auth-mode.ts</td><td><code>getCurrentUser()</code>、<code>resolveSessionUser()</code>、<code>createAuthCallbacks()</code>、Productionでのテスト認証無効化。</td></tr>
+              <tr><td>lib/user-access.ts / user-profile.ts / test-users.ts</td><td>登録・有効状態・管理者権限のDB確認、表示名更新・入力schema、固定テストユーザー定義。</td></tr>
+              <tr><td>lib/repository.ts / bootstrap.ts</td><td><code>getBootstrap()</code>の集約SQL・DTO構築、<code>requireWorkspaceMember()</code>、タブ別scopeとmetadataの併合。</td></tr>
+              <tr><td>lib/expense-splits.ts / split-allocations.ts / settlement.ts</td><td>参加者別保存割合・デフォルトルール、整数円への配分・円入力からの割合、正確な分数集計による清算。</td></tr>
+              <tr><td>lib/paypay.ts / paypay-id.ts / import-duplicates.ts / paypay-import.ts</td><td>CSV解析、JST外部ID生成・正規化、既存/CSV内重複・衝突の検出、DB Transactionでの登録。</td></tr>
+              <tr><td>lib/transaction-editing.ts / transaction-record.ts / transaction-updates.ts</td><td>一覧入力検証・秒/ミリ秒付きJST変換、確定DB行のDTO化、応答の対象行への反映と清算再計算。</td></tr>
+              <tr><td>lib/transaction-memo.ts / transaction-filters.ts / transaction-filter-storage.ts</td><td>メモ専用schema、列条件・候補集計、localStorage形式の検証・保存。</td></tr>
+              <tr><td>lib/types.ts</td><td>UI、API、Repository、ドメイン関数間の共通データ契約。</td></tr>
             </tbody>
           </table></div>
         </section>
@@ -371,308 +373,397 @@
         <section id="routes">
           <h2>4. ルート・レンダリング設計</h2>
           <div class="table-wrap"><table>
-            <thead><tr><th>URL</th><th>方式</th><th>入力</th><th>処理・出力</th></tr></thead>
+            <thead><tr><th>URL</th><th>方式・入力</th><th>処理・出力</th></tr></thead>
             <tbody>
-              <tr><td><code>/</code></td><td>動的RSC<br /><code>force-dynamic</code></td><td>Query <code>workspaceId?</code></td><td>未ログインはLoginScreen。DB未設定はセットアップ案内。ログイン済みはBootstrapDataを取得してDashboard。</td></tr>
-              <tr><td><code>/invite/[token]</code></td><td>RSC + Client Component</td><td>64文字の招待トークン想定</td><td>InviteCardを描画。承認後は対象ワークスペース付きの<code>/</code>へ遷移。</td></tr>
-              <tr><td><code>/api/auth/[...nextauth]</code></td><td>Auth.js Handler</td><td>OAuth / Credentialsプロトコル</td><td>ログイン、コールバック、セッション、ログアウト。</td></tr>
-              <tr><td><code>/api/app</code> GET</td><td>Route Handler</td><td>Query <code>workspaceId?</code></td><td>認証済みユーザーのBootstrapDataをJSONで返却。</td></tr>
-              <tr><td><code>/api/app</code> POST</td><td>Route Handler</td><td>JSON <code>{ action, ... }</code></td><td>アクション別に検証・更新し、成功JSONまたは<code>{ error }</code>を返却。</td></tr>
+              <tr><td><code>/</code></td><td>動的RSC、<code>force-dynamic</code>。Query <code>workspaceId?</code>、<code>error?</code>。</td><td>未ログイン・利用不可はLoginScreen。ログイン済みはfullのBootstrapDataをDashboardへ渡す。DB未設定時の案内を持つが、登録済みユーザー確認にもDBを使用する。</td></tr>
+              <tr><td><code>/invite/[token]</code></td><td>RSC + Client Component。64文字の招待トークン。</td><td>InviteCardを描画。承認後は対象workspaceId付きの<code>/</code>へ遷移。</td></tr>
+              <tr><td><code>/api/auth/[...nextauth]</code></td><td>Auth.js Handler。OAuth / Credentials。</td><td>ログイン、コールバック、セッション、ログアウト。</td></tr>
+              <tr><td><code>/api/app</code> GET</td><td>Node.js Route Handler。<code>workspaceId?</code>、<code>scope=full|metadata</code>（既定full）。</td><td>認証・利用可否を確認し、BootstrapDataまたはBootstrapMetadataを返す。</td></tr>
+              <tr><td><code>/api/app</code> POST</td><td>Node.js Route Handler。JSON <code>{ action, ... }</code>。</td><td>入力・認可・業務条件を検証し、アクション別成功JSONまたは<code>{ error }</code>。</td></tr>
+              <tr><td><code>/api/import/duplicates</code> POST</td><td>Node.js Route Handler。workspace UUID、外部ID配列1〜2000件。</td><td>所属を確認し、指定IDに一致するexternalIdsと既存明細の最小照合情報を返す。</td></tr>
+              <tr><td><code>/api/admin/users</code> GET / POST / DELETE</td><td>Node.js、<code>force-dynamic</code>。管理者権限。</td><td>一覧、登録/再有効化、停止。成功は利用者一覧と<code>Cache-Control: no-store</code>。</td></tr>
             </tbody>
           </table></div>
           <h3>初期表示シーケンス</h3>
           <div class="sequence">
-            <div><b>Browser</b><i>→</i><span><code>GET /?workspaceId=...</code> を要求。</span></div>
-            <div><b>Home</b><i>→</i><span><code>getCurrentUser()</code>でAuth.jsセッションをAppUserへ変換。</span></div>
-            <div><b>Repository</b><i>→</i><span><code>getBootstrap()</code>がユーザー同期、所属一覧、選択ワークスペース、保留招待を取得。</span></div>
-            <div><b>Domain</b><i>→</i><span>共有ワークスペースなら取得したメンバーと明細から<code>calculateSettlement()</code>を実行。</span></div>
-            <div><b>Dashboard</b><i>←</i><span>BootstrapDataを初期Propsとして受け取り、以後の操作はFetchで更新。</span></div>
+            <div><b>Browser</b><i>→</i><span><code>GET /?workspaceId=...</code>を要求。</span></div>
+            <div><b>Home / Auth</b><i>→</i><span><code>getCurrentUser()</code>がJWTのID・メールと現在のDB登録・有効状態・認証モードを照合。</span></div>
+            <div><b>Repository</b><i>→</i><span><code>getBootstrap()</code>が所属一覧、選択先、詳細、保留招待を一つのSQLで集約。所属0件なら初期家計を作成して再取得。</span></div>
+            <div><b>Domain</b><i>→</i><span>共有workspaceは明細ごとの保存割合から<code>calculateSettlement()</code>を実行。</span></div>
+            <div><b>Dashboard</b><i>←</i><span>BootstrapDataを初期Propsとして保持。タブ/家計切替時は必要なscopeで再取得。</span></div>
           </div>
         </section>
 
         <section id="auth">
           <h2>5. 認証・セッション詳細設計</h2>
           <div class="grid-2">
-            <div class="card"><h3>Googleモード</h3><ul><li><code>AUTH_MODE</code>が<code>test</code>以外、またはVercel Production。</li><li>NextAuthのGoogle Providerを一つ登録。</li><li>JWTセッション戦略を使用。</li><li>Session Callbackで<code>token.sub</code>を<code>session.user.id</code>へ設定。</li></ul></div>
-            <div class="card"><h3>テストモード</h3><ul><li><code>AUTH_MODE=test</code>かつ<code>VERCEL_ENV !== production</code>。</li><li>Credentials Provider <code>test-login</code>を登録。</li><li><code>testUserKey</code>を固定ユーザーA/Bへ解決。</li><li>Productionでは設定ミスがあっても常に無効。</li></ul></div>
+            <div class="card"><h3>Googleモード</h3><ul><li>テスト認証が無効なときGoogle Providerを登録。</li><li>Googleの確認済みメールとProviderのメールが一致し、<code>app_users</code>に有効な通常ユーザーとして事前登録されていることが必要。</li><li>メールは前後空白を除去して小文字化。別名メールの統合は行わない。</li><li>GoogleのSubjectではなく登録済みの内部IDをJWT <code>sub</code>に保存。</li></ul></div>
+            <div class="card"><h3>テストモード</h3><ul><li><code>AUTH_MODE=test</code>かつ<code>VERCEL_ENV !== production</code>。</li><li>Credentials Provider <code>test-login</code>を登録し、固定のA/Bキーを解決。</li><li>固定IDとメールの組合せだけを自動登録/有効化。保存済みの表示名は維持。</li><li>常に非管理者。通常アカウント二人の上限から除外。Productionでは強制無効。</li></ul></div>
           </div>
-          <h3>ログイン後のユーザー同期</h3>
-          <div class="sequence">
-            <div><b>Provider</b><i>→</i><span>識別子、メール、表示名、画像URLをNextAuthへ返す。</span></div>
-            <div><b>signIn event</b><i>→</i><span>IDとメールが存在する場合、<code>app_users</code>へUPSERT。</span></div>
-            <div><b>Session</b><i>→</i><span>JWT SubjectをユーザーIDとして画面・APIから使用。</span></div>
-            <div><b>API</b><i>→</i><span><code>currentUser()</code>が未認証なら例外「ログインが必要です。」。</span></div>
-          </div>
-          <div class="note">認証は本人確認、認可はワークスペース所属確認として分離する。更新系アクションは原則として<code>requireWorkspaceMember()</code>を通過する。</div>
+          <h3>ログインと現在ユーザー</h3>
+          <ol>
+            <li><code>createAuthCallbacks()</code>の<code>signIn</code>で登録・有効状態を確認する。Googleログインは未登録アカウントを自動作成しない。</li>
+            <li>Googleログイン時の<code>updateRegisteredProfile()</code>は画像URLだけを更新し、Cakeで保存した表示名を上書きしない。</li>
+            <li><code>jwt</code> callbackでもGoogleアカウントの有効状態を再確認して内部ID・メールを保存。<code>session</code> callbackで<code>token.sub</code>を<code>session.user.id</code>へ設定。</li>
+            <li><code>getCurrentUser()</code>は毎回<code>findSessionUser(id, email)</code>でDBを照合し、現在の名前・画像・管理者権限を返す。停止/削除されたユーザーや認証モードと異なるセッションは<code>null</code>。</li>
+          </ol>
+          <h3>利用者管理</h3>
+          <p>初回マイグレーションで管理者を登録する。通常の有効アカウントは管理者を含め二人まで。管理者はメールを登録し、停止済みの通常ユーザーを同じ内部IDで再有効化できる。停止は取引や所属を削除せず、既存セッションからのアクセスも無効にする。</p>
+          <div class="note">認証・利用可否、workspace所属、管理者権限を分ける。管理APIは<code>requireAdministrator()</code>で現在のDB権限を再確認し、SQLの変更条件でも管理者の有効状態を確認する。通常workspace操作はOWNER/MEMBERを区別せず所属を認可条件とする。</div>
         </section>
 
         <section id="api">
           <h2>6. アプリケーションAPI詳細設計</h2>
-          <h3>共通仕様</h3>
+          <h3>共通仕様とGET</h3>
           <ul>
-            <li>Runtimeは<code>nodejs</code>。Node標準の<code>crypto</code>でUUID・招待トークン・SHA-256を生成する。</li>
-            <li>POST Bodyは<code>Record&lt;string, unknown&gt;</code>として読み、<code>action</code>と各入力をZodで検証する。</li>
-            <li>成功は原則HTTP 200。POST失敗はHTTP 400、GET失敗はHTTP 401で<code>{ "error": "メッセージ" }</code>を返す。</li>
-            <li>SQLはNeon tagged templateを使い、値をパラメータ化する。</li>
+            <li>Runtimeは<code>nodejs</code>。UUID・32 byte招待トークン・SHA-256をNode Cryptoで生成。</li>
+            <li>POSTは<code>action</code>と入力をZodで検証。SQLはNeon tagged templateで値をパラメータ化する。</li>
+            <li><code>/api/app</code>成功はHTTP 200。GET失敗は基本401、POST失敗は基本400。<code>UserAccessError</code>は固有statusを優先し、応答は<code>{ error }</code>。</li>
+            <li>GETは<code>getBootstrap(user, workspaceId, scope)</code>を実行。scope省略はfull。所属していない/不正形式の指定IDは本人の所属一覧先頭へフォールバックする。</li>
           </ul>
-          <h3>GET</h3>
-          <div class="table-wrap"><table>
-            <thead><tr><th>入力</th><th>処理</th><th>出力</th></tr></thead>
-            <tbody><tr><td><code>workspaceId?: string</code></td><td>ログイン必須。<code>getBootstrap(user, workspaceId)</code>を実行。</td><td><code>BootstrapData</code>。指定IDが所属一覧にない場合は一覧先頭を選択。</td></tr></tbody>
-          </table></div>
-
           <h3>POSTアクション一覧</h3>
           <div class="table-wrap"><table>
-            <thead><tr><th>action</th><th>主な入力・検証</th><th>更新処理</th><th>成功応答</th></tr></thead>
+            <thead><tr><th>action</th><th>主な入力・検証</th><th>更新処理・成功応答</th></tr></thead>
             <tbody>
-              <tr><td><code>createWorkspace</code></td><td><code>name</code> 1〜80文字、<code>type</code> PERSONAL/SHARED。</td><td>UUIDを生成し、workspacesとOWNER memberを一括Transactionで作成。</td><td><code>{ ok, workspaceId }</code></td></tr>
-              <tr><td><code>updateWorkspace</code></td><td>UUID、所属、名称1〜80文字。</td><td>名称と<code>updated_at</code>を更新。</td><td><code>{ ok }</code></td></tr>
-              <tr><td><code>deleteWorkspace</code></td><td>UUID、所属、<code>confirmationName</code>完全一致。</td><td>workspacesを削除。関連は外部キーCASCADE。</td><td><code>{ ok }</code></td></tr>
-              <tr><td><code>createInvite</code></td><td>共有用、所属、Email形式、本人以外、参加者2人未満。</td><td>32 byte tokenを生成。SHA-256だけを保存し、有効期限7日でUPSERT。</td><td><code>{ ok, invitePath }</code></td></tr>
-              <tr><td><code>acceptInvite</code></td><td>token 64文字、Hash一致、PENDING、期限内、ログインEmail一致、2人未満。</td><td>MEMBER追加と招待ACCEPTED更新をTransaction実行。</td><td><code>{ ok, workspaceId }</code></td></tr>
-              <tr><td><code>updateWeights</code></td><td>共有用、所属、正整数2件、DB上の2参加者とID一致。</td><td>各memberのweightをTransactionで更新。</td><td><code>{ ok }</code></td></tr>
-              <tr><td><code>saveTransaction</code></td><td>UUID、ISO日時、文字数、正整数円、Enum、actorが参加者。</td><td>IDありは未清算行だけUPDATE。なしは<code>manual_UUID</code>をexternal_idとしてINSERT。</td><td><code>{ ok }</code></td></tr>
-              <tr><td><code>deleteTransaction</code></td><td>workspace/transaction UUID、所属。</td><td>対象workspaceかつ未清算行だけDELETE。</td><td><code>{ ok }</code></td></tr>
-              <tr><td><code>createRule</code></td><td>文字列1〜120、費用区分、priority 0〜9999。</td><td>default_rulesへINSERT。</td><td><code>{ ok }</code></td></tr>
-              <tr><td><code>deleteRule</code></td><td>workspace/rule UUID、所属。</td><td>対象workspaceのruleだけDELETE。</td><td><code>{ ok }</code></td></tr>
-              <tr><td><code>bulkImport</code></td><td>fileName 1〜240、totalRows非負、items最大2000、各actorが参加者。</td><td>import_batchesとPAYPAY明細をTransactionで登録。重複external_idは無視。</td><td><code>{ ok, imported }</code></td></tr>
-              <tr><td><code>completeSettlement</code></td><td>workspace UUID、所属、再取得時に清算対象あり。</td><td>履歴、対象関連、対象明細のsettled_at更新をTransaction実行。</td><td><code>{ ok }</code></td></tr>
+              <tr><td><code>updateProfile</code></td><td>本人のみ。nameをtrimして1〜120文字。strict schema。</td><td>DB上の本人ID・メール・有効状態を条件に名前更新。<code>{ ok, user }</code>。</td></tr>
+              <tr><td><code>createWorkspace</code></td><td>name 1〜80文字、PERSONAL/SHARED。</td><td>UUID生成、workspaceとOWNERを一括Transactionで作成。<code>{ ok, workspaceId }</code>。</td></tr>
+              <tr><td><code>updateWorkspace</code> / <code>deleteWorkspace</code></td><td>workspace UUID・所属。更新はname 1〜80文字、削除はconfirmationName完全一致。</td><td>名称とupdated_at更新、または配下をCASCADE削除。<code>{ ok }</code>。</td></tr>
+              <tr><td><code>createInvite</code></td><td>共有workspace・所属、Email、本人以外、参加者2人未満。</td><td>tokenのHashだけ保存、期限7日。同じworkspace/emailは再発行。<code>{ ok, invitePath }</code>。メール送信は行わない。</td></tr>
+              <tr><td><code>acceptInvite</code></td><td>token 64文字、Hash一致・PENDING・期限内・本人メール一致・2人未満。</td><td>MEMBER追加とACCEPTEDをTransaction実行。<code>{ ok, workspaceId }</code>。</td></tr>
+              <tr><td><code>updateWeights</code></td><td>共有workspace・所属、現在の全参加者1〜2件、ID重複なし。整数0〜2147483647、合計は正。</td><td>workspaceとmemberのデフォルトweight更新。保存済み明細の割合は変えない。<code>{ ok }</code>。</td></tr>
+              <tr><td><code>saveTransaction</code></td><td>workspace/任意transaction UUID、ISO日時、merchant 1〜240、method 1〜120、正整数円、type、参加者actor、任意class/split。新規だけ任意memo。</td><td>新規はMANUALとmanual_UUID。既存は未清算行だけ更新し、既存割合の省略時は可能な限り保持。所属者別割合を検証。<code>{ ok, transaction }</code>は確定DB行のDTO。</td></tr>
+              <tr><td><code>saveTransactionMemo</code></td><td>strict入力: action、workspace UUID、transaction UUID、memo最大2000文字。</td><td>清算済みも更新可能。メモ・監査項目だけ更新。<code>{ ok, transactionId, memo }</code>。既存saveTransactionへmemoを含めると拒否。</td></tr>
+              <tr><td><code>deleteTransaction</code></td><td>workspace/transaction UUID・所属。</td><td>未清算の対象行だけ削除。0件なら業務例外。<code>{ ok }</code>。</td></tr>
+              <tr><td><code>deleteTransactions</code> / <code>applyTransactionRules</code></td><td>所属、transaction UUID配列1〜5000件、大小文字を正規化した重複なし。</td><td>DB関数で全選択の存在・未清算を検証し、全件削除/現在ルール適用。<code>{ ok, deleted }</code> / <code>{ ok, applied, appliedTransactions }</code>。</td></tr>
+              <tr><td><code>createRule</code> / <code>updateRule</code></td><td>所属、merchantContains 1〜120、class、任意splitWeights/null、任意enabled。更新はrule UUID。</td><td>新規はsort_order末尾、enabled既定true。共有割合nullは現在のデフォルトを利用、個人費ルールはnull。更新時に省略した割合は区分同一なら保持。<code>{ ok }</code>。</td></tr>
+              <tr><td><code>reorderRules</code></td><td>所属、全rule UUID配列最大5000。</td><td>DB関数で現在の全ルールとの完全一致・重複なしを確認し、sort_orderを0始まりで更新。<code>{ ok }</code>。</td></tr>
+              <tr><td><code>deleteRule</code> / <code>deleteRules</code></td><td>所属、単一UUIDまたは重複のない配列1〜5000。複数削除は全対象の存在確認。</td><td>対象workspace内だけ削除しsort_orderを詰める。<code>{ ok }</code> / <code>{ ok, deleted }</code>。</td></tr>
+              <tr><td><code>bulkImport</code></td><td>所属、fileName 1〜240、totalRows非負、items最大2000。各actor・class・割合・金額・ISO日時・外部IDを検証。</td><td>PAYPAY/PAYMENT明細とbatchを同一Transactionで登録。外部ID順で登録し一致重複は省略、不一致は全体を中止。<code>{ ok, imported, skipped }</code>。</td></tr>
+              <tr><td><code>completeSettlement</code></td><td>workspace UUID・所属、最新full参照で対象明細あり。</td><td>対象計算値をロック下で再照合し、履歴・関連行・settled_atを一括保存。<code>{ ok }</code>。</td></tr>
             </tbody>
           </table></div>
-          <div class="warning"><code>bulkImport</code>の<code>imported</code>とimport_batches.imported_rowsは要求items件数であり、競合により<code>ON CONFLICT DO NOTHING</code>となった実挿入件数ではない。</div>
+          <div class="note"><code>bulkImport</code>の<code>imported</code>と<code>import_batches.imported_rows</code>は、新規batch IDを持つ明細をDB Transaction内で数えた実挿入件数。重複は既存明細を更新せず、<code>skipped = max(0, totalRows - imported)</code>として記録する。</div>
+          <h3>重複確認API</h3>
+          <p><code>POST /api/import/duplicates</code>は<code>{ workspaceId, externalIds }</code>を受け、IDの重複をまとめて選択workspaceだけを照合する。応答は<code>{ externalIds, transactions: [{ externalId, merchant, amountYen, source }] }</code>。未認証は401、検証/所属/DBエラーは400。CSV原本や既存明細の全件取得は不要。</p>
+          <h3>利用者管理API</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Method</th><th>入力・処理</th></tr></thead>
+            <tbody>
+              <tr><td>GET</td><td>管理者の利用者一覧。固定テストID/メールのA・Bを除外し、管理者・有効状態・作成順で返す。</td></tr>
+              <tr><td>POST</td><td>strict JSON <code>{ email, name? }</code>。Email正規化、name任意1〜120文字。通常ユーザーを新規登録/停止済み再有効化し一覧を返す。</td></tr>
+              <tr><td>DELETE</td><td>strict JSON <code>{ userId }</code>（1〜200文字）。有効な非管理者だけを停止して一覧を返す。</td></tr>
+            </tbody>
+          </table></div>
+          <p>POST/DELETEは同一originと<code>application/json</code>を必須にする。失敗は401未認証、403権限/Origin、400形式/入力、409上限/既存登録/停止不可、500その他。全成功応答は<code>Cache-Control: no-store</code>。</p>
         </section>
 
         <section id="client">
           <h2>7. クライアント状態・画面詳細設計</h2>
           <h3>Dashboardの状態</h3>
           <div class="table-wrap"><table>
-            <thead><tr><th>State</th><th>型・初期値</th><th>用途</th></tr></thead>
+            <thead><tr><th>State / Ref</th><th>用途</th></tr></thead>
             <tbody>
-              <tr><td><code>data</code></td><td><code>BootstrapData</code> / initialData</td><td>画面全体の参照モデル。更新後のGETで全置換。</td></tr>
-              <tr><td><code>tab</code></td><td><code>home | transactions | settlement | import | settings</code></td><td>表示パネルを切替。</td></tr>
-              <tr><td><code>modal</code></td><td><code>null | workspace | transaction | TransactionRecord</code></td><td>作成・追加・編集ダイアログ制御。</td></tr>
-              <tr><td><code>busy</code></td><td><code>boolean</code></td><td>API処理中の状態表示。</td></tr>
-              <tr><td><code>notice</code></td><td><code>string | null</code></td><td>成功メッセージ。</td></tr>
-              <tr><td><code>error</code></td><td><code>string | null</code></td><td>API・入力処理のエラー表示。</td></tr>
+              <tr><td><code>data</code> / <code>currentData</code></td><td>initialDataで初期化するBootstrapData。確定応答の局所更新、full置換、metadata併合。</td></tr>
+              <tr><td><code>tab</code> / <code>currentTab</code></td><td>home / transactions / import / settlement / settings。初期home。</td></tr>
+              <tr><td><code>workspaceModal</code> / <code>transactionModal</code></td><td>ワークスペース作成、新規明細登録ダイアログの開閉。既存明細は一覧で編集。</td></tr>
+              <tr><td><code>loading</code> / <code>pendingRequests</code></td><td>同時API要求数を管理し、処理が一件でも残ればローディング表示を維持。</td></tr>
+              <tr><td><code>notice</code></td><td>成功・エラーの全体メッセージ。各編集画面にも保存状態・エラー・再試行を持つ。</td></tr>
+              <tr><td><code>workspaceView</code> / <code>dataRevision</code> / <code>refreshRequest</code></td><td>workspace ID・世代・データ変更revision・要求IDで、古い家計/保存前/先行GETの遅延応答が現在の画面を置換しないよう検証。</td></tr>
             </tbody>
           </table></div>
-          <h3>共通API呼出</h3>
-          <div class="sequence">
-            <div><b>postAction</b><i>→</i><span>JSONで<code>POST /api/app</code>。非2xxなら応答のerrorを例外化。</span></div>
-            <div><b>run</b><i>→</i><span>busy開始、既存メッセージを消去し、postActionを実行。</span></div>
-            <div><b>refresh</b><i>→</i><span>成功後に選択workspaceId付きGETを実行し、BootstrapDataを置換。</span></div>
-            <div><b>UI</b><i>←</i><span>成功noticeまたは例外messageを表示し、finallyでbusy解除。</span></div>
-          </div>
-          <h3>タブ別責務</h3>
+          <h3>共通API呼出と再取得</h3>
+          <ol>
+            <li><code>postAction()</code>がJSONを<code>POST /api/app</code>し、非2xxのerrorを例外化する。</li>
+            <li><code>run()</code>が要求開始時のworkspace・世代を保持し、現在画面向けの成功応答だけを反映する。</li>
+            <li><code>saveTransaction</code>はサーバーの確定TransactionRecordを一覧へ置換/追加し、日時で並び替え、清算を再計算。<code>saveTransactionMemo</code>は返されたメモだけを反映。どちらも直後の全件GETを省く。</li>
+            <li>その他の更新とタブ切替は<code>refresh()</code>で再取得。import/settingsはmetadata、home/transactions/settlementはfull。workspace切替は常にfull。</li>
+            <li>metadataは同一workspaceの取得済み明細・清算・履歴を保持して併合する。選択workspaceが変化した場合はfullを取得し直す。</li>
+          </ol>
           <div class="table-wrap"><table>
-            <thead><tr><th>タブ</th><th>コンポーネント</th><th>参照</th><th>更新アクション</th></tr></thead>
+            <thead><tr><th>タブ</th><th>参照・操作</th></tr></thead>
             <tbody>
-              <tr><td>ホーム</td><td><code>HomePanel</code></td><td>指標、最近5件、保留招待数、清算概要。</td><td>明細モーダル起動、各タブ遷移。</td></tr>
-              <tr><td>取引明細</td><td><code>TransactionsPanel</code></td><td>全明細。</td><td>saveTransaction、deleteTransaction。</td></tr>
-              <tr><td>CSV取込</td><td><code>ImportPanel</code></td><td>既存external_id、ルール、参加者。</td><td>ブラウザ解析、一括費用区分変更、bulkImport。</td></tr>
-              <tr><td>清算</td><td><code>SettlementPanel</code></td><td>SettlementResult、履歴。</td><td>completeSettlement。</td></tr>
-              <tr><td>設定</td><td><code>SettingsPanel</code></td><td>workspace、members、rules。</td><td>名称、重み、招待、ルール、workspace削除。</td></tr>
+              <tr><td>ホーム</td><td>今月の支払い、未清算共通費、次の送金、最近6件、保留招待数、登録/取込/清算への導線。今月集計はブラウザの月番号が一致する明細を抽出し、年の条件は持たない。</td></tr>
+              <tr><td>取引明細</td><td>全明細の列フィルタ、未清算行のインライン保存、清算済みもメモ保存、選択削除/ルール適用。</td></tr>
+              <tr><td>CSV取込</td><td>metadataのルール・参加者でCSVを解析し、外部IDだけを専用APIで照合。選択行の費用区分を一括変更し、行ごとの割合を編集してbulkImport。</td></tr>
+              <tr><td>清算</td><td>保存割合による清算内訳、対象明細、最新20件の履歴、清算完了。</td></tr>
+              <tr><td>設定</td><td>本人表示名、workspace名・デフォルト割合・招待・削除、共有ルール、管理者だけの利用者登録/停止。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>新規明細</h3>
+          <p>NewTransactionModalはPAYMENTを登録する。UI初期値は共通費と現在のデフォルト割合で、取引先ルールに一致すると区分・割合を適用する。ルール未一致もUIでは共通費を選び、利用者が区分/割合を変更した後は自動適用を止める。APIと清算計算はRECEIPTも扱うが、新規画面には種別切替を持たない。</p>
+          <h3>明細編集・一括操作</h3>
+          <ul>
+            <li>文字・日時・金額・割合は欄を離れるかEnterで保存。選択項目は変更時に保存。入力検証後、保存キューで順番に実行し、失敗時の下書きと再試行を保持する。</li>
+            <li>取引の担当者を変更すると個人費の割合は新担当者1・ほか0に追従。共通費の保存済み割合は保持する。費用区分を新たに共通費へ変更すると現在のデフォルト割合を使う。</li>
+            <li>割合は%と円入力を切替可能。円表示は最大剰余法で配分し同率時は参加者順、合計を整数円に一致させる。円入力は分担金額を重みとして保存する。</li>
+            <li>メモは空文字で削除可能、改行/空白を保持し最大2000文字。blurまたはCtrl/⌘+Enterで専用保存。清算済み行はメモだけ編集できる。</li>
+            <li>列を絞り込んでも未清算行の選択を保持する。編集・保存・エラー中の行は条件外になっても表示を維持。一括操作の前に未保存の変更を保存し、確定した取引先と担当者へルールを適用する。</li>
+            <li>一括削除/ルール適用は選択全件の存在と未清算をDBで確認し、対象の一部だけを変更しない。ルール未一致は個人費へ戻る。適用済み明細の確定値を応答し、編集Stateにも反映する。</li>
+          </ul>
+          <h3>ルール編集</h3>
+          <p>有効なルールを上から評価し、取引先の部分一致が最初に成立する一件を使う。文字・割合はblur/Enter、区分・デフォルト利用・有効状態は即保存。追加は末尾、ドラッグまたはスペース/上下キーで並び替え、選択したルールをまとめて削除する。操作キューは並び替え・削除と行編集を直列化し、失敗した入力や構造操作の再試行を保持する。ルール変更だけでは保存済み明細を変更しない。</p>
+          <h3>取引明細のフィルタ保存</h3>
+          <p><code>TransactionsPanel</code>は<code>useTransactionFilters(userId, workspaceId)</code>で列ごとの条件を管理し、<code>lib/transaction-filter-storage.ts</code>を通して<code>localStorage</code>へ保存・復元する。API・DBへは保存しない。</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>項目</th><th>仕様</th></tr></thead>
+            <tbody>
+              <tr><td>保存キー</td><td><code>cake:transaction-filters:v1:{encodeURIComponent(userId)}:{encodeURIComponent(workspaceId)}</code>。ユーザーとワークスペースごとに分離し、キー内の<code>v1</code>で保存形式を識別する。</td></tr>
+              <tr><td>保存内容</td><td><code>TransactionFilters</code>をJSON化したオブジェクト。列IDは<code>occurredAt</code>、<code>merchant</code>、<code>method</code>、<code>amountYen</code>、<code>actorUserId</code>、<code>expenseClass</code>、<code>splitWeights</code>、<code>memo</code>、<code>settlement</code>だけを認め、各値は文字列配列とする。</td></tr>
+              <tr><td>条件の意味</td><td>列IDの省略はその列の絞り込みなし。空配列はすべての候補を未選択にした条件として保持し、該当明細を0件にする。全列の絞り込み解除でオブジェクトが空になった場合は保存キーを削除する。</td></tr>
+              <tr><td>復元・更新</td><td>ユーザーIDまたはワークスペースIDの変更時に保存先を切り替える。画面再表示・再読み込み時に保存値を読み、変更時は即時保存する。<code>useSyncExternalStore</code>のサーバー描画時の初期値は空オブジェクトとし、ブラウザで復元する。同じブラウザの別タブによる変更・削除は<code>storage</code>イベントで再読込する。</td></tr>
+              <tr><td>異常時</td><td>JSON不正やオブジェクト以外の値は空条件へ戻す。不明な列IDや文字列配列以外の列値は無視する。読込・書込・削除の例外を捕捉し、保存領域が利用できない場合も現在の画面上の絞り込み操作を継続する。</td></tr>
+              <tr><td>保存範囲</td><td>同じサイトのブラウザ内だけに保持し、別端末・別ブラウザへ同期しない。サイトデータの削除で保存条件を初期化する。</td></tr>
             </tbody>
           </table></div>
           <h3>日時・金額表示</h3>
           <ul>
-            <li><code>money()</code>: <code>Intl.NumberFormat("ja-JP", { currency: "JPY" })</code>で表示。</li>
-            <li><code>dateTime()</code>: <code>Asia/Tokyo</code>タイムゾーンで年月日時分を表示。</li>
-            <li><code>inputDate()</code>: ISO日時を日本時間の<code>datetime-local</code>形式へ変換。</li>
-            <li><code>jstInputToIso()</code>: 入力値へ<code>+09:00</code>を付け、UTC ISO文字列へ変換。</li>
+            <li><code>money()</code>: <code>Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" })</code>。</li>
+            <li><code>dateTime()</code>: <code>Asia/Tokyo</code>で年月日時分秒を表示。</li>
+            <li>新規入力の<code>inputDate()</code>/<code>jstInputToIso()</code>はJSTのdatetime-localとUTC ISOを変換。</li>
+            <li>一覧の<code>transactionDateInput()</code>/<wbr><code>transactionDateToIso()</code>は秒・ミリ秒を維持し、存在しない日付/時刻を拒否。Repositoryのfull取得は従来互換の秒精度を保ち、SQL内の順序判定には元の日時精度を使用する。</li>
           </ul>
         </section>
 
         <section id="domain">
           <h2>8. ドメイン処理詳細設計</h2>
+          <h3>保存割合・デフォルト判定</h3>
+          <p><code>SplitWeights = Record&lt;userId, number&gt;</code>は現在の参加者IDをすべて含み、余分なIDなし、各値0〜2147483647の整数、合計は正とする。<code>validateSplitWeights()</code>は入力のコピーを返す。個人費はactorが1・ほか0、共通費は任意の有効割合を保存する。</p>
+          <p><code>transactionDefaults()</code>はenabledルールを<code>sortOrder</code>昇順で部分一致判定。未一致はPERSONAL、共通費のルール割合nullはmemberの現在デフォルトをコピーする。明示ルールの新参加者IDがない場合は0として補う。デフォルトやルール変更だけでは過去明細の保存割合を変更しない。</p>
           <h3>PayPay CSV解析</h3>
-          <p><code>parsePayPayCsv(text, rules, existingExternalIds): PayPayPreviewRow[]</code></p>
-          <div class="state-flow"><span>BOM除去</span><i>→</i><span>PapaParse</span><i>→</i><span>必須Header検証</span><i>→</i><span>「支払い」抽出</span><i>→</i><span>行検証・Rule適用</span><i>→</i><span>Preview</span></div>
+          <p><code>parsePayPayCsv(text, rules, existingExternalIds, members?, actorUserId?): PayPayPreviewRow[]</code></p>
+          <div class="state-flow"><span>BOM除去</span><i>→</i><span>PapaParse</span><i>→</i><span>必須Header検証</span><i>→</i><span>「支払い」抽出</span><i>→</i><span>行検証・Rule適用</span><i>→</i><span>ID照合後Preview</span></div>
           <div class="table-wrap"><table>
             <thead><tr><th>処理</th><th>仕様</th></tr></thead>
             <tbody>
               <tr><td>必須列</td><td>取引日、出金金額（円）、取引内容、取引先、取引方法、取引番号。欠落時はファイル全体を例外。</td></tr>
-              <tr><td>対象行</td><td>取引内容をtrimした値が<code>支払い</code>と完全一致する行だけ。</td></tr>
-              <tr><td>金額</td><td>カンマと前後空白を除去し、数字だけを許可。正整数でなければ行エラー。</td></tr>
-              <tr><td>重複</td><td>既存external ID Setに含まれる行は<code>duplicate=true</code>、初期選択OFF。</td></tr>
-              <tr><td>デフォルト区分</td><td>enabled ruleをpriority昇順にし、merchant部分一致の先頭を採用。未一致はPERSONAL。</td></tr>
-              <tr><td>日時</td><td><code>yyyy/MM/dd HH:mm:ss</code>を正規表現検証し、JSTとしてISOへ変換。</td></tr>
-              <tr><td>原本</td><td>FileReaderで文字列化するだけで、CSV本文をサーバー・DBへ送信しない。</td></tr>
+              <tr><td>対象行・金額</td><td>取引内容をtrimした値が支払いと完全一致する行だけ。金額のカンマ/前後空白を除去し、数字のみ・正整数を許可。</td></tr>
+              <tr><td>日時・外部ID</td><td><code>yyyy/MM/dd HH:mm:ss</code>を存在するJST日時として検証。<code>PayPay_YYYYMMDDHHMMSS_{取引番号}</code>を生成し、番号の先頭ゼロを保持。日時/actor編集後も保存IDは保持。</td></tr>
+              <tr><td>行の値</td><td>取引先はtrimして必須。取引方法が空ならPayPay。区分・割合はtransactionDefaultsで決める。</td></tr>
+              <tr><td>重複・衝突</td><td>既存IDとCSV内同一キーの一致行は初期選択OFF。同一CSVの繰返しは最初の一件だけ登録候補。同じキーで金額/取引先が異なる場合、既存sourceがPAYPAY以外の場合は衝突エラーとして登録不可。</td></tr>
+              <tr><td>専用API照合</td><td>有効な外部IDをまとめ、最大2000件ずつ選択workspaceへ照合。照合完了前や失敗後に未確認のプレビューは表示しない。ファイル変更時の遅延応答は破棄する。</td></tr>
+              <tr><td>原本</td><td><code>File.text()</code>で端末内解析。サーバーへ送るのは選択済みitems・ファイル名・件数で、CSV本文は保存しない。</td></tr>
+              <tr><td>DB登録</td><td>外部IDを正規化し、キー順にTransactionへ追加。同一キーは競合行のロック下でsource・金額・取引先を確認。一致は省略、不一致は履歴も含め全体をロールバック。</td></tr>
             </tbody>
           </table></div>
-
           <h3>清算計算</h3>
           <p><code>calculateSettlement(members, transactions): SettlementResult | null</code></p>
           <ol>
-            <li>メンバーがちょうど2人でなければ<code>null</code>。</li>
-            <li><code>expenseClass === SHARED</code>かつ<code>settledAt === null</code>の明細だけを抽出。0件なら<code>null</code>。</li>
-            <li><code>paymentTotal</code>、<code>receiptTotal</code>、<code>netTotal = paymentTotal - receiptTotal</code>を集計。</li>
-            <li>先頭メンバーの目標負担を<code>Math.round(netTotal × weight / weightTotal)</code>で算出し、二人目は残額。</li>
-            <li>各人の<code>actual = payments - receipts</code>、<code>balance = actual - target</code>を算出。</li>
-            <li>balanceが負の人をpayer、正の人をpayeeとし、送金額はpayerの絶対値。該当者なしはID/Nameがnull、金額0。</li>
+            <li>メンバーがちょうど2人でなければnull。未清算のSHARED明細だけを抽出し、0件ならnull。</li>
+            <li>対象actorの所属、正の安全整数金額、各明細の保存割合を検証する。</li>
+            <li>支払いを正、受け取りを負として正味共通費を計算。各明細の金額に、その明細の先頭参加者割合を掛けた分数をBigIntで正確に合算する。</li>
+            <li>全明細を合算した先頭参加者の負担を一度だけ<code>Math.round</code>相当で丸める。負の0.5も正の方向に丸め、二人目の負担は正味共通費から先頭負担を引く。</li>
+            <li><code>actual = ownPayments - ownReceipts</code>、<code>balance = actual - target</code>。負balanceの人が支払い、正balanceの人が受け取り、送金額は負balanceの絶対値。</li>
+            <li>差額0ならpayer/payeeのID・名前はnull、金額0。対象明細があれば0円の清算完了も可能。</li>
           </ol>
-          <div class="code-block">targetTransactions = SHARED && !settledAt
-netTotal          = ΣPAYMENT - ΣRECEIPT
-firstTarget       = round(netTotal × firstWeight / weightTotal)
+          <div class="code-block">targetTransactions = SHARED &amp;&amp; !settledAt
+signedAmount(t)    = PAYMENT ? amountYen : -amountYen
+netTotal          = Σ signedAmount(t)
+firstBurden       = Σ [signedAmount(t) × t.splitWeights[firstId]
+                       / Σ t.splitWeights]  (exact BigInt fraction)
+firstTarget       = round(firstBurden)      (once after aggregation)
 secondTarget      = netTotal - firstTarget
 actual            = ownPayments - ownReceipts
 balance           = actual - target
 amountYen         = abs(payer.balance)</div>
-          <h3>清算完了</h3>
-          <div class="state-flow"><span>Bootstrap再取得</span><i>→</i><span>対象ID固定</span><i>→</i><span>履歴Snapshot</span><i>→</i><span>関連行INSERT</span><i>→</i><span>明細settled_at更新</span></div>
-          <p>全クエリを一つのNeon Transactionで実行する。<code>settlement_transactions.transaction_id</code>のUNIQUE制約により、同じ明細を二重に清算しようとしたTransactionは失敗する。</p>
+          <p><code>SettlementPerson.weight</code>と<code>weight_snapshot</code>は現在のデフォルト割合を記録するが、計算は各明細の<code>splitWeights</code>を使用する。清算Snapshotには対象明細ごとの保存割合も含める。</p>
+          <h3>清算完了と同時操作</h3>
+          <div class="state-flow"><span>full再取得・再計算</span><i>→</i><span>対象値をID順に固定</span><i>→</i><span>ロック・Snapshot照合</span><i>→</i><span>履歴・関連INSERT</span><i>→</i><span>settled_at更新</span></div>
+          <p><code>cake_assert_settlement_snapshot()</code>をTransaction先頭で実行し、workspace行の更新ロックを取得して所属を再確認する。現在の未清算SHARED全明細のID・actor・type・amount・class・splitWeightsが期待値と完全一致しなければ全体を失敗させる。計算に関係しないメモ・日時・取引先・方法は照合Snapshotの対象外。</p>
+          <p>計算Snapshot・対象明細Snapshot、対象関連、settled_atを同じNeon Transactionで保存する。対象明細の追加・削除・計算値変更・先行清算があれば再確認を促す。<code>settlement_transactions.transaction_id</code>のUNIQUE制約でも二重清算を防ぐ。清算済みの計算値は通常更新/削除不可だが、メモは専用APIで変更できる。</p>
         </section>
 
         <section id="repository">
           <h2>9. Repository・データ取得設計</h2>
           <h3><code>getBootstrap()</code>の構築規則</h3>
-          <div class="sequence">
-            <div><b>ensureUser</b><i>→</i><span>app_usersをID基準でUPSERT。メールは小文字化。</span></div>
-            <div><b>listWorkspaces</b><i>→</i><span>本人所属だけを更新日時・作成日時の降順で取得し、全member数を集計。</span></div>
-            <div><b>initial workspace</b><i>→</i><span>所属0件なら「個人の家計」とOWNER membershipをCTEで作成後、再取得。</span></div>
-            <div><b>select</b><i>→</i><span>requestedWorkspaceIdに一致する所属、なければ一覧先頭。</span></div>
-            <div><b>parallel read</b><i>→</i><span>選択workspace詳細とメール宛の保留招待を並列取得。</span></div>
-          </div>
-          <h3><code>getWorkspaceData()</code>の並列Query</h3>
+          <ol>
+            <li>ユーザー登録/プロフィール書込みは行わず、認証境界で確認済みのAppUserを受け取る。</li>
+            <li><code>my_workspaces</code> CTEで本人所属だけを抽出し、全参加者数を集計。<code>selected_workspace</code> CTEは指定IDに一致する所属を優先し、更新日時DESC・作成日時DESC・ID ASCで一件を選択する。</li>
+            <li>同じSQL内で一覧、選択先のmembers/rules、本人メール宛のPENDING・期限内招待をJSON集約する。fullの場合だけtransactionsとsettlementHistoryの集約を含める。</li>
+            <li>所属0件なら一つのCTEで「個人の家計」とOWNER membershipを作成し、集約SQLを一回再実行する。</li>
+            <li>集約JSONをDTO化し、fullの共有workspaceだけ清算を計算する。</li>
+          </ol>
           <div class="table-wrap"><table>
-            <thead><tr><th>取得対象</th><th>Join・順序</th><th>DTO</th></tr></thead>
+            <thead><tr><th>取得対象</th><th>並び順・範囲</th><th>scope</th></tr></thead>
             <tbody>
-              <tr><td>members</td><td>workspace_members + app_users、joined_at昇順。</td><td><code>WorkspaceMember[]</code></td></tr>
-              <tr><td>transactions</td><td>transactions + actor user、occurred_at/created_at降順。</td><td><code>TransactionRecord[]</code></td></tr>
-              <tr><td>rules</td><td>default_rules、priority/created_at昇順。</td><td><code>DefaultRule[]</code></td></tr>
-              <tr><td>history</td><td>settlements + payer/payee、completed_at降順、最大20件。</td><td><code>SettlementHistory[]</code></td></tr>
+              <tr><td>workspaces / selected</td><td>本人所属。updated_at DESC、created_at DESC、id ASC。選択詳細の全SQL集約は認可済みselected_workspaceにJOIN。</td><td>full / metadata</td></tr>
+              <tr><td>members</td><td>app_usersをJOIN、joined_at ASC、user_id ASC。</td><td>full / metadata</td></tr>
+              <tr><td>rules</td><td>sort_order ASC、created_at ASC、id ASC。無効ルールも返す。</td><td>full / metadata</td></tr>
+              <tr><td>pendingInvitations</td><td>本人メール宛、PENDING、expires_at &gt; now()、created_at DESC。</td><td>full / metadata</td></tr>
+              <tr><td>transactions</td><td>全明細、actor userをJOIN、occurred_at DESC、created_at DESC。memoと保存割合を含む。</td><td>fullのみ</td></tr>
+              <tr><td>settlementHistory</td><td>payer/payeeをLEFT JOIN、completed_at DESC、最新20件。</td><td>fullのみ</td></tr>
             </tbody>
           </table></div>
-          <p>SQL行は<code>Record&lt;string, unknown&gt;</code>として受け、<code>text</code>、<code>nullableText</code>、<code>number</code>でDTOへ明示変換する。日時はISO文字列へ正規化する。</p>
-          <div class="note"><code>requireWorkspaceMember(workspaceId, userId)</code>はworkspacesとworkspace_membersのJOIN結果を返す。行がなければ認可例外を送出し、参照・更新の共通ガードとして使う。</div>
+          <p>通常の画面要求/<code>GET /api/app</code>は利用可否確認1 SQLと集約1 SQLの合計2 SQL・2回のNeon通信。初期workspace作成時だけ追加SQLが発生する。lazy SQL断片は集約時に一緒に実行し、断片作成だけで通信しない。metadataは明細・清算・履歴のSQL自体を含まず、既存明細の全件取得を省く。</p>
+          <p>SQL行を<code>Record&lt;string, unknown&gt;</code>として受け、text/nullableText/number、<code>transactionRecord()</code>で明示変換する。集約日時は<code>date_trunc('second', ...)</code>で従来DTOの秒精度を維持し、並び順や期限判定は元の精度を使用する。</p>
+          <div class="note"><code>requireWorkspaceMember(workspaceId, userId)</code>はworkspacesとworkspace_membersをJOINし、所属がなければ認可例外。scopeや指定IDはユーザーの所属を広げない。</div>
+          <h3>DB実行ログ</h3>
+          <p><code>instrumentDatabase()</code>はlazy queryの実行時に、<code>db.query</code>または<code>db.transaction</code>のJSONを出力する。operation、匿名queryId、許可済みtable名、durationMs、sqlCount、status、slow、失敗時の標準errorType/SQLSTATEだけを含み、SQL本文・パラメータ・結果・エラーメッセージは含めない。</p>
+          <p><code>DB_QUERY_LOG=all|slow|off</code>。既定はPreview/開発がall、その他slow。ProductionはNODE_ENVに関係なくslow。<code>DB_SLOW_QUERY_MS</code>は非負数で既定500ms。不正値は500へ戻す。slowは閾値以上の成功と全失敗、offは全ログを停止。Transactionは総時間を一件で記録し、sqlCountはSQL文数。集約SQLは参照テーブル数に関係なく1件として計測する。</p>
         </section>
 
         <section id="database">
           <h2>10. データベース物理設計</h2>
-          <p class="lead">PostgreSQL。UUID生成に<code>pgcrypto</code>を使用し、日時は<code>timestamptz</code>、金額は整数円で保持する。</p>
+          <p class="lead">PostgreSQL。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜006の順次適用後を指す。</p>
           <div class="table-wrap"><table>
-            <thead><tr><th>テーブル</th><th>主キー</th><th>主要制約・Index</th><th>削除連鎖</th></tr></thead>
+            <thead><tr><th>テーブル</th><th>主キー</th><th>主要列・制約・Index</th><th>参照・削除</th></tr></thead>
             <tbody>
-              <tr><td><code>app_users</code></td><td>text <code>id</code></td><td>email UNIQUE、email/name NOT NULL。</td><td>member・actor参照に応じる。</td></tr>
-              <tr><td><code>workspaces</code></td><td>uuid</td><td>name 1〜80、type PERSONAL/SHARED、owner FK。</td><td>workspace配下をCASCADE。</td></tr>
-              <tr><td><code>workspace_members</code></td><td>(workspace_id, user_id)</td><td>role Enum、weight &gt; 0。TriggerでPERSONAL=1人、SHARED=2人上限。</td><td>workspace/user削除でCASCADE。</td></tr>
-              <tr><td><code>invitations</code></td><td>uuid</td><td>token_hash UNIQUE、(workspace,email) UNIQUE、status Enum。</td><td>workspace削除でCASCADE。</td></tr>
-              <tr><td><code>import_batches</code></td><td>uuid</td><td>件数・file_name・imported_byを保持。</td><td>workspace削除でCASCADE。</td></tr>
-              <tr><td><code>transactions</code></td><td>uuid</td><td>(workspace_id,external_id) UNIQUE、amount &gt; 0、type/class/source Enum。日付・未清算Index。</td><td>workspace削除でCASCADE、batch削除でSET NULL。</td></tr>
-              <tr><td><code>default_rules</code></td><td>uuid</td><td>merchant 1〜120、class Enum、priority Index。</td><td>workspace削除でCASCADE。</td></tr>
-              <tr><td><code>settlements</code></td><td>uuid</td><td>amount &gt;= 0、weight/calculation JSONB。</td><td>workspace削除でCASCADE。</td></tr>
-              <tr><td><code>settlement_transactions</code></td><td>(settlement_id, transaction_id)</td><td>transaction_id UNIQUEで一明細一清算。</td><td>settlement削除でCASCADE。</td></tr>
+              <tr><td><code>app_users</code></td><td>text id</td><td>email UNIQUE/trim小文字、name必須、画像nullable、is_admin/is_enabled NOT NULL DEFAULT false。</td><td>owner、member、actor、履歴・監査から参照。利用停止は削除しない。</td></tr>
+              <tr><td><code>app_user_access_guard</code></td><td>boolean singleton</td><td>singletonはtrueのみ、revision bigint。利用者上限の並行変更を直列化。</td><td>通常ユーザーの有効化時等にTriggerがrevisionを更新。</td></tr>
+              <tr><td><code>workspaces</code></td><td>uuid id</td><td>name 1〜80、type PERSONAL/SHARED、owner FK、created_at/updated_at。</td><td>workspace配下は削除時CASCADE。</td></tr>
+              <tr><td><code>workspace_members</code></td><td>(workspace_id, user_id)</td><td>role OWNER/MEMBER、weight &gt;= 0、joined_at。PERSONAL最大1人・SHARED最大2人。</td><td>workspace/user削除時CASCADE。</td></tr>
+              <tr><td><code>invitations</code></td><td>uuid id</td><td>token_hash UNIQUE、(workspace,email) UNIQUE、status Enum、期限・inviter。</td><td>workspace削除時CASCADE。</td></tr>
+              <tr><td><code>import_batches</code></td><td>uuid id</td><td>file_name、total/imported/skipped_rows、imported_by、created_at。</td><td>workspace削除時CASCADE。</td></tr>
+              <tr><td><code>transactions</code></td><td>uuid id</td><td>(workspace_id,external_id) UNIQUE、正のinteger amount、type/class/source Enum、actor・created/updated_by、split_weights NOT NULL/object、memo NOT NULL DEFAULT 空文字・最大2000文字。workspace/date、workspace/class/settled_at Index。</td><td>workspace削除時CASCADE、batch削除時SET NULL。清算関連からtransactionを参照。</td></tr>
+              <tr><td><code>default_rules</code></td><td>uuid id</td><td>merchant 1〜120、class Enum、sort_order &gt;= 0、nullable/object split_weights、enabled。sort_order/created_at Index。旧priority列とIndexは互換用に保持。</td><td>workspace削除時CASCADE。</td></tr>
+              <tr><td><code>settlements</code></td><td>uuid id</td><td>amount &gt;= 0、weight_snapshot/calculation_snapshot JSONB、payer/payee nullable、completed_by/completed_at。</td><td>workspace削除時CASCADE。</td></tr>
+              <tr><td><code>settlement_transactions</code></td><td>(settlement_id, transaction_id)</td><td>transaction_id UNIQUEで一明細一清算。</td><td>settlement削除時CASCADE。</td></tr>
+              <tr><td><code>schema_migrations</code></td><td>text name</td><td>適用済みSQLファイル名、applied_at。</td><td>setup-dbが履歴を管理。</td></tr>
             </tbody>
           </table></div>
-          <h3>参加者上限Trigger</h3>
-          <ol>
-            <li>INSERT前にworkspace_id文字列のhashでtransaction advisory lockを取得。</li>
-            <li>workspace typeと現在member数を取得。</li>
-            <li>PERSONALで1人以上、SHAREDで2人以上ならDB例外。</li>
-          </ol>
-          <h3>初期化</h3>
-          <p><code>scripts/setup-db.mjs</code>が<code>DATABASE_URL</code>を検証し、<code>db/migrations/001_initial.sql</code>全体をNeonへ送信する。DDLは<code>IF NOT EXISTS</code>を基本とし、Triggerは再作成する。</p>
+          <h3>DB関数・Trigger</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>関数 / Trigger</th><th>整合性</th></tr></thead>
+            <tbody>
+              <tr><td><code>enforce_workspace_member_limit</code></td><td>member INSERT前にworkspace hashのtransaction advisory lockを取得し、個人1人/共有2人の上限を確認。</td></tr>
+              <tr><td><code>enforce_enabled_user_limit</code></td><td>有効化/ID/メール変更時に共通advisory lockとguard行revision更新で上限変更を直列化。固定テストID/メール以外の有効アカウントを二人に制限。</td></tr>
+              <tr><td><code>cake_sync_default_rule_order</code></td><td>sort_orderと旧priorityを同期。旧アプリからの登録は末尾sort_orderを補完。workspace行も更新して順序操作と直列化。</td></tr>
+              <tr><td><code>cake_complete_saved_split</code> / <code>cake_complete_split_weights</code></td><td>個人費はactor1/ほか0、旧アプリの共通費INSERTは現在デフォルトを補完。保存済みJSONへ不足参加者ID:0を加える。</td></tr>
+              <tr><td><code>cake_extend_saved_splits_for_member</code></td><td>新member参加後、既存明細と明示ルールへ新ID:0を追加し、旧参加者の保存割合を維持。清算済み明細にも不足キーを補う。</td></tr>
+              <tr><td><code>cake_reorder_default_rules</code></td><td>workspace行ロック・所属・現在全ルールとの完全一致を確認し、sort_orderを0始まりで再採番。</td></tr>
+              <tr><td><code>cake_assert_settlement_snapshot</code></td><td>workspace行ロック・所属・全未清算SHARED明細の計算値Snapshot一致を同じTransactionで確認。</td></tr>
+              <tr><td><code>cake_bulk_transactions</code></td><td>operationと1〜5000件の一意IDを検証。workspace行ロック、member FOR SHARE、対象をID順FOR UPDATE。全件存在・未清算を確認後、DELETEまたはAPPLY_RULESを実行し、ロック中の確定値を返す。</td></tr>
+              <tr><td><code>cake_normalize_paypay_external_id</code> / <code>cake_assert_paypay_duplicate</code></td><td>PayPay INSERT時の旧ID正規化と、ON CONFLICT条件でのsource・金額・取引先照合。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>マイグレーションと初期化</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>ファイル</th><th>追加・変更</th></tr></thead>
+            <tbody>
+              <tr><td>001_initial.sql</td><td>初期9テーブル・Index・参加者上限Trigger。</td></tr>
+              <tr><td>002_user_access.sql</td><td>管理者/有効状態、メール正規化、上限guard・Trigger、初期管理者。既存通常アカウントは初期値falseのまま保持。</td></tr>
+              <tr><td>003_transaction_splits.sql</td><td>weightの0許可、明細の割合固定/既存履歴の割合補完、ルール順序・割合・互換Trigger、新参加者補完、並び替え/清算Snapshot関数。</td></tr>
+              <tr><td>004_bulk_transactions.sql</td><td>一括削除・現在ルール適用の全件検証・ロック・確定値応答関数。</td></tr>
+              <tr><td>005_transaction_memo.sql</td><td>空文字を既定とする最大2000文字のmemo列。</td></tr>
+              <tr><td>006_paypay_external_ids.sql</td><td>旧PayPay ID移行、登録時正規化、内容衝突検証関数。</td></tr>
+            </tbody>
+          </table></div>
+          <p><code>scripts/setup-db.mjs</code>はDATABASE_URLを確認し、番号付きSQLをファイル名順に適用する。schema_migrationsを作成し、各SQLと適用履歴を同じDO文/Transaction内で実行。共通advisory lockで同時適用を防ぎ、適用済みファイルを省略する。再実行しても利用者/権限を初期状態へ戻さない。</p>
+          <p><code>006_paypay_external_ids.sql</code>は<code>source = PAYPAY</code>の既存外部IDを、保存済み<code>occurred_at AT TIME ZONE 'Asia/Tokyo'</code>から生成した<code>PayPay_YYYYMMDDHHMMSS_{取引番号}</code>へ移行する。すでに新形式の外部IDと手動明細は変更しない。UUID主キーと参照関係は保持し、キー衝突時は一意制約で移行全体を失敗させる。移行前に日時を編集していた明細は元のCSV日時を復元できないため、再取込時の重複判定が一致しない場合がある。</p>
+          <p>移行中は<code>transactions</code>への書込みをロックして、既存データの変換と登録時トリガーの作成を一体で適用する。<code>cake_normalize_paypay_external_id</code>を呼ぶ<code>BEFORE INSERT</code>トリガーは、更新切替中に旧サーバーが送るPayPayの取引番号だけの外部IDも新形式へ変換する。手動明細と新形式は保持し、<code>UPDATE</code>時には実行しないため日時編集後も元の外部IDが残る。</p>
+          <p>同じマイグレーションで<code>cake_assert_paypay_duplicate</code>を作成する。<code>ON CONFLICT DO UPDATE</code>の条件から、競合行のロックを保持した状態で既存source・金額・取引先を検証する。一致時はfalseを返して更新・返却を省略し、不一致時は日本語の例外で取込トランザクション全体を失敗させる。</p>
         </section>
 
         <section id="types">
           <h2>11. TypeScript型設計</h2>
-          <h3>列挙型</h3>
           <div class="table-wrap"><table>
-            <thead><tr><th>型</th><th>値</th><th>対応DB列</th></tr></thead>
+            <thead><tr><th>型</th><th>値・重要フィールド</th></tr></thead>
             <tbody>
-              <tr><td><code>WorkspaceType</code></td><td>PERSONAL | SHARED</td><td>workspaces.type</td></tr>
-              <tr><td><code>TransactionType</code></td><td>PAYMENT | RECEIPT</td><td>transactions.type</td></tr>
-              <tr><td><code>ExpenseClass</code></td><td>PERSONAL | SHARED</td><td>transactions/default_rules.expense_class</td></tr>
+              <tr><td><code>WorkspaceType</code> / <code>TransactionType</code> / <code>ExpenseClass</code></td><td>PERSONAL|SHARED、PAYMENT|RECEIPT、PERSONAL|SHARED。DBのtype/classと対応。</td></tr>
+              <tr><td><code>SplitWeights</code></td><td><code>Record&lt;string, number&gt;</code>。保存済み参加者別整数割合。</td></tr>
+              <tr><td><code>AppUser</code> / <code>RegisteredUser</code></td><td>id/email/name/imageUrl、AppUserは任意isAdmin。RegisteredUserは必須isAdmin/isEnabled。</td></tr>
+              <tr><td><code>WorkspaceSummary</code> / <code>WorkspaceMember</code></td><td>workspaceのid/name/type/ownerUserId/memberCount。memberはAppUserにweightとOWNER/MEMBER role。</td></tr>
+              <tr><td><code>TransactionRecord</code></td><td>id、ISO occurredAt、merchant/method/memo、type、整数amountYen、actorUserId/actorName、expenseClass、splitWeights、nullable settledAt、externalId、MANUAL/PAYPAY source。</td></tr>
+              <tr><td><code>DefaultRule</code></td><td>id、merchantContains、expenseClass、sortOrder、nullable splitWeights、enabled。priorityはDTOに公開しない。</td></tr>
+              <tr><td><code>SettlementPerson</code> / <code>SettlementResult</code></td><td>一人分のuserId/name/weight/payments/receipts/actual/target/balance。結果はtransactionIds、paymentTotal/receiptTotal/netTotal、people、nullable payerUserId/payerName/payeeUserId/payeeName、amountYen。</td></tr>
+              <tr><td><code>SettlementHistory</code> / <code>PendingInvitation</code></td><td>履歴はid/nullable payerName・payeeName/amountYen/completedAt。招待はid/workspaceName/inviterName/expiresAt。</td></tr>
+              <tr><td><code>BootstrapScope</code></td><td>full | metadata。</td></tr>
+              <tr><td><code>PayPayPreviewRow</code></td><td>key、selected、CSVのJST occurredAt、merchant/method/amountYen/externalId、expenseClass/splitWeights、duplicate、nullable error。</td></tr>
             </tbody>
           </table></div>
           <h3>DTO関係</h3>
-          <div class="code-block">BootstrapData
+          <div class="code-block">BootstrapMetadata
 ├─ user: AppUser
 ├─ workspaces: WorkspaceSummary[]
-├─ selected: WorkspaceData | null
+├─ selected: WorkspaceMetadata | null
 │  ├─ workspace: WorkspaceSummary
 │  ├─ members: WorkspaceMember[]
-│  ├─ transactions: TransactionRecord[]
-│  ├─ rules: DefaultRule[]
-│  ├─ settlement: SettlementResult | null
-│  └─ settlementHistory: SettlementHistory[]
-└─ pendingInvitations: PendingInvitation[]</div>
-          <div class="table-wrap"><table>
-            <thead><tr><th>型</th><th>用途・重要フィールド</th></tr></thead>
-            <tbody>
-              <tr><td><code>AppUser</code></td><td>id、email、name、nullable imageUrl。</td></tr>
-              <tr><td><code>WorkspaceMember</code></td><td>AppUserを拡張し、正整数weightとOWNER/MEMBER role。</td></tr>
-              <tr><td><code>TransactionRecord</code></td><td>ISO occurredAt、整数amountYen、actor、nullable settledAt、externalId、source。</td></tr>
-              <tr><td><code>SettlementPerson</code></td><td>payments、receipts、actual、target、balanceの一人分内訳。</td></tr>
-              <tr><td><code>SettlementResult</code></td><td>対象transactionIds、集計、people、payer/payee、amountYen。</td></tr>
-              <tr><td><code>PayPayPreviewRow</code></td><td>UI選択状態、変換後フィールド、duplicate、行errorを保持。</td></tr>
-            </tbody>
-          </table></div>
-          <p><code>types/next-auth.d.ts</code>でNextAuth Session Userへ必須の<code>id: string</code>をDeclaration Mergingする。</p>
+│  └─ rules: DefaultRule[]
+└─ pendingInvitations: PendingInvitation[]
+
+BootstrapData extends BootstrapMetadata
+└─ selected: WorkspaceData | null
+   ├─ ...WorkspaceMetadata
+   ├─ transactions: TransactionRecord[]
+   ├─ settlement: SettlementResult | null
+   └─ settlementHistory: SettlementHistory[]</div>
+          <p><code>getBootstrap</code>はscope別に返却型をoverloadする。metadata JSONへ空の明細/履歴/清算を付けず、同一workspaceの既存fullデータとの併合はクライアントで行う。<code>types/next-auth.d.ts</code>はSession Userの必須idをDeclaration Mergingする。</p>
         </section>
 
         <section id="errors">
           <h2>12. 例外・認可・整合性設計</h2>
           <div class="table-wrap"><table>
-            <thead><tr><th>分類</th><th>検出箇所</th><th>扱い</th></tr></thead>
+            <thead><tr><th>分類</th><th>検出・扱い</th></tr></thead>
             <tbody>
-              <tr><td>未認証</td><td><code>currentUser()</code></td><td>GETは401、POSTは共通catchにより400。画面はLoginScreen。</td></tr>
-              <tr><td>入力不正</td><td>Zod / CSV関数 / HTML制約</td><td>サーバーはZod messageまたは業務messageをJSON返却。クライアントはerror表示。</td></tr>
-              <tr><td>非所属</td><td><code>requireWorkspaceMember()</code></td><td>処理を中止し「操作する権限がありません」。</td></tr>
-              <tr><td>清算済み編集</td><td>UPDATE/DELETEの<code>settled_at IS NULL</code></td><td>RETURNING 0件を業務例外へ変換。</td></tr>
-              <tr><td>CSV重複</td><td>クライアントSet + DB UNIQUE</td><td>事前に選択不可。競合時もDBでDO NOTHING。</td></tr>
-              <tr><td>二重清算</td><td>transaction_id UNIQUE</td><td>Neon Transaction全体を失敗させ、中途半端な履歴・更新を残さない。</td></tr>
-              <tr><td>DB未設定</td><td><code>db()</code> / Home</td><td>Homeは設定案内、サーバー関数は明示例外。</td></tr>
+              <tr><td>未認証・利用不可</td><td>現在のDB登録・有効状態・モードを照合。一般/app GETは401、POSTは基本400、重複APIと管理APIの未認証は401。画面はログイン導線。</td></tr>
+              <tr><td>入力不正</td><td>Zod、CSV、純粋検証関数と入力欄で確認。API error/行エラーを表示し、未保存下書きを保持。管理APIは入力の詳細を固定メッセージへ変換。</td></tr>
+              <tr><td>非所属・管理者以外</td><td>workspace所属を確認。利用者管理は現在のDB管理者権限で確認し403。通常workspace操作のOWNER専用制約は持たない。</td></tr>
+              <tr><td>清算済み計算値の変更</td><td>通常UPDATE/DELETEはsettled_at IS NULL条件。0件は業務エラー。bulkは全対象の未清算を確認。メモは専用保存で変更可能。</td></tr>
+              <tr><td>古い/欠けた一括選択</td><td>DB関数で全IDの存在・未清算・参加者・現在ルールをロック下で確認。一件でも不正なら全体を変更しない。</td></tr>
+              <tr><td>CSV重複・衝突</td><td>専用API・CSV内検証・DB UNIQUE・競合行のsource/金額/取引先検証。一致は省略、内容差は取込全体を中止。</td></tr>
+              <tr><td>清算対象の並行変更</td><td>workspaceロック下でSnapshot一致検証。対象追加/削除/計算値変更/先行清算を検出したら全体を失敗させ、更新後の再確認を促す。関連UNIQUEでも二重清算を拒否。</td></tr>
+              <tr><td>ルール順序の並行変更</td><td>全rule IDの完全一致と一意性をDBで検証。ルール追加/削除により一覧が変化していれば再取得を促す。</td></tr>
+              <tr><td>遅延応答</td><td>Dashboardはworkspace世代・データrevision・GET要求IDを照合。CSV選択も要求IDで古いファイル照合結果を破棄する。</td></tr>
+              <tr><td>DB未設定</td><td>db()は明示例外。Homeに設定案内を持つが、有効ユーザー確認にもDBを使用する。</td></tr>
             </tbody>
           </table></div>
           <h3>現行コード上の権限境界</h3>
           <ul>
-            <li class="check">既存workspaceを対象とする更新は、招待承認を除き所属確認を実施する。</li>
-            <li class="check">actorUserIdは対象workspaceのmemberであることを追加検証する。</li>
-            <li class="check">招待トークンは平文保存せずSHA-256 Hashで照合する。</li>
-            <li class="caution">OWNER専用操作は実装されておらず、所属メンバーは名称変更・招待・重み変更・workspace削除を実行できる。</li>
-            <li class="caution">workspace削除前の再認証は実装されておらず、名称一致と所属のみを検証する。</li>
+            <li>workspace更新は招待承認を除き所属を確認。actorは同じworkspaceの参加者であることを追加検証。</li>
+            <li>招待は本人のログインメールと宛先の一致を確認し、平文tokenは保存せずSHA-256を保存する。招待承認だけでは未登録Googleユーザーの利用許可を与えない。</li>
+            <li>所属者はOWNER/MEMBERによらず名称・招待・割合・ルール・明細・清算・workspace削除を操作できる。削除は名称一致と確認ダイアログを使い、再認証は行わない。</li>
+            <li>利用者管理はテストユーザーを除く有効管理者のみ。管理者の停止は拒否し、停止済み通常ユーザーの再登録は既存内部IDとデータを保持。</li>
           </ul>
-          <div class="warning">上記の注意点は仕様提案ではなく、現行ソースの境界を明示したものである。権限仕様を変更する場合はAPI条件、UI表示、受入条件を合わせて変更する。</div>
         </section>
 
         <section id="tests">
           <h2>13. テスト・ビルド・運用設計</h2>
           <h3>自動テスト</h3>
           <div class="table-wrap"><table>
-            <thead><tr><th>ファイル</th><th>対象</th><th>検証内容</th></tr></thead>
+            <thead><tr><th>テストファイル群</th><th>主な検証</th></tr></thead>
             <tbody>
-              <tr><td class="path">tests/paypay.test.ts</td><td>CSVドメイン関数</td><td>支払い行だけの抽出、JST→ISO変換、非対象行除外、rule優先順位、既存IDの選択不可。</td></tr>
-              <tr><td class="path">tests/settlement.test.ts</td><td>清算ドメイン関数</td><td>6:4の送金額、個人費・清算済み除外、1円端数の配分。</td></tr>
+              <tr><td>paypay.test.ts / paypay-id.test.ts / import-duplicates.test.ts / paypay-import.test.ts</td><td>支払い抽出、JST日時・外部ID・先頭ゼロ、旧ID正規化、行/既存重複・内容衝突、保存順、Transactionと実挿入件数。</td></tr>
+              <tr><td>settlement.test.ts / expense-splits.test.ts / split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、受け取り、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>
+              <tr><td>transaction-editing.test.ts / transaction-updates.test.ts / transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>
+              <tr><td>transaction-filters.test.ts / transaction-filter-storage.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗。</td></tr>
+              <tr><td>user-access.test.ts / user-profile.test.ts</td><td>確認済みGoogleメールと事前登録、内部ID、有効状態・権限再確認、テストモード、表示名保持・本人更新schema。</td></tr>
+              <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・秒精度、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
+              <tr><td>db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
+              <tr><td>deploy-preview.test.ts / vercel-build.test.ts</td><td>接続情報の解決、Preview成功/READY後だけ固定alias更新、CLI引数・失敗時再試行、PreviewだけDB更新、テスト認証seed、失敗時ビルド停止。</td></tr>
+              <tr><td>seed-startup.test.ts / seed-error.test.ts</td><td>@next/env実起動、環境変数のロード、DB登録失敗の段階・原因を秘密情報なしで整形。</td></tr>
             </tbody>
           </table></div>
-          <h3>コマンド</h3>
+          <p>全テストは<code>tests/</code>配下。純粋関数、SQL/外部コマンドのスタブ、スクリプト起動を検証する。実DBの制約・同時操作とブラウザ操作は別途実環境で確認する。</p>
+          <h3>コマンドとデプロイ</h3>
           <div class="table-wrap"><table>
             <thead><tr><th>コマンド</th><th>目的</th></tr></thead>
             <tbody>
-              <tr><td><code>npm test</code></td><td><code>tsx --test tests/*.test.ts</code>で純粋関数の単体テスト。</td></tr>
-              <tr><td><code>npm run lint</code></td><td>ESLintでTypeScript/React/Next.js規約を検査。</td></tr>
-              <tr><td><code>npm run build</code></td><td>Next.js Production buildと型・ルート整合性を検証。</td></tr>
-              <tr><td><code>npm run db:setup</code></td><td>初期DDLを接続先DBへ適用。</td></tr>
-              <tr><td><code>npm run db:seed:test</code></td><td>固定テストユーザーA/BをUPSERT。</td></tr>
+              <tr><td><code>npm test</code></td><td><code>tsx --test tests/*.test.ts</code>。</td></tr>
+              <tr><td><code>npm run lint</code> / <code>npm run build</code></td><td>ESLintとNext.js Production build・型/ルート検証。</td></tr>
+              <tr><td><code>npm run db:setup</code></td><td>未適用番号付きSQLと適用履歴をatomicに追加。</td></tr>
+              <tr><td><code>npm run db:seed:test</code></td><td>固定テストユーザーA/Bを非管理者・有効として登録し、共有家計と所属を準備。繰返し実行しても重複しない。</td></tr>
+              <tr><td><code>npm run build:vercel</code></td><td>Vercel Previewではdb:setup → AUTH_MODE=testの場合db:seed:test → build。必須環境変数/DB準備が失敗すれば停止。Production/Development/ローカルはbuildのみ。</td></tr>
+              <tr><td><code>npm run deploy:preview</code></td><td>接続先を確認/未接続なら対話linkし、ローカルファイルをPreviewへ送信。成功/READYを確認後に固定aliasを更新。</td></tr>
             </tbody>
           </table></div>
+          <p><code>vercel.json</code>はbuildCommandにbuild:vercel、regionにsin1を指定する。Previewは本番と別DBを使用。接続は<code>.vercel/project.json</code>またはGit連携の<code>.vercel/repo.json</code>に対応。固定URL既定は<code>https://cake-preview-fumin1.vercel.app</code>、<code>CAKE_PREVIEW_ALIAS</code>でホスト名を変更できる。追加引数は<code>--logs</code>/<code>--force</code>/<code>--with-cache</code>だけを許可する。</p>
+          <p>デプロイ/ビルド失敗時は固定URLを更新しない。alias失敗時は作成済みDeployment URLと再試行コマンドを返す。Preview上で変更箇所を確認してURLを報告する。Production公開は明示依頼時に行い、必要なマイグレーションは事前にdb:setupで適用する。接続・環境設定・確認手順は<a href="../README.md">README</a>を参照。</p>
           <h3>環境変数</h3>
           <div class="table-wrap"><table>
-            <thead><tr><th>変数</th><th>必須</th><th>用途</th></tr></thead>
+            <thead><tr><th>変数</th><th>用途</th></tr></thead>
             <tbody>
-              <tr><td><code>DATABASE_URL</code></td><td>実データ操作時</td><td>Neon PostgreSQL接続文字列。SSL接続を想定。</td></tr>
-              <tr><td><code>AUTH_SECRET</code></td><td>必須</td><td>Auth.jsの署名・暗号化秘密情報。</td></tr>
-              <tr><td><code>AUTH_GOOGLE_ID</code> / <code>AUTH_GOOGLE_SECRET</code></td><td>Googleモード</td><td>Google OAuth Client資格情報。</td></tr>
-              <tr><td><code>AUTH_URL</code></td><td>環境依存</td><td>Auth.jsの公開基準URL。</td></tr>
-              <tr><td><code>AUTH_MODE</code></td><td>任意</td><td><code>test</code>で開発・PreviewのCredentials認証を有効化。</td></tr>
-              <tr><td><code>VERCEL_ENV</code></td><td>Vercel自動</td><td><code>production</code>時にテスト認証を強制無効化。</td></tr>
+              <tr><td><code>DATABASE_URL</code></td><td>DB接続。認証済みユーザーの照合・画面/API参照・更新で必要。Preview専用DBを分ける。</td></tr>
+              <tr><td><code>AUTH_SECRET</code></td><td>Auth.js署名/暗号化。PreviewビルドはDATABASE_URLとともに値の存在を確認。</td></tr>
+              <tr><td><code>AUTH_GOOGLE_ID</code> / <code>AUTH_GOOGLE_SECRET</code></td><td>GoogleモードのOAuth Client資格情報。</td></tr>
+              <tr><td><code>AUTH_URL</code></td><td>公開基準URL。localhostはローカル用、PreviewはURL自動検出または固定Preview URL。</td></tr>
+              <tr><td><code>AUTH_MODE</code> / <code>VERCEL_ENV</code></td><td>testは開発/Previewの固定ユーザー認証。productionはテスト認証を無効化し、PreviewのみDB準備を実行。</td></tr>
+              <tr><td><code>DB_QUERY_LOG</code> / <code>DB_SLOW_QUERY_MS</code></td><td>DBログall/slow/offと遅い実行の閾値。既定500ms。</td></tr>
+              <tr><td><code>CAKE_PREVIEW_ALIAS</code></td><td>デプロイ端末での固定Previewホスト名。ローカル.env.local用、Vercel登録は不要。</td></tr>
             </tbody>
           </table></div>
-          <div class="note">詳細設計に影響する変更の最低確認セットは <code>npm test</code>、<code>npm run lint</code>、<code>npm run build</code> とする。DB制約変更時は別環境でマイグレーション適用も確認する。</div>
+          <div class="note">コード変更後の検証はlint・test・build。業務/認可変更は対応テストを追加・更新し、UI変更はPC/スマートフォンの表示・操作を確認する。検証完了後にPreviewへデプロイし、変更内容・検証結果・アクセスURLを報告する。詳細な作業ルールは<a href="../AGENTS.md">AGENTS.md</a>。</div>
         </section>
 
-        <footer>Cake 家計管理アプリ 詳細設計書 · Version 1.0 · Source baseline 2026-08-03</footer>
+        <footer>Cake 家計管理アプリ 詳細設計書 · Version 1.1 · Source baseline 2026-10-10</footer>
       </main>
     </div>
   </body>
