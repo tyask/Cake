@@ -464,21 +464,30 @@
             <thead><tr><th>State / Ref</th><th>用途</th></tr></thead>
             <tbody>
               <tr><td><code>data</code> / <code>currentData</code></td><td>initialDataで初期化するBootstrapData。確定応答の局所更新、full置換、metadata併合。</td></tr>
-              <tr><td><code>tab</code> / <code>currentTab</code></td><td>home / transactions / import / settlement / settings。初期home。</td></tr>
+              <tr><td><code>tab</code> / <code>currentTab</code> / <code>tabGeneration</code></td><td>home / transactions / import / settlement / settings。初期home。タブ切替ごとに世代を進め、元のタブへ戻っても古い通知を抑制する。</td></tr>
               <tr><td><code>workspaceModal</code> / <code>transactionModal</code></td><td>ワークスペース作成、新規明細登録ダイアログの開閉。既存明細は一覧で編集。</td></tr>
               <tr><td><code>loading</code> / <code>pendingRequests</code></td><td>同時API要求数を管理し、処理が一件でも残ればローディング表示を維持。</td></tr>
-              <tr><td><code>notice</code></td><td>成功・エラーの全体メッセージ。各編集画面にも保存状態・エラー・再試行を持つ。</td></tr>
+              <tr><td><code>refreshing</code> / <code>manualRefreshPending</code></td><td>手動更新の保存待ち・取得中の表示と二重実行防止。更新前の個別保存通知を抑え、手動更新の完了・失敗通知へまとめる。</td></tr>
+              <tr><td><code>noticeState</code> / <code>notice</code></td><td>成功・エラーの共通ポップアップ。通知ごとに新しいStateを作り、表示から2秒後に自動で消す。同じ文言の再通知でもタイマーをリセットし、再通知・手動閉じる・アンマウント時は古いタイマーを解除する。「×」で手動閉じる。各編集画面の保存状態・エラー・再試行は個別に保持する。</td></tr>
               <tr><td><code>workspaceView</code> / <code>dataRevision</code> / <code>refreshRequest</code></td><td>workspace ID・世代・データ変更revision・要求IDで、古い家計/保存前/先行GETの遅延応答が現在の画面を置換しないよう検証。</td></tr>
             </tbody>
           </table></div>
           <h3>共通API呼出と再取得</h3>
           <ol>
             <li><code>postAction()</code>がJSONを<code>POST /api/app</code>し、非2xxのerrorを例外化する。</li>
-            <li><code>run()</code>が要求開始時のworkspace・世代を保持し、現在画面向けの成功応答だけを反映する。</li>
+            <li><code>run()</code>が要求開始時のworkspace・世代を保持し、現在のworkspace向けの成功応答だけを反映する。通知はタブ世代も一致し、手動更新中でない場合だけ表示する。</li>
             <li><code>saveTransaction</code>はサーバーの確定TransactionRecordを一覧へ置換/追加し、日時で並び替え、清算を再計算。<code>saveTransactionMemo</code>は返されたメモだけを反映。どちらも直後の全件GETを省く。</li>
             <li>その他の更新とタブ切替は<code>refresh()</code>で再取得。import/settingsはmetadata、home/transactions/settlementはfull。workspace切替は常にfull。</li>
             <li>metadataは同一workspaceの取得済み明細・清算・履歴を保持して併合する。選択workspaceが変化した場合はfullを取得し直す。</li>
           </ol>
+          <h3>画面の手動更新</h3>
+          <ul>
+            <li>ホーム・取引明細・清算に「↻ 更新」を表示する。ホームは指標上部、取引明細は見出し右側の追加ボタン左、清算は見出し右側。白背景・薄いベージュ枠・茶色文字、高さ44px、角丸10〜12pxとし、スマートフォンでは見出し・説明の下に文字付きの操作行を右寄せする。</li>
+            <li>現在のworkspaceを<code>full</code>で再取得する。画面遷移やコンポーネントの再マウントを行わず、フィルタとスクロール位置を保持する。</li>
+            <li>取引明細は全行の未保存入力とメモを保存し、保存キューの完了を待ってからGETする。入力検証・保存に失敗した場合はGETせず、下書きと再試行を保持する。</li>
+            <li>保存待ちから取得終了まで回転アイコンと「更新中…」を表示し、二重実行と競合する操作を抑制する。<code>notice</code>で成功・エラーを通知する。</li>
+            <li>開始時のworkspace・世代とタブ世代を保持し、現在の表示と一致する場合だけ応答と通知を適用する。途中でタブやworkspaceが変わった場合、元のタブへ戻っても古い処理の完了で現在の画面を置換しない。</li>
+          </ul>
           <div class="table-wrap"><table>
             <thead><tr><th>タブ</th><th>参照・操作</th></tr></thead>
             <tbody>

@@ -11,6 +11,7 @@ import { WorkspaceRules } from "./workspace-rules";
 import { CakeIcon } from "./cake-icon";
 import { ImportPreviewTable } from "./import-preview-table";
 import { TransactionsPanel } from "./transactions-panel";
+import { RefreshButton } from "./refresh-button";
 import { defaultSplitWeights, matchingDefaultRule, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
 import { parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
 import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
@@ -58,13 +59,18 @@ const navItems: { id: Tab; label: string; icon: string }[] = [
   { id: "settings", label: "設定", icon: "⚙" },
 ];
 
+const NOTICE_DURATION_MS = 2_000;
+
 export function Dashboard({ initialData, testAuth = false }: { initialData: BootstrapData; testAuth?: boolean }) {
   const [data, setData] = useState(initialData);
   const currentData = useRef(initialData);
   const [tab, setTab] = useState<Tab>("home");
   const currentTab = useRef<Tab>("home");
+  const tabGeneration = useRef(0);
   const [loading, setLoading] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [noticeState, setNoticeState] = useState<{ message: string } | null>(null);
+  const notice = noticeState?.message ?? null;
   const [workspaceModal, setWorkspaceModal] = useState(false);
   const [transactionModal, setTransactionModal] = useState(false);
   const selected = data.selected;
@@ -72,6 +78,19 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
   const pendingRequests = useRef(0);
   const dataRevision = useRef(0);
   const refreshRequest = useRef(0);
+  const manualRefreshPending = useRef(false);
+
+  function setNotice(message: string | null) {
+    setNoticeState(message ? { message } : null);
+  }
+
+  useEffect(() => {
+    if (!noticeState) return;
+    const timer = window.setTimeout(() => {
+      setNoticeState(current => current === noticeState ? null : current);
+    }, NOTICE_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [noticeState]);
 
   function startLoading() { pendingRequests.current += 1; setLoading(true); }
   function finishLoading() { pendingRequests.current -= 1; setLoading(pendingRequests.current > 0); }
@@ -103,33 +122,59 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
     return true;
   }
 
+  async function refreshCurrentView(prepare?: () => Promise<void>) {
+    if (manualRefreshPending.current) return;
+    manualRefreshPending.current = true;
+    const { workspaceId, generation } = workspaceView.current;
+    const originTabGeneration = tabGeneration.current;
+    const isCurrentView = () => generation === workspaceView.current.generation
+      && workspaceId === workspaceView.current.workspaceId && originTabGeneration === tabGeneration.current;
+    setRefreshing(true);
+    startLoading();
+    setNotice(null);
+    try {
+      await prepare?.();
+      if (!isCurrentView()) return;
+      const applied = await refresh(workspaceId, generation, "full");
+      if (applied && isCurrentView()) setNotice("最新状態に更新しました。");
+    } catch (error) {
+      if (isCurrentView()) setNotice(error instanceof Error ? error.message : "更新に失敗しました。もう一度お試しください。");
+    } finally {
+      manualRefreshPending.current = false;
+      setRefreshing(false);
+      finishLoading();
+    }
+  }
+
   async function run(payload: Record<string, unknown>, success: string, workspaceId?: string) {
     const originWorkspaceId = typeof payload.workspaceId === "string" ? payload.workspaceId : selected?.workspace.id;
     const generation = workspaceView.current.generation;
+    const originTabGeneration = tabGeneration.current;
     const isCurrentView = () => generation === workspaceView.current.generation && originWorkspaceId === workspaceView.current.workspaceId;
+    const shouldNotify = () => isCurrentView() && originTabGeneration === tabGeneration.current && !manualRefreshPending.current;
     startLoading();
     if (isCurrentView()) dataRevision.current += 1;
-    if (isCurrentView()) setNotice(null);
+    if (shouldNotify()) setNotice(null);
     try {
       const result = await postAction(payload);
       if (isCurrentView()) {
         dataRevision.current += 1;
         if (payload.action === "saveTransaction" && result.transaction && originWorkspaceId) {
           updateData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, { transaction: result.transaction }) : current);
-          setNotice(success);
+          if (shouldNotify()) setNotice(success);
         } else if (payload.action === "saveTransactionMemo" && result.transactionId && typeof result.memo === "string" && originWorkspaceId) {
           updateData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, { transactionId: result.transactionId, memo: result.memo }) : current);
-          setNotice(success);
+          if (shouldNotify()) setNotice(success);
         } else {
           const applied = await refresh(workspaceId ?? result.workspaceId ?? originWorkspaceId, generation);
-          if (applied && generation === workspaceView.current.generation) {
+          if (applied && shouldNotify()) {
             setNotice(payload.action === "bulkImport" ? `${result.imported}件を取り込みました。` : success);
           }
         }
       }
       return result;
     } catch (error) {
-      if (isCurrentView()) setNotice(error instanceof Error ? error.message : "処理に失敗しました。");
+      if (shouldNotify()) setNotice(error instanceof Error ? error.message : "処理に失敗しました。");
       throw error;
     } finally { finishLoading(); }
   }
@@ -149,12 +194,13 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
 
   function openTab(next: Tab) {
     if (next === tab) return;
+    const originTabGeneration = ++tabGeneration.current;
     currentTab.current = next;
     setTab(next);
     startLoading();
     const generation = workspaceView.current.generation;
     void refresh().catch(error => {
-      if (generation === workspaceView.current.generation) setNotice(error instanceof Error ? error.message : "読込に失敗しました。");
+      if (generation === workspaceView.current.generation && originTabGeneration === tabGeneration.current) setNotice(error instanceof Error ? error.message : "読込に失敗しました。");
     }).finally(finishLoading);
   }
 
@@ -186,12 +232,12 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
       <main className="app-main">
         <header className="mobile-header"><div className="app-logo"><CakeIcon decorative size={34} /><b>Cake</b></div><select value={selected?.workspace.id ?? ""} onChange={(event) => switchWorkspace(event.target.value)}>{data.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></header>
         {testAuth && <div className="demo-banner">テストログインで使用中です（{data.user.name}）</div>}
-        {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice(null)}>×</button></div>}
+        {notice && <div className="notice" role="status">{notice}<button type="button" aria-label="通知を閉じる" onClick={() => setNotice(null)}>×</button></div>}
         {loading && <div className="loading-line" />}
-        {selected && tab === "home" && <HomePanel selected={selected} pending={data.pendingInvitations.length} setTab={openTab} add={() => setTransactionModal(true)} />}
-        {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} userId={data.user.id} add={() => setTransactionModal(true)} run={run} />}
+        {selected && tab === "home" && <HomePanel selected={selected} pending={data.pendingInvitations.length} setTab={openTab} add={() => setTransactionModal(true)} refreshAction={<RefreshButton refreshing={refreshing} disabled={loading} onClick={() => { void refreshCurrentView(); }} />} refreshing={refreshing} />}
+        {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} userId={data.user.id} add={() => setTransactionModal(true)} run={run} onRefresh={refreshCurrentView} refreshing={refreshing} />}
         {selected && tab === "import" && <ImportPanel key={selected.workspace.id} selected={selected} run={run} />}
-        {selected && tab === "settlement" && <SettlementPanel key={selected.workspace.id} selected={selected} run={run} />}
+        {selected && tab === "settlement" && <SettlementPanel key={selected.workspace.id} selected={selected} run={run} refreshAction={<RefreshButton refreshing={refreshing} disabled={loading} onClick={() => { void refreshCurrentView(); }} />} refreshing={refreshing} />}
         {tab === "settings" && <>
           <PageHeading title="設定" />
           <PersonalSettings key={`${data.user.id}-${data.user.name}`} user={data.user} run={run} />
@@ -214,13 +260,13 @@ function PageHeading({ eyebrow, title, description, action }: { eyebrow?: string
   return <div className="page-heading"><div>{eyebrow && <span>{eyebrow}</span>}<h1>{title}</h1>{description && <p>{description}</p>}</div>{action}</div>;
 }
 
-function HomePanel({ selected, pending, setTab, add }: { selected: WorkspaceData; pending: number; setTab: (tab: Tab) => void; add: () => void }) {
+function HomePanel({ selected, pending, setTab, add, refreshAction, refreshing }: { selected: WorkspaceData; pending: number; setTab: (tab: Tab) => void; add: () => void; refreshAction: React.ReactNode; refreshing: boolean }) {
   const month = new Date().getMonth();
   const monthTransactions = selected.transactions.filter((item) => new Date(item.occurredAt).getMonth() === month);
   const payments = monthTransactions.filter((item) => item.type === "PAYMENT").reduce((sum, item) => sum + item.amountYen, 0);
   const shared = selected.transactions.filter((item) => item.expenseClass === "SHARED" && !item.settledAt).reduce((sum, item) => sum + (item.type === "PAYMENT" ? item.amountYen : -item.amountYen), 0);
   return <>
-    <div className="home-actions"><button className="primary" onClick={add}>＋ 明細を追加</button></div>
+    <div className="home-actions page-actions">{refreshAction}<button className="primary" disabled={refreshing} onClick={add}>＋ 明細を追加</button></div>
     {pending > 0 && <button className="invite-alert" onClick={() => setTab("settings")}>あなた宛ての招待が{pending}件あります <span>確認する →</span></button>}
     <div className="kpi-grid">
       <article className="kpi"><span>今月の支払い</span><strong>{money(payments)}</strong><small>{monthTransactions.length}件の取引</small></article>
@@ -232,7 +278,7 @@ function HomePanel({ selected, pending, setTab, add }: { selected: WorkspaceData
         <div className="recent-list">{selected.transactions.slice(0, 6).map((item) => <div className="recent-row" key={item.id}><span className="recent-name"><b>{item.merchant}</b><small>{dateTime(item.occurredAt)} · {item.actorName}</small></span><span className="recent-class">{item.expenseClass === "SHARED" ? "共通費" : "個人費"}</span><strong className={item.type === "RECEIPT" ? "positive" : ""}>{money(item.amountYen)}</strong></div>)}{selected.transactions.length === 0 && <Empty text="まだ取引がありません" />}</div>
       </section>
       <section className="panel quick"><div className="panel-head"><div><span>QUICK ACTIONS</span><h2>すぐにできること</h2></div></div>
-        <button onClick={add}><i>＋</i><span><b>明細を追加</b><small>現金や受け取りを手動登録</small></span></button>
+        <button disabled={refreshing} onClick={add}><i>＋</i><span><b>明細を追加</b><small>現金や受け取りを手動登録</small></span></button>
         <button onClick={() => setTab("import")}><i>⇩</i><span><b>PayPay CSVを取込</b><small>支払い明細をまとめて登録</small></span></button>
         <button onClick={() => setTab("settlement")}><i>↔</i><span><b>清算を確認</b><small>ふたりの差額を計算</small></span></button>
       </section>
@@ -366,13 +412,13 @@ function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload
   </>;
 }
 
-function SettlementPanel({ selected, run }: { selected: WorkspaceData; run: (payload: Record<string, unknown>, success: string) => Promise<unknown> }) {
+function SettlementPanel({ selected, run, refreshAction, refreshing }: { selected: WorkspaceData; run: (payload: Record<string, unknown>, success: string) => Promise<unknown>; refreshAction: React.ReactNode; refreshing: boolean }) {
   const result = selected.settlement;
   async function complete() { if (confirm("表示中の明細を清算済みにしますか？ 実際の送金は別途行ってください。")) await run({ action: "completeSettlement", workspaceId: selected.workspace.id }, "清算を完了しました。"); }
   return <>
-    <PageHeading eyebrow="SETTLEMENT" title="共通費を清算" description="未清算の共通費から、ふたりの差額を計算します。" />
+    <PageHeading eyebrow="SETTLEMENT" title="共通費を清算" description="未清算の共通費から、ふたりの差額を計算します。" action={<div className="page-actions">{refreshAction}</div>} />
     {selected.workspace.type === "PERSONAL" ? <section className="panel"><Empty text="清算は共有ワークスペースで利用できます" /></section> : selected.members.length < 2 ? <section className="panel"><Empty text="相手を招待すると清算計算を利用できます" /></section> : !result ? <section className="panel"><Empty text="現在、清算対象の共通費はありません" /></section> : <>
-      <section className="settlement-hero"><span>今回の清算</span>{result.amountYen > 0 ? <><div className="people-flow"><b>{result.payerName}</b><i>→</i><b>{result.payeeName}</b></div><strong>{money(result.amountYen)}</strong><p>{result.payerName}さんが{result.payeeName}さんへ支払うと、差額が解消されます。</p></> : <><strong>清算不要</strong><p>現在の負担額に差はありません。</p></>}<button className="light-button" onClick={complete}>清算を完了する</button></section>
+      <section className="settlement-hero"><span>今回の清算</span>{result.amountYen > 0 ? <><div className="people-flow"><b>{result.payerName}</b><i>→</i><b>{result.payeeName}</b></div><strong>{money(result.amountYen)}</strong><p>{result.payerName}さんが{result.payeeName}さんへ支払うと、差額が解消されます。</p></> : <><strong>清算不要</strong><p>現在の負担額に差はありません。</p></>}<button className="light-button" disabled={refreshing} onClick={complete}>清算を完了する</button></section>
       <div className="settlement-grid"><section className="panel"><div className="panel-head"><div><span>CALCULATION</span><h2>計算の内訳</h2></div></div><dl className="summary-list"><div><dt>共通支払い</dt><dd>{money(result.paymentTotal)}</dd></div><div><dt>共通収入</dt><dd>− {money(result.receiptTotal)}</dd></div><div className="total"><dt>正味共通費</dt><dd>{money(result.netTotal)}</dd></div></dl></section><section className="panel"><div className="panel-head"><div><span>ALLOCATION</span><h2>ふたりの負担</h2></div></div>{result.people.map((person) => <div className="person-calc" key={person.userId}><div><b>{person.name}</b><span>明細ごとの割合で計算</span></div><p>実質負担 <b>{money(person.actual)}</b></p><p>目標負担 <b>{money(person.target)}</b></p><p className={person.balance >= 0 ? "positive" : "negative"}>差額 <b>{person.balance >= 0 ? "+" : ""}{money(person.balance)}</b></p></div>)}</section></div>
     </>}
     {selected.settlementHistory.length > 0 && <section className="panel history"><div className="panel-head"><div><span>HISTORY</span><h2>清算履歴</h2></div></div>{selected.settlementHistory.map((item) => <div key={item.id}><span>{dateTime(item.completedAt)}</span><b>{item.payerName && item.payeeName ? `${item.payerName} → ${item.payeeName}` : "清算不要"}</b><strong>{money(item.amountYen)}</strong></div>)}</section>}
