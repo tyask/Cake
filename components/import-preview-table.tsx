@@ -55,7 +55,7 @@ function ImportPreviewRow({ row, members, actorId, saving, onSelect, onChangeCla
   const actorName = members.find(member => member.id === actorId)?.name ?? "";
   const invalid = !!row.error || row.duplicate;
   const disabled = saving || invalid;
-  const status = row.duplicate ? "登録済み" : row.error ?? "登録可能";
+  const status = row.error ?? (row.duplicate ? "登録済み" : "登録可能");
   const selectionLabel = `${row.merchant || "取引先未設定"}を取り込む`;
   return <tr className={styles.transactionRow} data-expanded={expanded} data-import-key={row.key}>
     <MobileTransactionSummary item={{ ...row, actorName }} expanded={expanded} onToggle={() => setExpanded(value => !value)}

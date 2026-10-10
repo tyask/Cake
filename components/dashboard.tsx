@@ -15,15 +15,19 @@ import { defaultSplitWeights, matchingDefaultRule, personalSplitWeights, transac
 import { parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
 import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
 import { applyTransactionUpdate } from "@/lib/transaction-updates";
+import { bootstrapScopeForTab, mergeBootstrapMetadata, type DashboardTab } from "@/lib/bootstrap";
+import { applyPayPayDuplicateChecks, MAX_DUPLICATE_CHECK_IDS, type ExistingPayPayTransaction } from "@/lib/import-duplicates";
 import type {
   BootstrapData,
+  BootstrapMetadata,
+  BootstrapScope,
   ExpenseClass,
   WorkspaceData,
   WorkspaceType,
   SplitWeights,
 } from "@/lib/types";
 
-type Tab = "home" | "transactions" | "import" | "settlement" | "settings";
+type Tab = DashboardTab;
 
 const money = (value: number) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(value);
 const dateTime = (value: string) => new Intl.DateTimeFormat("ja-JP", {
@@ -56,7 +60,9 @@ const navItems: { id: Tab; label: string; icon: string }[] = [
 
 export function Dashboard({ initialData, testAuth = false }: { initialData: BootstrapData; testAuth?: boolean }) {
   const [data, setData] = useState(initialData);
+  const currentData = useRef(initialData);
   const [tab, setTab] = useState<Tab>("home");
+  const currentTab = useRef<Tab>("home");
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [workspaceModal, setWorkspaceModal] = useState(false);
@@ -70,17 +76,30 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
   function startLoading() { pendingRequests.current += 1; setLoading(true); }
   function finishLoading() { pendingRequests.current -= 1; setLoading(pendingRequests.current > 0); }
 
-  async function refresh(workspaceId = workspaceView.current.workspaceId, generation = workspaceView.current.generation) {
+  function updateData(update: BootstrapData | ((current: BootstrapData) => BootstrapData)) {
+    const next = typeof update === "function" ? update(currentData.current) : update;
+    currentData.current = next;
+    setData(next);
+  }
+
+  async function refresh(workspaceId = workspaceView.current.workspaceId, generation = workspaceView.current.generation, scope: BootstrapScope = bootstrapScopeForTab(currentTab.current)): Promise<boolean> {
     const requestId = ++refreshRequest.current;
     const revision = dataRevision.current;
     const desiredWorkspaceId = workspaceView.current.workspaceId;
-    const response = await fetch(`/api/app${workspaceId ? `?workspaceId=${workspaceId}` : ""}`, { cache: "no-store" });
+    const params = new URLSearchParams();
+    if (workspaceId) params.set("workspaceId", workspaceId);
+    if (scope === "metadata") params.set("scope", scope);
+    const query = params.toString();
+    const response = await fetch(`/api/app${query ? `?${query}` : ""}`, { cache: "no-store" });
     const next = await response.json();
     if (!response.ok) throw new Error(next.error ?? "更新に失敗しました。");
     // An autosave for a previous workspace must not replace the newly selected view.
     if (generation !== workspaceView.current.generation || desiredWorkspaceId !== workspaceView.current.workspaceId || revision !== dataRevision.current || requestId !== refreshRequest.current) return false;
-    workspaceView.current.workspaceId = next.selected?.workspace.id;
-    setData(next);
+    const nextData = scope === "metadata" ? mergeBootstrapMetadata(currentData.current, next as BootstrapMetadata) : next as BootstrapData;
+    // A new or externally deleted workspace needs its own transaction data.
+    if (!nextData) return refresh(next.selected?.workspace.id, generation, "full");
+    workspaceView.current.workspaceId = nextData.selected?.workspace.id;
+    updateData(nextData);
     return true;
   }
 
@@ -96,14 +115,16 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
       if (isCurrentView()) {
         dataRevision.current += 1;
         if (payload.action === "saveTransaction" && result.transaction && originWorkspaceId) {
-          setData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, { transaction: result.transaction }) : current);
+          updateData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, { transaction: result.transaction }) : current);
           setNotice(success);
         } else if (payload.action === "saveTransactionMemo" && result.transactionId && typeof result.memo === "string" && originWorkspaceId) {
-          setData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, { transactionId: result.transactionId, memo: result.memo }) : current);
+          updateData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, { transactionId: result.transactionId, memo: result.memo }) : current);
           setNotice(success);
         } else {
           const applied = await refresh(workspaceId ?? result.workspaceId ?? originWorkspaceId, generation);
-          if (applied && generation === workspaceView.current.generation) setNotice(success);
+          if (applied && generation === workspaceView.current.generation) {
+            setNotice(payload.action === "bulkImport" ? `${result.imported}件を取り込みました。` : success);
+          }
         }
       }
       return result;
@@ -117,7 +138,7 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
     const generation = workspaceView.current.generation + 1;
     workspaceView.current = { workspaceId, generation };
     startLoading(); setNotice(null);
-    try { await refresh(workspaceId, generation); }
+    try { await refresh(workspaceId, generation, "full"); }
     catch (error) {
       if (generation === workspaceView.current.generation) {
         workspaceView.current = { workspaceId: selected?.workspace.id, generation: generation + 1 };
@@ -128,6 +149,7 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
 
   function openTab(next: Tab) {
     if (next === tab) return;
+    currentTab.current = next;
     setTab(next);
     startLoading();
     const generation = workspaceView.current.generation;
@@ -167,7 +189,7 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
         {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice(null)}>×</button></div>}
         {loading && <div className="loading-line" />}
         {selected && tab === "home" && <HomePanel selected={selected} pending={data.pendingInvitations.length} setTab={openTab} add={() => setTransactionModal(true)} />}
-        {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} add={() => setTransactionModal(true)} run={run} />}
+        {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} userId={data.user.id} add={() => setTransactionModal(true)} run={run} />}
         {selected && tab === "import" && <ImportPanel key={selected.workspace.id} selected={selected} run={run} />}
         {selected && tab === "settlement" && <SettlementPanel key={selected.workspace.id} selected={selected} run={run} />}
         {tab === "settings" && <>
@@ -230,17 +252,44 @@ function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload
   const [actorId, setActorId] = useState(selected.members[0]?.id ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [reading, setReading] = useState(false);
+  const fileRequest = useRef(0);
   const selectedCount = rows.filter((row) => row.selected).length;
+
+  useEffect(() => () => { fileRequest.current += 1; }, []);
 
   async function choose(file?: File) {
     if (!file) return;
+    const requestId = ++fileRequest.current;
+    setReading(true);
+    setRows([]);
+    setFileName("");
+    setError(null);
     try {
       const text = await file.text();
-      const existing = new Set(selected.transactions.map((item) => item.externalId));
-      setRows(importFormats[format].parse(text, selected.rules, existing, selected.members, actorId));
+      if (requestId !== fileRequest.current) return;
+      const parsed = importFormats[format].parse(text, selected.rules, new Set(), selected.members, actorId);
+      const externalIds = [...new Set(parsed.filter(row => !row.error).map(row => row.externalId).filter(Boolean))];
+      const existing: ExistingPayPayTransaction[] = [];
+      for (let offset = 0; offset < externalIds.length; offset += MAX_DUPLICATE_CHECK_IDS) {
+        const response = await fetch("/api/import/duplicates", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspaceId: selected.workspace.id, externalIds: externalIds.slice(offset, offset + MAX_DUPLICATE_CHECK_IDS) }),
+        });
+        const result = await response.json();
+        if (requestId !== fileRequest.current) return;
+        if (!response.ok) throw new Error(result.error ?? "重複の確認に失敗しました。");
+        existing.push(...result.transactions as ExistingPayPayTransaction[]);
+      }
+      if (requestId !== fileRequest.current) return;
+      setRows(applyPayPayDuplicateChecks(parsed, existing));
       setFileName(file.name);
       setError(null);
-    } catch (failure) { setError(failure instanceof Error ? failure.message : "CSVを読み込めませんでした。"); }
+    } catch (failure) {
+      if (requestId === fileRequest.current) setError(failure instanceof Error ? failure.message : "CSVを読み込めませんでした。");
+    } finally {
+      if (requestId === fileRequest.current) setReading(false);
+    }
   }
 
   function changeActor(nextActor: string) {
@@ -269,7 +318,7 @@ function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload
         splitWeights: validateSplitWeights(row.splitWeights, selected.members, row.expenseClass, actorId),
       }));
       if (items.length === 0) { setError("登録する行を選択してください。"); return; }
-      await run({ action: "bulkImport", workspaceId: selected.workspace.id, fileName, totalRows: rows.length, items }, `${items.length}件を取り込みました。`);
+      await run({ action: "bulkImport", workspaceId: selected.workspace.id, fileName, totalRows: rows.length, items }, "明細を取り込みました。");
       setRows([]);
       setFileName("");
     } catch (failure) { setError(failure instanceof Error ? failure.message : "明細を登録できませんでした。"); }
@@ -287,8 +336,12 @@ function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload
       onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); choose(event.dataTransfer.files[0]); }}>
       <div className="upload-icon">⇧</div><h2>CSVファイルをここにドロップ</h2>
       <p>またはファイル選択から{importFormats[format].label}の取引履歴を指定してください。</p>
-      <button className="primary" onClick={() => inputRef.current?.click()}>ファイルを選択</button>
-      <input ref={inputRef} hidden type="file" accept=".csv,text/csv" onChange={(event) => choose(event.target.files?.[0])} />
+      <button className="primary" disabled={reading} onClick={() => inputRef.current?.click()}>{reading ? "読み込み中…" : "ファイルを選択"}</button>
+      <input ref={inputRef} hidden type="file" accept=".csv,text/csv" disabled={reading} onChange={(event) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        void choose(file);
+      }} />
       <small>取引内容が「支払い」の行のみ対象 · CSVは保存されません</small>
       {error && <p className="form-error" role="alert">{error}</p>}
     </section> : <section className="panel table-panel">

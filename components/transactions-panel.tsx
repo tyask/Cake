@@ -10,8 +10,9 @@ import { TransactionFilterDialog } from "./transaction-filter-dialog";
 import { SelectionCheckbox } from "./selection-checkbox";
 import { TransactionMemoEditor, type SaveTransactionMemo } from "./transaction-memo-editor";
 import { transactionMemoSchema } from "@/lib/transaction-memo";
-import { matchesTransactionFilters, transactionColumns, transactionFilterOptions, type TransactionColumn, type TransactionFilters } from "@/lib/transaction-filters";
+import { matchesTransactionFilters, transactionColumns, transactionFilterOptions, type TransactionColumn } from "@/lib/transaction-filters";
 import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } from "./transaction-table";
+import { useTransactionFilters } from "./use-transaction-filters";
 
 type RunAction = (payload: Record<string, unknown>, success: string) => Promise<unknown>;
 type SaveTransaction = (id: string, getValues: () => TransactionValues) => Promise<TransactionValues>;
@@ -35,12 +36,12 @@ function fieldEqual(left: unknown, right: unknown): boolean {
   return Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((key) => a[key] === b[key]);
 }
 
-export function TransactionsPanel({ selected, add, run }: { selected: WorkspaceData; add: () => void; run: RunAction }) {
-  return <TransactionList key={selected.workspace.id} selected={selected} add={add} run={run} />;
+export function TransactionsPanel({ selected, userId, add, run }: { selected: WorkspaceData; userId: string; add: () => void; run: RunAction }) {
+  return <TransactionList key={`${userId}:${selected.workspace.id}`} selected={selected} userId={userId} add={add} run={run} />;
 }
 
-function TransactionList({ selected, add, run }: { selected: WorkspaceData; add: () => void; run: RunAction }) {
-  const [columnFilters, setColumnFilters] = useState<TransactionFilters>({});
+function TransactionList({ selected, userId, add, run }: { selected: WorkspaceData; userId: string; add: () => void; run: RunAction }) {
+  const [columnFilters, setColumnFilters] = useTransactionFilters(userId, selected.workspace.id);
   const [filterColumn, setFilterColumn] = useState<TransactionColumn | null>(null);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => new Set());
   const [memoPinnedIds, setMemoPinnedIds] = useState<Set<string>>(() => new Set());

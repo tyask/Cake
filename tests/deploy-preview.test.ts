@@ -10,6 +10,12 @@ type CommandCall = { args: readonly string[]; captureStdout: boolean };
 
 const deploymentUrl = "https://cake-test-one-fumin1.vercel.app";
 const defaultAlias = "cake-preview-fumin1.vercel.app";
+// Matches getDeploymentOutputJson() in Vercel CLI62.2.0. Preview targets are null.
+const readyDeployment = {
+  id: "dpl_fixture-one", url: deploymentUrl, productionUrl: null,
+  inspectorUrl: "https://vercel.com/fumin1/cake/fixture-one", readyState: "READY", target: null,
+  deploymentApiUrl: "https://api.vercel.com/v13/deployments/dpl_fixture-one",
+};
 const commandResult = (stdout = "", status = 0, signal: NodeJS.Signals | null = null): CommandResult => ({ status, signal, stdout });
 
 function executor(outcomes: (CommandResult | Error)[]) {
@@ -44,7 +50,7 @@ test("Preview成功後だけ固定aliasを最新Deploymentへ割り当てる", a
   const result = await runPreviewDeployment({ environment: {}, execute: stub.execute, log: (message) => logs.push(message) });
   assert.deepEqual(result, { deploymentUrl, fixedUrl: `https://${defaultAlias}` });
   assert.deepEqual(stub.calls, [
-    { args: ["vercel", "deploy", "--target", "preview"], captureStdout: true },
+    { args: ["vercel", "deploy", "--target", "preview", "--format", "json"], captureStdout: true },
     { args: ["vercel", "alias", "set", deploymentUrl, defaultAlias], captureStdout: false },
   ]);
   assert.ok(logs.some((message) => message.includes(`https://${defaultAlias}`)));
@@ -62,7 +68,7 @@ test("許可されたビルドflagsだけをPreviewのdeployコマンドへ渡�
   const args = ["--logs", "--force", "--with-cache"] as const;
   const stub = executor([commandResult(deploymentUrl), commandResult()]);
   await runPreviewDeployment({ environment: {}, args, execute: stub.execute, log: () => {} });
-  assert.deepEqual(stub.calls[0].args, ["vercel", "deploy", "--target", "preview", ...args]);
+  assert.deepEqual(stub.calls[0].args, ["vercel", "deploy", "--target", "preview", "--format", "json", ...args]);
   assert.deepEqual(stub.calls[1].args, ["vercel", "alias", "set", deploymentUrl, defaultAlias]);
 });
 
@@ -90,6 +96,68 @@ test("deploy成功でもstdoutが単一のHTTPS Deployment URLでなければ更
     "", "not-a-url", "http://cake-insecure.vercel.app", "javascript:alert(1)",
     `${deploymentUrl}\nhttps://cake-test-two-fumin1.vercel.app`,
     `build log\n${deploymentUrl}`, "https://user:password@cake-secret.vercel.app",
+  ]) {
+    const stub = executor([commandResult(stdout)]);
+    await assert.rejects(() => runPreviewDeployment({ environment: {}, execute: stub.execute, log: () => {} }), stdout);
+    assert.equal(stub.calls.length, 1, stdout);
+  }
+});
+
+test("Vercel CLIのJSON出力から準備済みPreviewだけを固定aliasへ割り当てる", async () => {
+  for (const payload of [readyDeployment, { ...readyDeployment, target: "preview" }]) {
+    const stub = executor([commandResult(JSON.stringify(payload, null, 2)), commandResult()]);
+    const result = await runPreviewDeployment({ environment: {}, execute: stub.execute, log: () => {} });
+    assert.deepEqual(result, { deploymentUrl, fixedUrl: `https://${defaultAlias}` });
+    assert.deepEqual(stub.calls[1].args, ["vercel", "alias", "set", deploymentUrl, defaultAlias]);
+  }
+});
+
+test("agentモードのJSON成功応答と--logsを使った場合も同じDeployment URLを採用する", async () => {
+  const payload = {
+    status: "ok", deployment: readyDeployment, message: "Deployment ready.",
+    next: [
+      { command: "vercel inspect fixture", when: "Inspect deployment" },
+      { command: "vercel deploy --prod", when: "Promote to production" },
+    ],
+  };
+  const stub = executor([commandResult(JSON.stringify(payload, null, 2)), commandResult()]);
+  const result = await runPreviewDeployment({ environment: {}, args: ["--logs"], execute: stub.execute, log: () => {} });
+  assert.equal(result.deploymentUrl, deploymentUrl);
+  assert.deepEqual(stub.calls, [
+    { args: ["vercel", "deploy", "--target", "preview", "--format", "json", "--logs"], captureStdout: true },
+    { args: ["vercel", "alias", "set", deploymentUrl, defaultAlias], captureStdout: false },
+  ]);
+});
+
+test("JSONにURLがあっても失敗・未完了・Production・別targetならaliasを更新しない", async () => {
+  for (const payload of [
+    { ...readyDeployment, readyState: "BUILDING" }, { ...readyDeployment, readyState: "ERROR" },
+    { ...readyDeployment, target: "production" }, { ...readyDeployment, target: "staging" },
+    { ...readyDeployment, error: { name: "CHECKS_FAILED" } },
+    { ...readyDeployment, aliasError: { message: "assignment failed" } },
+    { status: "error", deployment: readyDeployment }, { status: "action_required", deployment: readyDeployment },
+    { status: "ok", error: { message: "failed" }, deployment: readyDeployment },
+    { status: "ok", deployment: null }, { status: "ok", deployment: [] },
+    { ...readyDeployment, id: "" }, { url: deploymentUrl },
+  ]) {
+    const stdout = JSON.stringify(payload);
+    const stub = executor([commandResult(stdout)]);
+    await assert.rejects(() => runPreviewDeployment({ environment: {}, execute: stub.execute, log: () => {} }), stdout);
+    assert.equal(stub.calls.length, 1, stdout);
+  }
+});
+
+test("JSON応答のURLも認証情報・パス・クエリを拒否し、混在ログからURLを抽出しない", async () => {
+  const unsafeUrls = [
+    "http://cake-insecure.vercel.app", "https://user:password@cake-secret.vercel.app",
+    `${deploymentUrl}/path`, `${deploymentUrl}?secret=value`, `${deploymentUrl}#fragment`,
+    "https://cake-test-one-fumin1.vercel.app:8443", `${deploymentUrl}\nhttps://other.vercel.app`,
+  ];
+  const validJson = JSON.stringify({ status: "ok", deployment: readyDeployment });
+  for (const stdout of [
+    ...unsafeUrls.map((url) => JSON.stringify({ ...readyDeployment, url })),
+    `build log\n${validJson}`, `${validJson}\nbuild log`, `${validJson}\n${validJson}`,
+    `${validJson}\n${deploymentUrl}`, "{malformed-json}", JSON.stringify([readyDeployment]),
   ]) {
     const stub = executor([commandResult(stdout)]);
     await assert.rejects(() => runPreviewDeployment({ environment: {}, execute: stub.execute, log: () => {} }), stdout);
@@ -175,7 +243,7 @@ test("明示したteam scopeをdeployとaliasの両方へ引き継ぐ", async ()
   const stub = executor([commandResult(deploymentUrl), commandResult()]);
   await runPreviewDeployment({ environment: {}, scope, execute: stub.execute, log: () => {} });
   assert.deepEqual(stub.calls, [
-    { args: ["vercel", "deploy", "--target", "preview", "--scope", scope], captureStdout: true },
+    { args: ["vercel", "deploy", "--target", "preview", "--format", "json", "--scope", scope], captureStdout: true },
     { args: ["vercel", "alias", "set", deploymentUrl, defaultAlias, "--scope", scope], captureStdout: false },
   ]);
 });
@@ -216,7 +284,7 @@ test("未リンクなら対話linkを実行し、作成された接続先のteam
     await runPreviewDeployment({ environment: {}, scope: linked.orgId, execute, log: () => {} });
     assert.deepEqual(calls, [
       { args: ["vercel", "link"], captureStdout: false },
-      { args: ["vercel", "deploy", "--target", "preview", "--scope", project.orgId], captureStdout: true },
+      { args: ["vercel", "deploy", "--target", "preview", "--format", "json", "--scope", project.orgId], captureStdout: true },
       { args: ["vercel", "alias", "set", deploymentUrl, defaultAlias, "--scope", project.orgId], captureStdout: false },
     ]);
   });
@@ -315,7 +383,7 @@ test("Git連携のrepo.jsonを再linkせず読み取りdeployとaliasへ同じte
     assert.deepEqual(stub.calls, []);
     await runPreviewDeployment({ environment: {}, scope: linked.orgId, execute: stub.execute, log: () => {} });
     assert.deepEqual(stub.calls, [
-      { args: ["vercel", "deploy", "--target", "preview", "--scope", project.orgId], captureStdout: true },
+      { args: ["vercel", "deploy", "--target", "preview", "--format", "json", "--scope", project.orgId], captureStdout: true },
       { args: ["vercel", "alias", "set", deploymentUrl, defaultAlias, "--scope", project.orgId], captureStdout: false },
     ]);
     assert.equal(await readFile(repoFile, "utf8"), before);
@@ -340,7 +408,7 @@ test("対話linkがrepo.jsonだけを作成した場合もその接続先でdepl
     await runPreviewDeployment({ environment: {}, scope: linked.orgId, execute, log: () => {} });
     assert.deepEqual(calls, [
       { args: ["vercel", "link"], captureStdout: false },
-      { args: ["vercel", "deploy", "--target", "preview", "--scope", project.orgId], captureStdout: true },
+      { args: ["vercel", "deploy", "--target", "preview", "--format", "json", "--scope", project.orgId], captureStdout: true },
       { args: ["vercel", "alias", "set", deploymentUrl, defaultAlias, "--scope", project.orgId], captureStdout: false },
     ]);
   });

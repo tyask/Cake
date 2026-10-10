@@ -9,6 +9,8 @@ import { transactionMemoInputSchema, transactionMemoSchema } from "@/lib/transac
 import { transactionRecord } from "@/lib/transaction-record";
 import { updateProfileInputSchema } from "@/lib/user-profile";
 import { updateDisplayName, UserAccessError } from "@/lib/user-access";
+import { MAX_PAYPAY_EXTERNAL_ID_LENGTH } from "@/lib/paypay-id";
+import { persistPayPayImport } from "@/lib/paypay-import";
 
 export const runtime = "nodejs";
 
@@ -26,8 +28,10 @@ function errorResponse(error: unknown, status = 400) {
 export async function GET(request: Request) {
   try {
     const user = await currentUser();
-    const workspaceId = new URL(request.url).searchParams.get("workspaceId");
-    return Response.json(await getBootstrap(user, workspaceId));
+    const params = new URL(request.url).searchParams;
+    const workspaceId = params.get("workspaceId");
+    const scope = z.enum(["full", "metadata"]).parse(params.get("scope") ?? "full");
+    return Response.json(await getBootstrap(user, workspaceId, scope));
   } catch (error) {
     return errorResponse(error, 401);
   }
@@ -364,27 +368,15 @@ export async function POST(request: Request) {
       const itemSchema = z.object({
         occurredAt: z.string().datetime(), merchant: z.string().trim().min(1).max(240),
         method: z.string().trim().min(1).max(120), amountYen: z.number().int().positive(),
-        externalId: z.string().trim().min(1).max(160), actorUserId: z.string().min(1),
+        externalId: z.string().trim().min(1).max(MAX_PAYPAY_EXTERNAL_ID_LENGTH), actorUserId: z.string().min(1),
         expenseClass: expenseClassSchema.optional(), splitWeights: splitWeightsSchema.optional(),
       });
       const input = z.object({ workspaceId: workspaceIdSchema, fileName: z.string().min(1).max(240), totalRows: z.number().int().nonnegative(), items: z.array(itemSchema).max(2000) }).parse(body);
       await requireWorkspaceMember(input.workspaceId, user.id);
       const context = await splitContext(input.workspaceId);
       const items = input.items.map((item) => ({ ...item, ...resolveTransactionSplit(item, context) }));
-      const batchId = randomUUID();
-      const queries = [
-        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
-        sql`INSERT INTO import_batches (id, workspace_id, imported_by, file_name, total_rows, imported_rows, skipped_rows) VALUES (${batchId}::uuid, ${input.workspaceId}::uuid, ${user.id}, ${input.fileName}, ${input.totalRows}, ${input.items.length}, ${Math.max(0, input.totalRows - input.items.length)})`,
-        ...items.map((item) => sql`
-          INSERT INTO transactions (workspace_id, occurred_at, merchant, method, type, amount_yen, actor_user_id,
-            expense_class, split_weights, external_id, source, import_batch_id, created_by, updated_by)
-          VALUES (${input.workspaceId}::uuid, ${item.occurredAt}::timestamptz, ${item.merchant}, ${item.method}, 'PAYMENT',
-            ${item.amountYen}, ${item.actorUserId}, ${item.expenseClass}, ${JSON.stringify(item.splitWeights)}::jsonb, ${item.externalId}, 'PAYPAY', ${batchId}::uuid, ${user.id}, ${user.id})
-          ON CONFLICT (workspace_id, external_id) DO NOTHING
-        `),
-      ];
-      await sql.transaction(queries);
-      return Response.json({ ok: true, imported: input.items.length });
+      const result = await persistPayPayImport({ ...input, items, userId: user.id });
+      return Response.json({ ok: true, ...result });
     }
 
     if (action === "completeSettlement") {

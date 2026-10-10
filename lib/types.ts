@@ -94,18 +94,27 @@ export interface PendingInvitation {
   expiresAt: string;
 }
 
-export interface WorkspaceData {
+export interface WorkspaceMetadata {
   workspace: WorkspaceSummary;
   members: WorkspaceMember[];
-  transactions: TransactionRecord[];
   rules: DefaultRule[];
+}
+
+export interface WorkspaceData extends WorkspaceMetadata {
+  transactions: TransactionRecord[];
   settlement: SettlementResult | null;
   settlementHistory: SettlementHistory[];
 }
 
-export interface BootstrapData {
+export type BootstrapScope = "full" | "metadata";
+
+export interface BootstrapMetadata {
   user: AppUser;
   workspaces: WorkspaceSummary[];
-  selected: WorkspaceData | null;
+  selected: WorkspaceMetadata | null;
   pendingInvitations: PendingInvitation[];
+}
+
+export interface BootstrapData extends BootstrapMetadata {
+  selected: WorkspaceData | null;
 }
