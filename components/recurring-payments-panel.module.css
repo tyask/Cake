@@ -3,6 +3,7 @@
 .headingActions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .headingActions > button { min-height: 44px; }
 .table { min-width: 83rem; }
+.table td > small { display: block; margin-top: .2rem; color: var(--muted); font-size: .61rem; }
 .column0 { width: 8.5rem; }
 .column1 { width: 7rem; }
 .column2 { width: 5rem; }
@@ -51,4 +52,7 @@
   .pending b { font-size: .7rem; }
   .dialog { max-height: calc(100dvh - 1rem); }
   .preview { font-size: .68rem; }
+}
+@media (max-width: 352px) {
+  .dialog form :global(.form-grid) { grid-template-columns: minmax(0, 1fr); }
 }
