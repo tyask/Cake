@@ -17,18 +17,29 @@ export function SplitEditor({ members, value, onChange, onCommit, amountYen, dis
 }) {
   const id = useId();
   const [mode, setMode] = useState<"RATIO" | "AMOUNT">("RATIO");
+  const [emptyInput, setEmptyInput] = useState<{ memberId: string; value: SplitWeights; mode: typeof mode; amountYen: number | undefined } | null>(null);
+  if (emptyInput && (emptyInput.value !== value || emptyInput.mode !== mode || emptyInput.amountYen !== amountYen || disabled)) {
+    setEmptyInput(null);
+  }
   const transactionSplit = amountYen !== undefined;
   const validAmount = Number.isInteger(amountYen) && amountYen! > 0 && amountYen! <= 2_147_483_647;
   const total = members.reduce((sum, member) => sum + (value[member.id] ?? 0), 0);
   const percentages = safeAmounts(1000, value, members);
   const amounts = safeAmounts(validAmount ? amountYen! : 0, value, members);
-  function updateShare(memberId: string, input: number) {
+  function updateShare(memberId: string, text: string) {
+    const input = Number(text);
     if (!onChange || !Number.isFinite(input)) return;
-    if (!transactionSplit) { onChange({ ...value, [memberId]: input }); return; }
-    const target = mode === "AMOUNT" ? amountYen! : 1000;
-    const share = mode === "AMOUNT" ? input : Math.round(input * 10);
-    if (!Number.isInteger(share)) return;
-    onChange(changeSplitAmount(target, Math.min(target, Math.max(0, share)), memberId, value, members));
+    let next: SplitWeights;
+    if (!transactionSplit) next = { ...value, [memberId]: input };
+    else {
+      const target = mode === "AMOUNT" ? amountYen! : 1000;
+      const share = mode === "AMOUNT" ? input : Math.round(input * 10);
+      if (!Number.isInteger(share)) return;
+      next = changeSplitAmount(target, Math.min(target, Math.max(0, share)), memberId, value, members);
+    }
+    // Keep a deleted field blank while calculations and saved weights use zero.
+    setEmptyInput(text === "" ? { memberId, value: next, mode, amountYen } : null);
+    onChange(next);
   }
   return (
     <fieldset className={`split-editor${compact ? " split-editor-compact" : ""}${inline ? " split-editor-inline" : ""}`} disabled={disabled}
@@ -43,13 +54,13 @@ export function SplitEditor({ members, value, onChange, onCommit, amountYen, dis
         {members.map((member) => (
           <label key={member.id} htmlFor={`${id}-${member.id}`}>
             {!inline && <span>{member.name}</span>}
-            <div className="split-input"><input id={`${id}-${member.id}`} type="number" required min="0"
+            <div className="split-input"><input id={`${id}-${member.id}`} type="number" min="0"
               aria-label={`${member.name}の${transactionSplit && mode === "AMOUNT" ? "支払い金額（円）" : "支払い割合"}`}
               max={transactionSplit ? mode === "AMOUNT" ? amountYen : 100 : 2_147_483_647}
               step={transactionSplit && mode === "RATIO" ? "0.1" : "1"}
-              value={transactionSplit ? mode === "AMOUNT" ? amounts[member.id] : percentages[member.id] / 10 : value[member.id] ?? 0}
+              value={emptyInput?.memberId === member.id ? "" : transactionSplit ? mode === "AMOUNT" ? amounts[member.id] : percentages[member.id] / 10 : value[member.id] ?? 0}
               readOnly={!onChange} disabled={transactionSplit && (members.length < 2 || mode === "AMOUNT" && !validAmount)}
-              onChange={(event) => updateShare(member.id, Number(event.target.value))} />
+              onChange={(event) => updateShare(member.id, event.target.value)} />
               {transactionSplit && <span aria-hidden="true">{mode === "AMOUNT" ? "円" : "%"}</span>}</div>
             <small>{transactionSplit && mode === "RATIO" ? money(amounts[member.id]) : total > 0 ? `${percentages[member.id] / 10}%` : "—"}</small>
           </label>
