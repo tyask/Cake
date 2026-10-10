@@ -357,7 +357,7 @@
           <div class="table-wrap"><table>
             <thead><tr><th>ファイル</th><th>主要処理</th></tr></thead>
             <tbody>
-              <tr><td>lib/db.ts / db-query-logging.ts</td><td><code>db()</code>でNeonクライアントを遅延生成・再利用。<code>instrumentDatabase()</code>で単発/Transactionの実行時間と安全な識別情報を記録。</td></tr>
+              <tr><td>lib/db.ts / db-query-logging.ts / database-environment.ts</td><td><code>db()</code>でNeonクライアントを遅延生成・再利用。PreviewはテストDB接続を必須とし、本番接続へのfallbackを禁止。<code>instrumentDatabase()</code>で単発/Transactionの実行時間と安全な識別情報を記録。</td></tr>
               <tr><td>lib/current-user.ts / auth-callbacks.ts / auth-mode.ts</td><td><code>getCurrentUser()</code>、<code>resolveSessionUser()</code>、<code>createAuthCallbacks()</code>、Productionでのテスト認証無効化。</td></tr>
               <tr><td>lib/user-access.ts / user-profile.ts / test-users.ts</td><td>登録・有効状態・管理者権限のDB確認、表示名更新・入力schema、固定テストユーザー定義。</td></tr>
               <tr><td>lib/repository.ts / bootstrap.ts</td><td><code>getBootstrap()</code>の集約SQL・DTO構築、<code>requireWorkspaceMember()</code>、タブ別scopeとmetadataの併合。</td></tr>
@@ -656,7 +656,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>006_paypay_external_ids.sql</td><td>旧PayPay ID移行、登録時正規化、内容衝突検証関数。</td></tr>
             </tbody>
           </table></div>
-          <p><code>scripts/setup-db.mjs</code>はDATABASE_URLを確認し、番号付きSQLをファイル名順に適用する。schema_migrationsを作成し、各SQLと適用履歴を同じDO文/Transaction内で実行。共通advisory lockで同時適用を防ぎ、適用済みファイルを省略する。再実行しても利用者/権限を初期状態へ戻さない。</p>
+          <p><code>scripts/setup-db.mjs</code>は環境に応じたDB接続（PreviewはCAKE_TEST_DATABASE_URL、それ以外はDATABASE_URL）を確認し、番号付きSQLをファイル名順に適用する。schema_migrationsを作成し、各SQLと適用履歴を同じDO文/Transaction内で実行。共通advisory lockで同時適用を防ぎ、適用済みファイルを省略する。再実行しても利用者/権限を初期状態へ戻さない。</p>
           <p><code>006_paypay_external_ids.sql</code>は<code>source = PAYPAY</code>の既存外部IDを、保存済み<code>occurred_at AT TIME ZONE 'Asia/Tokyo'</code>から生成した<code>PayPay_YYYYMMDDHHMMSS_{取引番号}</code>へ移行する。すでに新形式の外部IDと手動明細は変更しない。UUID主キーと参照関係は保持し、キー衝突時は一意制約で移行全体を失敗させる。移行前に日時を編集していた明細は元のCSV日時を復元できないため、再取込時の重複判定が一致しない場合がある。</p>
           <p>移行中は<code>transactions</code>への書込みをロックして、既存データの変換と登録時トリガーの作成を一体で適用する。<code>cake_normalize_paypay_external_id</code>を呼ぶ<code>BEFORE INSERT</code>トリガーは、更新切替中に旧サーバーが送るPayPayの取引番号だけの外部IDも新形式へ変換する。手動明細と新形式は保持し、<code>UPDATE</code>時には実行しないため日時編集後も元の外部IDが残る。</p>
           <p>同じマイグレーションで<code>cake_assert_paypay_duplicate</code>を作成する。<code>ON CONFLICT DO UPDATE</code>の条件から、競合行のロックを保持した状態で既存source・金額・取引先を検証する。一致時はfalseを返して更新・返却を省略し、不一致時は日本語の例外で取込トランザクション全体を失敗させる。</p>
@@ -737,7 +737,9 @@ BootstrapData extends BootstrapMetadata
               <tr><td>user-access.test.ts / user-profile.test.ts</td><td>確認済みGoogleメールと事前登録、内部ID、有効状態・権限再確認、テストモード、表示名保持・本人更新schema。</td></tr>
               <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・秒精度、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
               <tr><td>db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
-              <tr><td>deploy-preview.test.ts / vercel-build.test.ts</td><td>接続情報の解決、Preview成功/READY後だけ固定alias更新、CLI引数・失敗時再試行、PreviewだけDB更新、テスト認証seed、失敗時ビルド停止。</td></tr>
+              <tr><td>start-task.test.ts</td><td>最新origin/mainからの専用ブランチ・worktree作成、元のdirty状態の保持、既存作業の上書き拒否、作成先指定とnpm ci失敗時の保持。</td></tr>
+              <tr><td>task-preview.test.ts / task-pr.test.ts</td><td>クリーンなタスクブランチ、push、HEADとPreviewのコミット完全一致、READY/失敗/タイムアウト、検証記録と報告を使うPR作成。</td></tr>
+              <tr><td>database-environment.test.ts / vercel-build.test.ts</td><td>Preview専用接続の必須化、本番接続へのfallback禁止、PreviewのDB更新・seed、Productionのビルド後DB更新、失敗時の公開停止。</td></tr>
               <tr><td>seed-startup.test.ts / seed-error.test.ts</td><td>@next/env実起動、環境変数のロード、DB登録失敗の段階・原因を秘密情報なしで整形。</td></tr>
             </tbody>
           </table></div>
@@ -746,30 +748,40 @@ BootstrapData extends BootstrapMetadata
           <div class="table-wrap"><table>
             <thead><tr><th>コマンド</th><th>目的</th></tr></thead>
             <tbody>
+              <tr><td><code>npm run task:start -- &lt;タスク名&gt;</code></td><td>originを取得し、最新origin/mainからcodex/ブランチと専用worktreeを作成してnpm ci。元の未コミット変更・環境設定を保持。</td></tr>
               <tr><td><code>npm test</code></td><td><code>tsx --test tests/*.test.ts</code>。</td></tr>
               <tr><td><code>npm run lint</code> / <code>npm run build</code></td><td>ESLintとNext.js Production build・型/ルート検証。</td></tr>
               <tr><td><code>npm run db:setup</code></td><td>未適用番号付きSQLと適用履歴をatomicに追加。</td></tr>
               <tr><td><code>npm run db:seed:test</code></td><td>固定テストユーザーA/Bを非管理者・有効として登録し、共有家計と所属を準備。繰返し実行しても重複しない。</td></tr>
-              <tr><td><code>npm run build:vercel</code></td><td>Vercel Previewではdb:setup → AUTH_MODE=testの場合db:seed:test → build。必須環境変数/DB準備が失敗すれば停止。Production/Development/ローカルはbuildのみ。</td></tr>
-              <tr><td><code>npm run deploy:preview</code></td><td>接続先を確認/未接続なら対話linkし、ローカルファイルをPreviewへ送信。成功/READYを確認後に固定aliasを更新。</td></tr>
+              <tr><td><code>npm run build:vercel</code></td><td>Previewは必須環境変数確認 → db:setup → テスト認証時db:seed:test → build。Productionは必須環境変数確認 → build → db:setup。いずれも失敗時に公開停止。Development/ローカルはbuildのみ。</td></tr>
+              <tr><td><code>npm run deploy:preview</code></td><td>scripts/task-preview.tsでクリーンなcodex/ブランチをpushし、HEADと同じコミットのGit PreviewがREADYになるまで待つ。Deployment固有のURLを記録。</td></tr>
+              <tr><td><code>npm run task:pr -- --title &lt;タイトル&gt; --verification-file &lt;Markdownファイル&gt;</code></td><td>最新ブランチ・コミットとPreview記録、非空の検証報告を確認してmain向けPRを作成。マージはしない。</td></tr>
             </tbody>
           </table></div>
-          <p><code>vercel.json</code>はbuildCommandにbuild:vercel、regionにsin1を指定する。Previewは本番と別DBを使用。接続は<code>.vercel/project.json</code>またはGit連携の<code>.vercel/repo.json</code>に対応。固定URL既定は<code>https://cake-preview-fumin1.vercel.app</code>、<code>CAKE_PREVIEW_ALIAS</code>でホスト名を変更できる。追加引数は<code>--logs</code>/<code>--force</code>/<code>--with-cache</code>だけを許可する。</p>
-          <p>デプロイ/ビルド失敗時は固定URLを更新しない。alias失敗時は作成済みDeployment URLと再試行コマンドを返す。Preview上で変更箇所を確認してURLを報告する。Production公開は明示依頼時に行い、必要なマイグレーションは事前にdb:setupで適用する。接続・環境設定・確認手順は<a href="../README.md">README</a>を参照。</p>
+          <h3>タスクの分離とPreview記録</h3>
+          <p>worktreeは元のリポジトリの兄弟<code>Cake-worktrees/&lt;タスク名&gt;</code>へ作成し、<code>CAKE_WORKTREE_ROOT</code>で変更できる。相対パスは元のリポジトリから解決する。既存ブランチ・作成先は上書きせず、<code>.env.local</code>・<code>.vercel</code>・<code>node_modules</code>はコピーしない。ローカル実DB検証には対象タスクのテスト用接続情報を設定する。</p>
+          <p>PreviewはVercelのGit連携で作り、10秒間隔・最大15分で同じHEADコミットのREADYを確認する。結果はGit対象外の<code>.cake/preview.json</code>へブランチ・コミット・Deployment URLとして保存する。PR作成時にクリーンな現在のブランチ・コミットと照合し、変更後の古い検証記録は拒否する。検証報告・PRに接続文字列や認証情報を記載しない。</p>
+          <h3>DB環境と公開順序</h3>
+          <p><code>vercel.json</code>はbuildCommandにbuild:vercel、regionにsin1を指定する。Vercel MarketplaceのNeonリソース<code>cake-preview</code>は本番と別のNeonプロジェクトを使い、Previewだけへ接続する。環境変数は<code>CAKE_TEST_</code>で始め、Native Preview Branchingを有効にする。リソース準備完了をデプロイ開始条件にし、Gitブランチごとの独立DBをビルドとAPIで共用する。</p>
+          <p>Previewは<code>CAKE_TEST_DATABASE_URL</code>が未設定なら停止し、通常の<code>DATABASE_URL</code>を代用しない。Productionはテストデータを登録しない。アプリビルド成功後に本番DBを更新し、更新失敗時には公開しない。DBは自動で巻き戻らないため、公開中の旧版との互換性を保ち、列・テーブルの削除や名前変更を段階的に行う。通常のリモートビルドが正規経路で、手動Productionデプロイは明示依頼時だけ行う。</p>
+          <h3>CIとレビュー</h3>
+          <p><code>.github/workflows/ci.yml</code>はmain向けPR、main・codex/**へのpushで単一job <code>ci</code>を実行する。Node.js 24、npmキャッシュ、contents:read権限を使い、npm ci → lint → test → build。外部環境の秘密情報は渡さず、Actionsは完全コミットSHAで固定する。同ブランチ・同イベントの古い実行を中止し、PRの検証をpushで中止しない。</p>
+          <p>mainのRulesetはPR経由、最新mainへの追従、必須check <code>ci</code>の成功を要求し、削除・force pushを禁止する。同アカウントで作成したPRの自己Approveはできないため、必須承認人数は0人とする。ユーザーが差分・Preview・CIを確認して手動マージし、Codexはマージや自動マージを設定しない。接続・確認手順は<a href="../README.md">README</a>を参照。</p>
           <h3>環境変数</h3>
           <div class="table-wrap"><table>
             <thead><tr><th>変数</th><th>用途</th></tr></thead>
             <tbody>
-              <tr><td><code>DATABASE_URL</code></td><td>DB接続。認証済みユーザーの照合・画面/API参照・更新で必要。Preview専用DBを分ける。</td></tr>
-              <tr><td><code>AUTH_SECRET</code></td><td>Auth.js署名/暗号化。PreviewビルドはDATABASE_URLとともに値の存在を確認。</td></tr>
+              <tr><td><code>DATABASE_URL</code></td><td>Production・ローカルのDB接続。ローカルは対象タスクのテストDBを設定。</td></tr>
+              <tr><td><code>CAKE_TEST_DATABASE_URL</code></td><td>PreviewのDB接続。ブランチ別のテスト用Neonから供給し、ビルド・実行時とも必須。</td></tr>
+              <tr><td><code>AUTH_SECRET</code></td><td>Auth.js署名/暗号化。Preview・Productionビルドで必須。</td></tr>
               <tr><td><code>AUTH_GOOGLE_ID</code> / <code>AUTH_GOOGLE_SECRET</code></td><td>GoogleモードのOAuth Client資格情報。</td></tr>
-              <tr><td><code>AUTH_URL</code></td><td>公開基準URL。localhostはローカル用、PreviewはURL自動検出または固定Preview URL。</td></tr>
-              <tr><td><code>AUTH_MODE</code> / <code>VERCEL_ENV</code></td><td>testは開発/Previewの固定ユーザー認証。productionはテスト認証を無効化し、PreviewのみDB準備を実行。</td></tr>
+              <tr><td><code>AUTH_URL</code></td><td>公開基準URL。localhostはローカル用、Previewは未設定にしてURL自動検出。</td></tr>
+              <tr><td><code>AUTH_MODE</code> / <code>VERCEL_ENV</code></td><td>testは開発/Previewの固定ユーザー認証。productionはテスト認証とseedを無効化し、ビルド後に本番DBを更新。</td></tr>
               <tr><td><code>DB_QUERY_LOG</code> / <code>DB_SLOW_QUERY_MS</code></td><td>DBログall/slow/offと遅い実行の閾値。既定500ms。</td></tr>
-              <tr><td><code>CAKE_PREVIEW_ALIAS</code></td><td>デプロイ端末での固定Previewホスト名。ローカル.env.local用、Vercel登録は不要。</td></tr>
+              <tr><td><code>CAKE_WORKTREE_ROOT</code></td><td>タスク用worktreeの作成先。未設定なら元リポジトリの兄弟Cake-worktrees。</td></tr>
             </tbody>
           </table></div>
-          <div class="note">コード変更後の検証はlint・test・build。業務/認可変更は対応テストを追加・更新し、UI変更はPC/スマートフォンの表示・操作を確認する。検証完了後にPreviewへデプロイし、変更内容・検証結果・アクセスURLを報告する。詳細な作業ルールは<a href="../AGENTS.md">AGENTS.md</a>。</div>
+          <div class="note">コード変更後の検証はlint・test・build。業務/認可変更は対応テストを追加・更新し、UI変更はPC/スマートフォンの表示・操作を確認する。検証完了後にコミットし、Preview上で動作確認してPRを作成する。文書のみの変更はPreview不要。変更内容・検証結果・Preview URL・PR URLを報告する。詳細な作業ルールは<a href="../AGENTS.md">AGENTS.md</a>。</div>
         </section>
 
         <footer>Cake 家計管理アプリ 詳細設計書 · Version 1.1 · Source baseline 2026-10-10</footer>

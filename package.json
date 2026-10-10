@@ -10,7 +10,9 @@
     "lint": "eslint .",
     "db:setup": "node scripts/setup-db.mjs",
     "db:seed:test": "tsx scripts/seed-test-users.ts",
-    "deploy:preview": "node --import tsx scripts/deploy-preview.ts",
+    "task:start": "node --import tsx scripts/start-task.ts",
+    "deploy:preview": "node --import tsx scripts/task-preview.ts",
+    "task:pr": "node --import tsx scripts/task-pr.ts",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
