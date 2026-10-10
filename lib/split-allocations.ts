@@ -3,6 +3,14 @@ import type { SplitWeights } from "./types";
 
 type Member = { id: string };
 
+/** Preserve an exact half share even when the displayed yen amounts are rounded. */
+export function equalSplitWeights(members: readonly Member[]): SplitWeights {
+  if (members.length !== 2 || members[0].id === members[1].id) {
+    throw new Error("1:1は二人の参加者で設定してください。");
+  }
+  return Object.fromEntries(members.map((member) => [member.id, 1]));
+}
+
 /** Allocate whole yen while keeping the total exact, with stable ties in member order. */
 export function splitAmounts(amountYen: number, weights: SplitWeights, members: readonly Member[]): SplitWeights {
   if (!Number.isInteger(amountYen) || amountYen < 0 || amountYen > 2_147_483_647) {
