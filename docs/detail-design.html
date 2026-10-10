@@ -335,6 +335,7 @@
               <tr><td>app/api/app/route.ts</td><td><code>GET</code>でscope別参照、<code>POST</code>でアクション別入力検証・所属確認・更新。</td></tr>
               <tr><td>app/api/admin/users/route.ts</td><td>管理者専用の利用者一覧・登録・利用停止。毎回DB権限を確認。</td></tr>
               <tr><td>app/api/import/duplicates/route.ts</td><td>選択workspace内の外部IDを照合し、既存の金額・取引先・sourceを返す。</td></tr>
+              <tr><td>app/api/recurring-payments/route.ts / run/route.ts / app/api/cron/recurring-payments/route.ts</td><td>定期設定の専用GET/POST、テスト専用の当日実行、Bearer認証付き日次Cron。動的・no-store、実行APIはmaxDuration=300。</td></tr>
               <tr><td>app/api/auth/[...nextauth]/route.ts / auth.ts</td><td>Auth.js HandlerとGoogle / test-login Provider、JWTセッション、<code>createAuthCallbacks</code>を構成。</td></tr>
             </tbody>
           </table></div>
@@ -348,6 +349,7 @@
               <tr><td>components/transaction-memo-editor.tsx</td><td>清算済みを含むメモ専用の編集・保存・再試行。</td></tr>
               <tr><td>components/split-editor.tsx / import-preview-table.tsx / selection-checkbox.tsx</td><td>割合または円での分担入力、CSVプレビュー編集、選択チェック。</td></tr>
               <tr><td>components/workspace-rules.tsx</td><td>ルールのインライン編集・追加・一括削除、ドラッグ/キーボードによる適用順変更。</td></tr>
+              <tr><td>components/recurring-payments-panel.tsx</td><td>定期設定の専用取得、PC表/スマホ要約、追加・翌月変更・停止/再開/削除確認。保存中の二重操作抑止、遅いworkspace応答の破棄、失敗時の入力保持。</td></tr>
               <tr><td>components/personal-settings.tsx / user-management.tsx</td><td>本人の表示名変更と、管理者だけの利用者登録・停止UI。</td></tr>
               <tr><td>components/login-screen.tsx / invite-card.tsx / test-login-buttons.tsx</td><td>ログイン、招待承認、固定テストユーザーA/Bへのログイン導線。</td></tr>
               <tr><td>components/cake-icon.tsx / mobile-access-qr.tsx</td><td>CakeのSVGアイコンと現在のoriginのルートURLを開くQRコード。</td></tr>
@@ -491,15 +493,24 @@
           <div class="table-wrap"><table>
             <thead><tr><th>タブ</th><th>参照・操作</th></tr></thead>
             <tbody>
-              <tr><td>ホーム</td><td>今月の支払い、未清算共通費、次の送金、最近6件、保留招待数、登録/取込/清算への導線。今月集計はブラウザの月番号が一致する明細を抽出し、年の条件は持たない。</td></tr>
+              <tr><td>ホーム</td><td>今月の支払い、未清算共通費、次の送金、最近6件、保留招待数、登録/取込/清算への導線。lib/home-summary.tsで日本時間の年・月が一致する明細を抽出する。</td></tr>
               <tr><td>取引明細</td><td>全明細の列フィルタ、未清算行のインライン保存、清算済みもメモ保存、選択削除/ルール適用。</td></tr>
               <tr><td>CSV取込</td><td>metadataのルール・参加者でCSVを解析し、外部IDだけを専用APIで照合。選択行の費用区分を一括変更し、行ごとの割合を編集してbulkImport。</td></tr>
               <tr><td>清算</td><td>保存割合による清算内訳、対象明細、最新20件の履歴、清算完了。</td></tr>
-              <tr><td>設定</td><td>本人表示名、workspace名・デフォルト割合・招待・削除、共有ルール、管理者だけの利用者登録/停止。</td></tr>
+              <tr><td>設定</td><td>本人表示名、workspace名・デフォルト割合・招待・削除、共有ルール、定期支払い、管理者だけの利用者登録/停止。</td></tr>
             </tbody>
           </table></div>
           <h3>新規明細</h3>
           <p>NewTransactionModalはPAYMENTを登録する。UI初期値は共通費と現在のデフォルト割合で、取引先ルールに一致すると区分・割合を適用する。ルール未一致もUIでは共通費を選び、利用者が区分/割合を変更した後は自動適用を止める。APIと清算計算はRECEIPTも扱うが、新規画面には種別切替を持たない。</p>
+          <h3 id="recurring-payments">定期支払いの取得・変更・実行</h3>
+          <p>設定表示時に<code>GET /api/recurring-payments?workspaceId=UUID</code>を実行し、payments、eligibleActorUserIds、日本時間のtodayを取得する。設定を既存bootstrapへ混在させず、full/metadataの通常2 SQLを維持する。現在月に到来したpendingはDTO内でcurrentConfigとして扱い、読込だけではDBを変更しない。</p>
+          <p>同じURLのPOSTはactionごとのstrict schemaで検証する。createはworkspaceId、startOnと設定8項目を受けて201、updateはworkspaceId、paymentId、expectedRevisionと設定8項目を受けて200を返す。設定項目はdayOfMonth、merchant、method、amountYen、actorUserId、expenseClass、splitWeights、memo。startOnは保存当日以降で作成後不変。pause/resume/archiveはworkspaceId、paymentId、expectedRevisionだけを受ける。応答はpaymentと、update時のeffectiveMonth。</p>
+          <p>編集は<code>max(現在月の翌月, 開始月)</code>に適用する設定全体をpending_configへ1件だけ保存し、再編集ではpendingを初期値として上書きする。期限に達したpendingは次のDB更新時に現在列へ移す。停止はACTIVE→PAUSED、再開はPAUSED/BLOCKED→ACTIVEでactive_from_monthを翌月以降にする。削除はARCHIVED。last_generated_monthは設定変更・停止・再開・明細編集/削除で消さない。</p>
+          <p>未認証401、非所属/利用不可403、対象なし404、入力不正400、revision・状態の競合409、DB障害503を固定のerror/codeで返す。所有者・参加者はどちらも操作でき、設定保存・再開の本人を実行承認者にする。支払者・正の割合を持つ参加者の有効状態と認証モードも検証し、不明な参加者を勝手に削除・再配分しない。</p>
+          <p><code>GET /api/cron/recurring-payments</code>はCRON_SECRETのBearer認証、任意日時/対象指定の拒否を行ってから実行する。<code>POST /api/recurring-payments/run</code>は非ProductionのAUTH_MODE=testだけで利用可能。本人の所属するworkspaceIdだけを受け、日時上書きは不可。Production/Googleモードでは認証・DBの前に404。両実行APIは登録失敗や時間制限による未処理があれば503を返す。</p>
+          <p>日本時間の当日と予定日が一致し、開始日・再開月を満たすACTIVEだけを候補にする。適用済みpendingを使って当月の予定日を計算し、指定日がない月は月末に補正する。ロック後に同じ条件とlast_generated_monthを再確認し、通常のPAYMENT/RECURRING明細と成功月を同一Transactionで保存する。外部IDは<code>recurring_{設定UUID}_{YYYYMM}</code>。当日分が未生成なら当日を次回として表示するが、Cron終了済みかを保証しない。</p>
+          <p>承認者・支払者・正の割合の利用不可などはBLOCKEDと固定理由を保存する。通信/DB障害では明細・pending物理反映・成功月をすべてrollbackし、その呼出しでは再試行しない。翌日は翌日の予定だけを処理する。時間制限は240秒で新しい処理の開始を止め、未処理を記録する。実行開始・設定ごとの結果・終了をrecurring.*ログへ記録し、取引内容や秘密値を含めない。</p>
+          <p>Productionは通常利用者のみ、非Productionのtestモードは固定テストID/メールの組だけを処理する。候補抽出では利用停止した承認者も検知できるよう、identityとenabledを分ける。実行時に利用可否を確認してBLOCKEDへ移し、自動実行でテストユーザーを再有効化しない。Cron設定はUTC <code>0 0 * * *</code>、日本時間09:00ごろ。設定・検証・ログ確認の運用はREADMEを参照する。</p>
           <h3>明細編集・一括操作</h3>
           <ul>
             <li>文字・日時・金額・割合は欄を離れるかEnterで保存。選択項目は変更時に保存。入力検証後、保存キューで順番に実行し、失敗時の下書きと再試行を保持する。</li>
@@ -612,7 +623,7 @@ amountYen         = abs(payer.balance)</div>
 
         <section id="database">
           <h2>10. データベース物理設計</h2>
-          <p class="lead">PostgreSQL。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜006の順次適用後を指す。</p>
+          <p class="lead">PostgreSQL。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜007の順次適用後を指す。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>テーブル</th><th>主キー</th><th>主要列・制約・Index</th><th>参照・削除</th></tr></thead>
             <tbody>
@@ -623,6 +634,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>invitations</code></td><td>uuid id</td><td>token_hash UNIQUE、(workspace,email) UNIQUE、status Enum、期限・inviter。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>import_batches</code></td><td>uuid id</td><td>file_name、total/imported/skipped_rows、imported_by、created_at。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>transactions</code></td><td>uuid id</td><td>(workspace_id,external_id) UNIQUE、正のinteger amount、type/class/source Enum、actor・created/updated_by、split_weights NOT NULL/object、memo NOT NULL DEFAULT 空文字・最大2000文字。workspace/date、workspace/class/settled_at Index。</td><td>workspace削除時CASCADE、batch削除時SET NULL。清算関連からtransactionを参照。</td></tr>
+              <tr><td><code>recurring_payments</code></td><td>uuid id</td><td>workspace/state Index、毎月の日1〜31、開始日・再開月、現在の支払い設定8項目、pending_config/effective_monthの同時NULL制約、成功月last_generated_month、実行承認者、正のrevision、固定blocked_reason、作成/更新の監査列。</td><td>workspace削除時CASCADE。支払者・承認者・作成/更新者はapp_usersを参照。設定削除はARCHIVED。</td></tr>
               <tr><td><code>default_rules</code></td><td>uuid id</td><td>merchant 1〜120、class Enum、sort_order &gt;= 0、nullable/object split_weights、enabled。sort_order/created_at Index。旧priority列とIndexは互換用に保持。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>settlements</code></td><td>uuid id</td><td>amount &gt;= 0、weight_snapshot/calculation_snapshot JSONB、payer/payee nullable、completed_by/completed_at。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>settlement_transactions</code></td><td>(settlement_id, transaction_id)</td><td>transaction_id UNIQUEで一明細一清算。</td><td>settlement削除時CASCADE。</td></tr>
@@ -642,6 +654,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>cake_assert_settlement_snapshot</code></td><td>workspace行ロック・所属・全未清算SHARED明細の計算値Snapshot一致を同じTransactionで確認。</td></tr>
               <tr><td><code>cake_bulk_transactions</code></td><td>operationと1〜5000件の一意IDを検証。workspace行ロック、member FOR SHARE、対象をID順FOR UPDATE。全件存在・未清算を確認後、DELETEまたはAPPLY_RULESを実行し、ロック中の確定値を返す。</td></tr>
               <tr><td><code>cake_normalize_paypay_external_id</code> / <code>cake_assert_paypay_duplicate</code></td><td>PayPay INSERT時の旧ID正規化と、ON CONFLICT条件でのsource・金額・取引先照合。</td></tr>
+              <tr><td><code>cake_mutate_recurring_payment</code> / <code>cake_generate_recurring_payment</code></td><td>workspace→定期設定→利用者(ID順)・memberの順にロック。所属・利用可否・状態・revision・設定を再確認する。生成では当日予定の再判定、pending反映、明細INSERTと成功月更新を同じTransactionで確定する。</td></tr>
             </tbody>
           </table></div>
           <h3>マイグレーションと初期化</h3>
@@ -654,6 +667,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>004_bulk_transactions.sql</td><td>一括削除・現在ルール適用の全件検証・ロック・確定値応答関数。</td></tr>
               <tr><td>005_transaction_memo.sql</td><td>空文字を既定とする最大2000文字のmemo列。</td></tr>
               <tr><td>006_paypay_external_ids.sql</td><td>旧PayPay ID移行、登録時正規化、内容衝突検証関数。</td></tr>
+              <tr><td>007_recurring_payments.sql</td><td>定期設定1表、日付/認可/入力検証/設定変更/明細生成関数。transactions.sourceにRECURRINGを追加。既存テーブル・列・明細は削除せず、旧版との互換性を維持する。</td></tr>
             </tbody>
           </table></div>
           <p><code>scripts/setup-db.mjs</code>は環境に応じたDB接続（PreviewはCAKE_TEST_DATABASE_URL、それ以外はDATABASE_URL）を確認し、番号付きSQLをファイル名順に適用する。schema_migrationsを作成し、各SQLと適用履歴を同じDO文/Transaction内で実行。共通advisory lockで同時適用を防ぎ、適用済みファイルを省略する。再実行しても利用者/権限を初期状態へ戻さない。</p>
@@ -671,7 +685,8 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>SplitWeights</code></td><td><code>Record&lt;string, number&gt;</code>。保存済み参加者別整数割合。</td></tr>
               <tr><td><code>AppUser</code> / <code>RegisteredUser</code></td><td>id/email/name/imageUrl、AppUserは任意isAdmin。RegisteredUserは必須isAdmin/isEnabled。</td></tr>
               <tr><td><code>WorkspaceSummary</code> / <code>WorkspaceMember</code></td><td>workspaceのid/name/type/ownerUserId/memberCount。memberはAppUserにweightとOWNER/MEMBER role。</td></tr>
-              <tr><td><code>TransactionRecord</code></td><td>id、ISO occurredAt、merchant/method/memo、type、整数amountYen、actorUserId/actorName、expenseClass、splitWeights、nullable settledAt、externalId、MANUAL/PAYPAY source。</td></tr>
+              <tr><td><code>TransactionRecord</code></td><td>id、ISO occurredAt、merchant/method/memo、type、整数amountYen、actorUserId/actorName、expenseClass、splitWeights、nullable settledAt、externalId、MANUAL/PAYPAY/RECURRING source。</td></tr>
+              <tr><td><code>RecurringPayment</code></td><td>id、workspaceId、state、startOn、activeFromMonth、revision、authorizedById、currentConfig、nullable pendingConfig/pendingEffectiveMonth/nextScheduledOn/blockedReason/lastGeneratedMonth。configはdayOfMonth、merchant、method、amountYen、actorUserId、expenseClass、splitWeights、memo。</td></tr>
               <tr><td><code>DefaultRule</code></td><td>id、merchantContains、expenseClass、sortOrder、nullable splitWeights、enabled。priorityはDTOに公開しない。</td></tr>
               <tr><td><code>SettlementPerson</code> / <code>SettlementResult</code></td><td>一人分のuserId/name/weight/payments/receipts/actual/target/balance。結果はtransactionIds、paymentTotal/receiptTotal/netTotal、people、nullable payerUserId/payerName/payeeUserId/payeeName、amountYen。</td></tr>
               <tr><td><code>SettlementHistory</code> / <code>PendingInvitation</code></td><td>履歴はid/nullable payerName・payeeName/amountYen/completedAt。招待はid/workspaceName/inviterName/expiresAt。</td></tr>
@@ -774,6 +789,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td><code>DATABASE_URL</code></td><td>Production・ローカルのDB接続。ローカルは対象タスクのテストDBを設定。</td></tr>
               <tr><td><code>CAKE_TEST_DATABASE_URL</code></td><td>PreviewのDB接続。ブランチ別のテスト用Neonから供給し、ビルド・実行時とも必須。</td></tr>
               <tr><td><code>AUTH_SECRET</code></td><td>Auth.js署名/暗号化。Preview・Productionビルドで必須。</td></tr>
+              <tr><td><code>CRON_SECRET</code></td><td>定期支払いのCron認証用。Productionへ16文字以上の乱数を設定。欠落・Bearer不一致時は401でDBを呼ばない。</td></tr>
               <tr><td><code>AUTH_GOOGLE_ID</code> / <code>AUTH_GOOGLE_SECRET</code></td><td>GoogleモードのOAuth Client資格情報。</td></tr>
               <tr><td><code>AUTH_URL</code></td><td>公開基準URL。localhostはローカル用、Previewは未設定にしてURL自動検出。</td></tr>
               <tr><td><code>AUTH_MODE</code> / <code>VERCEL_ENV</code></td><td>testは開発/Previewの固定ユーザー認証。productionはテスト認証とseedを無効化し、ビルド後に本番DBを更新。</td></tr>

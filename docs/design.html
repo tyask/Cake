@@ -457,6 +457,7 @@
                 <li>個人・共有ワークスペースの作成と切り替え</li>
                 <li>メールアドレス指定による一名の招待と承認</li>
                 <li>取引明細の一覧、追加、直接編集・自動保存、メモ、一括削除・ルール適用</li>
+                <li>毎月指定日の定期支払い、翌月変更・停止・翌月再開、当日予定の自動登録</li>
                 <li>列ごとの値による絞り込みとユーザー・ワークスペース別の条件保存</li>
                 <li>PayPay CSVの支払い明細を対象とする確認画面付きインポート</li>
                 <li>取引先に応じた費用区分・負担割合の共有ルールと優先順の並べ替え</li>
@@ -577,7 +578,7 @@
               <tr><td>SC-04</td><td>明細追加モーダル</td><td>日時、取引先、方法、金額、支払者、費用区分、割合・金額、メモ。支払い固定、IDは自動発行。</td><td>幅を画面内に収め、モーダル内を縦スクロール。</td></tr>
               <tr><td>SC-05</td><td>CSV取込</td><td>PayPay形式、ファイル選択・ドロップ、重複確認、支払者指定、選択行の費用区分変更、行ごとの割合調整、登録。</td><td>明細カードの詳細を展開し、登録操作欄を固定。</td></tr>
               <tr><td>SC-06</td><td>清算</td><td>共通支払い・収入、正味共通費、二人の負担、送金方向・金額、確認付き完了、最新20件の履歴。</td><td>計算内訳を縦積み。</td></tr>
-              <tr><td>SC-07</td><td>設定</td><td>表示名・ログアウト、ワークスペース名称・種別表示・参加者・招待・デフォルト割合・共有費ルール・削除、管理者のみ利用者管理。</td><td>設定をセクション分割。</td></tr>
+              <tr><td>SC-07</td><td>設定</td><td>表示名・ログアウト、ワークスペース名称・種別表示・参加者・招待・デフォルト割合・共有費ルール・定期支払い・削除、管理者のみ利用者管理。</td><td>設定をセクション分割。定期支払いは要約から詳細を開閉。</td></tr>
               <tr><td>SC-08</td><td>招待承認</td><td>招待されたアカウントでログインし、トークンを使って承認する。一般的な招待案内を表示し、辞退操作はない。</td><td>一画面中央配置。</td></tr>
             </tbody>
           </table></div>
@@ -613,6 +614,39 @@
           <p>各列の候補値は検索・複数選択でき、同じ列の選択値はOR、異なる列の条件はANDで組み合わせる。候補の件数は現在表示中の明細を基準とする。編集・メモ入力中の行は条件外になっても編集終了まで表示する。</p>
           <p>列ごとの絞り込み条件はブラウザの<code>localStorage</code>へ自動保存し、別の画面から戻ったときや再読み込み後に復元する。ログインユーザーとワークスペースごとに保存を分け、すべての絞り込みを解除すると保存済み条件も削除する。</p>
           <p>条件はサーバーへ保存せず、別の端末・ブラウザへ同期しない。ブラウザのサイトデータを削除すると初期状態に戻る。保存領域が利用できない場合や保存内容が壊れている場合も、画面上の絞り込み操作を継続できる。</p>
+          <h3 id="recurring-payments">定期支払い</h3>
+          <p>ワークスペース設定に、毎月1〜31日の固定額を登録する一覧を配置する。PCは取引明細と同じコンパクトな列別テーブル、スマートフォンは取引先・予定日・支払者と金額・状態の要約から詳細を開く。追加・編集は明細追加と同じ2列フォーム、割合（%）/金額（円）入力、メモ、保存ボタンを用いる。狭い幅では1列にする。</p>
+          <p>現在の設定と翌月の変更を分けて表示する。編集は翌月から（開始前は開始月以降）、停止は即時、再開は翌月から。削除した設定は再開できず、生成済み明細は保持する。保存失敗・revision競合では入力を保持し、最新設定を確認して編集し直せる。</p>
+          <p>毎日日本時間09:00ごろのCronが当日予定だけを処理し、存在しない日は月末に丸める。生成明細の日時は予定日の日本時間00:00、種別PAYMENT、source RECURRINGとする。設定保存時の金額・区分・割合・メモをコピーし、その後のデフォルト変更で再配分しない。二人目の参加では不足割合を0で補う。</p>
+          <p>追加テーブルはrecurring_paymentsの1つ。翌月変更はpending_configの1件、成功月はlast_generated_monthの1つだけを保持する。明細登録と成功月更新を同一トランザクションにし、同時実行・再呼出し・明細削除後も当月に最大1件とする。失敗翌日や停止期間の自動補完は行わず、構造化ログで失敗を確認する。履歴テーブル・共通ログ画面は追加しない。</p>
+          <p>支払者・実行承認者または正の割合を持つ参加者の利用不可・所属不整合などは「要確認」として停止する。0の割合は保持する。原因を修正して翌月から再開する。設定は専用APIで取得・更新し、既存のfull/metadata・通常2 SQLの取得契約を維持する。</p>
+          <h3>定期支払いの画面イメージ</h3>
+          <p>以下は設定一覧と翌月変更フォームの表示例。枠・文字サイズ・項目配置は取引明細の表と明細追加モーダルに合わせる。表示例の操作ボタンは動作しない。</p>
+          <figure style="margin: 1rem 0">
+            <figcaption>PC：メモを含む項目別の表。翌月変更は対象行の下に表示し、表内を横スクロールする。</figcaption>
+            <div style="margin-top: .5rem; overflow-x: auto; border: 1px solid #eadfbd; border-radius: 1rem; color: #332a18; background: #fffef8">
+              <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: .7rem; padding: 1rem"><strong>定期支払い</strong><span style="padding: .5rem .8rem; border-radius: .6rem; color: #3d2b0c; background: #facc15">＋ 定期支払いを追加</span></div>
+              <table style="min-width: 70rem; font-size: .72rem"><thead><tr><th>毎月の日 / 次回</th><th>取引先</th><th>方法</th><th>金額（円）</th><th>支払者</th><th>費用区分</th><th>支払い割合（A, B）</th><th>メモ</th><th>状態</th><th>操作</th></tr></thead><tbody>
+                <tr><td>毎月27日<br />次回：2026/10/27</td><td>家賃</td><td>銀行振込</td><td>¥100,000</td><td>Aさん</td><td>共通費</td><td>¥50,000 / ¥50,000<br />50% / 50%</td><td>ふたりの家賃</td><td>有効</td><td>編集　停止　削除</td></tr>
+                <tr><td colspan="10" style="background: #fff5c7">2026年11月から変更予定：毎月10日 / ¥110,000 / AさんとBさんが各¥55,000</td></tr>
+                <tr><td>毎月1日<br />次回：—</td><td>動画サービス</td><td>クレジットカード</td><td>¥1,200</td><td>Bさん</td><td>個人費</td><td>¥0 / ¥1,200<br />0% / 100%</td><td>月額プラン</td><td>停止中</td><td>編集　再開　削除</td></tr>
+              </tbody></table>
+            </div>
+          </figure>
+          <figure style="margin: 1rem 0">
+            <figcaption>スマートフォン：要約から詳細を展開する。保存フォームは反映予定月と現在値を示す。</figcaption>
+            <div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 1rem; margin-top: .5rem; color: #332a18">
+              <div style="flex: 1 1 16rem; padding: 1rem; border: 1px solid #eadfbd; border-radius: 1rem; background: #fffbeb">
+                <strong>定期支払い</strong><p style="font-size: .72rem">予定日の日本時間9時ごろに追加します。</p>
+                <details open style="padding: .8rem; border: 1px solid #eadfbd; border-radius: .75rem; background: #fffef8"><summary style="cursor: pointer"><b>家賃</b>　¥100,000<br /><small>毎月27日 · Aさん　有効</small></summary><p style="font-size: .72rem">銀行振込 · 共通費<br />次回：2026/10/27<br />支払い割合：Aさん50% / Bさん50%<br />メモ：ふたりの家賃</p><p style="padding: .5rem; background: #fff5c7; font-size: .72rem">11月から毎月10日・¥110,000へ変更予定</p><span style="font-size: .72rem">編集　停止　削除</span></details>
+                <details style="margin-top: .5rem; padding: .8rem; border: 1px solid #eadfbd; border-radius: .75rem; background: #fffef8"><summary style="cursor: pointer"><b>動画サービス</b>　¥1,200<br /><small>毎月1日 · Bさん　停止中</small></summary><p style="font-size: .72rem">クレジットカード · 個人費<br />次回：—<br />編集　再開　削除</p></details>
+              </div>
+              <div style="flex: 1 1 16rem; overflow: hidden; border: 1px solid #eadfbd; border-radius: 1rem; background: #fffef8">
+                <div style="padding: 1rem; border-bottom: 1px solid #eadfbd"><strong>定期支払いを編集</strong><span style="float: right">×</span></div>
+                <div style="padding: 1rem; font-size: .72rem"><p style="padding: .6rem; background: #fff5c7">2026年11月分から変更します。</p><p>毎月の日：<b>10日</b>（現在27日）<br />開始日：2026/09/01（変更不可）<br />取引先：家賃<br />取引方法：銀行振込<br />金額：<b>¥110,000</b>（現在¥100,000）<br />支払者：Aさん / 費用区分：共通費<br />支払い割合：50% / 50%（各¥55,000）<br />メモ：ふたりの家賃</p><p style="padding: .6rem; background: #fbf5df">変更後の予定：2026/11/10<br />追加済み明細は変わりません。</p><div style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem"><span style="padding: .5rem; border: 1px solid #dccd9c; border-radius: .6rem">キャンセル</span><span style="padding: .5rem; border-radius: .6rem; background: #facc15">翌月からの変更を保存</span></div></div>
+              </div>
+            </div>
+          </figure>
         </section>
 
         <section id="settlement">
@@ -717,6 +751,7 @@
               <tr><td><code>workspace_members</code></td><td>workspace_id, user_id, role, weight, joined_at</td><td>複合主キー。weightは共有費のデフォルト重み。個人用一人・共有用最大二人をDBでも強制。</td></tr>
               <tr><td><code>invitations</code></td><td>id, workspace_id, email, token_hash, status, expires_at, invited_by</td><td>トークンのハッシュを保存。現在はPENDINGからACCEPTEDへ更新し、期限を日時で判定。DBにはDECLINED／EXPIREDも許容するが更新操作はない。</td></tr>
               <tr><td><code>transactions</code></td><td>id, workspace_id, occurred_at, merchant, method, type, amount_yen, actor_user_id, expense_class, split_weights, memo, settled_at, external_id, source</td><td>PAYMENT／RECEIPTとPERSONAL／SHAREDを保持。明細固有の割合・メモを保存し、workspace_idとexternal_idの組で重複防止。</td></tr>
+              <tr><td><code>recurring_payments</code></td><td>id, workspace_id, state, start_on, active_from_month, 支払い設定8項目, pending_config, pending_effective_month, last_generated_month, authorized_by, revision, blocked_reason, 監査列</td><td>定期設定・翌月の変更1件・最後の成功月を保持。workspace削除時CASCADE、設定削除はARCHIVED。</td></tr>
               <tr><td><code>default_rules</code></td><td>id, workspace_id, merchant_contains, expense_class, sort_order, split_weights, enabled, priority</td><td>取引先の部分一致で費用区分・割合の初期値を決定。sort_orderの昇順で評価。priorityは旧バージョン互換用に同期。</td></tr>
               <tr><td><code>import_batches</code></td><td>id, workspace_id, imported_by, file_name, total_rows, imported_rows, skipped_rows, created_at</td><td>取込単位の結果を記録。CSV本文は保存しない。</td></tr>
               <tr><td><code>settlements</code></td><td>id, workspace_id, payer_user_id, payee_user_id, amount_yen, weight_snapshot, calculation_snapshot, completed_by, completed_at</td><td>清算時点の計算根拠をJSONスナップショットとして保持。</td></tr>
@@ -734,7 +769,7 @@
             <li>有効な通常利用者は管理者を含め二人までとする。固定テストユーザーA/Bは人数上限から除外する。</li>
             <li>清算済み明細と清算履歴の関連付けをDBトランザクションで一括更新する。</li>
             <li>取引IDは同一ワークスペース内で一意とする。手動追加時はアプリが自動発行する。</li>
-            <li>適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。現行スキーマは001〜006の適用結果。本番公開前の更新は公開中の旧版と互換性を保つ。</li>
+            <li>適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。現行スキーマは001〜007の適用結果。007は定期設定1表・関数とsource制約の拡張を追加し、既存データと旧版の明細登録を維持する。</li>
           </ul>
         </section>
 
@@ -771,7 +806,7 @@
               <tr><td>CSV・一括操作上限</td><td>取込登録・重複確認は1リクエスト最大2,000明細／ID、明細一括操作・ルール順序指定は最大5,000件。ファイルサイズ・ブラウザ側解析行数の明示上限はない。</td></tr>
               <tr><td>可用性</td><td>VercelとNeonの利用環境に依存。アプリ内のデータエクスポート機能は提供していない。Previewは本番と別のNeonプロジェクトのタスク専用DBを使う。</td></tr>
               <tr><td>セキュリティ</td><td>入力検証、パラメータ化SQL、操作ごとの認可、秘密情報のサーバー管理を行う。アプリ共通のレート制限は実装していない。</td></tr>
-              <tr><td>日時・通貨</td><td>取引日時の入力・表示とPayPay ID生成は日本時間、通貨は日本円。ホームの今月指標はブラウザのローカル月番号で抽出する（現在は年を比較しない）。</td></tr>
+              <tr><td>日時・通貨</td><td>取引日時の入力・表示、予定日、PayPay ID生成は日本時間、通貨は日本円。ホームの今月指標は日本時間の年と月が一致する明細を抽出する。</td></tr>
               <tr><td>DB計測</td><td>DBクエリ・トランザクションのアプリ側所要時間を構造化JSONログへ記録する。SQL本文・パラメーター・行データはログへ出さない。</td></tr>
               <tr><td>保守性</td><td>清算計算とCSV変換をUIから分離し、単体テスト可能な純粋関数として実装する。</td></tr>
             </tbody>

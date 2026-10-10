@@ -7,7 +7,7 @@ type QueryStatus = "ok" | "error";
 
 const appTables = new Set([
   "app_users", "workspaces", "workspace_members", "invitations", "transactions",
-  "default_rules", "settlements", "settlement_transactions", "import_batches", "schema_migrations",
+  "default_rules", "settlements", "settlement_transactions", "import_batches", "schema_migrations", "recurring_payments",
 ]);
 const errorTypes = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "AbortError", "TimeoutError"]);
 

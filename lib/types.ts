@@ -43,7 +43,7 @@ export interface TransactionRecord {
   splitWeights: SplitWeights;
   settledAt: string | null;
   externalId: string;
-  source: "MANUAL" | "PAYPAY";
+  source: "MANUAL" | "PAYPAY" | "RECURRING";
 }
 
 export interface DefaultRule {
