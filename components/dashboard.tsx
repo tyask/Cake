@@ -559,7 +559,7 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
           setCustomized(true);
         }}><option value="PERSONAL">個人費</option><option value="SHARED">共通費</option></select></label>
         <div className="full">
-          <SplitEditor inline label={`支払い割合（${selected.members.map((member) => member.name).join(", ")}）`} amountYen={amountYen} members={selected.members} value={splitWeights}
+          <SplitEditor inline allowEqualSplit label={`支払い割合（${selected.members.map((member) => member.name).join(", ")}）`} amountYen={amountYen} members={selected.members} value={splitWeights}
             disabled={expenseClass === "PERSONAL" || saving} onChange={(next) => { setSplitWeights(next); setCustomized(true); }} />
           <p className="ratio-note">{expenseClass === "PERSONAL" ? "個人費は支払者の負担が100%になります。" : "割合・金額で設定できます。相手の分は自動計算します。"}</p>
           <button type="button" className="text-button" disabled={saving} onClick={() => { applyDefaults(); setCustomized(false); }}>取引先のルールを適用</button>

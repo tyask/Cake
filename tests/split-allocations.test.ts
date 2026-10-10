@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { changeSplitAmount, splitAmounts } from "../lib/split-allocations";
+import { changeSplitAmount, equalSplitWeights, splitAmounts } from "../lib/split-allocations";
 import { calculateSettlement } from "../lib/settlement";
 import type { TransactionRecord, WorkspaceMember } from "../lib/types";
 
@@ -8,6 +8,28 @@ const members: WorkspaceMember[] = [
   { id: "a", name: "A", email: "a@example.test", imageUrl: null, weight: 6, role: "OWNER" },
   { id: "b", name: "B", email: "b@example.test", imageUrl: null, weight: 4, role: "MEMBER" },
 ];
+
+test("1:1は奇数円の表示端数を保存割合にせず、複数明細も正確に折半する", () => {
+  const weights = equalSplitWeights(members);
+  assert.deepEqual(weights, { a: 1, b: 1 });
+  assert.deepEqual(splitAmounts(101, weights, members), { a: 51, b: 50 });
+  const transactions: TransactionRecord[] = ["first", "second"].map((id) => ({
+    id, occurredAt: "2026-10-11T00:00:00Z", merchant: "スーパー", method: "現金", type: "PAYMENT",
+    amountYen: 101, actorUserId: "a", actorName: "A", expenseClass: "SHARED", splitWeights: weights,
+    settledAt: null, externalId: id, source: "MANUAL", memo: "",
+  }));
+  const result = calculateSettlement(members, transactions)!;
+  assert.deepEqual(result.people.map((person) => person.target), [101, 101]);
+  assert.equal(result.amountYen, 101);
+  assert.deepEqual(weights, { a: 1, b: 1 });
+  assert.deepEqual(members.map((member) => member.weight), [6, 4]);
+});
+
+test("1:1は二人の異なる参加者がそろっている場合だけ設定できる", () => {
+  for (const invalid of [[], [members[0]], [members[0], members[0]], [...members, { id: "c" }]]) {
+    assert.throws(() => equalSplitWeights(invalid));
+  }
+});
 
 test("割合から円へ切り替える際は奇数円の端数を配分して合計を保つ", () => {
   assert.deepEqual(splitAmounts(101, { a: 1, b: 1 }, members), { a: 51, b: 50 });
