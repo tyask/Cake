@@ -6,6 +6,7 @@
 /.aws/
 /.agents/
 /.codex/
+/.cake/
 
 # Local build output and tool metadata.
 /node_modules/

@@ -20,6 +20,7 @@
 ## 技術構成
 
 - Next.js 16 / React 19 / TypeScript
+- Node.js 24 / npm
 - Auth.js（Google OAuth）
 - Neon PostgreSQL
 - Vercel
@@ -146,81 +147,125 @@ AUTH_MODE=test
 npm run db:seed:test
 ```
 
-固定ユーザーは`test-a@cake.local`と`test-b@cake.local`です。テストユーザーに管理者権限はなく、通常アカウント二人の上限にも含めません。Vercel Productionでは、誤って`AUTH_MODE=test`を設定してもテストログインは無効になります。Preview・ローカル用には本番と別のDB（Neonの別ブランチなど）を使用してください。
+固定ユーザーは`test-a@cake.local`と`test-b@cake.local`です。テストユーザーに管理者権限はなく、通常アカウント二人の上限にも含めません。Vercel Productionでは、誤って`AUTH_MODE=test`を設定してもテストログインは無効になります。Preview・ローカル用には、本番と別のNeonプロジェクトにあるタスク専用DBを使用してください。
+
+## Codexとの開発フロー
+
+設計を合意してから、タスクごとのブランチ・worktree・テストDBで開発します。元の作業フォルダにある未コミット変更はそのまま保持します。
+
+### 1. タスクを開始する
+
+Node.js 24、Git、GitHub CLI、Vercel CLIを利用できる環境で、元のリポジトリから次を実行します。GitHubの認証は`gh auth login`、Vercelの認証は`npx vercel login`で設定します。
+
+```bash
+npm run task:start -- feature-name
+cd ../Cake-worktrees/feature-name
+```
+
+`origin`を取得し、最新の`origin/main`から`codex/feature-name`と専用worktreeを作成して`npm ci`を実行します。タスク名は60文字以内の英小文字・数字・ハイフンで指定します。既存のブランチやフォルダは上書きしません。依存関係のインストールに失敗した場合は、作成済みworktreeで`npm ci`を再実行します。
+
+作成先は元のリポジトリの兄弟フォルダ`Cake-worktrees/<タスク名>`です。別の場所に作る場合は、実行時の`CAKE_WORKTREE_ROOT`で指定します。相対パスは元のリポジトリから解決します。
+
+```bash
+CAKE_WORKTREE_ROOT=/tmp/cake-worktrees npm run task:start -- feature-name
+```
+
+`.env.local`、`.vercel`、`node_modules`はコピーしません。新しいworktreeには上のローカルセットアップを参考に`.env.local`を作り、`DATABASE_URL`へ対象タスクのテストDBを設定します。本番用の環境ファイルを流用しないでください。Git連携のPreview DBはデプロイ時に作られるため、通常の環境変数取得だけではそのDB接続情報を得られない場合があります。ローカルでも実DBを使う場合はNeon Consoleで該当するテスト用ブランチを選び、接続情報を設定します。実DBの主要な検証はPreview上で行えます。
+
+### 2. 開発し、コミットする
+
+コード変更後は次を実行します。業務ロジック・認可を変更した場合は回帰テストを追加・更新し、UI変更はPCとスマートフォンで表示・操作を確認します。
+
+```bash
+npm run lint
+npm test
+npm run build
+```
+
+関連する設計書・READMEも更新して、変更したファイルをコミットします。接続文字列や認証情報はGitや検証報告へ保存しません。
+
+### 3. Previewで画面・APIを検証する
+
+下の「Previewへデプロイ」の初回設定を済ませ、専用worktreeで実行します。
+
+```bash
+npm run deploy:preview
+```
+
+クリーンな`codex/`ブランチを`origin`へpushし、Git連携で作られたPreviewを待ちます。ローカルのHEADと完全に一致するコミットのDeploymentが`READY`になった場合だけ、Deployment固有のURLを返します。確認は10秒間隔で最大15分です。失敗やタイムアウト時はURL・ビルドログを調べて修正し、同じコマンドを再実行します。
+
+コミット・ブランチ・Preview URLを`.cake/preview.json`へ記録します。このフォルダはGitへ登録しません。画面とAPIが対象タスクのテストDBを使うこと、変更した挙動が動くことをPreview上で確認します。テストユーザーA・Bは共有ワークスペースへ参加済みで、管理者権限はありません。
+
+### 4. 検証結果を添えてPRを作成する
+
+変更内容、テストDBのブランチ名と隔離確認、lint・test・build、Preview上の画面・API、UI変更時のPC・スマートフォンの検証結果をMarkdownファイルへ記載します。DB変更がある場合は、追加したマイグレーションと公開中の旧版との互換性も記載します。未実行項目には理由を添えてください。
+
+```bash
+npm run task:pr -- --title '変更内容を表すタイトル' --verification-file /tmp/cake-verification.md
+```
+
+最新のクリーンなブランチ・コミットとPreview記録が一致することを確認し、Preview URL・コミット・検証報告を含む`main`向けPRを作成します。既存のPRがある場合は、タイトルと本文を最新の検証結果へ更新します。検証後に変更した場合は、再コミット・再デプロイ・再検証が必要です。文書のみの変更はPreviewが不要なので、このコマンドを使わずに、その理由と検証結果を添えたPRを作成できます。
+
+### 5. レビューして手動マージする
+
+GitHub Actionsの`ci`は、`main`向けPRと`main`・`codex/**`へのpushで`npm ci`、lint、test、buildを実行します。Node.js 24を使い、DBやVercelのSecretsは必要ありません。
+
+`main`のRulesetはPR経由と必須チェック`ci`の成功を要求し、マージ前に最新の`main`へ追従する設定にします。削除とforce pushを禁止します。Codexが本人のアカウントでPRを作る運用では、自分のPRをApproveできないため必須承認人数は0人です。ユーザーが差分とPreviewを確認して手動マージし、Codexはマージ・自動マージ設定を行いません。
+
+マージ後はVercelがProductionをビルドし、本番DBの更新が成功してから公開します。詳細は下の「Productionへデプロイ」を参照してください。
 
 ## Vercelへ配置
 
 ### 初回設定
 
-1. このリポジトリをGitHubへpushしてVercelへImportするか、プロジェクトのルートで次を実行して既存のVercelプロジェクトと接続します。
+1. GitHubリポジトリをVercelの`fumin1`チームの`cake`プロジェクトへ接続し、Production Branchを`main`にします。専用worktreeのCLI接続は次のコマンドで行います。
 
 ```bash
-npx vercel link
+npx vercel link --scope fumin1 --project cake
 ```
 
-2. VercelのEnvironment Variablesへ、本番用の設定として`Production`を対象に次を登録します。Preview用の設定は下の「Previewへデプロイ」を参照してください。
+2. Build Commandに`npm run build:vercel`、Node.jsに24.xを設定し、`Automatically expose System Environment Variables`を有効にします。`VERCEL_ENV`でPreviewとProductionのDB準備を切り替えます。
+3. Environment Variablesへ、`Production`を対象に次を登録します。Preview用の設定は下の「Previewへデプロイ」を参照してください。
    - `DATABASE_URL`
    - `AUTH_SECRET`
    - `AUTH_GOOGLE_ID`
    - `AUTH_GOOGLE_SECRET`
    - `AUTH_URL`（例: `https://cake.example.com`）
    - `AUTH_MODE=google`
-3. Google Cloud ConsoleのAuthorized redirect URIへ本番URLを追加します。
+4. Google Cloud ConsoleのAuthorized redirect URIへ本番URLを追加します。
 
 ```text
 https://あなたのドメイン/api/auth/callback/google
 ```
 
-4. `npm run db:setup`を本番のNeon接続情報が設定された環境で実行します。初回だけでなく、マイグレーションの追加された更新時にも実行してください。
-5. Vercelへデプロイします。
+Vercel上の通常のビルドでDBを準備します。環境変数の秘密情報はVercelまたはNeon Consoleで設定し、リポジトリやPRへ書き込みません。
 
 ### Previewへデプロイ
 
-Vercelのプロジェクト設定のEnvironment Variablesで、`Preview`を対象に次を登録します。
+本番とは別のNeonプロジェクトを、Vercel MarketplaceのNeonリソース`cake-preview`として用意します。親DBにはテスト用のスキーマとデータだけを登録し、本番のデータをコピーしません。
 
-- `DATABASE_URL`：Preview専用のNeon DBまたはブランチの接続文字列。本番用のDBとは分けてください。
-- `AUTH_SECRET`：`openssl rand -base64 32`で生成した値。
-- `AUTH_MODE=test`：テストユーザーA・Bのログインを有効にします。
+`cake`への接続で次を設定します。
 
-`AUTH_URL=http://localhost:3000`はローカル専用です。Previewには設定せず、VercelのURL自動検出を使用してください。固定URLを指定する場合は、そのPreviewの公開URLを設定します。
+- 接続先は`Preview`だけにする。Production・Developmentへ接続しない。
+- 生成される環境変数を`CAKE_TEST_`で始める（DB接続は`CAKE_TEST_DATABASE_URL`）。
+- Preview Branching（Native Preview Branching）を有効にし、Gitブランチごとに独立したDBを作る。
+- `Resource must be active before deployment`を有効にし、DBが準備されてからビルドを始める。
 
-VercelでSecretとして設定された環境変数の値は、CLIからローカルへ取得できない場合があります。`npx vercel env run`でDBの準備を行う必要はありません。SecretはVercel上のビルドで利用できるため、Previewのデプロイのために`.env.local`へ接続情報や認証キーをコピーする必要もありません。
+同じGitブランチへの追加pushは同じDBブランチを使います。異なるタスクのDBと、本番のDBを共有しません。設定手順は[Neon公式のVercel連携](https://neon.com/docs/guides/vercel-managed-integration)を参照してください。
 
-まだCLIにログインしていない場合は `npx vercel login` を実行します。ローカルに接続情報がない場合、`npm run deploy:preview` がVercelの接続手順を起動するので、利用するチームと既存の `cake` プロジェクトを選択してください。このプロジェクトではチームは `fumin1` です。接続情報は `.vercel/project.json` または `.vercel/repo.json` に保存され、次回から再利用します。Git連携済みの候補（`linked by git`）を選んだ場合の `.vercel/repo.json` にも対応しています。
+VercelのEnvironment Variablesで、`Preview`を対象に`AUTH_SECRET`と`AUTH_MODE=test`を登録します。`AUTH_URL`は設定せず、Deployment URLの自動検出を使います。`http://localhost:3000`はローカル専用です。
 
-接続先を明示して先に設定する場合は、次を実行できます。[Vercelのプロジェクト接続](https://vercel.com/docs/cli/link)も参照してください。
+PreviewのビルドとAPIは`CAKE_TEST_DATABASE_URL`を必須にし、通常の`DATABASE_URL`へ切り替えません。欠落時は停止します。Vercel上で未適用マイグレーションを適用し、テスト認証時にはテストユーザーと共有ワークスペースを登録してからアプリをビルドします。DB準備・ビルドの失敗時は新しいDeploymentを公開しません。
 
-```bash
-npx vercel link --scope fumin1 --project cake
-```
-
-現在のローカルファイルを送信してPreviewへデプロイします。Gitへのpushは不要です。
-
-```bash
-npm run deploy:preview
-```
-
-デプロイとビルドが成功すると、固定URL `https://cake-preview-fumin1.vercel.app` を新しいPreviewへ割り当てます。以後はこのURLをブックマークし、同じURLで最新版を開けます。ログ末尾の `Cake: 固定Preview URL:` でアクセス先を確認できます。デプロイやビルドに失敗した場合、固定URLは更新しません。
-
-固定URLの名前を変更する場合は、ローカルの `.env.local` にホスト名のみを設定します。未使用の名前、または自分が管理するドメインを使用してください。`CAKE_PREVIEW_ALIAS` はデプロイする端末用の設定なので、Vercelの環境変数への登録は不要です。
-
-```dotenv
-CAKE_PREVIEW_ALIAS=cake-preview-fumin1.vercel.app
-```
-
-固定URLの割り当てに失敗した場合は、コマンドに表示される `npx vercel alias set ...` を再実行できます。[Vercel公式のalias手順](https://vercel.com/kb/guide/how-to-alias-a-preview-deployment-using-the-cli)も参照してください。
-
-ビルドログを表示する場合は `npm run deploy:preview -- --logs`、新しくビルドし直す場合は `npm run deploy:preview -- --force` を使用できます。追加引数は `--logs`・`--force`・`--with-cache` に対応しています。
-
-Vercel上のビルドでPreview用DBへ未適用のマイグレーションを適用し、`AUTH_MODE=test`の場合はテストユーザーと共有ワークスペースを登録してから、アプリをビルドします。DB準備に失敗した場合はビルドを停止します。
-
-作成されたDeployment固有のPreview URLもログに表示されます。`AUTH_MODE=test`なら、テストユーザーA・Bは`テスト共有家計`へ参加済みです。この二人に管理者権限はありません。
-
-GoogleログインでPreviewを確認する場合は、Previewの`AUTH_MODE=google`と`AUTH_GOOGLE_ID`・`AUTH_GOOGLE_SECRET`を設定し、Google Cloud側に固定URLのコールバックURL（初期値は `https://cake-preview-fumin1.vercel.app/api/auth/callback/google`）を登録してください。`AUTH_URL` を指定する場合も固定URLを設定します。この場合もマイグレーションは適用されますが、テストユーザーの登録は行いません。管理者による利用者登録はGoogleログインで確認できます。
+環境設定後、コミット済みの専用worktreeから`npm run deploy:preview`を実行します。Git連携のPreviewには画面とAPIの両方が含まれ、PR作成前でも検証できます。Deployment固有のURLを使うため、ほかのタスクのデプロイで確認先が更新されることはありません。
 
 ### Productionへデプロイ
 
-Production環境へ公開するときだけ`--prod`を付けます。本番用の環境変数とDBが正しいことを確認してから実行してください。ProductionのビルドはDBの更新やテストデータの登録を行わないため、必要なマイグレーションは公開前に`npm run db:setup`で適用します。
+ユーザーがPRを`main`へマージすると、Git連携により通常のVercelリモートビルドを開始します。必須環境変数を確認し、アプリのビルド、`npm run db:setup`の順に実行して、両方が成功してから新しい版を公開します。ビルド失敗時はDBを更新せず、DB更新失敗時は公開を止めます。Productionではテストデータを登録しません。
+
+DBの更新は自動で巻き戻りません。更新時には公開中の旧版が同じDBを使うため、マイグレーションは旧版との互換性を保つ必要があります。列やテーブルの削除・名前変更は、追加・データ移行・アプリ切替・削除を別の段階で行います。アプリをロールバックしてもDBは戻りません。
+
+Productionへの手動デプロイは、ユーザーから明示的に依頼された場合だけ行います。その場合もDB更新を含む通常のリモートビルドを使います。`--prebuilt`やPreviewの昇格でこの手順を省略しません。
 
 ```bash
 npx vercel --prod
@@ -254,7 +299,7 @@ npx vercel list --prod
 npx vercel redeploy https://対象のpreview-url.vercel.app
 ```
 
-ローカルの最新ファイルを改めて配置し、固定URLも更新する場合は次を実行します。
+コード変更後は検証してコミットし、次で最新コミットのPreviewを取得します。PR作成前に再検証してください。
 
 ```bash
 npm run deploy:preview
@@ -274,7 +319,7 @@ npx vercel list --environment=preview
 npx vercel remove https://対象のpreview-url.vercel.app
 ```
 
-この操作で削除されるのは指定したVercel Deploymentだけです。Vercelの環境変数、Gitブランチ、手動作成したNeonの`preview`ブランチとそのデータは削除されません。
+この操作で削除されるのは指定したVercel Deploymentだけです。Vercelの環境変数やGitブランチは削除されません。NeonのDBブランチの削除は連携側のライフサイクルに従います。不要なテストDBはNeon Consoleで確認し、対象タスクのものだけを削除します。
 
 ### ローカルのVercel開発サーバー
 
@@ -311,7 +356,9 @@ npm run lint      # ESLint
 npm test          # 清算・CSV解析テスト
 npm run db:setup  # 未適用のDBマイグレーションを適用
 npm run db:seed:test # テストユーザーA・Bと共有ワークスペースを登録
-npm run deploy:preview # Vercel上でPreview用DBを準備してデプロイ
+npm run task:start -- feature-name # 最新mainから専用ブランチとworktreeを作成
+npm run deploy:preview # ブランチをpushし、同じコミットのGit Previewを待つ
+npm run task:pr -- --title 'タイトル' --verification-file /tmp/cake-verification.md # 検証後にPRを作成
 ```
 
 ## 清算ルール

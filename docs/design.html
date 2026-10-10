@@ -526,8 +526,10 @@
           <h3>画面ごとのデータ取得</h3>
           <p>初回表示、ワークスペース切替、ホーム・取引明細・清算への移動は<code>full</code>で明細・清算・履歴まで取得する。取込・設定への移動と保存後は<code>metadata</code>でユーザー、ワークスペース一覧、招待、選択先、参加者、ルールを取得する。同じワークスペースでは取得済みの明細・清算・履歴を保持し、選択先が変われば全データを再取得する。</p>
           <p>通常のログイン済み<code>GET /api/app</code>は利用可否確認と画面用の集約取得を各1 SQLで行い、<code>full</code>・<code>metadata</code>ともに2 SQL・2回のNeon往復となる。初めてのワークスペース作成などでは追加処理がある。読込ではプロフィールをDBへ書き戻さない。</p>
-          <h3>Preview・Productionの配置</h3>
-          <p>修正と必要な検証が完了したら<code>npm run deploy:preview</code>で現在のローカルファイルをVercel Previewへ配置し、成功後に固定URL <code>https://cake-preview-fumin1.vercel.app</code>を更新する。Preview専用DBを使い、ビルド時に未適用マイグレーション、テスト認証時のテストデータ登録、アプリビルドの順に実行する。ProductionのビルドはDB準備を行わず、公開前にマイグレーションを適用する。具体的な環境設定と操作はREADME、作業規則は<code>AGENTS.md</code>に従う。</p>
+          <h3>開発・Preview・Productionの配置</h3>
+          <p>設計合意後、<code>npm run task:start -- &lt;タスク名&gt;</code>で最新の<code>origin/main</code>から<code>codex/&lt;タスク名&gt;</code>と専用worktreeを作成する。元の未コミット変更は保持し、環境ファイルや依存関係のコピーは行わない。開発・lint・test・buildの完了後にコミットし、<code>npm run deploy:preview</code>でブランチをpushする。</p>
+          <p>Git連携で作成されたPreviewのコミットがHEADと一致し、READYになったことを確認してDeployment固有のURLで画面・APIを検証する。テストDBは本番とは別のNeonプロジェクトからGitブランチごとに作成する。Previewのビルドと実行時は<code>CAKE_TEST_DATABASE_URL</code>を必須にし、通常の<code>DATABASE_URL</code>を代用しない。ビルドではマイグレーション、テスト認証時のデータ登録、アプリビルドの順に実行する。</p>
+          <p>検証後、結果とPreview URLを含む<code>main</code>向けPRを作成する。必須CIが成功し、ユーザーがレビューして手動でマージした後、Productionでアプリビルド、本番DB更新の順に実行し、成功時だけ公開する。DB更新は自動で巻き戻らず、公開中の旧版と互換性を保つ。手動のProductionデプロイは明示依頼時だけ行う。具体的な環境設定と操作はREADME、作業規則は<code>AGENTS.md</code>に従う。</p>
         </section>
 
         <section id="requirements">
@@ -732,7 +734,7 @@
             <li>有効な通常利用者は管理者を含め二人までとする。固定テストユーザーA/Bは人数上限から除外する。</li>
             <li>清算済み明細と清算履歴の関連付けをDBトランザクションで一括更新する。</li>
             <li>取引IDは同一ワークスペース内で一意とする。手動追加時はアプリが自動発行する。</li>
-            <li>適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。現行スキーマは001〜006の適用結果。</li>
+            <li>適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。現行スキーマは001〜006の適用結果。本番公開前の更新は公開中の旧版と互換性を保つ。</li>
           </ul>
         </section>
 
@@ -767,7 +769,7 @@
               <tr><td>アクセシビリティ</td><td>キーボード操作、明確なフォーカス、ラベル、色以外の状態表現、十分なコントラストを確保する。</td></tr>
               <tr><td>性能</td><td>画面に応じてfull／metadataを使い分け、画面データを集約SQLで取得する。明細は全件取得してブラウザで絞り込む。読込・保存中を表示する。</td></tr>
               <tr><td>CSV・一括操作上限</td><td>取込登録・重複確認は1リクエスト最大2,000明細／ID、明細一括操作・ルール順序指定は最大5,000件。ファイルサイズ・ブラウザ側解析行数の明示上限はない。</td></tr>
-              <tr><td>可用性</td><td>VercelとNeonの利用環境に依存。アプリ内のデータエクスポート機能は提供していない。Previewは本番と別のDBを使う。</td></tr>
+              <tr><td>可用性</td><td>VercelとNeonの利用環境に依存。アプリ内のデータエクスポート機能は提供していない。Previewは本番と別のNeonプロジェクトのタスク専用DBを使う。</td></tr>
               <tr><td>セキュリティ</td><td>入力検証、パラメータ化SQL、操作ごとの認可、秘密情報のサーバー管理を行う。アプリ共通のレート制限は実装していない。</td></tr>
               <tr><td>日時・通貨</td><td>取引日時の入力・表示とPayPay ID生成は日本時間、通貨は日本円。ホームの今月指標はブラウザのローカル月番号で抽出する（現在は年を比較しない）。</td></tr>
               <tr><td>DB計測</td><td>DBクエリ・トランザクションのアプリ側所要時間を構造化JSONログへ記録する。SQL本文・パラメーター・行データはログへ出さない。</td></tr>
@@ -820,7 +822,7 @@
               <tr><td>D9</td><td>利用者制限</td><td>通常の有効アカウントは管理者を含め二人まで。テストA/Bは別扱いでProductionでは無効。</td></tr>
               <tr><td>D10</td><td>割合の保持</td><td>各明細に割合を保存する。デフォルトは新しい共有費の初期値。既存明細へ変更を反映する場合は明示的なルール適用を行う。</td></tr>
               <tr><td>D11</td><td>フィルタ</td><td>列ごとの値を端末内へ自動保存。ユーザー・ワークスペース単位で分離し、端末間同期はしない。</td></tr>
-              <tr><td>D12</td><td>Preview</td><td>修正・検証後にdeploy:previewで配置し、成功したPreviewへ固定URLを割り当てる。Productionへの配置は明示依頼時。</td></tr>
+              <tr><td>D12</td><td>開発・公開</td><td>最新mainからタスク専用worktreeを作り、独立DB付きGit Previewで検証後にPRを作成する。ユーザーが必須CIを確認して手動マージし、本番のビルド・DB更新成功後に公開する。</td></tr>
             </tbody>
           </table></div>
           <div class="note">仕様変更時は本書と詳細設計を更新し、運用が変わる場合はREADMEも更新する。</div>

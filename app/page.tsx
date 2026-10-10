@@ -4,6 +4,7 @@ import { CakeIcon } from "@/components/cake-icon";
 import { getCurrentUser } from "@/lib/current-user";
 import { isTestAuthEnabled } from "@/lib/auth-mode";
 import { getBootstrap } from "@/lib/repository";
+import { databaseVariable } from "@/lib/database-environment";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ w
   const testAuth = isTestAuthEnabled();
   if (!user) return <LoginScreen testAuth={testAuth} error={error} />;
 
-  if (!process.env.DATABASE_URL) {
+  if (!process.env[databaseVariable(process.env)]) {
     return (
       <main className="setup-page">
         <section className="setup-card">
