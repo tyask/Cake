@@ -407,7 +407,7 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
     <td data-label={draft.type === "PAYMENT" ? "支払者" : "受取者"}><select aria-label={draft.type === "PAYMENT" ? "支払者" : "受取者"} value={draft.actorUserId} disabled={busy} onChange={(event) => change(transactionActorPatch(currentValues(), event.target.value, members), true)}>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></td>
     <td data-label="費用区分"><select aria-label="費用区分" value={draft.expenseClass} disabled={busy} onChange={(event) => change(transactionExpensePatch(currentValues(), event.target.value as ExpenseClass, members), true)}><option value="PERSONAL">個人費</option><option value="SHARED">共有費</option></select></td>
     <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}>
-      <SplitEditor compact inline label="支払い割合" members={members} value={draft.splitWeights} amountYen={draft.amountYen}
+      <SplitEditor compact inline allowEqualSplit label="支払い割合" members={members} value={draft.splitWeights} amountYen={draft.amountYen}
         disabled={busy || draft.expenseClass === "PERSONAL"} onChange={(splitWeights) => change({ splitWeights })} onCommit={requestCommit} />
     </td>
     <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={draft.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} onError={() => setMobileExpanded(true)} onSavingChange={setMemoSaving} register={registerMemo} /></td>
