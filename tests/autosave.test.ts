@@ -66,3 +66,30 @@ test('acknowledgement bridges old React props and releases when caught up', () =
   assert.equal(acknowledge('latest', second, 'latest', signature), null);
   assert.equal(second?.sources.includes('external'), false);
 });
+
+test('revert to the in-flight value coalesces; failure does not auto-retry blur', async () => {
+  const request = createAutosaveRequest();
+  const gate = deferred(); const started = deferred();
+  let base = { text: 'old' }; let draft = { text: 'saved' }; let posts = 0;
+  const operation = () => saveChanged(() => ({ values: { ...draft }, base }), async values => {
+    posts++; started.resolve(); await gate.promise; return values;
+  }, saved => { base = saved; });
+  const first = request(operation); await started.promise;
+  draft = { text: 'temporary' }; request(operation);
+  draft = { text: 'saved' }; request(operation);
+  gate.resolve(); await first;
+  assert.equal(posts, 1);
+  const failing = () => { posts++; return Promise.reject(new Error('offline')); };
+  const failure = request(failing); request(failing);
+  await assert.rejects(failure, /offline/);
+  assert.equal(posts, 2);
+});
+
+test('acknowledges inside shared queue before next editor reads the base', async () => {
+  let base = { text: 'old' }; const draft = { text: 'new' }; let posts = 0;
+  const save = () => saveChanged(() => ({ values: draft, base }), async values => {
+    posts++; return values;
+  }, saved => { base = saved; });
+  const queue = Promise.resolve().then(save).then(save);
+  await queue; assert.equal(posts, 1);
+});
