@@ -27,8 +27,8 @@ export function recurringFormDefaults(selected: WorkspaceMetadata, merchant: str
     : { expenseClass: "SHARED" as const, splitWeights: defaultSplitWeights(selected.members) };
 }
 
-export function recurringFormPreview(config: RecurringPaymentConfig, today: string, payment?: RecurringPayment) {
+export function recurringFormPreview(config: RecurringPaymentConfig, now: Date, payment?: RecurringPayment) {
   const firstOn = nextScheduledOn({ state: "ACTIVE", currentConfig: config,
-    lastGeneratedMonth: payment?.lastGeneratedMonth ?? null }, today);
+    lastGeneratedMonth: payment?.lastGeneratedMonth ?? null }, now);
   return { firstOn };
 }

@@ -29,6 +29,7 @@ export interface RecurringPaymentsResponse {
   payments: RecurringPayment[];
   eligibleActorUserIds: string[];
   today: string;
+  now: string;
 }
 
 export interface RecurringPaymentMutationResult {

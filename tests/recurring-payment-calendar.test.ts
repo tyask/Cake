@@ -8,6 +8,7 @@ import type { RecurringPaymentConfig } from "../lib/recurring-payment-types";
 
 const config: RecurringPaymentConfig = { dayOfMonth: 27, merchant: "家賃", method: "銀行振込", amountYen: 100000,
   actorUserId: "a", expenseClass: "SHARED", splitWeights: { a: 1, b: 1 }, memo: "" };
+const beforeNine = (date: string) => new Date(`${date}T08:59:59.999+09:00`);
 const payment = (overrides: Partial<RecurringPaymentSchedule> = {}): RecurringPaymentSchedule => ({
   state: "ACTIVE", currentConfig: config, lastGeneratedMonth: null, ...overrides,
 });
@@ -42,37 +43,60 @@ test("当日のみ生成し、失敗した翌日に過去予定を補完しな�
   assert.equal(isDueToday(setting, "2026-10-26"), false);
   assert.equal(isDueToday(setting, "2026-10-27"), true);
   assert.equal(isDueToday(setting, "2026-10-28"), false);
-  assert.equal(nextScheduledOn(setting, "2026-10-28"), "2026-11-27");
+  assert.equal(nextScheduledOn(setting, beforeNine("2026-10-28")), "2026-11-27");
   assert.equal(isDueToday(setting, "2026-11-27"), true);
 });
 
 test("月末の予定は開始条件なしで当日に対象となる", () => {
   const endOfMonth = payment({ currentConfig: { ...config, dayOfMonth: 31 } });
-  assert.equal(nextScheduledOn(endOfMonth, "2027-02-10"), "2027-02-28");
+  assert.equal(nextScheduledOn(endOfMonth, beforeNine("2027-02-10")), "2027-02-28");
   assert.equal(isDueToday(endOfMonth, "2027-02-28"), true);
-  assert.equal(nextScheduledOn(endOfMonth, "2027-03-01"), "2027-03-31");
+  assert.equal(nextScheduledOn(endOfMonth, beforeNine("2027-03-01")), "2027-03-31");
+});
+
+test("次回予定は当月の未来日を返し、当日は日本時間09:00ちょうどで翌月へ進む", () => {
+  const ninth = payment({ currentConfig: { ...config, dayOfMonth: 9 } });
+  const tenth = payment({ currentConfig: { ...config, dayOfMonth: 10 } });
+  const before = new Date("2026-10-09T08:59:59.999+09:00");
+  const atNine = new Date("2026-10-09T09:00:00.000+09:00");
+  const after = new Date("2026-10-09T09:00:00.001+09:00");
+  assert.equal(nextScheduledOn(ninth, before), "2026-10-09");
+  for (const now of [atNine, after, new Date("2026-10-09T09:59:59+09:00"), new Date("2026-10-09T23:59:59+09:00")]) {
+    assert.equal(nextScheduledOn(ninth, now), "2026-11-09");
+    assert.equal(nextScheduledOn(tenth, now), "2026-10-10");
+    // A 09:00–09:59 Cron or a later manual test run must still generate today's entry.
+    assert.equal(isDueToday(ninth, jstToday(now)), true);
+  }
+});
+
+test("09:00の境界でも月末補正・閏年・年の繰り上げを保つ", () => {
+  const endOfMonth = payment({ currentConfig: { ...config, dayOfMonth: 31 } });
+  for (const [date, next] of [["2027-02-28", "2027-03-31"], ["2028-02-29", "2028-03-31"], ["2026-12-31", "2027-01-31"]]) {
+    assert.equal(nextScheduledOn(endOfMonth, beforeNine(date)), date);
+    assert.equal(nextScheduledOn(endOfMonth, new Date(`${date}T09:00:00+09:00`)), next);
+  }
 });
 
 test("未生成の設定編集は当月の日付と金額に即時反映する", () => {
   const edited = payment({ currentConfig: { ...config, dayOfMonth: 10, amountYen: 110000 } });
-  assert.equal(nextScheduledOn(edited, "2026-10-10"), "2026-10-10");
+  assert.equal(nextScheduledOn(edited, beforeNine("2026-10-10")), "2026-10-10");
   assert.equal(isDueToday(edited, "2026-10-10"), true);
   assert.equal(isDueToday(edited, "2026-10-27"), false);
   const futureDay = { ...edited, currentConfig: { ...edited.currentConfig, dayOfMonth: 31 } };
-  assert.equal(nextScheduledOn(futureDay, "2026-10-10"), "2026-10-31");
+  assert.equal(nextScheduledOn(futureDay, beforeNine("2026-10-10")), "2026-10-31");
   assert.equal(isDueToday(futureDay, "2026-10-31"), true);
 });
 
 test("編集した日がすでに過ぎていれば当月分を補完せず翌月を返す", () => {
   const edited = payment({ currentConfig: { ...config, dayOfMonth: 1 } });
-  assert.equal(nextScheduledOn(edited, "2026-10-10"), "2026-11-01");
+  assert.equal(nextScheduledOn(edited, beforeNine("2026-10-10")), "2026-11-01");
   assert.equal(isDueToday(edited, "2026-10-10"), false);
   assert.equal(isDueToday(edited, "2026-11-01"), true);
 });
 
 test("停止中・要確認・削除設定は予定日と生成を返さない", () => {
   for (const state of ["PAUSED", "BLOCKED", "ARCHIVED"] as const) {
-    assert.equal(nextScheduledOn(payment({ state }), "2026-10-10"), null);
+    assert.equal(nextScheduledOn(payment({ state }), beforeNine("2026-10-10")), null);
     assert.equal(isDueToday(payment({ state }), "2026-10-27"), false);
   }
 });
@@ -80,11 +104,17 @@ test("停止中・要確認・削除設定は予定日と生成を返さない",
 test("登録済み年月は明細削除・設定編集後も同月再生成を防ぐ", () => {
   const saved = payment({ lastGeneratedMonth: "2026-10-01" });
   assert.equal(isDueToday(saved, "2026-10-27"), false);
-  assert.equal(nextScheduledOn(saved, "2026-10-27"), "2026-11-27");
-  assert.equal(nextScheduledOn(payment({ lastGeneratedMonth: "2026-12-01" }), "2026-10-10"), "2027-01-27");
+  assert.equal(nextScheduledOn(saved, beforeNine("2026-10-27")), "2026-11-27");
+  assert.equal(nextScheduledOn(payment({ lastGeneratedMonth: "2026-12-01" }), beforeNine("2026-10-10")), "2027-01-27");
   const edited = { ...saved, currentConfig: { ...config, dayOfMonth: 31, amountYen: 110000 } };
   assert.equal(isDueToday(edited, "2026-10-31"), false);
-  assert.equal(nextScheduledOn(edited, "2026-10-10"), "2026-11-30");
+  assert.equal(nextScheduledOn(edited, beforeNine("2026-10-10")), "2026-11-30");
+  for (const [time, expected] of [["2026-10-27T08:59:59.999+09:00", "2026-10-27"], ["2026-10-27T09:00:00+09:00", "2026-11-27"]]) {
+    const now = new Date(time);
+    assert.equal(nextScheduledOn(saved, now), "2026-11-27");
+    assert.equal(nextScheduledOn(payment({ lastGeneratedMonth: "2026-09-01" }), now), expected);
+    assert.equal(nextScheduledOn(payment({ lastGeneratedMonth: "2026-12-01" }), now), "2027-01-27");
+  }
 });
 
 test("再開は即時有効で、当日未生成なら対象、生成済みなら翌月になる", () => {
@@ -92,10 +122,10 @@ test("再開は即時有効で、当日未生成なら対象、生成済みな�
     const stopped = payment({ state });
     const resumed = { ...stopped, state: "ACTIVE" as const };
     assert.equal(isDueToday(resumed, "2026-10-27"), true);
-    assert.equal(nextScheduledOn(resumed, "2026-10-27"), "2026-10-27");
-    assert.equal(nextScheduledOn(resumed, "2026-10-28"), "2026-11-27");
+    assert.equal(nextScheduledOn(resumed, beforeNine("2026-10-27")), "2026-10-27");
+    assert.equal(nextScheduledOn(resumed, beforeNine("2026-10-28")), "2026-11-27");
     const alreadyGenerated = { ...resumed, lastGeneratedMonth: "2026-10-01" };
     assert.equal(isDueToday(alreadyGenerated, "2026-10-27"), false);
-    assert.equal(nextScheduledOn(alreadyGenerated, "2026-10-27"), "2026-11-27");
+    assert.equal(nextScheduledOn(alreadyGenerated, beforeNine("2026-10-27")), "2026-11-27");
   }
 });

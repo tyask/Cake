@@ -58,13 +58,13 @@ test("金額・日・文字数・割合の境界を検証する", () => {
 test("開始日を持たない現在設定から予定を返し、旧適用月をAPIへ公開しない", () => {
   const raw = row({ day_of_month: 10, amount_yen: 110000,
     active_from_month: "2027-12-01", pending_config: null, pending_effective_month: null });
-  const saved = recurringPaymentRecord(raw, "2026-10-10");
+  const saved = recurringPaymentRecord(raw, new Date("2026-10-10T08:59:59.999+09:00"));
   assert.equal(saved.currentConfig.amountYen, 110000);
   assert.equal(saved.nextScheduledOn, "2026-10-10");
   for (const removed of ["startOn", "activeFromMonth", "pendingConfig", "pendingEffectiveMonth", "effectiveMonth"]) {
     assert.equal(removed in saved, false, removed);
   }
-  assert.equal(recurringPaymentRecord(raw, "2026-10-11").nextScheduledOn, "2026-11-10");
+  assert.equal(recurringPaymentRecord(raw, new Date("2026-10-10T09:00:00+09:00")).nextScheduledOn, "2026-11-10");
   assert.equal(raw.active_from_month, "2027-12-01");
 });
 
@@ -93,7 +93,7 @@ test("本番/通常認証と固定test identityの境界をID・メール・有�
   assert.equal(isRecurringUserEligible({ ...normal, isEnabled: false }, false), false);
 });
 
-test("作成は開始日を保持せず、日本時間の日付を次回予定の計算だけに使う", async () => {
+test("作成は開始日を保持せず、サーバー時刻の日本時間09:00で次回予定を繰り上げる", async () => {
   const { service, store } = fixture();
   const input = { action: "create", workspaceId, ...config, dayOfMonth: 10 };
   const times: string[] = [];
@@ -104,11 +104,26 @@ test("作成は開始日を保持せず、日本時間の日付を次回予定�
     times.push(clock.toISOString());
     return { payment: row({ day_of_month: 10 }) };
   };
-  const beforeMidnight = await service.mutateRecurringPayment("a", input, new Date("2026-10-10T14:59:59.999Z"));
-  const afterMidnight = await service.mutateRecurringPayment("a", input, new Date("2026-10-10T15:00:00Z"));
-  assert.deepEqual(times, ["2026-10-10T14:59:59.999Z", "2026-10-10T15:00:00.000Z"]);
-  assert.equal(beforeMidnight.payment.nextScheduledOn, "2026-10-10");
-  assert.equal(afterMidnight.payment.nextScheduledOn, "2026-11-10");
+  const beforeNine = await service.mutateRecurringPayment("a", input, new Date("2026-10-10T08:59:59.999+09:00"));
+  const atNine = await service.mutateRecurringPayment("a", input, new Date("2026-10-10T09:00:00+09:00"));
+  assert.deepEqual(times, ["2026-10-09T23:59:59.999Z", "2026-10-10T00:00:00.000Z"]);
+  assert.equal(beforeNine.payment.nextScheduledOn, "2026-10-10");
+  assert.equal(atNine.payment.nextScheduledOn, "2026-11-10");
+});
+
+test("一覧は次回予定とフォーム用のサーバー時刻を同じ時刻で返す", async () => {
+  const { service, store } = fixture();
+  store.list = async () => ({ authorized: true,
+    payments: [row({ day_of_month: 9 }), row({ day_of_month: 10 }), row({ day_of_month: 10, last_generated_month: "2026-10-01" })],
+    eligibleActorUserIds: ["a", "b"] });
+  for (const [time, ninth] of [["2026-10-09T08:59:59.999+09:00", "2026-10-09"], ["2026-10-09T09:00:00+09:00", "2026-11-09"]]) {
+    const serverNow = new Date(time);
+    const listed = await service.listRecurringPayments(workspaceId, "a", serverNow);
+    assert.equal(listed.today, "2026-10-09");
+    assert.equal(listed.now, serverNow.toISOString());
+    assert.deepEqual(listed.payments.map(payment => payment.nextScheduledOn), [ninth, "2026-10-10", "2026-11-10"]);
+    assert.deepEqual(listed.eligibleActorUserIds, ["a", "b"]);
+  }
 });
 
 test("編集応答は保存した金額と日を即時反映し、適用月や変更予定を返さない", async () => {
@@ -124,12 +139,12 @@ test("編集応答は保存した金額と日を即時反映し、適用月や�
   const result = await service.mutateRecurringPayment("a", input, now);
   assert.equal(result.payment.currentConfig.amountYen, 110000);
   assert.equal(result.payment.currentConfig.dayOfMonth, 10);
-  assert.equal(result.payment.nextScheduledOn, "2026-10-10");
+  assert.equal(result.payment.nextScheduledOn, "2026-11-10");
   assert.equal(result.payment.revision, 2);
   assert.deepEqual(Object.keys(result), ["payment"]);
 });
 
-test("再開は当日未生成の予定を即時返し、登録済み月は次回を翌月にする", async () => {
+test("再開の次回予定は当日の09:00前後と登録済み月を判定する", async () => {
   const { service, store } = fixture();
   let generatedMonth: string | null = null;
   store.mutate = async (_userId, input) => {
@@ -137,8 +152,11 @@ test("再開は当日未生成の予定を即時返し、登録済み月は次�
     return { payment: row({ day_of_month: 10, last_generated_month: generatedMonth }) };
   };
   const input = { action: "resume", workspaceId, paymentId, expectedRevision: 1 };
-  assert.equal((await service.mutateRecurringPayment("a", input, now)).payment.nextScheduledOn, "2026-10-10");
+  const beforeNine = new Date("2026-10-10T08:59:59.999+09:00");
+  assert.equal((await service.mutateRecurringPayment("a", input, beforeNine)).payment.nextScheduledOn, "2026-10-10");
+  assert.equal((await service.mutateRecurringPayment("a", input, now)).payment.nextScheduledOn, "2026-11-10");
   generatedMonth = "2026-10-01";
+  assert.equal((await service.mutateRecurringPayment("a", input, beforeNine)).payment.nextScheduledOn, "2026-11-10");
   assert.equal((await service.mutateRecurringPayment("a", input, now)).payment.nextScheduledOn, "2026-11-10");
 });
 

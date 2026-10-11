@@ -44,13 +44,14 @@ export function scheduledDate(month: string, dayOfMonth: number): string {
   return `${first.slice(0, 7)}-${String(Math.min(dayOfMonth, date.getUTCDate())).padStart(2, "0")}`;
 }
 
-/** Past scheduled days are never returned as recovery work. */
-export function nextScheduledOn(payment: RecurringPaymentSchedule, today: string): string | null {
+/** Forecast the next 09:00 JST schedule; generation still checks the entire day. */
+export function nextScheduledOn(payment: RecurringPaymentSchedule, now: Date): string | null {
   if (payment.state !== "ACTIVE") return null;
+  const today = jstToday(now);
   let month = [monthOf(today),
     ...(payment.lastGeneratedMonth ? [addMonths(payment.lastGeneratedMonth, 1)] : [])].sort().at(-1)!;
   const date = scheduledDate(month, payment.currentConfig.dayOfMonth);
-  if (date >= today) return date;
+  if (new Date(`${date}T09:00:00+09:00`).getTime() > now.getTime()) return date;
   month = addMonths(month, 1);
   return scheduledDate(month, payment.currentConfig.dayOfMonth);
 }
