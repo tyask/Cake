@@ -27,7 +27,8 @@ export function recurringFormDefaults(selected: WorkspaceMetadata, merchant: str
     : { expenseClass: "SHARED" as const, splitWeights: defaultSplitWeights(selected.members) };
 }
 
-export function recurringFormPreview(config: RecurringPaymentConfig, startOn: string, today: string, payment?: RecurringPayment) {
+export function recurringFormPreview(config: RecurringPaymentConfig, today: string, payment?: RecurringPayment) {
+  const startOn = payment?.startOn ?? today;
   const effectiveMonth = payment ? pendingEffectiveMonth(startOn, today) : monthOf(startOn);
   const activeFromMonth = payment && payment.activeFromMonth > effectiveMonth ? payment.activeFromMonth : effectiveMonth;
   const firstOn = nextScheduledOn({ state: "ACTIVE", startOn, activeFromMonth,

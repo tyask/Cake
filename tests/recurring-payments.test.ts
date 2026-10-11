@@ -32,9 +32,9 @@ function fixture() {
 const now = new Date("2026-10-10T00:00:00Z");
 
 test("入力はactionごとに厳密で、readonly列・日時の上書きを拒否する", () => {
-  const create = { action: "create", workspaceId, startOn: "2026-10-10", ...config };
+  const create = { action: "create", workspaceId, ...config };
   assert.equal(recurringPaymentMutationSchema.safeParse(create).success, true);
-  for (const additional of [{ state: "ACTIVE" }, { authorizedById: "b" }, { lastGeneratedMonth: null }, { now: "2026-10-09" }]) {
+  for (const additional of [{ startOn: "2026-10-10" }, { state: "ACTIVE" }, { authorizedById: "b" }, { lastGeneratedMonth: null }, { now: "2026-10-09" }]) {
     assert.equal(recurringPaymentMutationSchema.safeParse({ ...create, ...additional }).success, false);
   }
   assert.equal(recurringPaymentMutationSchema.safeParse({ action: "update", workspaceId, paymentId, expectedRevision: 1, ...config }).success, true);
@@ -45,13 +45,12 @@ test("入力はactionごとに厳密で、readonly列・日時の上書きを拒
   }
 });
 
-test("日付・金額・日・文字数・割合の境界を検証する", () => {
+test("金額・日・文字数・割合の境界を検証する", () => {
   for (const change of [{ dayOfMonth: 0 }, { dayOfMonth: 32 }, { dayOfMonth: 1.1 }, { amountYen: 0 },
     { amountYen: 2_147_483_648 }, { amountYen: 1.1 }, { merchant: " " }, { method: " " }, { expenseClass: "OTHER" },
     { splitWeights: { a: 0 } }, { splitWeights: { a: -1 } }, { splitWeights: { a: 1.2 } },
     { memo: "a".repeat(2001) }]) assert.equal(recurringPaymentConfigSchema.safeParse({ ...config, ...change }).success, false, JSON.stringify(change));
   assert.equal(recurringPaymentConfigSchema.parse({ ...config, merchant: " 家賃 " }).merchant, "家賃");
-  assert.equal(recurringPaymentMutationSchema.safeParse({ action: "create", workspaceId, startOn: "2026-02-29", ...config }).success, false);
 });
 
 test("現在設定と未来の変更を返し、期限を過ぎたpendingは読込だけで論理適用する", () => {
@@ -94,13 +93,31 @@ test("本番/通常認証と固定test identityの境界をID・メール・有�
   assert.equal(isRecurringUserEligible({ ...normal, isEnabled: false }, false), false);
 });
 
-test("作成時はサーバーの日本時間を基準に開始日の過去入力をDBより前に拒否する", async () => {
+test("開始日なしで作成し、内部開始日はサーバーの日本時間の日付を保存する", async () => {
+  const { service, store } = fixture();
+  const dates: string[] = [];
+  store.mutate = async (_userId, input, _testMode, clock) => {
+    assert.equal(input.action, "create");
+    if (input.action !== "create") throw new Error("Unexpected action");
+    dates.push(input.startOn);
+    assert.ok(clock instanceof Date);
+    return { payment: row({ start_on: input.startOn }) };
+  };
+  const input = { action: "create", workspaceId, ...config };
+  const beforeMidnight = await service.mutateRecurringPayment("a", input, new Date("2026-10-10T14:59:59.999Z"));
+  const afterMidnight = await service.mutateRecurringPayment("a", input, new Date("2026-10-10T15:00:00Z"));
+  assert.deepEqual(dates, ["2026-10-10", "2026-10-11"]);
+  assert.equal(beforeMidnight.payment.startOn, "2026-10-10");
+  assert.equal(afterMidnight.payment.startOn, "2026-10-11");
+});
+
+test("作成で開始日を指定しても過去・現在・未来を問わず保存前に拒否する", async () => {
   const { service, calls } = fixture();
-  await assert.rejects(service.mutateRecurringPayment("a", { action: "create", workspaceId, startOn: "2026-10-09", ...config }, now),
-    (error: unknown) => error instanceof RecurringPaymentError && error.status === 400);
+  for (const startOn of ["2026-10-09", "2026-10-10", "2026-12-28"]) {
+    await assert.rejects(service.mutateRecurringPayment("a", { action: "create", workspaceId, startOn, ...config }, now),
+      (error: unknown) => error instanceof RecurringPaymentError && error.status === 400 && error.code === "INPUT_INVALID");
+  }
   assert.equal(calls.mutate, 0);
-  await service.mutateRecurringPayment("a", { action: "create", workspaceId, startOn: "2026-10-10", ...config }, now);
-  assert.equal(calls.mutate, 1);
 });
 
 test("DB例外は固定のHTTPコードへ変換し、内部文言を漏らさない", async () => {
@@ -123,6 +140,30 @@ test("手動実行は所属・利用可否を先に確認し、不許可時は�
   assert.deepEqual(calls.generated, []);
   await assert.rejects(service.runRecurringPayments({ authorizedUserId: "a", now, logger: () => {} }),
     (error: unknown) => error instanceof RecurringPaymentError && error.status === 400);
+});
+
+test("runnerは実行日時の秒・ミリ秒を保ち、候補抽出と全明細生成へ同じ時刻を渡す", async () => {
+  const { service, store } = fixture();
+  const executedAt = new Date("2026-10-27T09:23:45.678+09:00");
+  const generatedTimes: string[] = [];
+  const logs: RecurringPaymentLog[] = [];
+  store.candidates = async (scope, testMode, candidateTime) => {
+    assert.equal(scope, undefined);
+    assert.equal(testMode, false);
+    assert.equal(candidateTime.toISOString(), "2026-10-27T00:23:45.678Z");
+    return [paymentId, "00000000-0000-4000-8000-000000000003"].map(id => ({ id, workspaceId }));
+  };
+  store.generate = async (candidate, testMode, generatedAt) => {
+    assert.equal(candidate.workspaceId, workspaceId);
+    assert.equal(testMode, false);
+    generatedTimes.push(generatedAt.toISOString());
+    return { status: "created" };
+  };
+  const result = await service.runRecurringPayments({ now: executedAt, logger: entry => logs.push(entry) });
+  assert.equal(result.created, 2);
+  assert.deepEqual(generatedTimes, ["2026-10-27T00:23:45.678Z", "2026-10-27T00:23:45.678Z"]);
+  assert.deepEqual(logs.filter(entry => entry.event === "recurring.payment.completed").map(entry => entry.scheduledOn),
+    ["2026-10-27", "2026-10-27"]);
 });
 
 test("runnerは失敗をその呼出しで再試行せず、次の設定を処理して固定ログへ集計する", async () => {

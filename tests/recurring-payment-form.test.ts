@@ -26,10 +26,17 @@ test("new recurring payment selects an eligible actor and fixes a personal works
   assert.deepEqual(recurringFormDefaults(personal, "", "b"), { expenseClass: "PERSONAL", splitWeights: { a: 0, b: 1 } });
 });
 
-test("future-start editing preview respects the start date and changes in the start month", () => {
+test("new payment preview uses today and the next matching monthly date", () => {
+  assert.deepEqual(recurringFormPreview({ ...config, dayOfMonth: 10 }, "2026-10-10"), { effectiveMonth: "2026-10-01", firstOn: "2026-10-10" });
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 1 }, "2026-10-10").firstOn, "2026-11-01");
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 27 }, "2026-10-10").firstOn, "2026-10-27");
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 31 }, "2027-02-10").firstOn, "2027-02-28");
+});
+
+test("editing retains legacy internal start metadata without accepting a start date input", () => {
   const future = { ...payment, startOn: "2026-12-28", activeFromMonth: "2026-12-01", lastGeneratedMonth: null };
-  assert.deepEqual(recurringFormPreview({ ...config, dayOfMonth: 31 }, future.startOn, "2026-10-10", future), { effectiveMonth: "2026-12-01", firstOn: "2026-12-31" });
-  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 10 }, future.startOn, "2026-10-10", future).firstOn, "2027-01-10");
+  assert.deepEqual(recurringFormPreview({ ...config, dayOfMonth: 31 }, "2026-10-10", future), { effectiveMonth: "2026-12-01", firstOn: "2026-12-31" });
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 10 }, "2026-10-10", future).firstOn, "2027-01-10");
 });
 
 test("new members get zero without silently deleting an unknown saved participant", () => {

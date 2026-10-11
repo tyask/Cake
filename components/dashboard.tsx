@@ -246,7 +246,6 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
           {selected && <section className="settings-group" aria-labelledby="workspace-settings-title">
             <div className="settings-group-heading"><h2 id="workspace-settings-title">ワークスペース設定</h2><p>{selected.workspace.name}の情報・共有費の割合・ルールを設定します。</p></div>
             <SettingsPanel key={selected.workspace.id} selected={selected} currentUserId={data.user.id} run={run} afterDelete={async () => { await refresh(); }} />
-            <RecurringPaymentsPanel key={`recurring-${selected.workspace.id}`} selected={selected} currentUserId={data.user.id} />
           </section>}
           {data.user.isAdmin === true && !testAuth && <UserManagement />}
         </>}
@@ -490,6 +489,7 @@ function SettingsPanel({ selected, currentUserId, run, afterDelete }: { selected
         {error && <p className="settings-error form-error" role="alert">{error}</p>}
       </section>
     </div>
+    <RecurringPaymentsPanel selected={selected} currentUserId={currentUserId} />
     <WorkspaceRules selected={selected} run={run} />
     <section className="panel danger-zone">
       <div><span>DANGER ZONE</span><h2>ワークスペースを削除</h2><p>関連する明細、招待、ルール、清算履歴がすべて削除され、元に戻せません。</p></div>

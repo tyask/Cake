@@ -5,7 +5,7 @@ import { isTestAuthEnabled } from "./auth-mode";
 import { validateSplitWeights } from "./expense-splits";
 import { transactionMemoSchema } from "./transaction-memo";
 import { TEST_USERS } from "./test-users";
-import { configForMonth, isCalendarDate, jstToday, monthOf, nextScheduledOn } from "./recurring-payment-calendar";
+import { configForMonth, jstToday, monthOf, nextScheduledOn } from "./recurring-payment-calendar";
 import type {
   RecurringPayment, RecurringPaymentConfig, RecurringPaymentMutationResult,
   RecurringPaymentRunResult, RecurringPaymentsResponse,
@@ -25,13 +25,15 @@ const configShape = {
 export const recurringPaymentConfigSchema = z.object(configShape).strict();
 const identityShape = { workspaceId: z.uuid(), paymentId: z.uuid(), expectedRevision: z.number().int().positive().max(2_147_483_647) };
 export const recurringPaymentMutationSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("create"), workspaceId: z.uuid(), startOn: z.string().refine(isCalendarDate, "開始日が不正です。"), ...configShape }).strict(),
+  z.object({ action: z.literal("create"), workspaceId: z.uuid(), ...configShape }).strict(),
   z.object({ action: z.literal("update"), ...identityShape, ...configShape }).strict(),
   z.object({ action: z.literal("pause"), ...identityShape }).strict(),
   z.object({ action: z.literal("resume"), ...identityShape }).strict(),
   z.object({ action: z.literal("archive"), ...identityShape }).strict(),
 ]);
 export type RecurringPaymentMutation = z.infer<typeof recurringPaymentMutationSchema>;
+type StoredRecurringPaymentMutation = Exclude<RecurringPaymentMutation, { action: "create" }>
+  | (Extract<RecurringPaymentMutation, { action: "create" }> & { startOn: string });
 
 export class RecurringPaymentError extends Error {
   constructor(message: string, public readonly status: number, public readonly code: string) {
@@ -93,7 +95,7 @@ interface RecurringCandidate { id: string; workspaceId: string }
 interface GenerationResult { status: "created" | "skipped" | "blocked"; errorCode?: string }
 export interface RecurringPaymentStore {
   list(workspaceId: string, userId: string, testMode: boolean): Promise<{ authorized: boolean; payments: Row[]; eligibleActorUserIds: string[] }>;
-  mutate(userId: string, input: RecurringPaymentMutation, testMode: boolean, now: Date): Promise<SavedMutation>;
+  mutate(userId: string, input: StoredRecurringPaymentMutation, testMode: boolean, now: Date): Promise<SavedMutation>;
   candidates(workspaceId: string | undefined, testMode: boolean, now: Date): Promise<RecurringCandidate[]>;
   generate(candidate: RecurringCandidate, testMode: boolean, now: Date): Promise<GenerationResult>;
 }
@@ -194,9 +196,11 @@ export function createRecurringPaymentService(store: RecurringPaymentStore, opti
   async function mutateRecurringPayment(userId: string, input: unknown, now: Date = new Date()): Promise<RecurringPaymentMutationResult> {
     try {
       const parsed = recurringPaymentMutationSchema.parse(input);
-      if (parsed.action === "create" && parsed.startOn < jstToday(now)) throw new RecurringPaymentError("開始日は本日以降を指定してください。", 400, "INPUT_INVALID");
-      const result = await store.mutate(userId, parsed, mode(), now);
-      return { payment: recurringPaymentRecord(result.payment, jstToday(now)),
+      const today = jstToday(now);
+      // The date is internal metadata. Clients choose only the recurring day.
+      const storedInput = parsed.action === "create" ? { ...parsed, startOn: today } : parsed;
+      const result = await store.mutate(userId, storedInput, mode(), now);
+      return { payment: recurringPaymentRecord(result.payment, today),
         ...(result.effectiveMonth ? { effectiveMonth: dateText(result.effectiveMonth) } : {}) };
     } catch (error) { throw fixedServiceError(error); }
   }

@@ -42,7 +42,7 @@ test("未認証の一覧と保存はサービスへ到達しない", async () =>
   const f = fixture();
   const handlers = recurringPaymentHandlers({ ...f.dependencies, currentUser: async () => null });
   assert.equal((await handlers.GET(new Request(`https://cake.example/api/recurring-payments?workspaceId=${workspaceId}`))).status, 401);
-  assert.equal((await handlers.POST(request({ action: "create", workspaceId, startOn: "2026-10-10", ...config }))).status, 401);
+  assert.equal((await handlers.POST(request({ action: "create", workspaceId, ...config }))).status, 401);
   assert.deepEqual(f.calls, []);
 });
 
@@ -54,11 +54,12 @@ test("一覧の不正workspace・日時上書き・重複workspaceを拒否す�
   assert.deepEqual(f.calls, []);
 });
 
-test("設定作成は201、通常の設定更新・状態変更は200", async () => {
+test("開始日なしの設定作成は201、通常の設定更新・状態変更は200", async () => {
   const f = fixture();
-  const created = await f.handlers.POST(request({ action: "create", workspaceId, startOn: "2026-10-10", ...config }));
+  const created = await f.handlers.POST(request({ action: "create", workspaceId, ...config }));
   assert.equal(created.status, 201);
   assert.equal((await created.json()).payment.id, paymentId);
+  assert.deepEqual(f.calls, [["mutate", "test-user-a", { action: "create", workspaceId, ...config }]]);
   const updated = await f.handlers.POST(request({ action: "update", workspaceId, paymentId, expectedRevision: 1, ...config }));
   assert.equal(updated.status, 200);
   for (const action of ["pause", "resume", "archive"]) {
@@ -66,6 +67,16 @@ test("設定作成は201、通常の設定更新・状態変更は200", async ()
   }
   assert.equal(f.calls.length, 5);
   assert.ok(f.calls.every(call => call[1] === "test-user-a"));
+});
+
+test("設定作成でクライアントの開始日指定を拒否する", async () => {
+  const f = fixture();
+  for (const startOn of ["2026-10-09", "2026-10-10", "2026-12-28"]) {
+    const result = await f.handlers.POST(request({ action: "create", workspaceId, ...config, startOn }));
+    assert.equal(result.status, 400);
+    assert.deepEqual(await result.json(), { error: "入力内容を確認してください。", code: "INPUT_INVALID" });
+  }
+  assert.deepEqual(f.calls, []);
 });
 
 test("更新で開始日・状態・成功月・承認者を指定できない", async () => {
@@ -82,7 +93,7 @@ test("JSON不正と入力検証の失敗は固定エラーで入力値を漏ら�
   const result = await f.handlers.POST(malformed);
   assert.equal(result.status, 400);
   assert.deepEqual(await result.json(), { error: "入力内容を確認してください。", code: "INPUT_INVALID" });
-  assert.equal((await f.handlers.POST(request({ action: "create", workspaceId, startOn: "2026-10-10", ...config, amountYen: 0 }))).status, 400);
+  assert.equal((await f.handlers.POST(request({ action: "create", workspaceId, ...config, amountYen: 0 }))).status, 400);
   assert.deepEqual(f.calls, []);
 });
 

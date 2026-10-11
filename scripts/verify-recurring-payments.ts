@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
+import { transactionDateInput } from "../lib/transaction-editing";
 
 // Run only against the task's isolated database, after db:setup. This script
 // never loads .env files or falls back to DATABASE_URL, and never alters seed
@@ -64,11 +65,11 @@ async function main() {
     return rows[0].result as { payment: Row; effectiveMonth?: string };
   }
 
-  const generateQuery = (workspaceId: string, payment: Row, day: string, testMode = false) =>
+  const generateQuery = (workspaceId: string, payment: Row, day: string, testMode = false, runAt = now(day)) =>
     sql`SELECT cake_generate_recurring_payment(${workspaceId}::uuid, ${payment.id}::uuid,
-      ${testMode}, ${now(day)}::timestamptz) AS result`;
-  async function generate(workspaceId: string, payment: Row, day: string, testMode = false) {
-    const rows = await generateQuery(workspaceId, payment, day, testMode);
+      ${testMode}, ${runAt}::timestamptz) AS result`;
+  async function generate(workspaceId: string, payment: Row, day: string, testMode = false, runAt = now(day)) {
+    const rows = await generateQuery(workspaceId, payment, day, testMode, runAt);
     return rows[0].result as { status: string; errorCode?: string; transactionId?: string };
   }
   async function saved(payment: Row) {
@@ -94,8 +95,8 @@ async function main() {
   try {
     stage = "マイグレーションと有効ユーザー枠の確認";
     const schema = await sql`SELECT EXISTS (SELECT 1 FROM schema_migrations
-      WHERE name = '007_recurring_payments.sql') AS ready`;
-    assert.equal(schema[0].ready, true, "007 migration must be applied first");
+      WHERE name = '008_recurring_payment_execution_time.sql') AS ready`;
+    assert.equal(schema[0].ready, true, "008 migration must be applied first");
     const capacity = await sql`SELECT count(*)::integer AS count FROM app_users WHERE is_enabled
       AND NOT ((id = 'test-user-a' AND email = 'test-a@cake.local')
         OR (id = 'test-user-b' AND email = 'test-b@cake.local'))`;
@@ -126,14 +127,18 @@ async function main() {
     await rejectsCode(() => mutate(workspaceId, "create", null,
       baseConfig({ splitWeights: { [userA]: 1, [userB]: 0, [outsider]: 1 } })), "SPLIT_MEMBERS_INVALID");
 
-    stage = "同時登録・固定スナップショット・JST日時";
+    stage = "同時登録・固定スナップショット・実行日時";
     await sql`UPDATE workspace_members SET weight = 7 WHERE workspace_id = ${workspaceId}::uuid AND user_id = ${userA}`;
-    const concurrent = await Promise.all([generate(workspaceId, payment, "2026-10-27"), generate(workspaceId, payment, "2026-10-27")]);
+    const executedAt = "2026-10-27T09:23:45.678+09:00";
+    const concurrent = await Promise.all([generate(workspaceId, payment, "2026-10-27", false, executedAt),
+      generate(workspaceId, payment, "2026-10-27", false, executedAt)]);
     assert.deepEqual(concurrent.map(item => item.status).sort(), ["created", "skipped"]);
     assert.equal(await count(workspaceId, payment), 1);
     const entry = (await sql`SELECT * FROM transactions WHERE workspace_id = ${workspaceId}::uuid
       AND external_id = ${`recurring_${payment.id}_202610`}`)[0];
-    assert.equal(new Date(String(entry.occurred_at)).toISOString(), "2026-10-26T15:00:00.000Z");
+    const occurredAt = new Date(String(entry.occurred_at)).toISOString();
+    assert.equal(occurredAt, "2026-10-27T00:23:45.678Z");
+    assert.equal(transactionDateInput(occurredAt), "2026-10-27T09:23:45.678");
     assert.equal(entry.source, "RECURRING");
     assert.equal(entry.type, "PAYMENT");
     assert.equal(Number(entry.amount_yen), 100_000);

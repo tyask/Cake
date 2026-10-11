@@ -120,7 +120,7 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
     {data && data.payments.length > 0 && <div className={tableStyles.tableWrap}><table className={`${tableStyles.table} ${styles.table}`} aria-label="定期支払い一覧">
       <colgroup>{["予定", "取引先", "方法", "金額", "支払者", "区分", "割合", "メモ", "状態", "操作"].map((label, index) => <col key={label} className={styles[`column${index}`]} />)}</colgroup>
       <thead><tr>{["毎月の日 / 次回", "取引先", "方法", "金額（円）", "支払者", "費用区分", `支払い割合（${selected.members.map(member => member.name).join(", ")}）`, "メモ", "状態", "操作"].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
-      <tbody>{data.payments.map(payment => <RecurringPaymentRow key={payment.id} payment={payment} members={selected.members} today={data.today} busy={busy || loading}
+      <tbody>{data.payments.map(payment => <RecurringPaymentRow key={payment.id} payment={payment} members={selected.members} busy={busy || loading}
         onEdit={() => { setNotice(null); setForm({ payment }); }} onAction={action => { setNotice(null); setConfirmation({ action, payment }); }} />)}</tbody>
     </table></div>}
     {form && data && <RecurringPaymentForm key={form.payment ? `${form.payment.id}-${form.payment.revision}` : "new"} selected={selected} currentUserId={currentUserId} data={data} payment={form.payment}
@@ -130,19 +130,18 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
   </section>;
 }
 
-function RecurringPaymentRow({ payment, members, today, busy, onEdit, onAction }: { payment: RecurringPayment; members: WorkspaceMember[]; today: string; busy: boolean; onEdit: () => void; onAction: (action: StateAction) => void }) {
+function RecurringPaymentRow({ payment, members, busy, onEdit, onAction }: { payment: RecurringPayment; members: WorkspaceMember[]; busy: boolean; onEdit: () => void; onAction: (action: StateAction) => void }) {
   const [expanded, setExpanded] = useState(false);
   const config = payment.currentConfig;
   const actorName = members.find(member => member.id === config.actorUserId)?.name ?? "確認が必要です";
   const stateLabel = payment.state === "ACTIVE" ? "有効" : payment.state === "PAUSED" ? "停止中" : "要確認";
-  const starting = payment.startOn > today;
   return <><tr className={tableStyles.transactionRow} data-expanded={expanded} data-recurring-payment-id={payment.id}>
     <td className={tableStyles.mobileSummary} colSpan={10}><button type="button" className={`${tableStyles.summaryButton} ${styles.summaryButton}`} aria-expanded={expanded}
       aria-label={`${config.merchant}の詳細を${expanded ? "閉じる" : "開く"}`} onClick={() => setExpanded(current => !current)}>
       <span className={tableStyles.summaryName}><b>{config.merchant}</b><small>毎月{config.dayOfMonth}日 · {actorName}</small></span>
       <span className={tableStyles.summaryAmount}><strong>{money(config.amountYen)}</strong><small>{stateLabel}</small></span><span className={tableStyles.summaryChevron} aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
     </button></td>
-    <td data-label="毎月の日 / 次回" className={tableStyles.fullCell}><b>毎月{config.dayOfMonth}日</b><small>次回：{payment.nextScheduledOn ? dateLabel(payment.nextScheduledOn) : "—"}</small><small>開始日：{dateLabel(payment.startOn)}</small>{starting && <small>開始予定の設定</small>}
+    <td data-label="毎月の日 / 次回" className={tableStyles.fullCell}><b>毎月{config.dayOfMonth}日</b><small>次回：{payment.nextScheduledOn ? dateLabel(payment.nextScheduledOn) : "—"}</small>
       {config.dayOfMonth >= 29 && <small>その日がない月は月末に追加</small>}</td>
     <td data-label="取引先"><b>{config.merchant}</b></td><td data-label="方法">{config.method}</td><td data-label="金額（円）">{money(config.amountYen)}</td>
     <td data-label="支払者">{actorName}</td><td data-label="費用区分">{config.expenseClass === "PERSONAL" ? "個人費" : "共通費"}</td>
@@ -191,7 +190,6 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
   save: (payload: Record<string, unknown>) => Promise<RecurringPaymentMutationResult>; reloadLatest: (payment: RecurringPayment) => Promise<void>;
 }) {
   const [config, setConfig] = useState(() => recurringFormConfig(selected, currentUserId, data.eligibleActorUserIds, data.today, payment));
-  const [startOn, setStartOn] = useState(payment?.startOn ?? data.today);
   const [customized, setCustomized] = useState(!!payment);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
@@ -202,7 +200,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
   let splitValid = true;
   try { validateSplitWeights(config.splitWeights, selected.members, config.expenseClass, config.actorUserId); } catch { splitValid = false; }
   let preview: ReturnType<typeof recurringFormPreview> | null = null;
-  try { preview = recurringFormPreview(config, startOn, data.today, payment); } catch { /* Incomplete date input has no preview. */ }
+  try { preview = recurringFormPreview(config, data.today, payment); } catch { /* Invalid config has no preview. */ }
   const patch = (update: Partial<RecurringPaymentConfig>) => { setConfig(current => ({ ...current, ...update })); if (!conflict) setError(null); };
   const applyDefaults = () => { patch(recurringFormDefaults(selected, config.merchant, config.actorUserId)); setCustomized(false); };
   return <RecurringDialog title={payment ? "定期支払いを編集" : "定期支払いを追加"} close={close} busy={saving}>
@@ -211,7 +209,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
       try {
         validateSplitWeights(config.splitWeights, selected.members, config.expenseClass, config.actorUserId);
         if (unavailableActor) throw new Error("有効な参加者を支払者として選んでください。");
-        await save({ ...config, action: payment ? "update" : "create", ...(payment ? { paymentId: payment.id, expectedRevision: payment.revision } : { startOn }) });
+        await save({ ...config, action: payment ? "update" : "create", ...(payment ? { paymentId: payment.id, expectedRevision: payment.revision } : {}) });
       } catch (failure) {
         setError(failure instanceof Error ? failure.message : "保存できませんでした。入力内容は保持しています。");
         if (failure instanceof RecurringRequestError && failure.code === "REVISION_CONFLICT") setConflict(true);
@@ -219,8 +217,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
     }}>
       {payment && preview && <p className={styles.hint}>{monthLabel(preview.effectiveMonth)}分から変更します。追加済みの明細は変わりません。{payment.state !== "ACTIVE" && "保存後も自動追加は停止中です。再開は一覧から行ってください。"}</p>}
       <fieldset disabled={saving} className={styles.fields}><div className="form-grid">
-        <label>毎月の日<select required value={config.dayOfMonth} onChange={event => patch({ dayOfMonth: Number(event.target.value) })}>{Array.from({ length: 31 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}日</option>)}</select></label>
-        <label>開始日<input type="date" required min={payment ? undefined : data.today} value={startOn} readOnly={!!payment} onChange={event => setStartOn(event.target.value)} />{payment && <small>変更できません</small>}</label>
+        <label className="full">毎月の日<select required value={config.dayOfMonth} onChange={event => patch({ dayOfMonth: Number(event.target.value) })}>{Array.from({ length: 31 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}日</option>)}</select></label>
         <label className="full">取引先<input required maxLength={240} value={config.merchant} onChange={event => {
           const merchant = event.target.value;
           patch({ merchant, ...(!customized ? recurringFormDefaults(selected, merchant, config.actorUserId) : {}) });
