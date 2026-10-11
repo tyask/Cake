@@ -17,10 +17,10 @@ BEGIN
   UPDATE workspaces SET updated_at = now() WHERE id = target_workspace;
   IF NOT FOUND THEN RETURN jsonb_build_object('status','skipped'); END IF;
   SELECT * INTO payment FROM recurring_payments WHERE id = target_payment AND workspace_id = target_workspace FOR UPDATE;
-  IF NOT FOUND OR payment.state <> 'ACTIVE' OR today < payment.start_on OR this_month < payment.active_from_month
-    OR payment.last_generated_month >= this_month THEN RETURN jsonb_build_object('status','skipped'); END IF;
-  config := CASE WHEN payment.pending_effective_month <= this_month THEN payment.pending_config
-    ELSE cake_recurring_current_config(payment) END;
+  IF NOT FOUND OR payment.state <> 'ACTIVE' OR payment.last_generated_month >= this_month THEN
+    RETURN jsonb_build_object('status','skipped');
+  END IF;
+  config := cake_recurring_current_config(payment);
   IF cake_recurring_scheduled_on(this_month,(config->>'dayOfMonth')::integer) <> today THEN
     RETURN jsonb_build_object('status','skipped');
   END IF;
@@ -29,7 +29,6 @@ BEGIN
   IF NOT cake_recurring_identity_matches(payment.authorized_by,test_mode) THEN
     RETURN jsonb_build_object('status','skipped');
   END IF;
-  payment := cake_recurring_apply_pending(payment.id,this_month);
   IF NOT EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = target_workspace AND user_id = payment.authorized_by)
     OR NOT cake_recurring_user_allowed(payment.authorized_by,test_mode) THEN failure_code := 'AUTHORIZER_UNAVAILABLE';
   ELSE
@@ -41,8 +40,7 @@ BEGIN
       updated_at = now() WHERE id = payment.id;
     RETURN jsonb_build_object('status','blocked','errorCode',failure_code);
   END IF;
-  -- Deliberately fail on external_id collision; do not silently acknowledge an
-  -- inconsistent row. Any failure rolls back pending promotion and the marker.
+  -- An external_id collision must roll back the insert and the success marker.
   INSERT INTO transactions(workspace_id,occurred_at,merchant,method,type,amount_yen,actor_user_id,
     expense_class,split_weights,external_id,source,created_by,updated_by,memo)
   VALUES(target_workspace,target_now,config->>'merchant',config->>'method','PAYMENT',

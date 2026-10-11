@@ -55,9 +55,9 @@ test("金額・日・文字数・割合の境界を検証する", () => {
   assert.equal(recurringPaymentConfigSchema.parse({ ...config, merchant: " 家賃 " }).merchant, "家賃");
 });
 
-test("現在設定だけから予定を返し、互換用の開始日・適用月はAPIへ公開しない", () => {
+test("開始日を持たない現在設定から予定を返し、旧適用月をAPIへ公開しない", () => {
   const raw = row({ day_of_month: 10, amount_yen: 110000,
-    start_on: "2027-12-28", active_from_month: "2027-12-01", pending_config: null, pending_effective_month: null });
+    active_from_month: "2027-12-01", pending_config: null, pending_effective_month: null });
   const saved = recurringPaymentRecord(raw, "2026-10-10");
   assert.equal(saved.currentConfig.amountYen, 110000);
   assert.equal(saved.nextScheduledOn, "2026-10-10");
@@ -65,7 +65,7 @@ test("現在設定だけから予定を返し、互換用の開始日・適用�
     assert.equal(removed in saved, false, removed);
   }
   assert.equal(recurringPaymentRecord(raw, "2026-10-11").nextScheduledOn, "2026-11-10");
-  assert.equal(raw.start_on, "2027-12-28");
+  assert.equal(raw.active_from_month, "2027-12-01");
 });
 
 test("割合は既存検証を再利用し、新参加者には0だけを補い保存値を変えない", () => {

@@ -206,7 +206,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
         if (failure instanceof RecurringRequestError && failure.code === "REVISION_CONFLICT") setConflict(true);
       } finally { savingRef.current = false; setSaving(false); }
     }}>
-      {payment && <p className={styles.hint}>保存した設定は直ちに反映されます。追加済みの明細は変わりません。{payment.state !== "ACTIVE" && "保存後も自動追加は停止中です。再開は一覧から行ってください。"}</p>}
+      {payment && payment.state !== "ACTIVE" && <p className={styles.hint}>保存後も自動追加は停止中です。再開は一覧から行ってください。</p>}
       <fieldset disabled={saving} className={styles.fields}><div className="form-grid">
         <label className="full">毎月の日<select required value={config.dayOfMonth} onChange={event => patch({ dayOfMonth: Number(event.target.value) })}>{Array.from({ length: 31 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}日</option>)}</select></label>
         <label className="full">取引先<input required maxLength={240} value={config.merchant} onChange={event => {

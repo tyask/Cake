@@ -509,7 +509,7 @@
           <p>編集は設定8項目を現在の列へ即時に保存する。停止はACTIVE→PAUSED、再開はPAUSED/BLOCKED→ACTIVEに即時反映し、当日未生成の予定から対象になる。削除はARCHIVED。last_generated_monthは設定変更・停止・再開・明細編集/削除で消さず、同じ月の再生成を防ぐ。生成済み明細も設定編集では変更しない。</p>
           <p>未認証401、非所属/利用不可403、対象なし404、入力不正400、revision・状態の競合409、DB障害503を固定のerror/codeで返す。所有者・参加者はどちらも操作でき、設定保存・再開の本人を実行承認者にする。支払者・正の割合を持つ参加者の有効状態と認証モードも検証し、不明な参加者を勝手に削除・再配分しない。</p>
           <p><code>GET /api/cron/recurring-payments</code>はCRON_SECRETのBearer認証、任意日時/対象指定の拒否を行ってから実行する。<code>POST /api/recurring-payments/run</code>は非ProductionのAUTH_MODE=testだけで利用可能。本人の所属するworkspaceIdだけを受け、日時上書きは不可。Production/Googleモードでは認証・DBの前に404。両実行APIは登録失敗や時間制限による未処理があれば503を返す。</p>
-          <p>日本時間の当日と予定日が一致するACTIVEだけを候補にする。現在のday_of_monthから当月の予定日を計算し、指定日がない月は月末に補正する。開始日・適用月・変更予約は参照しない。ロック後に同じ条件とlast_generated_monthを再確認し、通常のPAYMENT/RECURRING明細と成功月を同一Transactionで保存する。取引日時は登録処理開始時の<code>target_now</code>を使う。同じ実行の候補抽出と全明細生成に同じ日時を渡し、たとえば2026/10/27 09:23 JSTに実行すると保存・APIでは2026-10-27T00:23:00Z、編集欄・一覧・ホームでは日本時間09:23と表示する。008適用後の生成分から変更し、追加済み明細は更新しない。外部IDは<code>recurring_{設定UUID}_{YYYYMM}</code>。当日分が未生成なら当日を次回として表示するが、Cron終了済みかを保証しない。</p>
+          <p>日本時間の当日と予定日が一致するACTIVEだけを候補にする。現在のday_of_monthから当月の予定日を計算し、指定日がない月は月末に補正する。開始日・適用月・変更予約は参照しない。ロック後に同じ条件とlast_generated_monthを再確認し、通常のPAYMENT/RECURRING明細と成功月を同一Transactionで保存する。取引日時は登録処理開始時の<code>target_now</code>を使う。同じ実行の候補抽出と全明細生成に同じ日時を渡し、たとえば2026/10/27 09:23 JSTに実行すると保存・APIでは2026-10-27T00:23:00Z、編集欄・一覧・ホームでは日本時間09:23と表示する。生成済み明細は更新しない。外部IDは<code>recurring_{設定UUID}_{YYYYMM}</code>。当日分が未生成なら当日を次回として表示するが、Cron終了済みかを保証しない。</p>
           <p>承認者・支払者・正の割合の利用不可などはBLOCKEDと固定理由を保存する。通信/DB障害では明細・成功月をすべてrollbackし、その呼出しでは再試行しない。翌日は翌日の予定だけを処理する。時間制限は240秒で新しい処理の開始を止め、未処理を記録する。実行開始・設定ごとの結果・終了をrecurring.*ログへ記録し、取引内容や秘密値を含めない。</p>
           <p>Productionは通常利用者のみ、非Productionのtestモードは固定テストID/メールの組だけを処理する。候補抽出では利用停止した承認者も検知できるよう、identityとenabledを分ける。実行時に利用可否を確認してBLOCKEDへ移し、自動実行でテストユーザーを再有効化しない。Cron設定はUTC <code>0 0 * * *</code>、日本時間09:00ごろ。設定・検証・ログ確認の運用はREADMEを参照する。</p>
           <h3>明細編集・一括操作</h3>
@@ -626,7 +626,7 @@ amountYen         = abs(payer.balance)</div>
 
         <section id="database">
           <h2>10. データベース物理設計</h2>
-          <p class="lead">PostgreSQL。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜009の順次適用後を指す。</p>
+          <p class="lead">PostgreSQL。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜010の順次適用後を指す。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>テーブル</th><th>主キー</th><th>主要列・制約・Index</th><th>参照・削除</th></tr></thead>
             <tbody>
@@ -637,7 +637,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>invitations</code></td><td>uuid id</td><td>token_hash UNIQUE、(workspace,email) UNIQUE、status Enum、期限・inviter。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>import_batches</code></td><td>uuid id</td><td>file_name、total/imported/skipped_rows、imported_by、created_at。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>transactions</code></td><td>uuid id</td><td>(workspace_id,external_id) UNIQUE、正のinteger amount、type/class/source Enum、actor・created/updated_by、split_weights NOT NULL/object、memo NOT NULL DEFAULT 空文字・最大2000文字。workspace/date、workspace/class/settled_at Index。</td><td>workspace削除時CASCADE、batch削除時SET NULL。清算関連からtransactionを参照。</td></tr>
-              <tr><td><code>recurring_payments</code></td><td>uuid id</td><td>workspace/state Index、毎月の日1〜31、現在の支払い設定8項目、成功月last_generated_month、実行承認者、正のrevision、固定blocked_reason、作成/更新の監査列。旧start_on/active_from_month/pending_config/pending_effective_monthは互換用に残すが、現行DTO・設定管理・予定判定では使わない。</td><td>workspace削除時CASCADE。支払者・承認者・作成/更新者はapp_usersを参照。設定削除はARCHIVED。</td></tr>
+              <tr><td><code>recurring_payments</code></td><td>uuid id</td><td>workspace/state Index、毎月の日1〜31、現在の支払い設定8項目、成功月last_generated_month、実行承認者、正のrevision、固定blocked_reason、作成/更新の監査列。開始日カラムstart_onは削除済み。旧active_from_month/pending_config/pending_effective_monthは現行DTO・設定管理・予定判定では使わない。</td><td>workspace削除時CASCADE。支払者・承認者・作成/更新者はapp_usersを参照。設定削除はARCHIVED。workspace_idの変更をTriggerで禁止する。</td></tr>
               <tr><td><code>default_rules</code></td><td>uuid id</td><td>merchant 1〜120、class Enum、sort_order &gt;= 0、nullable/object split_weights、enabled。sort_order/created_at Index。旧priority列とIndexは互換用に保持。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>settlements</code></td><td>uuid id</td><td>amount &gt;= 0、weight_snapshot/calculation_snapshot JSONB、payer/payee nullable、completed_by/completed_at。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>settlement_transactions</code></td><td>(settlement_id, transaction_id)</td><td>transaction_id UNIQUEで一明細一清算。</td><td>settlement削除時CASCADE。</td></tr>
@@ -670,9 +670,10 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>004_bulk_transactions.sql</td><td>一括削除・現在ルール適用の全件検証・ロック・確定値応答関数。</td></tr>
               <tr><td>005_transaction_memo.sql</td><td>空文字を既定とする最大2000文字のmemo列。</td></tr>
               <tr><td>006_paypay_external_ids.sql</td><td>旧PayPay ID移行、登録時正規化、内容衝突検証関数。</td></tr>
-              <tr><td>007_recurring_payments.sql</td><td>定期設定1表、日付/認可/入力検証/設定変更/明細生成関数。transactions.sourceにRECURRINGを追加。既存テーブル・列・明細は削除せず、旧版との互換性を維持する。</td></tr>
-              <tr><td>008_recurring_payment_execution_time.sql</td><td>既存の生成関数と同じ引数で置き換え、今後の明細の取引日時に登録処理開始時のtarget_nowを使用する。追加済み明細は更新しない。</td></tr>
-              <tr><td>009_recurring_payment_immediate_changes.sql</td><td>旧変更予約を現在設定へ反映してclearし、revisionを更新する。開始日・適用月を互換用の固定値0001-01-01へ統一して既定値を設け、編集・再開を即時反映する関数へ置き換える。現行処理から旧列・旧日付引数の参照を廃止し、旧版との互換性のため列と関数署名だけを保持する。追加済み明細と成功月は変更しない。</td></tr>
+              <tr><td>007_recurring_payments.sql</td><td>開始日カラムを持たない定期設定1表、認可/入力検証/即時変更・再開/実行日時での明細生成関数。transactions.sourceにRECURRINGを追加。未公開機能についてユーザー指示で適用済みファイルを現行仕様へ修正し、新規DBで開始日を作成しない。</td></tr>
+              <tr><td>008_recurring_payment_execution_time.sql</td><td>開始日を参照しない生成関数へ現行仕様を反映し、007と同じ引数・生成処理を維持する。取引日時は登録処理開始時のtarget_nowを使用し、追加済み明細は更新しない。</td></tr>
+              <tr><td>009_recurring_payment_immediate_changes.sql</td><td>旧変更予約を現在設定へ反映してclearし、revisionを更新する。開始日への参照を撤去し、編集・再開・生成関数を007・008と同じ現行仕様へ揃える。旧適用月は既定値0001-01-01、既存値は保持する。追加済み明細と成功月は変更しない。</td></tr>
+              <tr><td>010_recurring_payment_remove_start_on.sql</td><td>既存Previewの開始日カラムstart_onがあれば削除する。旧開始日Triggerをworkspace_idの変更禁止へ置き換え、開始日に依存していた複合CHECKを残る月列の月初CHECKへ置き換える。新規DBでは列がなく、既存の月初制約を重複して追加しない。公開中の本番アプリは削除列を参照しない。既存設定と追加済み明細は保持する。</td></tr>
             </tbody>
           </table></div>
           <p><code>scripts/setup-db.mjs</code>は環境に応じたDB接続（PreviewはCAKE_TEST_DATABASE_URL、それ以外はDATABASE_URL）を確認し、番号付きSQLをファイル名順に適用する。schema_migrationsを作成し、各SQLと適用履歴を同じDO文/Transaction内で実行。共通advisory lockで同時適用を防ぎ、適用済みファイルを省略する。再実行しても利用者/権限を初期状態へ戻さない。</p>

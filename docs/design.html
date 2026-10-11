@@ -644,7 +644,7 @@
               </div>
               <div style="flex: 1 1 16rem; overflow: hidden; border: 1px solid #eadfbd; border-radius: 1rem; background: #fffef8">
                 <div style="padding: 1rem; border-bottom: 1px solid #eadfbd"><strong>定期支払いを編集</strong><span style="float: right">×</span></div>
-                <div style="padding: 1rem; font-size: .72rem"><p style="padding: .6rem; background: #fff5c7">保存した設定は直ちに反映します。追加済みの明細は変わりません。</p><p>毎月の日：<b>10日</b><br />取引先：家賃<br />取引方法：銀行振込<br />金額：<b>¥110,000</b><br />支払者：Aさん / 費用区分：共通費<br />支払い割合：50% / 50%（各¥55,000）<br />メモ：ふたりの家賃</p><p style="padding: .6rem; background: #fbf5df">変更後の予定：2026/11/10</p><div style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem"><span style="padding: .5rem; border: 1px solid #dccd9c; border-radius: .6rem">キャンセル</span><span style="padding: .5rem; border-radius: .6rem; background: #facc15">変更を保存</span></div></div>
+                <div style="padding: 1rem; font-size: .72rem"><p>毎月の日：<b>10日</b><br />取引先：家賃<br />取引方法：銀行振込<br />金額：<b>¥110,000</b><br />支払者：Aさん / 費用区分：共通費<br />支払い割合：50% / 50%（各¥55,000）<br />メモ：ふたりの家賃</p><p style="padding: .6rem; background: #fbf5df">変更後の予定：2026/11/10</p><div style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem"><span style="padding: .5rem; border: 1px solid #dccd9c; border-radius: .6rem">キャンセル</span><span style="padding: .5rem; border-radius: .6rem; background: #facc15">変更を保存</span></div></div>
               </div>
             </div>
           </figure>
@@ -752,7 +752,7 @@
               <tr><td><code>workspace_members</code></td><td>workspace_id, user_id, role, weight, joined_at</td><td>複合主キー。weightは共有費のデフォルト重み。個人用一人・共有用最大二人をDBでも強制。</td></tr>
               <tr><td><code>invitations</code></td><td>id, workspace_id, email, token_hash, status, expires_at, invited_by</td><td>トークンのハッシュを保存。現在はPENDINGからACCEPTEDへ更新し、期限を日時で判定。DBにはDECLINED／EXPIREDも許容するが更新操作はない。</td></tr>
               <tr><td><code>transactions</code></td><td>id, workspace_id, occurred_at, merchant, method, type, amount_yen, actor_user_id, expense_class, split_weights, memo, settled_at, external_id, source</td><td>PAYMENT／RECEIPTとPERSONAL／SHAREDを保持。明細固有の割合・メモを保存し、workspace_idとexternal_idの組で重複防止。</td></tr>
-              <tr><td><code>recurring_payments</code></td><td>id, workspace_id, state, 支払い設定8項目, last_generated_month, authorized_by, revision, blocked_reason, 監査列。旧start_on/active_from_month/pending_config/pending_effective_monthは互換用に残し、現行処理で参照しない。</td><td>定期設定・最後の成功月を保持。workspace削除時CASCADE、設定削除はARCHIVED。旧開始日・適用月は固定値、旧変更予約は現在の設定へ移行して廃止。</td></tr>
+              <tr><td><code>recurring_payments</code></td><td>id, workspace_id, state, 支払い設定8項目, last_generated_month, authorized_by, revision, blocked_reason, 監査列。開始日カラムstart_onは削除済み。旧active_from_month/pending_config/pending_effective_monthは現行処理で参照しない。</td><td>定期設定・最後の成功月を保持。workspace削除時CASCADE、設定削除はARCHIVED。旧適用月は未使用、旧変更予約は現在の設定へ移行して廃止。</td></tr>
               <tr><td><code>default_rules</code></td><td>id, workspace_id, merchant_contains, expense_class, sort_order, split_weights, enabled, priority</td><td>取引先の部分一致で費用区分・割合の初期値を決定。sort_orderの昇順で評価。priorityは旧バージョン互換用に同期。</td></tr>
               <tr><td><code>import_batches</code></td><td>id, workspace_id, imported_by, file_name, total_rows, imported_rows, skipped_rows, created_at</td><td>取込単位の結果を記録。CSV本文は保存しない。</td></tr>
               <tr><td><code>settlements</code></td><td>id, workspace_id, payer_user_id, payee_user_id, amount_yen, weight_snapshot, calculation_snapshot, completed_by, completed_at</td><td>清算時点の計算根拠をJSONスナップショットとして保持。</td></tr>
@@ -770,7 +770,7 @@
             <li>有効な通常利用者は管理者を含め二人までとする。固定テストユーザーA/Bは人数上限から除外する。</li>
             <li>清算済み明細と清算履歴の関連付けをDBトランザクションで一括更新する。</li>
             <li>取引IDは同一ワークスペース内で一意とする。手動追加時はアプリが自動発行する。</li>
-            <li>適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。現行スキーマは001〜009の適用結果。007は定期設定1表・関数とsource制約の拡張を追加し、008は生成日時を登録処理開始時の日時へ変更する。009は編集・再開の即時反映と開始日管理の廃止を行い、旧変更予約を現在設定へ移す。旧版との互換性のため旧列・関数の引数は残し、列削除は新しい版への切替後に段階的に行う。追加済み明細は変更しない。</li>
+            <li>原則として適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。今回は未公開の定期支払いについてユーザーの指示により007〜009を現行仕様へ修正した。現行スキーマは001〜010の適用結果。007は開始日を持たない定期設定1表・即時変更/再開・実行日時による生成関数とsource制約の拡張を追加する。008は同じ生成仕様を維持し、009は旧変更予約を現在設定へ移す。010は適用済みPreview DBに残る開始日カラムを削除し、workspace移動禁止と月初制約を維持する。公開中の本番アプリは削除列を参照しない。追加済み明細は変更しない。</li>
           </ul>
         </section>
 

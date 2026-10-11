@@ -95,8 +95,11 @@ async function main() {
   try {
     stage = "マイグレーションと有効ユーザー枠の確認";
     const schema = await sql`SELECT EXISTS (SELECT 1 FROM schema_migrations
-      WHERE name = '009_recurring_payment_immediate_changes.sql') AS ready`;
-    assert.equal(schema[0].ready, true, "009 migration must be applied first");
+      WHERE name = '010_recurring_payment_remove_start_on.sql') AS ready`;
+    assert.equal(schema[0].ready, true, "010 migration must be applied first");
+    const columns = await sql`SELECT column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'recurring_payments' AND column_name = 'start_on'`;
+    assert.equal(columns.length, 0, "start_on must be removed from the table");
     const capacity = await sql`SELECT count(*)::integer AS count FROM app_users WHERE is_enabled
       AND NOT ((id = 'test-user-a' AND email = 'test-a@cake.local')
         OR (id = 'test-user-b' AND email = 'test-b@cake.local'))`;
@@ -113,12 +116,22 @@ async function main() {
     let payment = (await mutate(workspaceId, "create", null, baseConfig())).payment;
     assert.equal(payment.state, "ACTIVE");
     assert.equal(Number(payment.revision), 1);
-    assert.equal(String(payment.start_on), "0001-01-01");
+    assert.equal(Object.hasOwn(payment, "start_on"), false);
     assert.equal(String(payment.active_from_month), "0001-01-01");
     assert.equal(payment.pending_config, null);
     assert.equal(payment.pending_effective_month, null);
     await rejectsCode(() => sql`UPDATE recurring_payments SET workspace_id = ${otherWorkspace}::uuid
       WHERE id = ${payment.id}::uuid`, "INPUT_INVALID");
+    stage = "開始日削除後の月初制約保持";
+    await assert.rejects(sql`UPDATE recurring_payments SET active_from_month = DATE '2026-10-02'
+      WHERE id = ${payment.id}::uuid`, { code: "23514", constraint: "recurring_payments_active_from_month_month_start_check" });
+    await assert.rejects(sql`UPDATE recurring_payments SET pending_config = ${JSON.stringify(baseConfig())}::jsonb,
+      pending_effective_month = DATE '2026-11-02' WHERE id = ${payment.id}::uuid`,
+    { code: "23514", constraint: "recurring_payments_pending_effective_month_month_start_check" });
+    await assert.rejects(sql`UPDATE recurring_payments SET last_generated_month = DATE '2026-10-02'
+      WHERE id = ${payment.id}::uuid`, { code: "23514", constraint: "recurring_payments_last_generated_month_month_start_check" });
+    assert.equal((await saved(payment)).last_generated_month, null);
+    stage = "認可・revision・状態遷移";
     await rejectsCode(() => mutate(workspaceId, "update", payment, baseConfig(),
       "2026-10-11", "2026-10-10", userA, 999), "CONFLICT");
     await rejectsCode(() => mutate(otherWorkspace, "pause", payment), "NOT_FOUND");
@@ -230,7 +243,7 @@ async function main() {
     assert.equal(await count(workspaceId, missed), 0);
     const legacyStart = (await mutate(workspaceId, "create", null, baseConfig({ dayOfMonth: 31 }),
       "2026-10-10", "2026-12-28")).payment;
-    assert.equal(String(legacyStart.start_on), "0001-01-01");
+    assert.equal(Object.hasOwn(legacyStart, "start_on"), false);
     assert.equal(String(legacyStart.active_from_month), "0001-01-01");
     assert.equal((await generate(workspaceId, legacyStart, "2026-11-30")).status, "created");
     assert.equal((await generate(workspaceId, legacyStart, "2026-12-31")).status, "created");

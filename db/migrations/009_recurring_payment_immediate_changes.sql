@@ -1,24 +1,11 @@
--- Recurring settings apply as soon as they are saved. Retain the legacy date
--- columns and function arguments until older deployed applications are gone,
--- but store only a fixed compatibility value and never use it for scheduling.
-ALTER TABLE recurring_payments ALTER COLUMN start_on SET DEFAULT DATE '0001-01-01';
+-- Recurring settings apply as soon as they are saved. Retain the legacy active
+-- month and function argument as unused compatibility values.
 ALTER TABLE recurring_payments ALTER COLUMN active_from_month SET DEFAULT DATE '0001-01-01';
-
-CREATE OR REPLACE FUNCTION cake_recurring_start_immutable()
-RETURNS trigger AS $cake_recurring_start$
-BEGIN
-  IF NEW.workspace_id IS DISTINCT FROM OLD.workspace_id THEN
-    RAISE EXCEPTION USING ERRCODE = 'P0400', MESSAGE = 'INPUT_INVALID';
-  END IF;
-  RETURN NEW;
-END;
-$cake_recurring_start$ LANGUAGE plpgsql;
 
 -- Promote the latest saved change now, including paused settings. Increment
 -- its revision so an editor holding the old current configuration conflicts.
 -- Existing transaction snapshots and success markers remain unchanged.
 UPDATE recurring_payments SET
-  start_on = DATE '0001-01-01', active_from_month = DATE '0001-01-01',
   day_of_month = CASE WHEN pending_config IS NOT NULL THEN (pending_config->>'dayOfMonth')::integer ELSE day_of_month END,
   merchant = CASE WHEN pending_config IS NOT NULL THEN pending_config->>'merchant' ELSE merchant END,
   method = CASE WHEN pending_config IS NOT NULL THEN pending_config->>'method' ELSE method END,

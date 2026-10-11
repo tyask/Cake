@@ -1,5 +1,5 @@
--- The single settings table stores one future change and a durable success
--- marker. Existing transactions and older app versions remain compatible.
+-- A single settings table stores the current monthly configuration and durable
+-- success marker. Reserved legacy fields do not control scheduling.
 ALTER TABLE transactions DROP CONSTRAINT transactions_source_check;
 ALTER TABLE transactions ADD CONSTRAINT transactions_source_check
   CHECK (source IN ('MANUAL', 'PAYPAY', 'RECURRING'));
@@ -42,8 +42,7 @@ CREATE TABLE recurring_payments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   state text NOT NULL DEFAULT 'ACTIVE' CHECK (state IN ('ACTIVE','PAUSED','BLOCKED','ARCHIVED')),
-  start_on date NOT NULL,
-  active_from_month date NOT NULL,
+  active_from_month date NOT NULL DEFAULT DATE '0001-01-01',
   day_of_month integer NOT NULL CHECK (day_of_month BETWEEN 1 AND 31),
   merchant text NOT NULL CHECK (char_length(btrim(merchant)) BETWEEN 1 AND 240),
   method text NOT NULL CHECK (char_length(btrim(method)) BETWEEN 1 AND 120),
@@ -62,30 +61,31 @@ CREATE TABLE recurring_payments (
   updated_by text NOT NULL REFERENCES app_users(id),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CHECK (active_from_month = date_trunc('month',active_from_month)::date AND active_from_month >= date_trunc('month',start_on)::date),
+  CONSTRAINT recurring_payments_active_from_month_month_start_check
+    CHECK (active_from_month = date_trunc('month',active_from_month)::date),
   CHECK ((pending_config IS NULL) = (pending_effective_month IS NULL)),
   CHECK (pending_config IS NULL OR cake_recurring_config_valid(pending_config)),
-  CHECK (pending_effective_month IS NULL OR (pending_effective_month = date_trunc('month',pending_effective_month)::date
-    AND pending_effective_month >= date_trunc('month',start_on)::date)),
-  CHECK (last_generated_month IS NULL OR (last_generated_month = date_trunc('month',last_generated_month)::date
-    AND last_generated_month >= date_trunc('month',start_on)::date)),
+  CONSTRAINT recurring_payments_pending_effective_month_month_start_check
+    CHECK (pending_effective_month IS NULL OR pending_effective_month = date_trunc('month',pending_effective_month)::date),
+  CONSTRAINT recurring_payments_last_generated_month_month_start_check
+    CHECK (last_generated_month IS NULL OR last_generated_month = date_trunc('month',last_generated_month)::date),
   CHECK (cake_recurring_config_valid(jsonb_build_object('dayOfMonth',day_of_month,'merchant',merchant,'method',method,
     'amountYen',amount_yen,'actorUserId',actor_user_id,'expenseClass',expense_class,'splitWeights',split_weights,'memo',memo)))
 );
 CREATE INDEX recurring_payments_workspace_state_idx ON recurring_payments (workspace_id,state);
 CREATE INDEX recurring_payments_active_idx ON recurring_payments (id) WHERE state = 'ACTIVE';
 
-CREATE OR REPLACE FUNCTION cake_recurring_start_immutable()
-RETURNS trigger AS $cake_recurring_start$
+CREATE OR REPLACE FUNCTION cake_recurring_workspace_immutable()
+RETURNS trigger AS $cake_recurring_workspace$
 BEGIN
-  IF NEW.start_on IS DISTINCT FROM OLD.start_on OR NEW.workspace_id IS DISTINCT FROM OLD.workspace_id THEN
+  IF NEW.workspace_id IS DISTINCT FROM OLD.workspace_id THEN
     RAISE EXCEPTION USING ERRCODE = 'P0400', MESSAGE = 'INPUT_INVALID';
   END IF;
   RETURN NEW;
 END;
-$cake_recurring_start$ LANGUAGE plpgsql;
-CREATE TRIGGER recurring_payments_immutable_start BEFORE UPDATE OF start_on,workspace_id ON recurring_payments
-  FOR EACH ROW EXECUTE FUNCTION cake_recurring_start_immutable();
+$cake_recurring_workspace$ LANGUAGE plpgsql;
+CREATE TRIGGER recurring_payments_immutable_workspace BEFORE UPDATE OF workspace_id ON recurring_payments
+  FOR EACH ROW EXECUTE FUNCTION cake_recurring_workspace_immutable();
 
 CREATE OR REPLACE FUNCTION cake_recurring_identity_matches(target_user text, test_mode boolean)
 RETURNS boolean AS $cake_recurring_identity$
@@ -181,10 +181,6 @@ CREATE OR REPLACE FUNCTION cake_mutate_recurring_payment(
 RETURNS jsonb AS $cake_mutate_recurring$
 DECLARE
   payment recurring_payments;
-  today date := (target_now AT TIME ZONE 'Asia/Tokyo')::date;
-  this_month date := date_trunc('month',today)::date;
-  effective_month date;
-  check_config jsonb;
   checked jsonb;
 BEGIN
   IF target_now IS NULL OR operation IS NULL OR operation NOT IN ('create','update','pause','resume','archive') THEN
@@ -195,21 +191,20 @@ BEGIN
   IF operation <> 'create' THEN
     SELECT * INTO payment FROM recurring_payments WHERE id = target_payment AND workspace_id = target_workspace FOR UPDATE;
   END IF;
-  PERFORM cake_recurring_lock_users(target_workspace, ARRAY[actor_id,payment.authorized_by,payment.actor_user_id,supplied_config->>'actorUserId',payment.pending_config->>'actorUserId']);
+  PERFORM cake_recurring_lock_users(target_workspace, ARRAY[actor_id,payment.authorized_by,payment.actor_user_id,supplied_config->>'actorUserId']);
   IF NOT EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = target_workspace AND user_id = actor_id)
     OR NOT cake_recurring_user_allowed(actor_id,test_mode) THEN
     RAISE EXCEPTION USING ERRCODE = 'P0403', MESSAGE = 'FORBIDDEN';
   END IF;
   IF operation = 'create' THEN
-    IF supplied_start IS NULL OR supplied_start < today OR supplied_start > DATE '9999-12-31'
-      OR NOT cake_recurring_config_valid(supplied_config) THEN
+    IF NOT cake_recurring_config_valid(supplied_config) THEN
       RAISE EXCEPTION USING ERRCODE = 'P0400', MESSAGE = 'INPUT_INVALID';
     END IF;
     checked := cake_recurring_check_members(target_workspace,supplied_config,test_mode,false);
     IF checked ? 'errorCode' THEN RAISE EXCEPTION USING ERRCODE = 'P0400', MESSAGE = checked->>'errorCode'; END IF;
-    INSERT INTO recurring_payments(workspace_id,start_on,active_from_month,day_of_month,merchant,method,amount_yen,
+    INSERT INTO recurring_payments(workspace_id,day_of_month,merchant,method,amount_yen,
       actor_user_id,expense_class,split_weights,memo,authorized_by,created_by,updated_by)
-    VALUES(target_workspace,supplied_start,date_trunc('month',supplied_start)::date,(supplied_config->>'dayOfMonth')::integer,
+    VALUES(target_workspace,(supplied_config->>'dayOfMonth')::integer,
       btrim(supplied_config->>'merchant'),btrim(supplied_config->>'method'),(supplied_config->>'amountYen')::integer,
       supplied_config->>'actorUserId',supplied_config->>'expenseClass',supplied_config->'splitWeights',supplied_config->>'memo',
       actor_id,actor_id,actor_id) RETURNING * INTO payment;
@@ -221,28 +216,20 @@ BEGIN
     OR (operation = 'resume' AND payment.state NOT IN ('PAUSED','BLOCKED')) THEN
     RAISE EXCEPTION USING ERRCODE = 'P0409', MESSAGE = 'CONFLICT';
   END IF;
-  payment := cake_recurring_apply_pending(payment.id,this_month);
   IF operation = 'update' THEN
     checked := cake_recurring_check_members(target_workspace,supplied_config,test_mode,false);
     IF checked ? 'errorCode' THEN RAISE EXCEPTION USING ERRCODE = 'P0400', MESSAGE = checked->>'errorCode'; END IF;
-    effective_month := greatest((this_month + interval '1 month')::date,date_trunc('month',payment.start_on)::date);
-    UPDATE recurring_payments SET pending_config = supplied_config, pending_effective_month = effective_month,
+    UPDATE recurring_payments SET day_of_month = (supplied_config->>'dayOfMonth')::integer,
+      merchant = btrim(supplied_config->>'merchant'), method = btrim(supplied_config->>'method'),
+      amount_yen = (supplied_config->>'amountYen')::integer, actor_user_id = supplied_config->>'actorUserId',
+      expense_class = supplied_config->>'expenseClass', split_weights = supplied_config->'splitWeights', memo = supplied_config->>'memo',
+      pending_config = NULL, pending_effective_month = NULL,
       authorized_by = actor_id, revision = revision + 1, updated_by = actor_id, updated_at = now()
       WHERE id = payment.id RETURNING * INTO payment;
   ELSIF operation = 'resume' THEN
-    effective_month := greatest(payment.active_from_month,(this_month + interval '1 month')::date,date_trunc('month',payment.start_on)::date);
-    -- The first candidate can be in the next month when its day precedes start.
-    check_config := CASE WHEN payment.pending_effective_month <= effective_month THEN payment.pending_config
-      ELSE cake_recurring_current_config(payment) END;
-    IF cake_recurring_scheduled_on(effective_month,(check_config->>'dayOfMonth')::integer) < payment.start_on THEN
-      effective_month := (effective_month + interval '1 month')::date;
-      check_config := CASE WHEN payment.pending_effective_month <= effective_month THEN payment.pending_config
-        ELSE cake_recurring_current_config(payment) END;
-    END IF;
-    checked := cake_recurring_check_members(target_workspace,check_config,test_mode,true);
+    checked := cake_recurring_check_members(target_workspace,cake_recurring_current_config(payment),test_mode,true);
     IF checked ? 'errorCode' THEN RAISE EXCEPTION USING ERRCODE = 'P0400', MESSAGE = checked->>'errorCode'; END IF;
-    UPDATE recurring_payments SET state = 'ACTIVE', active_from_month = greatest(payment.active_from_month,
-      (this_month + interval '1 month')::date,date_trunc('month',payment.start_on)::date), authorized_by = actor_id,
+    UPDATE recurring_payments SET state = 'ACTIVE', authorized_by = actor_id,
       blocked_reason = NULL, revision = revision + 1, updated_by = actor_id, updated_at = now()
       WHERE id = payment.id RETURNING * INTO payment;
   ELSE
@@ -250,8 +237,10 @@ BEGIN
       blocked_reason = NULL, revision = revision + 1, updated_by = actor_id, updated_at = now()
       WHERE id = payment.id RETURNING * INTO payment;
   END IF;
+  -- Preserve the old SQL response key for an application still being replaced.
+  -- The current API does not expose this compatibility-only value.
   RETURN jsonb_build_object('payment',to_jsonb(payment)) || CASE WHEN operation = 'update'
-    THEN jsonb_build_object('effectiveMonth',effective_month) ELSE '{}'::jsonb END;
+    THEN jsonb_build_object('effectiveMonth',date_trunc('month',target_now AT TIME ZONE 'Asia/Tokyo')::date) ELSE '{}'::jsonb END;
 END;
 $cake_mutate_recurring$ LANGUAGE plpgsql;
 
@@ -272,10 +261,10 @@ BEGIN
   UPDATE workspaces SET updated_at = now() WHERE id = target_workspace;
   IF NOT FOUND THEN RETURN jsonb_build_object('status','skipped'); END IF;
   SELECT * INTO payment FROM recurring_payments WHERE id = target_payment AND workspace_id = target_workspace FOR UPDATE;
-  IF NOT FOUND OR payment.state <> 'ACTIVE' OR today < payment.start_on OR this_month < payment.active_from_month
-    OR payment.last_generated_month >= this_month THEN RETURN jsonb_build_object('status','skipped'); END IF;
-  config := CASE WHEN payment.pending_effective_month <= this_month THEN payment.pending_config
-    ELSE cake_recurring_current_config(payment) END;
+  IF NOT FOUND OR payment.state <> 'ACTIVE' OR payment.last_generated_month >= this_month THEN
+    RETURN jsonb_build_object('status','skipped');
+  END IF;
+  config := cake_recurring_current_config(payment);
   IF cake_recurring_scheduled_on(this_month,(config->>'dayOfMonth')::integer) <> today THEN
     RETURN jsonb_build_object('status','skipped');
   END IF;
@@ -284,7 +273,6 @@ BEGIN
   IF NOT cake_recurring_identity_matches(payment.authorized_by,test_mode) THEN
     RETURN jsonb_build_object('status','skipped');
   END IF;
-  payment := cake_recurring_apply_pending(payment.id,this_month);
   IF NOT EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = target_workspace AND user_id = payment.authorized_by)
     OR NOT cake_recurring_user_allowed(payment.authorized_by,test_mode) THEN failure_code := 'AUTHORIZER_UNAVAILABLE';
   ELSE
@@ -296,11 +284,10 @@ BEGIN
       updated_at = now() WHERE id = payment.id;
     RETURN jsonb_build_object('status','blocked','errorCode',failure_code);
   END IF;
-  -- Deliberately fail on external_id collision; do not silently acknowledge an
-  -- inconsistent row. Any failure rolls back pending promotion and the marker.
+  -- An external_id collision must roll back the insert and the success marker.
   INSERT INTO transactions(workspace_id,occurred_at,merchant,method,type,amount_yen,actor_user_id,
     expense_class,split_weights,external_id,source,created_by,updated_by,memo)
-  VALUES(target_workspace,today::timestamp AT TIME ZONE 'Asia/Tokyo',config->>'merchant',config->>'method','PAYMENT',
+  VALUES(target_workspace,target_now,config->>'merchant',config->>'method','PAYMENT',
     (config->>'amountYen')::integer,config->>'actorUserId',config->>'expenseClass',checked->'splitWeights',
     'recurring_' || payment.id::text || '_' || to_char(this_month,'YYYYMM'),'RECURRING',payment.authorized_by,payment.authorized_by,config->>'memo')
   RETURNING id INTO generated_id;
