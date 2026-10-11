@@ -33,7 +33,7 @@ export function ImportPreviewTable({ rows, members, actorId, saving, onSelect, o
   ] as const;
   return <TransactionTable columns={columns} label="取り込み明細" header={<tr>
     {columns.map(column => <th key={column.id} className={column.id === "selection" ? styles.selectionCell : undefined}>
-      {column.id === "selection" ? <SelectionCheckbox label="取込対象をすべて選択" checked={allSelected} partial={count > 0 && !allSelected} disabled={saving || eligible.length === 0} onChange={() => onSelectAll(!allSelected)} /> : column.label}
+      {column.id === "selection" ? <SelectionCheckbox label="取込対象をすべて選択" mobileLabel={allSelected ? "全解除" : "全選択"} checked={allSelected} partial={count > 0 && !allSelected} disabled={saving || eligible.length === 0} onChange={() => onSelectAll(!allSelected)} /> : column.label}
     </th>)}
   </tr>}>
     {rows.map(row => <ImportPreviewRow key={row.key} row={row} members={members} actorId={actorId} saving={saving}
