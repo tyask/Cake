@@ -32,7 +32,6 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [confirmation, setConfirmation] = useState<{ action: StateAction; payment: RecurringPayment } | null>(null);
   const mounted = useRef(false);
@@ -82,7 +81,6 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
   async function save(payload: Record<string, unknown>) {
     requestId.current += 1;
     setBusy(true);
-    setNotice(null);
     try {
       const response = await fetch("/api/recurring-payments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, workspaceId }) });
       const result = await readResponse<RecurringPaymentMutationResult>(response);
@@ -92,10 +90,6 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
           : [...current.payments.filter(payment => payment.id !== result.payment.id), result.payment] } : current);
         setForm(null);
         setConfirmation(null);
-        setNotice(payload.action === "update" ? null
-          : payload.action === "pause" ? "自動追加を停止しました。"
-          : payload.action === "resume" ? "自動追加を再開しました。"
-          : payload.action === "archive" ? "定期支払いを削除しました。追加済みの明細は残ります。" : "定期支払いを追加しました。");
         // A read failure after a successful creation must not invite a duplicate retry.
         setLoading(true);
         void load();
@@ -109,11 +103,11 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
     const result = await load();
     if (!result) return;
     const latest = result.payments.find(item => item.id === payment.id);
-    if (!latest) { setForm(null); setConfirmation(null); setNotice("この定期支払いは削除されています。"); return; }
+    if (!latest) { setForm(null); setConfirmation(null); return; }
     if (form) setForm({ payment: latest });
     if (confirmation) {
       const changedState = confirmation.action === "pause" && latest.state !== "ACTIVE" || confirmation.action === "resume" && latest.state === "ACTIVE";
-      if (changedState) { setConfirmation(null); setNotice("状態が変更されています。最新の一覧を確認してください。"); }
+      if (changedState) setConfirmation(null);
       else setConfirmation({ ...confirmation, payment: latest });
     }
   }
@@ -121,11 +115,10 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
   return <section className={`panel ${tableStyles.panel} ${styles.panel}`} aria-labelledby="recurring-payments-title">
     <div className={`panel-head ${styles.heading}`}><div><span>RECURRING PAYMENTS</span><h2 id="recurring-payments-title">定期支払い</h2></div>
       <div className={styles.headingActions}><RefreshButton refreshing={loading} disabled={busy || loading || form !== null || confirmation !== null} onClick={() => { setLoading(true); void load(); }} />
-        <button type="button" className="primary" disabled={busy || loading || !data || data.eligibleActorUserIds.length === 0} onClick={() => { setNotice(null); setForm({}); }}>＋ 定期支払いを追加</button></div>
+        <button type="button" className="primary" disabled={busy || loading || !data || data.eligibleActorUserIds.length === 0} onClick={() => setForm({})}>＋ 定期支払いを追加</button></div>
     </div>
     <p className={tableStyles.note}>予定日の日本時間9時ごろに明細を追加します。未登録の過去分は自動追加しません。</p>
     {error && <p className={tableStyles.bulkError} role="alert">{error}<button type="button" className="text-button" disabled={busy || loading} onClick={() => { setLoading(true); void load(); }}>再読込</button></p>}
-    {notice && <p className={tableStyles.bulkNotice} role="status">{notice}</p>}
     {!data && loading && <p className={tableStyles.empty}>定期支払いを読み込み中…</p>}
     {data && data.payments.length === 0 && <div className="empty"><span aria-hidden="true">○</span><p>定期支払いはまだありません</p><small className={styles.muted}>家賃や月額サービスを追加できます。</small></div>}
     {data && data.eligibleActorUserIds.length === 0 && <p className={tableStyles.bulkError}>現在、支払者として選べる参加者がいません。</p>}
@@ -133,7 +126,7 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
       <colgroup>{["予定", "取引先", "方法", "金額", "支払者", "区分", "割合", "メモ", "状態", "操作"].map((label, index) => <col key={label} className={styles[`column${index}`]} />)}</colgroup>
       <thead><tr>{["毎月の日 / 次回", "取引先", "方法", "金額（円）", "支払者", "費用区分", `支払い割合（${selected.members.map(member => member.name).join(", ")}）`, "メモ", "状態", "操作"].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
       <tbody>{data.payments.map(payment => <RecurringPaymentRow key={payment.id} payment={payment} members={selected.members} busy={busy || loading}
-        onEdit={() => { setNotice(null); setForm({ payment }); }} onAction={action => { setNotice(null); setConfirmation({ action, payment }); }} />)}</tbody>
+        onEdit={() => setForm({ payment })} onAction={action => setConfirmation({ action, payment })} />)}</tbody>
     </table></div>}
     {form && data && <RecurringPaymentForm key={form.payment ? `${form.payment.id}-${form.payment.revision}` : "new"} selected={selected} currentUserId={currentUserId} data={data} payment={form.payment}
       close={() => setForm(null)} save={save} reloadLatest={reloadLatest} />}
