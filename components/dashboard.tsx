@@ -11,11 +11,13 @@ import { WorkspaceRules } from "./workspace-rules";
 import { CakeIcon } from "./cake-icon";
 import { ImportPreviewTable } from "./import-preview-table";
 import { TransactionsPanel } from "./transactions-panel";
+import { RecurringPaymentsPanel } from "./recurring-payments-panel";
 import { RefreshButton } from "./refresh-button";
 import { defaultSplitWeights, matchingDefaultRule, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
 import { parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
 import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
 import { applyTransactionUpdate } from "@/lib/transaction-updates";
+import { currentMonthTransactions } from "@/lib/home-summary";
 import { bootstrapScopeForTab, mergeBootstrapMetadata, type DashboardTab } from "@/lib/bootstrap";
 import { applyPayPayDuplicateChecks, MAX_DUPLICATE_CHECK_IDS, type ExistingPayPayTransaction } from "@/lib/import-duplicates";
 import type {
@@ -261,8 +263,7 @@ function PageHeading({ eyebrow, title, description, action }: { eyebrow?: string
 }
 
 function HomePanel({ selected, pending, setTab, add, refreshAction, refreshing }: { selected: WorkspaceData; pending: number; setTab: (tab: Tab) => void; add: () => void; refreshAction: React.ReactNode; refreshing: boolean }) {
-  const month = new Date().getMonth();
-  const monthTransactions = selected.transactions.filter((item) => new Date(item.occurredAt).getMonth() === month);
+  const monthTransactions = currentMonthTransactions(selected.transactions);
   const payments = monthTransactions.filter((item) => item.type === "PAYMENT").reduce((sum, item) => sum + item.amountYen, 0);
   const shared = selected.transactions.filter((item) => item.expenseClass === "SHARED" && !item.settledAt).reduce((sum, item) => sum + (item.type === "PAYMENT" ? item.amountYen : -item.amountYen), 0);
   return <>
@@ -488,6 +489,7 @@ function SettingsPanel({ selected, currentUserId, run, afterDelete }: { selected
         {error && <p className="settings-error form-error" role="alert">{error}</p>}
       </section>
     </div>
+    <RecurringPaymentsPanel selected={selected} currentUserId={currentUserId} />
     <WorkspaceRules selected={selected} run={run} />
     <section className="panel danger-zone">
       <div><span>DANGER ZONE</span><h2>ワークスペースを削除</h2><p>関連する明細、招待、ルール、清算履歴がすべて削除され、元に戻せません。</p></div>

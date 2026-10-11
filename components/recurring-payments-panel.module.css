@@ -1,0 +1,50 @@
+.panel { margin-top: 1rem; }
+.heading { gap: .8rem; flex-wrap: wrap; }
+.headingActions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.headingActions > button { min-height: 44px; }
+.table { min-width: 83rem; }
+.table td > small { display: block; margin-top: .2rem; color: var(--muted); font-size: .61rem; }
+.column0 { width: 8.5rem; }
+.column1 { width: 7rem; }
+.column2 { width: 5rem; }
+.column3 { width: 6rem; }
+.column4 { width: 5rem; }
+.column5 { width: 4.5rem; }
+.column6 { width: 10rem; }
+.column7 { width: 12rem; }
+.column8 { width: 5rem; }
+.column9 { width: 10rem; }
+.rowActions { display: flex; gap: .45rem; flex-wrap: wrap; }
+.rowActions > button { min-height: 44px; padding: .3rem; }
+.summaryButton { min-height: 44px; }
+.blocked { display: block; color: var(--red) !important; line-height: 1.6; }
+.memo { white-space: pre-wrap; overflow-wrap: anywhere; }
+.muted { color: var(--muted); font-size: .7rem; }
+.dialog { padding: 0; border: 1px solid var(--line); width: min(32rem, calc(100vw - 1rem)); }
+.dialog:not([open]) { display: none; }
+.dialog::backdrop { background: rgba(51,42,24,.48); backdrop-filter: blur(4px); }
+.dialog > header > button { min-width: 44px; min-height: 44px; }
+.dialog :global(.modal-actions) > button { min-height: 44px; }
+.dialog .fields { display: block; margin: 0; padding: 0; border: 0; }
+.fields label small { display: block; margin-top: .25rem; font-size: .61rem; }
+.memoLabel { display: block; color: var(--muted); font-size: .68rem; font-weight: 700; }
+.hint { margin: 0 0 .8rem; padding: .65rem; border: 1px solid var(--line-strong); border-radius: .6rem; color: var(--accent-dark); background: var(--accent-soft); font-size: .7rem; line-height: 1.6; }
+.preview { display: grid; gap: .35rem; margin-top: .8rem; padding: .8rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--surface-muted); font-size: .72rem; line-height: 1.6; }
+.preview small { color: var(--muted); font-size: .65rem; }
+.current { margin: .75rem 0 0; color: var(--muted); font-size: .65rem; }
+.confirmMerchant { margin: 0 0 .8rem; font-weight: 800; }
+.confirmText { margin: 0; font-size: .8rem; line-height: 1.8; }
+.deleteButton { color: var(--red); border-color: var(--red); }
+@media (max-width: 48rem) {
+  .heading { padding: .85rem; }
+  .headingActions { width: 100%; justify-content: flex-end; }
+  .headingActions > button { font-size: .72rem; }
+  .table { min-width: 0; }
+  .table thead { display: none; }
+  .rowActions > button { min-height: 44px; padding: .5rem; font-size: .75rem; }
+  .dialog { max-height: calc(100dvh - 1rem); }
+  .preview { font-size: .68rem; }
+}
+@media (max-width: 352px) {
+  .dialog form :global(.form-grid) { grid-template-columns: minmax(0, 1fr); }
+}
