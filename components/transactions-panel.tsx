@@ -95,6 +95,7 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
   const visibleEditable = visible.filter((item) => !item.settledAt);
   const checkedVisibleCount = visibleEditable.filter((item) => selectedIds.has(item.id)).length;
   const allVisibleChecked = visibleEditable.length > 0 && checkedVisibleCount === visibleEditable.length;
+  const selectionChecked = allVisibleChecked || (visibleEditable.length === 0 && checkedIds.length > 0);
   const hiddenCheckedCount = checkedIds.filter((id) => !visible.some((item) => item.id === id)).length;
   const busy = bulkAction !== null || preparingRefresh || refreshing;
   const filteredColumns = transactionColumns.filter(column => columnFilters[column.id] !== undefined);
@@ -134,13 +135,12 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
     });
   }
 
-  function toggleVisible() {
+  function toggleSelection() {
     if (bulkBusyRef.current || refreshBusyRef.current) return;
     setSelectedIds((current) => {
+      if (selectionChecked) return new Set();
       const next = new Set(current);
-      for (const item of visibleEditable) {
-        if (allVisibleChecked) next.delete(item.id); else next.add(item.id);
-      }
+      for (const item of visibleEditable) next.add(item.id);
       return next;
     });
   }
@@ -202,12 +202,11 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
         <button type="button" disabled={busy || checkedIds.length === 0} onClick={() => { void performBulk("applyTransactionRules"); }}>{bulkAction === "applyTransactionRules" ? "適用中…" : "共有費ルールの適用"}</button>
         <button type="button" disabled={busy || filteredColumns.length === 0} onClick={() => setColumnFilters({})}>絞り込みをすべて解除</button>
         <button type="button" className={styles.bulkDelete} disabled={busy || checkedIds.length === 0} onClick={() => { void performBulk("deleteTransactions"); }}>{bulkAction === "deleteTransactions" ? "削除中…" : "削除"}</button>
-        {checkedIds.length > 0 && <button type="button" className={styles.clearSelection} disabled={busy} onClick={() => setSelectedIds(new Set())}>選択解除</button>}
       </div>
       {bulkError && <p role="alert" className={styles.bulkError}>{bulkError}</p>}
       {bulkNotice && <p role="status" className={styles.bulkNotice}>{bulkNotice}</p>}
-      <p className={styles.note}>清算済みの明細はメモのみ編集できます。メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。編集中の明細は編集を終えるまで表示します。</p>
-      <TransactionTable columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label="表示中の未清算明細をすべて選択" mobileLabel={allVisibleChecked ? "全解除" : "全選択"} checked={allVisibleChecked} partial={checkedVisibleCount > 0 && !allVisibleChecked} disabled={busy || visibleEditable.length === 0} onChange={toggleVisible} /></th>{transactionColumns.map(column => <th key={column.id}><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
+      <p className={styles.note}>清算済みの明細はメモのみ編集できます。メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。全選択チェックを外すと非表示の選択も解除します。編集中の明細は編集を終えるまで表示します。</p>
+      <TransactionTable columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => <th key={column.id}><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
         {visible.map((item) => <EditableTransaction key={item.id} item={item} members={selected.members} pinnedOutsideFilter={!matches(item)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} />)}
       </TransactionTable>
       {visible.length === 0 && <p className={styles.empty}>条件に一致する明細がありません。</p>}
