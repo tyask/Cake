@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
 import { transactionDateInput } from "../lib/transaction-editing";
+import { verificationDate, verificationTimestamp } from "./verification-dates";
 
 // Run only against the task's isolated database, after db:setup. This script
 // never loads .env files or falls back to DATABASE_URL, and never alters seed
@@ -117,10 +118,10 @@ async function main() {
     assert.equal(payment.state, "ACTIVE");
     assert.equal(Number(payment.revision), 1);
     assert.equal(Object.hasOwn(payment, "start_on"), false);
-    assert.equal(String(payment.active_from_month), "0001-01-01");
+    assert.equal(verificationDate(payment.active_from_month), "0001-01-01");
     assert.equal(payment.pending_config, null);
     assert.equal(payment.pending_effective_month, null);
-    assert.equal(String(payment.next_scheduled_on), "2026-10-27");
+    assert.equal(verificationDate(payment.next_scheduled_on), "2026-10-27");
     await rejectsCode(() => sql`UPDATE recurring_payments SET workspace_id = ${otherWorkspace}::uuid
       WHERE id = ${payment.id}::uuid`, "INPUT_INVALID");
     stage = "開始日削除後の月初制約保持";
@@ -151,10 +152,10 @@ async function main() {
     const cutoffConfig = baseConfig({ dayOfMonth: 10 });
     const beforeCutoff = (await mutate(workspaceId, "create", null, cutoffConfig,
       "2026-10-10", null, userA, null, false, "2026-10-10T08:59:59.999+09:00")).payment;
-    assert.equal(String(beforeCutoff.next_scheduled_on), "2026-10-10");
+    assert.equal(verificationDate(beforeCutoff.next_scheduled_on), "2026-10-10");
     const atCutoff = (await mutate(workspaceId, "create", null, cutoffConfig,
       "2026-10-10", null, userA, null, false, "2026-10-10T09:00:00+09:00")).payment;
-    assert.equal(String(atCutoff.next_scheduled_on), "2026-11-10");
+    assert.equal(verificationDate(atCutoff.next_scheduled_on), "2026-11-10");
     assert.equal((await generate(workspaceId, beforeCutoff, "2026-10-10", false,
       "2026-10-10T08:59:59.999+09:00")).status, "skipped");
     assert.equal((await generate(workspaceId, beforeCutoff, "2026-10-10")).status, "created");
@@ -169,7 +170,7 @@ async function main() {
     ] as const;
     for (const [at, day, expected] of dateCases) {
       const result = await sql`SELECT cake_recurring_next_scheduled_on(${day}, ${at}::timestamptz) AS next`;
-      assert.equal(String(result[0].next), expected);
+      assert.equal(verificationDate(result[0].next), expected);
     }
     // Legacy markers are retained solely for compatibility and cannot prevent
     // a setting from running or change when its next date is saved.
@@ -186,7 +187,7 @@ async function main() {
     const entry = (await sql`SELECT * FROM transactions WHERE workspace_id = ${workspaceId}::uuid
       AND id = ${concurrent.find(item => item.status === "created")?.transactionId}::uuid`)[0];
     assert.equal(entry.external_id, `recurring_${payment.id}_20261027_${entry.id}`);
-    const occurredAt = new Date(String(entry.occurred_at)).toISOString();
+    const occurredAt = verificationTimestamp(entry.occurred_at);
     assert.equal(occurredAt, "2026-10-27T00:23:45.678Z");
     assert.equal(transactionDateInput(occurredAt), "2026-10-27T09:23:45.678");
     assert.equal(entry.source, "RECURRING");
@@ -200,16 +201,16 @@ async function main() {
     await sql`SELECT cake_bulk_transactions(${workspaceId}::uuid, ${userA}, ARRAY[${entry.id}::uuid], 'DELETE')`;
     assert.equal((await generate(workspaceId, payment, "2026-10-27")).status, "skipped");
     assert.equal(await count(workspaceId, payment), 0);
-    assert.equal(String((await saved(payment)).last_generated_month), "2199-01-01");
-    assert.equal(String((await saved(payment)).next_scheduled_on), "2026-11-27");
+    assert.equal(verificationDate((await saved(payment)).last_generated_month), "2199-01-01");
+    assert.equal(verificationDate((await saved(payment)).next_scheduled_on), "2026-11-27");
 
     stage = "編集の即時反映・履歴marker非参照";
     let next = baseConfig({ dayOfMonth: 10, amountYen: 110_000 });
     payment = (await mutate(workspaceId, "update", await saved(payment), next, "2026-10-28")).payment;
     assert.equal(Number(payment.amount_yen), 110_000);
     assert.equal(Number(payment.day_of_month), 10);
-    assert.equal(String(payment.last_generated_month), "2199-01-01");
-    assert.equal(String(payment.next_scheduled_on), "2026-11-10");
+    assert.equal(verificationDate(payment.last_generated_month), "2199-01-01");
+    assert.equal(verificationDate(payment.next_scheduled_on), "2026-11-10");
     next = { ...next, memo: "即時反映した金額を保持してメモ変更" };
     payment = (await mutate(workspaceId, "update", payment, next, "2026-10-29")).payment;
     assert.equal(payment.memo, next.memo);
@@ -233,7 +234,7 @@ async function main() {
     assert.equal(Number(editedEntry.amount_yen), 444);
     immediatelyEdited = (await mutate(workspaceId, "update", await saved(immediatelyEdited),
       baseConfig({ dayOfMonth: 12, amountYen: 555, merchant: "変更後の支払先" }), "2026-10-11")).payment;
-    assert.equal(String(immediatelyEdited.next_scheduled_on), "2026-10-12");
+    assert.equal(verificationDate(immediatelyEdited.next_scheduled_on), "2026-10-12");
     assert.equal((await generate(workspaceId, immediatelyEdited, "2026-10-12")).status, "created");
     assert.equal((await generate(workspaceId, immediatelyEdited, "2026-10-12")).status, "skipped");
     assert.equal(await count(workspaceId, immediatelyEdited), 2);
@@ -249,13 +250,13 @@ async function main() {
     await rejectsCode(() => mutate(workspaceId, "pause", payment, null, "2026-11-11"), "CONFLICT");
     assert.equal((await generate(workspaceId, payment, "2026-12-10")).status, "skipped");
     payment = (await mutate(workspaceId, "resume", payment, null, "2026-12-09")).payment;
-    assert.equal(String(payment.active_from_month), "0001-01-01");
+    assert.equal(verificationDate(payment.active_from_month), "0001-01-01");
     assert.equal((await generate(workspaceId, payment, "2026-12-10")).status, "created");
     assert.equal((await generate(workspaceId, payment, "2027-01-10")).status, "created");
     payment = (await mutate(workspaceId, "archive", await saved(payment), null, "2027-01-11")).payment;
     await rejectsCode(() => mutate(workspaceId, "resume", payment, null, "2027-01-12"), "CONFLICT");
     await rejectsCode(() => mutate(workspaceId, "update", payment, next, "2027-01-12"), "CONFLICT");
-    assert.equal(String(payment.last_generated_month), "2199-01-01");
+    assert.equal(verificationDate(payment.last_generated_month), "2199-01-01");
     assert.equal(await count(workspaceId, payment), 3);
 
     stage = "途中失敗の全ロールバック・翌日補完なし";
@@ -267,14 +268,14 @@ async function main() {
     ]));
     const afterFailure = await saved(failed);
     assert.equal(afterFailure.last_generated_month, null);
-    assert.equal(String(afterFailure.next_scheduled_on), "2026-11-10");
+    assert.equal(verificationDate(afterFailure.next_scheduled_on), "2026-11-10");
     assert.equal(afterFailure.pending_config, null);
     assert.equal(Number(afterFailure.amount_yen), 110_000);
     assert.equal(await count(workspaceId, failed), 0);
     assert.equal((await generate(workspaceId, failed, "2026-11-11")).status, "skipped");
     assert.equal(await count(workspaceId, failed), 0);
     assert.equal((await generate(workspaceId, failed, "2026-12-10")).status, "created");
-    assert.equal(String((await saved(failed)).next_scheduled_on), "2027-01-10");
+    assert.equal(verificationDate((await saved(failed)).next_scheduled_on), "2027-01-10");
 
     stage = "未実行予定の翌日・開始日管理なし・月末丸め";
     const missed = (await mutate(workspaceId, "create", null, baseConfig())).payment;
@@ -283,7 +284,7 @@ async function main() {
     const legacyStart = (await mutate(workspaceId, "create", null, baseConfig({ dayOfMonth: 31 }),
       "2026-10-10", "2026-12-28")).payment;
     assert.equal(Object.hasOwn(legacyStart, "start_on"), false);
-    assert.equal(String(legacyStart.active_from_month), "0001-01-01");
+    assert.equal(verificationDate(legacyStart.active_from_month), "0001-01-01");
     assert.equal((await generate(workspaceId, legacyStart, "2026-11-30")).status, "created");
     assert.equal((await generate(workspaceId, legacyStart, "2026-12-31")).status, "created");
 
@@ -362,7 +363,7 @@ async function main() {
     await sql`UPDATE app_users SET is_enabled = true WHERE id = ${userA}`;
     const resumed = (await mutate(workspaceId, "resume", await saved(disabled), null, "2026-10-27")).payment;
     assert.equal(resumed.state, "ACTIVE");
-    assert.equal(String(resumed.next_scheduled_on), "2026-11-27");
+    assert.equal(verificationDate(resumed.next_scheduled_on), "2026-11-27");
     assert.equal((await generate(workspaceId, resumed, "2026-10-27")).status, "skipped");
     assert.equal((await generate(workspaceId, resumed, "2026-11-27")).status, "created");
 
