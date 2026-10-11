@@ -1,8 +1,10 @@
 "use client";
 
+import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/autosave";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { transactionActorPatch, transactionDateInput, transactionDateToIso, transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues } from "@/lib/transaction-editing";
-import type { ExpenseClass, SplitWeights, TransactionRecord, WorkspaceData, WorkspaceMember } from "@/lib/types";
+import type { ExpenseClass, TransactionRecord, WorkspaceData, WorkspaceMember } from "@/lib/types";
 import styles from "./transactions-panel.module.css";
 import { splitAmounts } from "@/lib/split-allocations";
 import { SplitEditor } from "./split-editor";
@@ -17,7 +19,7 @@ import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } fro
 import { useTransactionFilters } from "./use-transaction-filters";
 
 type RunAction = (payload: Record<string, unknown>, success: string) => Promise<unknown>;
-type SaveTransaction = (id: string, getValues: () => TransactionValues) => Promise<TransactionValues>;
+type SaveTransaction = (id: string, getValues: () => { values: TransactionValues; base: TransactionValues }, accept: (values: TransactionValues) => void) => Promise<void>;
 type AcknowledgedSave = { sources: string[]; values: TransactionValues };
 type RowHandle = { freeze: (value: boolean) => void; flush: () => Promise<void>; acceptRules: (values: TransactionValues) => void };
 type BulkAction = "deleteTransactions" | "applyTransactionRules";
@@ -38,13 +40,6 @@ function signature(values: TransactionValues): string {
   return JSON.stringify([values.occurredAt, values.merchant, values.method, values.type, values.amountYen, values.actorUserId, values.expenseClass, Object.entries(values.splitWeights).sort(([a], [b]) => a.localeCompare(b))]);
 }
 
-function fieldEqual(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
-  const a = left as SplitWeights;
-  const b = right as SplitWeights;
-  return Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((key) => a[key] === b[key]);
-}
 
 export function TransactionsPanel(props: TransactionListProps) {
   return <TransactionList key={`${props.userId}:${props.selected.workspace.id}`} {...props} />;
@@ -116,11 +111,10 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
     return result;
   }
 
-  const save: SaveTransaction = (transactionId, getValues) => enqueue(async () => {
-    const values = getValues();
+  const save: SaveTransaction = (transactionId, getValues, accept) => enqueue(() => saveChanged(getValues, async values => {
     const result = await run({ action: "saveTransaction", workspaceId: selected.workspace.id, transactionId, ...values }, "") as { transaction: TransactionRecord };
     return transactionValues(result.transaction);
-  });
+  }, accept));
   const saveMemo: SaveTransactionMemo = (transactionId, memo) => enqueue(async () => {
     const result = await run({ action: "saveTransactionMemo", workspaceId: selected.workspace.id, transactionId, memo }, "") as { memo: string };
     return transactionMemoSchema.parse(result.memo);
@@ -288,13 +282,16 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
   function acceptSaved(saved: TransactionValues) {
     baseRef.current = saved;
     const previous = acknowledgedRef.current;
-    const sources = [...new Set([sourceSignatureRef.current, ...(previous?.sources ?? []), ...(previous ? [signature(previous.values)] : [])])];
-    const next = sourceSignatureRef.current === signature(saved) ? null : { sources, values: saved };
+    const next = acknowledge(sourceSignatureRef.current, previous, saved, signature);
     acknowledgedRef.current = next;
     setAcknowledged(next);
   }
 
-  function commit(): Promise<void> {
+  const saveRequest = useRef(createAutosaveRequest()).current;
+
+  function commit(): Promise<void> { return saveRequest(commitOnce); }
+
+  function commitOnce(): Promise<void> {
     if (itemRef.current.settledAt) return Promise.reject(new Error("清算済みの明細は変更できません。"));
     if (Object.keys(changesRef.current).length === 0 && dateDraftRef.current === null && !errorRef.current) return Promise.resolve();
     pendingRef.current += 1;
@@ -310,8 +307,8 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
       capturedDate = dateDraftRef.current;
       const values = { ...baseRef.current, ...captured };
       if (capturedDate !== null) values.occurredAt = transactionDateToIso(capturedDate);
-      return validateTransactionValues(values, members);
-    }).then((saved) => {
+      return { values: validateTransactionValues(values, members), base: baseRef.current };
+    }, (saved) => {
       acceptSaved(saved);
       const remaining = { ...changesRef.current };
       for (const key of Object.keys(captured) as (keyof TransactionValues)[]) {

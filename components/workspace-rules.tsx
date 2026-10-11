@@ -1,16 +1,18 @@
 "use client";
 
+import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/autosave";
+
 import { useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { defaultSplitWeights, validateSplitWeights } from "@/lib/expense-splits";
-import type { DefaultRule, ExpenseClass, SplitWeights, WorkspaceData, WorkspaceMember } from "@/lib/types";
+import type { DefaultRule, ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/types";
 import styles from "./workspace-rules.module.css";
 
 type RunAction = (payload: Record<string, unknown>, success: string) => Promise<unknown>;
 type RuleValues = Pick<DefaultRule, "merchantContains" | "expenseClass" | "splitWeights" | "enabled">;
-type SaveRule = (ruleId: string, getValues: () => RuleValues) => Promise<RuleValues>;
+type SaveRule = (ruleId: string, getValues: () => { values: RuleValues; base: RuleValues }, accept: (values: RuleValues) => void) => Promise<void>;
 type StructuralAction = { payload: Record<string, unknown>; message: string };
 type AcknowledgedSave = { sources: string[]; values: RuleValues };
 
@@ -18,13 +20,6 @@ function ruleValues(rule: DefaultRule): RuleValues {
   return { merchantContains: rule.merchantContains, expenseClass: rule.expenseClass, splitWeights: rule.splitWeights, enabled: rule.enabled };
 }
 
-function fieldEqual(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
-  const a = left as SplitWeights;
-  const b = right as SplitWeights;
-  return Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((key) => a[key] === b[key]);
-}
 
 function signature(values: RuleValues): string {
   const weights = values.splitWeights === null ? null : Object.entries(values.splitWeights).sort(([a], [b]) => a.localeCompare(b));
@@ -90,11 +85,10 @@ function RulesEditor({ selected, run }: { selected: WorkspaceData; run: RunActio
     }
   }
 
-  const saveRule: SaveRule = (ruleId, getValues) => enqueue(async () => {
-    const values = getValues();
+  const saveRule: SaveRule = (ruleId, getValues, accept) => enqueue(() => saveChanged(getValues, async values => {
     await run({ action: "updateRule", workspaceId: selected.workspace.id, ruleId, ...values }, "");
     return values;
-  });
+  }, accept));
 
   async function reorder(nextIds: string[]) {
     if (structuralLock.current || nextIds.every((id, index) => id === orderedIds[index])) return;
@@ -190,19 +184,22 @@ function EditableRule({ rule, members, selected, onSelect, structuralBusy, onSav
     acknowledgedRef.current = acknowledged;
   }, [acknowledged, base, incomingSignature]);
 
-  function commit() {
-    if (Object.keys(changesRef.current).length === 0) return;
+  const saveRequest = useRef(createAutosaveRequest()).current;
+
+  function commit() { void saveRequest(commitOnce).catch(() => undefined); }
+
+  function commitOnce(): Promise<void> {
+    if (Object.keys(changesRef.current).length === 0) return Promise.resolve();
     setPending((count) => count + 1);
     setError(null);
     let captured: Partial<RuleValues> = {};
-    void onSave(rule.id, () => {
+    return onSave(rule.id, () => {
       captured = { ...changesRef.current };
-      return validateRule({ ...baseRef.current, ...captured }, members);
-    }).then((saved) => {
+      return { values: validateRule({ ...baseRef.current, ...captured }, members), base: baseRef.current };
+    }, (saved) => {
       baseRef.current = saved;
       const previous = acknowledgedRef.current;
-      const sources = [...new Set([sourceSignatureRef.current, ...(previous?.sources ?? []), ...(previous ? [signature(previous.values)] : [])])];
-      const next = sourceSignatureRef.current === signature(saved) ? null : { sources, values: saved };
+      const next = acknowledge(sourceSignatureRef.current, previous, saved, signature);
       acknowledgedRef.current = next;
       setAcknowledged(next);
       const remaining = { ...changesRef.current };
@@ -214,6 +211,7 @@ function EditableRule({ rule, members, selected, onSelect, structuralBusy, onSav
       setError(null);
     }).catch((failure) => {
       setError(failure instanceof Error ? failure.message : "保存できませんでした。入力内容は保持しています。");
+      throw failure;
     }).finally(() => setPending((count) => count - 1));
   }
 
