@@ -22,13 +22,13 @@ export interface RecurringPayment {
   currentConfig: RecurringPaymentConfig;
   nextScheduledOn: string | null;
   blockedReason: string | null;
-  lastGeneratedMonth: string | null;
 }
 
 export interface RecurringPaymentsResponse {
   payments: RecurringPayment[];
   eligibleActorUserIds: string[];
   today: string;
+  now: string;
 }
 
 export interface RecurringPaymentMutationResult {

@@ -618,10 +618,10 @@
           <p>条件はサーバーへ保存せず、別の端末・ブラウザへ同期しない。ブラウザのサイトデータを削除すると初期状態に戻る。保存領域が利用できない場合や保存内容が壊れている場合も、画面上の絞り込み操作を継続できる。</p>
           <h3 id="recurring-payments">定期支払い</h3>
           <p>ワークスペース設定のデフォルトルールより上に、毎月1〜31日の固定額を登録する一覧を配置する。開始日・適用月・変更予約は管理せず、指定日と日本時間の当日が一致した設定を処理する。PCは取引明細と同じコンパクトな列別テーブル、スマートフォンは取引先・予定日・支払者と金額・状態の要約から詳細を開く。追加・編集は明細追加と同じ2列フォーム、割合（%）/金額（円）入力、メモ、保存ボタンを用いる。幅352px以下では定期支払いのフォームを1列にする。</p>
-          <p>一覧・フォームの次回予定は日本時間の当日と成功月last_generated_monthから決める。今月未追加で指定日が当日・未来なら今月、過ぎていれば翌月を表示する。たとえば10/9に10日指定なら10/10、9日指定なら時刻にかかわらず10/9。追加が成功してlast_generated_monthが10月になった時点で次回は翌月へ進む。指定日の編集・明細の削除後も成功月を保持する。一覧では、停止中・要確認の次回予定を表示しない。</p>
-          <p>一覧には保存済みの設定だけを表示し、変更予定の行は設けない。編集は保存時点で反映し、保存成功のメッセージは表示せずフォームを閉じて一覧を更新する。停止・再開も即時。再開後は当日未生成の予定から対象にする。削除した設定は再開できず、生成済み明細は保持する。保存失敗・revision競合では入力を保持し、最新設定を確認して編集し直せる。</p>
+          <p>一覧・フォームの次回予定は設定日とサーバーの日本時間だけで決める。その月の設定日の09:00より前ならその月、09:00以降なら翌月を表示する。たとえば10/9に10日指定なら10/10、9日指定なら08:59まで10/9、09:00以降は11/9。追加履歴は参照せず、設定日の変更による月内の複数登録を許容する。一覧では、停止中・要確認の次回予定を表示しない。画面を開いたままでも09:00に一覧とフォームの予定を更新し、入力中の内容は保持する。</p>
+          <p>一覧には保存済みの設定だけを表示し、変更予定の行は設けない。編集は保存時点で反映し、保存成功のメッセージは表示せずフォームを閉じて一覧を更新する。停止・再開も即時。追加・編集・再開の保存時には、設定日と保存時刻から同じ09:00境界で処理予定日を決める。削除した設定は再開できず、生成済み明細は保持する。保存失敗・revision競合では入力を保持し、最新設定を確認して編集し直せる。</p>
           <p>毎日日本時間09:00ごろのCronが当日予定だけを処理し、存在しない日は月末に丸める。生成明細の日時は登録処理開始時の日時を使い、日本時間で表示する。種別PAYMENT、source RECURRINGとする。設定保存時の金額・区分・割合・メモをコピーし、その後のデフォルト変更で再配分しない。二人目の参加では不足割合を0で補う。</p>
-          <p>追加テーブルはrecurring_paymentsの1つ。現在の設定と成功月last_generated_monthを保持する。明細登録と成功月更新を同一トランザクションにし、編集・同時実行・再呼出し・明細削除後も当月に最大1件とする。失敗翌日や停止期間の自動補完は行わず、構造化ログで失敗を確認する。履歴テーブル・共通ログ画面は追加しない。</p>
+          <p>追加テーブルはrecurring_paymentsの1つ。現在の設定と処理予定日next_scheduled_onを保持する。明細登録と翌月への処理予定日更新を同一トランザクションにし、設定を変更しない通常の同時実行・再呼出しによる二重追加を防ぐ。明細削除だけでは処理予定日は変わらない。失敗翌日や停止期間の自動補完は行わず、構造化ログで失敗を確認する。履歴テーブル・共通ログ画面は追加しない。</p>
           <p>支払者・実行承認者または正の割合を持つ参加者の利用不可・所属不整合などは「要確認」として停止する。0の割合は保持する。原因を修正して再開する。設定は専用APIで取得・更新し、既存のfull/metadata・通常2 SQLの取得契約を維持する。</p>
           <h3>定期支払いの画面イメージ</h3>
           <p>以下は設定一覧と編集フォームの表示例。枠・文字サイズ・項目配置は取引明細の表と明細追加モーダルに合わせる。表示例の操作ボタンは動作しない。</p>
@@ -636,7 +636,7 @@
             </div>
           </figure>
           <figure style="margin: 1rem 0">
-            <figcaption>スマートフォン：要約から詳細を展開する。10/9時点で当月未追加の設定を10日へ編集すると、次回予定は10/10になる。</figcaption>
+            <figcaption>スマートフォン：要約から詳細を展開する。10/9に設定日を10日へ編集すると、追加履歴にかかわらず次回予定は10/10になる。9日を指定した場合は08:59まで10/9、09:00以降は11/9。</figcaption>
             <div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 1rem; margin-top: .5rem; color: #332a18">
               <div style="flex: 1 1 16rem; padding: 1rem; border: 1px solid #eadfbd; border-radius: 1rem; background: #fffbeb">
                 <strong>定期支払い</strong><p style="font-size: .72rem">予定日の日本時間9時ごろに追加します。</p>
@@ -753,7 +753,7 @@
               <tr><td><code>workspace_members</code></td><td>workspace_id, user_id, role, weight, joined_at</td><td>複合主キー。weightは共有費のデフォルト重み。個人用一人・共有用最大二人をDBでも強制。</td></tr>
               <tr><td><code>invitations</code></td><td>id, workspace_id, email, token_hash, status, expires_at, invited_by</td><td>トークンのハッシュを保存。現在はPENDINGからACCEPTEDへ更新し、期限を日時で判定。DBにはDECLINED／EXPIREDも許容するが更新操作はない。</td></tr>
               <tr><td><code>transactions</code></td><td>id, workspace_id, occurred_at, merchant, method, type, amount_yen, actor_user_id, expense_class, split_weights, memo, settled_at, external_id, source</td><td>PAYMENT／RECEIPTとPERSONAL／SHAREDを保持。明細固有の割合・メモを保存し、workspace_idとexternal_idの組で重複防止。</td></tr>
-              <tr><td><code>recurring_payments</code></td><td>id, workspace_id, state, 支払い設定8項目, last_generated_month, authorized_by, revision, blocked_reason, 監査列。開始日カラムstart_onは削除済み。旧active_from_month/pending_config/pending_effective_monthは現行処理で参照しない。</td><td>定期設定・最後の成功月を保持。workspace削除時CASCADE、設定削除はARCHIVED。旧適用月は未使用、旧変更予約は現在の設定へ移行して廃止。</td></tr>
+              <tr><td><code>recurring_payments</code></td><td>id, workspace_id, state, 支払い設定8項目, next_scheduled_on, authorized_by, revision, blocked_reason, 監査列。開始日カラムstart_onは削除済み。旧last_generated_month/active_from_month/pending_config/pending_effective_monthは予定判定・生成に使用しない。</td><td>定期設定・処理予定日を保持。workspace削除時CASCADE、設定削除はARCHIVED。明細登録の成功時に処理予定日を翌月へ進める。</td></tr>
               <tr><td><code>default_rules</code></td><td>id, workspace_id, merchant_contains, expense_class, sort_order, split_weights, enabled, priority</td><td>取引先の部分一致で費用区分・割合の初期値を決定。sort_orderの昇順で評価。priorityは旧バージョン互換用に同期。</td></tr>
               <tr><td><code>import_batches</code></td><td>id, workspace_id, imported_by, file_name, total_rows, imported_rows, skipped_rows, created_at</td><td>取込単位の結果を記録。CSV本文は保存しない。</td></tr>
               <tr><td><code>settlements</code></td><td>id, workspace_id, payer_user_id, payee_user_id, amount_yen, weight_snapshot, calculation_snapshot, completed_by, completed_at</td><td>清算時点の計算根拠をJSONスナップショットとして保持。</td></tr>
@@ -771,7 +771,7 @@
             <li>有効な通常利用者は管理者を含め二人までとする。固定テストユーザーA/Bは人数上限から除外する。</li>
             <li>清算済み明細と清算履歴の関連付けをDBトランザクションで一括更新する。</li>
             <li>取引IDは同一ワークスペース内で一意とする。手動追加時はアプリが自動発行する。</li>
-            <li>原則として適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。今回は未公開の定期支払いについてユーザーの指示により007〜009を現行仕様へ修正した。現行スキーマは001〜010の適用結果。007は開始日を持たない定期設定1表・即時変更/再開・実行日時による生成関数とsource制約の拡張を追加する。008は同じ生成仕様を維持し、009は旧変更予約を現在設定へ移す。010は適用済みPreview DBに残る開始日カラムを削除し、workspace移動禁止と月初制約を維持する。公開中の本番アプリは削除列を参照しない。追加済み明細は変更しない。</li>
+            <li>原則として適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。今回は未公開の定期支払いについてユーザーの指示により007〜009を現行仕様へ修正した。現行スキーマは001〜011の適用結果。007は開始日を持たない定期設定1表・処理予定日・即時変更/再開・実行日時による生成関数とsource制約の拡張を追加する。008は同じ生成仕様を維持し、009は旧変更予約を現在設定へ移す。010は適用済みPreview DBに残る開始日カラムを削除し、workspace移動禁止と月初制約を維持する。011は既存設定の処理予定日を設定日と適用時刻の09:00境界から初期化し、現行の変更・生成関数を適用する。公開中の本番アプリは削除列を参照しない。追加済み明細は変更しない。</li>
           </ul>
         </section>
 

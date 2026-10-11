@@ -1,23 +1,6 @@
--- Recurring settings apply as soon as they are saved. Retain the legacy active
--- month and function argument as unused compatibility values.
-ALTER TABLE recurring_payments ALTER COLUMN active_from_month SET DEFAULT DATE '0001-01-01';
-
--- Promote the latest saved change now, including paused settings. Increment
--- its revision so an editor holding the old current configuration conflicts.
--- Existing transaction snapshots and legacy markers remain unchanged.
-UPDATE recurring_payments SET
-  day_of_month = CASE WHEN pending_config IS NOT NULL THEN (pending_config->>'dayOfMonth')::integer ELSE day_of_month END,
-  merchant = CASE WHEN pending_config IS NOT NULL THEN pending_config->>'merchant' ELSE merchant END,
-  method = CASE WHEN pending_config IS NOT NULL THEN pending_config->>'method' ELSE method END,
-  amount_yen = CASE WHEN pending_config IS NOT NULL THEN (pending_config->>'amountYen')::integer ELSE amount_yen END,
-  actor_user_id = CASE WHEN pending_config IS NOT NULL THEN pending_config->>'actorUserId' ELSE actor_user_id END,
-  expense_class = CASE WHEN pending_config IS NOT NULL THEN pending_config->>'expenseClass' ELSE expense_class END,
-  split_weights = CASE WHEN pending_config IS NOT NULL THEN pending_config->'splitWeights' ELSE split_weights END,
-  memo = CASE WHEN pending_config IS NOT NULL THEN pending_config->>'memo' ELSE memo END,
-  revision = revision + CASE WHEN pending_config IS NOT NULL THEN 1 ELSE 0 END,
-  updated_at = CASE WHEN pending_config IS NOT NULL THEN now() ELSE updated_at END,
-  pending_config = NULL, pending_effective_month = NULL;
-
+-- Existing deployments receive a next scheduled date based solely on their
+-- saved day and the migration time. Preserve legacy columns and transaction
+-- snapshots for compatibility; last_generated_month no longer controls runs.
 CREATE OR REPLACE FUNCTION cake_recurring_scheduled_on(target_month date, target_day integer)
 RETURNS date AS $cake_recurring_date$
   SELECT date_trunc('month',target_month)::date + (least(target_day,
@@ -41,8 +24,6 @@ ALTER TABLE recurring_payments ADD COLUMN IF NOT EXISTS next_scheduled_on date;
 UPDATE recurring_payments SET next_scheduled_on = cake_recurring_next_scheduled_on(day_of_month,now())
   WHERE next_scheduled_on IS NULL;
 ALTER TABLE recurring_payments ALTER COLUMN next_scheduled_on SET NOT NULL;
--- A promoted pending day receives a schedule based on its current setting.
-UPDATE recurring_payments SET next_scheduled_on = cake_recurring_next_scheduled_on(day_of_month,now());
 
 CREATE OR REPLACE FUNCTION cake_mutate_recurring_payment(
   target_workspace uuid, actor_id text, operation text, target_payment uuid DEFAULT NULL,

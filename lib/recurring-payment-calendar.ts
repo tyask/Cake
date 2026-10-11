@@ -3,7 +3,6 @@ import type { RecurringPaymentConfig, RecurringPaymentState } from "./recurring-
 export interface RecurringPaymentSchedule {
   state: RecurringPaymentState;
   currentConfig: RecurringPaymentConfig;
-  lastGeneratedMonth: string | null;
 }
 
 export function isCalendarDate(value: string): boolean {
@@ -44,19 +43,18 @@ export function scheduledDate(month: string, dayOfMonth: number): string {
   return `${first.slice(0, 7)}-${String(Math.min(dayOfMonth, date.getUTCDate())).padStart(2, "0")}`;
 }
 
-/** Past scheduled days are never returned as recovery work. */
-export function nextScheduledOn(payment: RecurringPaymentSchedule, today: string): string | null {
+/** A schedule advances at its Japanese-time 09:00 deadline, without consulting transaction history. */
+export function nextScheduledOn(payment: RecurringPaymentSchedule, now: Date): string | null {
   if (payment.state !== "ACTIVE") return null;
-  let month = [monthOf(today),
-    ...(payment.lastGeneratedMonth ? [addMonths(payment.lastGeneratedMonth, 1)] : [])].sort().at(-1)!;
+  const today = jstToday(now);
+  const month = monthOf(today);
   const date = scheduledDate(month, payment.currentConfig.dayOfMonth);
-  if (date >= today) return date;
-  month = addMonths(month, 1);
-  return scheduledDate(month, payment.currentConfig.dayOfMonth);
+  const deadline = new Date(`${date}T09:00:00+09:00`);
+  return now.getTime() < deadline.getTime()
+    ? date : scheduledDate(addMonths(month, 1), payment.currentConfig.dayOfMonth);
 }
 
 export function isDueToday(payment: RecurringPaymentSchedule, today: string): boolean {
   return payment.state === "ACTIVE"
-    && (!payment.lastGeneratedMonth || payment.lastGeneratedMonth < monthOf(today))
     && scheduledDate(monthOf(today), payment.currentConfig.dayOfMonth) === today;
 }

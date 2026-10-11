@@ -29,14 +29,14 @@ function fixture() {
   const service = createRecurringPaymentService(store, { testMode: () => false });
   return { calls, store, service };
 }
-const now = new Date("2026-10-10T00:00:00Z");
+const now = new Date("2026-10-10T08:59:59.999+09:00");
 
 test("入力はactionごとに厳密で、readonly列・日時の上書きを拒否する", () => {
   const create = { action: "create", workspaceId, ...config };
   assert.equal(recurringPaymentMutationSchema.safeParse(create).success, true);
   for (const additional of [{ startOn: "2026-10-10" }, { activeFromMonth: "2026-11-01" }, { pendingConfig: config },
     { pendingEffectiveMonth: "2026-11-01" }, { effectiveMonth: "2026-11-01" }, { state: "ACTIVE" },
-    { authorizedById: "b" }, { lastGeneratedMonth: null }, { now: "2026-10-09" }]) {
+    { authorizedById: "b" }, { lastGeneratedMonth: null }, { nextScheduledOn: "2026-10-27" }, { now: "2026-10-09" }]) {
     assert.equal(recurringPaymentMutationSchema.safeParse({ ...create, ...additional }).success, false);
   }
   assert.equal(recurringPaymentMutationSchema.safeParse({ action: "update", workspaceId, paymentId, expectedRevision: 1, ...config }).success, true);
@@ -55,16 +55,18 @@ test("金額・日・文字数・割合の境界を検証する", () => {
   assert.equal(recurringPaymentConfigSchema.parse({ ...config, merchant: " 家賃 " }).merchant, "家賃");
 });
 
-test("開始日を持たない現在設定から予定を返し、旧適用月をAPIへ公開しない", () => {
+test("現在設定とサーバー時刻から予定を返し、開始日・旧適用月・成功月をAPIへ公開しない", () => {
   const raw = row({ day_of_month: 10, amount_yen: 110000,
-    active_from_month: "2027-12-01", pending_config: null, pending_effective_month: null });
-  const saved = recurringPaymentRecord(raw, "2026-10-10");
+    active_from_month: "2027-12-01", pending_config: null, pending_effective_month: null,
+    last_generated_month: "2027-12-01", next_scheduled_on: "2027-12-10" });
+  const saved = recurringPaymentRecord(raw, now);
   assert.equal(saved.currentConfig.amountYen, 110000);
   assert.equal(saved.nextScheduledOn, "2026-10-10");
-  for (const removed of ["startOn", "activeFromMonth", "pendingConfig", "pendingEffectiveMonth", "effectiveMonth"]) {
+  for (const removed of ["startOn", "activeFromMonth", "pendingConfig", "pendingEffectiveMonth", "effectiveMonth", "lastGeneratedMonth"]) {
     assert.equal(removed in saved, false, removed);
   }
-  assert.equal(recurringPaymentRecord(raw, "2026-10-11").nextScheduledOn, "2026-11-10");
+  assert.equal(recurringPaymentRecord(raw, new Date("2026-10-10T09:00:00+09:00")).nextScheduledOn, "2026-11-10");
+  assert.equal(recurringPaymentRecord(raw, new Date("2026-10-11T00:00:00+09:00")).nextScheduledOn, "2026-11-10");
   assert.equal(raw.active_from_month, "2027-12-01");
 });
 
@@ -93,7 +95,7 @@ test("本番/通常認証と固定test identityの境界をID・メール・有�
   assert.equal(isRecurringUserEligible({ ...normal, isEnabled: false }, false), false);
 });
 
-test("作成は開始日を保持せず、日本時間の日付を次回予定の計算だけに使う", async () => {
+test("作成は開始日を保持せず、日本時間の設定日09:00で初回予定を切り替える", async () => {
   const { service, store } = fixture();
   const input = { action: "create", workspaceId, ...config, dayOfMonth: 10 };
   const times: string[] = [];
@@ -104,14 +106,14 @@ test("作成は開始日を保持せず、日本時間の日付を次回予定�
     times.push(clock.toISOString());
     return { payment: row({ day_of_month: 10 }) };
   };
-  const beforeMidnight = await service.mutateRecurringPayment("a", input, new Date("2026-10-10T14:59:59.999Z"));
-  const afterMidnight = await service.mutateRecurringPayment("a", input, new Date("2026-10-10T15:00:00Z"));
-  assert.deepEqual(times, ["2026-10-10T14:59:59.999Z", "2026-10-10T15:00:00.000Z"]);
-  assert.equal(beforeMidnight.payment.nextScheduledOn, "2026-10-10");
-  assert.equal(afterMidnight.payment.nextScheduledOn, "2026-11-10");
+  const beforeDeadline = await service.mutateRecurringPayment("a", input, new Date("2026-10-09T23:59:59.999Z"));
+  const atDeadline = await service.mutateRecurringPayment("a", input, new Date("2026-10-10T00:00:00Z"));
+  assert.deepEqual(times, ["2026-10-09T23:59:59.999Z", "2026-10-10T00:00:00.000Z"]);
+  assert.equal(beforeDeadline.payment.nextScheduledOn, "2026-10-10");
+  assert.equal(atDeadline.payment.nextScheduledOn, "2026-11-10");
 });
 
-test("一覧と保存の次回予定は09:00では切り替えず、成功月で翌月へ進める", async () => {
+test("一覧と保存の次回予定は成功月を無視し、設定日09:00でだけ翌月へ進める", async () => {
   const { service, store } = fixture();
   let generatedMonth: string | null = null;
   store.list = async () => ({ authorized: true,
@@ -123,19 +125,21 @@ test("一覧と保存の次回予定は09:00では切り替えず、成功月で
     return { payment: row({ day_of_month: 9, last_generated_month: generatedMonth }) };
   };
   const input = { action: "update", workspaceId, paymentId, expectedRevision: 1, ...config, dayOfMonth: 9 };
-  const times = ["2026-10-09T08:59:59.999+09:00", "2026-10-09T09:00:00+09:00", "2026-10-09T09:59:59+09:00", "2026-10-09T23:59:59+09:00"];
-  for (const time of times) {
-    const listed = await service.listRecurringPayments(workspaceId, "a", new Date(time));
-    assert.equal(listed.today, "2026-10-09");
-    assert.equal("now" in listed, false);
-    assert.deepEqual(listed.payments.map(payment => payment.nextScheduledOn), ["2026-10-09", "2026-10-10"]);
-    assert.equal((await service.mutateRecurringPayment("a", input, new Date(time))).payment.nextScheduledOn, "2026-10-09");
-  }
-  generatedMonth = "2026-10-01";
-  for (const time of times) {
-    const listed = await service.listRecurringPayments(workspaceId, "a", new Date(time));
-    assert.deepEqual(listed.payments.map(payment => payment.nextScheduledOn), ["2026-11-09", "2026-11-10"]);
-    assert.equal((await service.mutateRecurringPayment("a", input, new Date(time))).payment.nextScheduledOn, "2026-11-09");
+  const times = [
+    ["2026-10-09T08:59:59.999+09:00", "2026-10-09"], ["2026-10-09T09:00:00+09:00", "2026-11-09"],
+    ["2026-10-09T09:59:59+09:00", "2026-11-09"], ["2026-10-09T23:59:59+09:00", "2026-11-09"],
+  ];
+  for (const legacyMonth of [null, "2026-10-01", "2027-12-01"]) {
+    generatedMonth = legacyMonth;
+    for (const [time, expected] of times) {
+      const clock = new Date(time);
+      const listed = await service.listRecurringPayments(workspaceId, "a", clock);
+      assert.equal(listed.today, "2026-10-09");
+      assert.equal(listed.now, clock.toISOString());
+      assert.deepEqual(listed.payments.map(payment => payment.nextScheduledOn), [expected, "2026-10-10"]);
+      assert.ok(listed.payments.every(payment => !("lastGeneratedMonth" in payment)));
+      assert.equal((await service.mutateRecurringPayment("a", input, clock)).payment.nextScheduledOn, expected);
+    }
   }
 });
 
@@ -157,7 +161,7 @@ test("編集応答は保存した金額と日を即時反映し、適用月や�
   assert.deepEqual(Object.keys(result), ["payment"]);
 });
 
-test("再開は当日未生成の予定を即時返し、登録済み月は次回を翌月にする", async () => {
+test("再開は登録済み月を参照せず、09:00前なら当日・以降なら翌月にする", async () => {
   const { service, store } = fixture();
   let generatedMonth: string | null = null;
   store.mutate = async (_userId, input) => {
@@ -165,9 +169,11 @@ test("再開は当日未生成の予定を即時返し、登録済み月は次�
     return { payment: row({ day_of_month: 10, last_generated_month: generatedMonth }) };
   };
   const input = { action: "resume", workspaceId, paymentId, expectedRevision: 1 };
-  assert.equal((await service.mutateRecurringPayment("a", input, now)).payment.nextScheduledOn, "2026-10-10");
-  generatedMonth = "2026-10-01";
-  assert.equal((await service.mutateRecurringPayment("a", input, now)).payment.nextScheduledOn, "2026-11-10");
+  for (const legacyMonth of [null, "2026-10-01"]) {
+    generatedMonth = legacyMonth;
+    assert.equal((await service.mutateRecurringPayment("a", input, now)).payment.nextScheduledOn, "2026-10-10");
+    assert.equal((await service.mutateRecurringPayment("a", input, new Date("2026-10-10T09:00:00+09:00"))).payment.nextScheduledOn, "2026-11-10");
+  }
 });
 
 test("作成で開始日を指定しても過去・現在・未来を問わず保存前に拒否する", async () => {

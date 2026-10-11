@@ -61,22 +61,20 @@ export function recurringSplitWeights(config: RecurringPaymentConfig, memberIds:
 }
 
 type Row = Record<string, unknown>;
-const dateText = (value: unknown): string => value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
-const nullableDate = (value: unknown): string | null => value == null ? null : dateText(value);
 const rowConfig = (row: Row): RecurringPaymentConfig => recurringPaymentConfigSchema.parse({
   dayOfMonth: Number(row.day_of_month), merchant: row.merchant, method: row.method, amountYen: Number(row.amount_yen),
   actorUserId: row.actor_user_id, expenseClass: row.expense_class, splitWeights: row.split_weights, memo: row.memo,
 });
 
-export function recurringPaymentRecord(row: Row, today: string): RecurringPayment {
+export function recurringPaymentRecord(row: Row, now: Date): RecurringPayment {
   const payment: RecurringPayment = {
     id: String(row.id), workspaceId: String(row.workspace_id), state: row.state as RecurringPayment["state"],
     revision: Number(row.revision),
     authorizedById: String(row.authorized_by), currentConfig: rowConfig(row),
     nextScheduledOn: null,
-    blockedReason: row.blocked_reason == null ? null : String(row.blocked_reason), lastGeneratedMonth: nullableDate(row.last_generated_month),
+    blockedReason: row.blocked_reason == null ? null : String(row.blocked_reason),
   };
-  payment.nextScheduledOn = nextScheduledOn(payment, today);
+  payment.nextScheduledOn = nextScheduledOn(payment, now);
   return payment;
 }
 
@@ -123,8 +121,9 @@ const databaseStore: RecurringPaymentStore = {
     const thisMonth = monthOf(today);
     const rows = await db()`SELECT id,workspace_id FROM recurring_payments p
       WHERE state = 'ACTIVE' AND (${workspaceId ?? null}::uuid IS NULL OR workspace_id = ${workspaceId ?? null}::uuid)
-        AND (last_generated_month IS NULL OR last_generated_month < ${thisMonth}::date)
+        AND next_scheduled_on <= ${today}::date
         AND cake_recurring_scheduled_on(${thisMonth}::date,day_of_month) = ${today}::date
+        AND (${today}::date + TIME '09:00') AT TIME ZONE 'Asia/Tokyo' <= ${now.toISOString()}::timestamptz
         AND cake_recurring_identity_matches(authorized_by,${testMode})
       ORDER BY workspace_id,id`;
     return rows.map(row => ({ id: String(row.id), workspaceId: String(row.workspace_id) }));
@@ -178,15 +177,15 @@ export function createRecurringPaymentService(store: RecurringPaymentStore, opti
       const result = await store.list(workspaceId, userId, mode());
       if (!result.authorized) throw new RecurringPaymentError("このワークスペースを操作する権限がありません。", 403, "FORBIDDEN");
       const today = jstToday(now);
-      return { payments: result.payments.map(row => recurringPaymentRecord(row, today)), eligibleActorUserIds: result.eligibleActorUserIds, today };
+      return { payments: result.payments.map(row => recurringPaymentRecord(row, now)), eligibleActorUserIds: result.eligibleActorUserIds,
+        today, now: now.toISOString() };
     } catch (error) { throw fixedServiceError(error); }
   }
   async function mutateRecurringPayment(userId: string, input: unknown, now: Date = new Date()): Promise<RecurringPaymentMutationResult> {
     try {
       const parsed = recurringPaymentMutationSchema.parse(input);
-      const today = jstToday(now);
       const result = await store.mutate(userId, parsed, mode(), now);
-      return { payment: recurringPaymentRecord(result.payment, today) };
+      return { payment: recurringPaymentRecord(result.payment, now) };
     } catch (error) { throw fixedServiceError(error); }
   }
   async function runRecurringPayments(input: RunOptions = {}): Promise<RecurringPaymentRunResult> {
