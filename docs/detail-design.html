@@ -347,7 +347,7 @@
               <tr><td>components/transactions-panel.tsx / transaction-table.tsx</td><td>明細一覧のインライン編集、行ごとの保存状態、一括選択・削除・ルール適用。<code>TransactionTable</code>は明細/取込の共通表枠とモバイル要約。</td></tr>
               <tr><td>components/transaction-filter-dialog.tsx / use-transaction-filters.ts</td><td>列候補の選択、列内OR・列間AND条件、ユーザー/workspace別のブラウザ保存。</td></tr>
               <tr><td>components/transaction-memo-editor.tsx</td><td>清算済みを含むメモ専用の編集・保存・再試行。</td></tr>
-              <tr><td>components/split-editor.tsx / import-preview-table.tsx / selection-checkbox.tsx</td><td>割合または円での分担入力、CSVプレビュー編集、選択チェック。</td></tr>
+              <tr><td>components/split-editor.tsx / import-preview-table.tsx / selection-checkbox.tsx</td><td>割合または円での分担入力、CSVプレビュー編集、選択チェック。SelectionCheckboxの任意mobileLabelで取引明細・CSV取込のヘッダーだけをラベル付きにし、48rem以下で全選択／全解除を表示する。44px以上のlabel全体をクリック可能とし、横スクロール中はヘッダーの選択セルを左端に固定。checked・partial・disabledと既存の対象選択ロジックを維持し、フィルターダイアログのチェックには影響しない。</td></tr>
               <tr><td>components/workspace-rules.tsx</td><td>ルールのインライン編集・追加・一括削除、ドラッグ/キーボードによる適用順変更。</td></tr>
               <tr><td>components/recurring-payments-panel.tsx</td><td>定期設定の専用取得、PC表/スマホ要約、追加・即時変更・停止/再開/削除確認。保存中の二重操作抑止、遅いworkspace応答の破棄、失敗時の入力保持。</td></tr>
               <tr><td>components/personal-settings.tsx / user-management.tsx</td><td>本人の表示名変更と、管理者だけの利用者登録・停止UI。</td></tr>

@@ -61,6 +61,9 @@
 .table input[type="datetime-local"]::-webkit-calendar-picker-indicator { width: .85rem; margin: 0; }
 .table input:disabled, .table select:disabled { color: var(--disabled-ink); background: var(--surface-disabled); }
 .table .selectionCell { text-align: center; }
+.selectAllLabel { display: inline-flex; align-items: center; cursor: pointer; }
+.selectAllLabel > span { display: none; }
+.selectAllLabel[data-disabled="true"] { cursor: not-allowed; }
 .table input.checkbox { width: 1rem; height: 1rem; min-height: 0; margin-top: .45rem; padding: 0; accent-color: var(--brand); cursor: pointer; }
 .table input.checkbox:disabled { cursor: not-allowed; }
 .savingIndicator { display: inline-flex; width: 1rem; height: 1rem; }
@@ -86,7 +89,11 @@
   .table thead { display: block; overflow-x: auto; }
   .table thead tr { display: flex; gap: .4rem; width: max-content; margin: 0 0 .55rem; padding: 0; border: 0; background: transparent; }
   .table thead th { border-radius: .45rem; }
-  .table thead .selectionCell, .table .updateStatusCell { display: none; }
+  .table .updateStatusCell { display: none; }
+  .table thead .selectionCell { position: sticky; left: 0; z-index: 1; flex-shrink: 0; padding: 0; }
+  .table .selectAllLabel { min-width: 44px; min-height: 44px; padding: .5rem .65rem; gap: .5rem; white-space: nowrap; }
+  .selectAllLabel > span { display: inline; }
+  .selectAllLabel[data-disabled="true"] { color: var(--disabled-ink); }
   .table tbody { display: block; width: 100%; }
   .table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .7rem; width: 100%; margin-bottom: .55rem; padding: .8rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--paper); }
   .table td { display: block; min-width: 0; padding: 0; border: 0; }
