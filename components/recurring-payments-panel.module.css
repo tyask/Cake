@@ -17,10 +17,6 @@
 .rowActions { display: flex; gap: .45rem; flex-wrap: wrap; }
 .rowActions > button { min-height: 44px; padding: .3rem; }
 .summaryButton { min-height: 44px; }
-.mobilePending { display: none; }
-.pending { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem 1rem; margin-top: .3rem; padding: .5rem; border: 1px solid var(--line-strong); border-radius: .5rem; background: var(--accent-soft); font-size: .63rem; line-height: 1.6; }
-.pending b { color: var(--accent); font-size: .63rem; }
-.pending small { margin-top: 0 !important; }
 .blocked { display: block; color: var(--red) !important; line-height: 1.6; }
 .memo { white-space: pre-wrap; overflow-wrap: anywhere; }
 .muted { color: var(--muted); font-size: .7rem; }
@@ -45,11 +41,7 @@
   .headingActions > button { font-size: .72rem; }
   .table { min-width: 0; }
   .table thead { display: none; }
-  .table tbody > .pendingRow { display: none; }
-  .mobilePending { display: block; }
   .rowActions > button { min-height: 44px; padding: .5rem; font-size: .75rem; }
-  .pending { display: grid; gap: .3rem; font-size: .7rem; }
-  .pending b { font-size: .7rem; }
   .dialog { max-height: calc(100dvh - 1rem); }
   .preview { font-size: .68rem; }
 }

@@ -1,11 +1,11 @@
 import { defaultSplitWeights, matchingDefaultRule, personalSplitWeights, transactionDefaults } from "./expense-splits";
-import { monthOf, nextScheduledOn, pendingEffectiveMonth } from "./recurring-payment-calendar";
+import { nextScheduledOn } from "./recurring-payment-calendar";
 import type { RecurringPayment, RecurringPaymentConfig } from "./recurring-payment-types";
 import type { WorkspaceMetadata } from "./types";
 
 export function recurringFormConfig(selected: WorkspaceMetadata, currentUserId: string, eligibleActorUserIds: readonly string[], today: string, payment?: RecurringPayment): RecurringPaymentConfig {
   if (payment) {
-    const config = payment.pendingConfig ?? payment.currentConfig;
+    const config = payment.currentConfig;
     // A newly joined member contributes zero; preserve unknown saved IDs so
     // invalid membership is reported instead of silently changing the split.
     const splitWeights = { ...config.splitWeights };
@@ -28,11 +28,7 @@ export function recurringFormDefaults(selected: WorkspaceMetadata, merchant: str
 }
 
 export function recurringFormPreview(config: RecurringPaymentConfig, today: string, payment?: RecurringPayment) {
-  const startOn = payment?.startOn ?? today;
-  const effectiveMonth = payment ? pendingEffectiveMonth(startOn, today) : monthOf(startOn);
-  const activeFromMonth = payment && payment.activeFromMonth > effectiveMonth ? payment.activeFromMonth : effectiveMonth;
-  const firstOn = nextScheduledOn({ state: "ACTIVE", startOn, activeFromMonth,
-    currentConfig: config, pendingConfig: null, pendingEffectiveMonth: null,
+  const firstOn = nextScheduledOn({ state: "ACTIVE", currentConfig: config,
     lastGeneratedMonth: payment?.lastGeneratedMonth ?? null }, today);
-  return { effectiveMonth, firstOn };
+  return { firstOn };
 }

@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  addMonths, configForMonth, isCalendarDate, isDueToday, jstToday, monthOf,
-  nextScheduledOn, pendingEffectiveMonth, resumeFromMonth, scheduledDate,
+  addMonths, isCalendarDate, isDueToday, jstToday, monthOf, nextScheduledOn, scheduledDate,
 } from "../lib/recurring-payment-calendar";
 import type { RecurringPaymentSchedule } from "../lib/recurring-payment-calendar";
 import type { RecurringPaymentConfig } from "../lib/recurring-payment-types";
@@ -10,8 +9,7 @@ import type { RecurringPaymentConfig } from "../lib/recurring-payment-types";
 const config: RecurringPaymentConfig = { dayOfMonth: 27, merchant: "家賃", method: "銀行振込", amountYen: 100000,
   actorUserId: "a", expenseClass: "SHARED", splitWeights: { a: 1, b: 1 }, memo: "" };
 const payment = (overrides: Partial<RecurringPaymentSchedule> = {}): RecurringPaymentSchedule => ({
-  state: "ACTIVE", startOn: "2026-10-10", activeFromMonth: "2026-10-01", currentConfig: config,
-  pendingConfig: null, pendingEffectiveMonth: null, lastGeneratedMonth: null, ...overrides,
+  state: "ACTIVE", currentConfig: config, lastGeneratedMonth: null, ...overrides,
 });
 
 test("日本時間の日付はUTCの15時で日付・年を繰り上げる", () => {
@@ -20,7 +18,7 @@ test("日本時間の日付はUTCの15時で日付・年を繰り上げる", () 
   assert.throws(() => jstToday(new Date("invalid")), RangeError);
 });
 
-test("開始日は実在する日付だけを受け入れる", () => {
+test("予定日の計算は実在する日付だけを受け入れる", () => {
   for (const value of ["2026-02-29", "2026-04-31", "2026-13-01", "2026-00-01", "2026-10-00", "2026-1-01", "0000-01-01"]) {
     assert.equal(isCalendarDate(value), false, value);
   }
@@ -48,30 +46,28 @@ test("当日のみ生成し、失敗した翌日に過去予定を補完しな�
   assert.equal(isDueToday(setting, "2026-11-27"), true);
 });
 
-test("開始前の予定を飛ばし、月末丸め後の実際の日付で開始日を判定する", () => {
-  assert.equal(nextScheduledOn(payment({ startOn: "2026-10-28" }), "2026-10-10"), "2026-11-27");
-  assert.equal(isDueToday(payment({ startOn: "2026-10-28" }), "2026-10-27"), false);
-  assert.equal(nextScheduledOn(payment({ startOn: "2027-02-28", activeFromMonth: "2027-02-01",
-    currentConfig: { ...config, dayOfMonth: 31 } }), "2027-02-10"), "2027-02-28");
+test("月末の予定は開始条件なしで当日に対象となる", () => {
+  const endOfMonth = payment({ currentConfig: { ...config, dayOfMonth: 31 } });
+  assert.equal(nextScheduledOn(endOfMonth, "2027-02-10"), "2027-02-28");
+  assert.equal(isDueToday(endOfMonth, "2027-02-28"), true);
+  assert.equal(nextScheduledOn(endOfMonth, "2027-03-01"), "2027-03-31");
 });
 
-test("翌月の変更は候補抽出と次回日付で同じ設定を使う", () => {
-  const pending = { ...config, dayOfMonth: 10, amountYen: 110000 };
-  const setting = payment({ pendingConfig: pending, pendingEffectiveMonth: "2026-11-01" });
-  assert.equal(configForMonth(setting, "2026-10-01"), config);
-  assert.equal(configForMonth(setting, "2026-11-01"), pending);
-  assert.equal(nextScheduledOn(setting, "2026-10-28"), "2026-11-10");
-  assert.equal(isDueToday(setting, "2026-11-10"), true);
-  assert.equal(isDueToday(setting, "2026-11-27"), false);
+test("未生成の設定編集は当月の日付と金額に即時反映する", () => {
+  const edited = payment({ currentConfig: { ...config, dayOfMonth: 10, amountYen: 110000 } });
+  assert.equal(nextScheduledOn(edited, "2026-10-10"), "2026-10-10");
+  assert.equal(isDueToday(edited, "2026-10-10"), true);
+  assert.equal(isDueToday(edited, "2026-10-27"), false);
+  const futureDay = { ...edited, currentConfig: { ...edited.currentConfig, dayOfMonth: 31 } };
+  assert.equal(nextScheduledOn(futureDay, "2026-10-10"), "2026-10-31");
+  assert.equal(isDueToday(futureDay, "2026-10-31"), true);
 });
 
-test("未来の開始月に設定変更を適用し、開始日前なら次の月の予定を返す", () => {
-  assert.equal(pendingEffectiveMonth("2026-12-28", "2026-10-10"), "2026-12-01");
-  assert.equal(pendingEffectiveMonth("2026-09-01", "2026-10-10"), "2026-11-01");
-  const future = payment({ startOn: "2026-12-28", activeFromMonth: "2026-12-01",
-    pendingConfig: { ...config, dayOfMonth: 31 }, pendingEffectiveMonth: "2026-12-01" });
-  assert.equal(nextScheduledOn(future, "2026-10-10"), "2026-12-31");
-  assert.equal(nextScheduledOn({ ...future, pendingConfig: { ...config, dayOfMonth: 10 } }, "2026-10-10"), "2027-01-10");
+test("編集した日がすでに過ぎていれば当月分を補完せず翌月を返す", () => {
+  const edited = payment({ currentConfig: { ...config, dayOfMonth: 1 } });
+  assert.equal(nextScheduledOn(edited, "2026-10-10"), "2026-11-01");
+  assert.equal(isDueToday(edited, "2026-10-10"), false);
+  assert.equal(isDueToday(edited, "2026-11-01"), true);
 });
 
 test("停止中・要確認・削除設定は予定日と生成を返さない", () => {
@@ -81,12 +77,25 @@ test("停止中・要確認・削除設定は予定日と生成を返さない",
   }
 });
 
-test("登録済み年月は明細削除後も同月再生成を防ぎ、再開月も尊重する", () => {
+test("登録済み年月は明細削除・設定編集後も同月再生成を防ぐ", () => {
   const saved = payment({ lastGeneratedMonth: "2026-10-01" });
   assert.equal(isDueToday(saved, "2026-10-27"), false);
   assert.equal(nextScheduledOn(saved, "2026-10-27"), "2026-11-27");
   assert.equal(nextScheduledOn(payment({ lastGeneratedMonth: "2026-12-01" }), "2026-10-10"), "2027-01-27");
-  assert.equal(resumeFromMonth(payment(), "2026-10-10"), "2026-11-01");
-  assert.equal(resumeFromMonth(payment({ activeFromMonth: "2027-01-01" }), "2026-10-10"), "2027-01-01");
-  assert.equal(nextScheduledOn(payment({ activeFromMonth: "2026-11-01" }), "2026-10-27"), "2026-11-27");
+  const edited = { ...saved, currentConfig: { ...config, dayOfMonth: 31, amountYen: 110000 } };
+  assert.equal(isDueToday(edited, "2026-10-31"), false);
+  assert.equal(nextScheduledOn(edited, "2026-10-10"), "2026-11-30");
+});
+
+test("再開は即時有効で、当日未生成なら対象、生成済みなら翌月になる", () => {
+  for (const state of ["PAUSED", "BLOCKED"] as const) {
+    const stopped = payment({ state });
+    const resumed = { ...stopped, state: "ACTIVE" as const };
+    assert.equal(isDueToday(resumed, "2026-10-27"), true);
+    assert.equal(nextScheduledOn(resumed, "2026-10-27"), "2026-10-27");
+    assert.equal(nextScheduledOn(resumed, "2026-10-28"), "2026-11-27");
+    const alreadyGenerated = { ...resumed, lastGeneratedMonth: "2026-10-01" };
+    assert.equal(isDueToday(alreadyGenerated, "2026-10-27"), false);
+    assert.equal(nextScheduledOn(alreadyGenerated, "2026-10-27"), "2026-11-27");
+  }
 });

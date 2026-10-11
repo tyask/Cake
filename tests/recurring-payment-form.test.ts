@@ -8,16 +8,16 @@ const selected: WorkspaceMetadata = { workspace: { id: "w", name: "家計", type
   members: [{ id: "a", email: "a@test", name: "A", imageUrl: null, role: "OWNER", weight: 1 },
     { id: "b", email: "b@test", name: "B", imageUrl: null, role: "MEMBER", weight: 1 }], rules: [] };
 const config = { dayOfMonth: 27, merchant: "家賃", method: "振込", amountYen: 100000, actorUserId: "a", expenseClass: "SHARED" as const, splitWeights: { a: 1, b: 1 }, memo: "" };
-const payment: RecurringPayment = { id: "r", workspaceId: "w", state: "ACTIVE", startOn: "2026-09-01", activeFromMonth: "2026-09-01", revision: 2, authorizedById: "a",
-  currentConfig: config, pendingConfig: { ...config, dayOfMonth: 10, amountYen: 110000 }, pendingEffectiveMonth: "2026-11-01",
+const payment: RecurringPayment = { id: "r", workspaceId: "w", state: "ACTIVE", revision: 2, authorizedById: "a",
+  currentConfig: config,
   nextScheduledOn: "2026-10-27", blockedReason: null, lastGeneratedMonth: "2026-09-01" };
 
-test("editing a future change starts with the saved future amount and day", () => {
+test("editing starts with the current saved amount and day and copies split weights", () => {
   const draft = recurringFormConfig(selected, "a", ["a", "b"], "2026-10-10", payment);
-  assert.equal(draft.amountYen, 110000);
-  assert.equal(draft.dayOfMonth, 10);
+  assert.equal(draft.amountYen, 100000);
+  assert.equal(draft.dayOfMonth, 27);
   draft.splitWeights.a = 9;
-  assert.equal(payment.pendingConfig!.splitWeights.a, 1);
+  assert.equal(payment.currentConfig.splitWeights.a, 1);
 });
 
 test("new recurring payment selects an eligible actor and fixes a personal workspace split", () => {
@@ -27,20 +27,22 @@ test("new recurring payment selects an eligible actor and fixes a personal works
 });
 
 test("new payment preview uses today and the next matching monthly date", () => {
-  assert.deepEqual(recurringFormPreview({ ...config, dayOfMonth: 10 }, "2026-10-10"), { effectiveMonth: "2026-10-01", firstOn: "2026-10-10" });
+  assert.deepEqual(recurringFormPreview({ ...config, dayOfMonth: 10 }, "2026-10-10"), { firstOn: "2026-10-10" });
   assert.equal(recurringFormPreview({ ...config, dayOfMonth: 1 }, "2026-10-10").firstOn, "2026-11-01");
   assert.equal(recurringFormPreview({ ...config, dayOfMonth: 27 }, "2026-10-10").firstOn, "2026-10-27");
   assert.equal(recurringFormPreview({ ...config, dayOfMonth: 31 }, "2027-02-10").firstOn, "2027-02-28");
 });
 
-test("editing retains legacy internal start metadata without accepting a start date input", () => {
-  const future = { ...payment, startOn: "2026-12-28", activeFromMonth: "2026-12-01", lastGeneratedMonth: null };
-  assert.deepEqual(recurringFormPreview({ ...config, dayOfMonth: 31 }, "2026-10-10", future), { effectiveMonth: "2026-12-01", firstOn: "2026-12-31" });
-  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 10 }, "2026-10-10", future).firstOn, "2027-01-10");
+test("editing previews the current month immediately but preserves the generated-month guard", () => {
+  assert.deepEqual(recurringFormPreview({ ...config, dayOfMonth: 31 }, "2026-10-10", payment), { firstOn: "2026-10-31" });
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 10 }, "2026-10-10", payment).firstOn, "2026-10-10");
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 1 }, "2026-10-10", payment).firstOn, "2026-11-01");
+  const generated = { ...payment, lastGeneratedMonth: "2026-10-01" };
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 31 }, "2026-10-10", generated).firstOn, "2026-11-30");
 });
 
 test("new members get zero without silently deleting an unknown saved participant", () => {
   const draft = recurringFormConfig(selected, "a", ["a", "b"], "2026-10-10", { ...payment,
-    pendingConfig: null, currentConfig: { ...config, splitWeights: { a: 1, former: 2 } } });
+    currentConfig: { ...config, splitWeights: { a: 1, former: 2 } } });
   assert.deepEqual(draft.splitWeights, { a: 1, former: 2, b: 0 });
 });

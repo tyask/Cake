@@ -17,13 +17,9 @@ export interface RecurringPayment {
   id: string;
   workspaceId: string;
   state: RecurringPaymentState;
-  startOn: string;
-  activeFromMonth: string;
   revision: number;
   authorizedById: string;
   currentConfig: RecurringPaymentConfig;
-  pendingConfig: RecurringPaymentConfig | null;
-  pendingEffectiveMonth: string | null;
   nextScheduledOn: string | null;
   blockedReason: string | null;
   lastGeneratedMonth: string | null;
@@ -37,7 +33,6 @@ export interface RecurringPaymentsResponse {
 
 export interface RecurringPaymentMutationResult {
   payment: RecurringPayment;
-  effectiveMonth?: string;
 }
 
 export interface RecurringPaymentRunResult {

@@ -5,7 +5,7 @@ import { isTestAuthEnabled } from "./auth-mode";
 import { validateSplitWeights } from "./expense-splits";
 import { transactionMemoSchema } from "./transaction-memo";
 import { TEST_USERS } from "./test-users";
-import { configForMonth, jstToday, monthOf, nextScheduledOn } from "./recurring-payment-calendar";
+import { jstToday, monthOf, nextScheduledOn } from "./recurring-payment-calendar";
 import type {
   RecurringPayment, RecurringPaymentConfig, RecurringPaymentMutationResult,
   RecurringPaymentRunResult, RecurringPaymentsResponse,
@@ -32,8 +32,6 @@ export const recurringPaymentMutationSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("archive"), ...identityShape }).strict(),
 ]);
 export type RecurringPaymentMutation = z.infer<typeof recurringPaymentMutationSchema>;
-type StoredRecurringPaymentMutation = Exclude<RecurringPaymentMutation, { action: "create" }>
-  | (Extract<RecurringPaymentMutation, { action: "create" }> & { startOn: string });
 
 export class RecurringPaymentError extends Error {
   constructor(message: string, public readonly status: number, public readonly code: string) {
@@ -70,32 +68,24 @@ const rowConfig = (row: Row): RecurringPaymentConfig => recurringPaymentConfigSc
   actorUserId: row.actor_user_id, expenseClass: row.expense_class, splitWeights: row.split_weights, memo: row.memo,
 });
 
-/** Reads logically promote a due pending change without modifying the database. */
 export function recurringPaymentRecord(row: Row, today: string): RecurringPayment {
   const payment: RecurringPayment = {
     id: String(row.id), workspaceId: String(row.workspace_id), state: row.state as RecurringPayment["state"],
-    startOn: dateText(row.start_on), activeFromMonth: dateText(row.active_from_month), revision: Number(row.revision),
+    revision: Number(row.revision),
     authorizedById: String(row.authorized_by), currentConfig: rowConfig(row),
-    pendingConfig: row.pending_config == null ? null : recurringPaymentConfigSchema.parse(row.pending_config),
-    pendingEffectiveMonth: nullableDate(row.pending_effective_month), nextScheduledOn: null,
+    nextScheduledOn: null,
     blockedReason: row.blocked_reason == null ? null : String(row.blocked_reason), lastGeneratedMonth: nullableDate(row.last_generated_month),
   };
-  const effective = configForMonth(payment, monthOf(today));
-  if (effective === payment.pendingConfig) {
-    payment.currentConfig = effective;
-    payment.pendingConfig = null;
-    payment.pendingEffectiveMonth = null;
-  }
   payment.nextScheduledOn = nextScheduledOn(payment, today);
   return payment;
 }
 
-interface SavedMutation { payment: Row; effectiveMonth?: string }
+interface SavedMutation { payment: Row }
 interface RecurringCandidate { id: string; workspaceId: string }
 interface GenerationResult { status: "created" | "skipped" | "blocked"; errorCode?: string }
 export interface RecurringPaymentStore {
   list(workspaceId: string, userId: string, testMode: boolean): Promise<{ authorized: boolean; payments: Row[]; eligibleActorUserIds: string[] }>;
-  mutate(userId: string, input: StoredRecurringPaymentMutation, testMode: boolean, now: Date): Promise<SavedMutation>;
+  mutate(userId: string, input: RecurringPaymentMutation, testMode: boolean, now: Date): Promise<SavedMutation>;
   candidates(workspaceId: string | undefined, testMode: boolean, now: Date): Promise<RecurringCandidate[]>;
   generate(candidate: RecurringCandidate, testMode: boolean, now: Date): Promise<GenerationResult>;
 }
@@ -122,7 +112,7 @@ const databaseStore: RecurringPaymentStore = {
       ? recurringPaymentConfigSchema.parse(Object.fromEntries(Object.keys(configShape).map(key => [key, input[key as keyof typeof input]]))) : null;
     const rows = await db()`SELECT cake_mutate_recurring_payment(
       ${input.workspaceId}::uuid,${userId},${input.action},${"paymentId" in input ? input.paymentId : null}::uuid,
-      ${"expectedRevision" in input ? input.expectedRevision : null}::integer,${"startOn" in input ? input.startOn : null}::date,
+      ${"expectedRevision" in input ? input.expectedRevision : null}::integer,${null}::date,
       ${config ? JSON.stringify(config) : null}::jsonb,${testMode},${now.toISOString()}::timestamptz
     ) AS result`;
     if (!rows[0]?.result) throw new Error("Unavailable result");
@@ -133,10 +123,8 @@ const databaseStore: RecurringPaymentStore = {
     const thisMonth = monthOf(today);
     const rows = await db()`SELECT id,workspace_id FROM recurring_payments p
       WHERE state = 'ACTIVE' AND (${workspaceId ?? null}::uuid IS NULL OR workspace_id = ${workspaceId ?? null}::uuid)
-        AND start_on <= ${today}::date AND active_from_month <= ${thisMonth}::date
         AND (last_generated_month IS NULL OR last_generated_month < ${thisMonth}::date)
-        AND cake_recurring_scheduled_on(${thisMonth}::date,CASE WHEN pending_effective_month <= ${thisMonth}::date
-          THEN (pending_config->>'dayOfMonth')::integer ELSE day_of_month END) = ${today}::date
+        AND cake_recurring_scheduled_on(${thisMonth}::date,day_of_month) = ${today}::date
         AND cake_recurring_identity_matches(authorized_by,${testMode})
       ORDER BY workspace_id,id`;
     return rows.map(row => ({ id: String(row.id), workspaceId: String(row.workspace_id) }));
@@ -197,11 +185,8 @@ export function createRecurringPaymentService(store: RecurringPaymentStore, opti
     try {
       const parsed = recurringPaymentMutationSchema.parse(input);
       const today = jstToday(now);
-      // The date is internal metadata. Clients choose only the recurring day.
-      const storedInput = parsed.action === "create" ? { ...parsed, startOn: today } : parsed;
-      const result = await store.mutate(userId, storedInput, mode(), now);
-      return { payment: recurringPaymentRecord(result.payment, today),
-        ...(result.effectiveMonth ? { effectiveMonth: dateText(result.effectiveMonth) } : {}) };
+      const result = await store.mutate(userId, parsed, mode(), now);
+      return { payment: recurringPaymentRecord(result.payment, today) };
     } catch (error) { throw fixedServiceError(error); }
   }
   async function runRecurringPayments(input: RunOptions = {}): Promise<RecurringPaymentRunResult> {

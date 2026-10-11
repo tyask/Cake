@@ -8,9 +8,8 @@ const workspaceId = "00000000-0000-4000-8000-000000000001";
 const paymentId = "00000000-0000-4000-8000-000000000002";
 const config = { dayOfMonth: 27, merchant: "家賃", method: "銀行振込", amountYen: 100000,
   actorUserId: "test-user-a", expenseClass: "PERSONAL" as const, splitWeights: { "test-user-a": 1 }, memo: "定期料金" };
-const payment: RecurringPayment = { id: paymentId, workspaceId, state: "ACTIVE", startOn: "2026-10-10",
-  activeFromMonth: "2026-10-01", revision: 1, authorizedById: "test-user-a", currentConfig: config,
-  pendingConfig: null, pendingEffectiveMonth: null, nextScheduledOn: "2026-10-27", blockedReason: null, lastGeneratedMonth: null };
+const payment: RecurringPayment = { id: paymentId, workspaceId, state: "ACTIVE", revision: 1, authorizedById: "test-user-a", currentConfig: config,
+  nextScheduledOn: "2026-10-27", blockedReason: null, lastGeneratedMonth: null };
 const summary = { runId: "run", candidates: 1, created: 1, skipped: 0, failed: 0, unprocessed: 0 };
 
 function fixture(environment: Record<string, string | undefined> = {}) {
@@ -62,6 +61,7 @@ test("開始日なしの設定作成は201、通常の設定更新・状態変�
   assert.deepEqual(f.calls, [["mutate", "test-user-a", { action: "create", workspaceId, ...config }]]);
   const updated = await f.handlers.POST(request({ action: "update", workspaceId, paymentId, expectedRevision: 1, ...config }));
   assert.equal(updated.status, 200);
+  assert.deepEqual(Object.keys(await updated.json()), ["payment"]);
   for (const action of ["pause", "resume", "archive"]) {
     assert.equal((await f.handlers.POST(request({ action, workspaceId, paymentId, expectedRevision: 1 }))).status, 200);
   }
@@ -79,9 +79,11 @@ test("設定作成でクライアントの開始日指定を拒否する", async
   assert.deepEqual(f.calls, []);
 });
 
-test("更新で開始日・状態・成功月・承認者を指定できない", async () => {
+test("更新で開始日・適用月・変更予定・状態・成功月・承認者を指定できない", async () => {
   const f = fixture();
-  for (const extra of [{ startOn: "2026-10-10" }, { state: "ACTIVE" }, { lastGeneratedMonth: "2026-10-01" }, { authorizedById: "other" }]) {
+  for (const extra of [{ startOn: "2026-10-10" }, { activeFromMonth: "2026-11-01" }, { pendingConfig: config },
+    { pendingEffectiveMonth: "2026-11-01" }, { effectiveMonth: "2026-11-01" },
+    { state: "ACTIVE" }, { lastGeneratedMonth: "2026-10-01" }, { authorizedById: "other" }]) {
     assert.equal((await f.handlers.POST(request({ action: "update", workspaceId, paymentId, expectedRevision: 1, ...config, ...extra }))).status, 400);
   }
   assert.deepEqual(f.calls, []);

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { validateSplitWeights, defaultSplitWeights, personalSplitWeights } from "@/lib/expense-splits";
 import { splitAmounts } from "@/lib/split-allocations";
-import { nextScheduledOn, resumeFromMonth } from "@/lib/recurring-payment-calendar";
 import { recurringFormConfig, recurringFormDefaults, recurringFormPreview } from "@/lib/recurring-payment-form";
 import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
 import type { RecurringPayment, RecurringPaymentConfig, RecurringPaymentMutationResult, RecurringPaymentsResponse } from "@/lib/recurring-payment-types";
@@ -15,7 +14,6 @@ import styles from "./recurring-payments-panel.module.css";
 
 const money = (value: number) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(value);
 const dateLabel = (date: string) => date.replaceAll("-", "/");
-const monthLabel = (month: string) => `${Number(month.slice(0, 4))}年${Number(month.slice(5, 7))}月`;
 type StateAction = "pause" | "resume" | "archive";
 type FormState = { payment?: RecurringPayment };
 
@@ -80,9 +78,9 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
           : [...current.payments.filter(payment => payment.id !== result.payment.id), result.payment] } : current);
         setForm(null);
         setConfirmation(null);
-        setNotice(payload.action === "update" && result.effectiveMonth ? `${monthLabel(result.effectiveMonth)}分からの変更を保存しました。`
+        setNotice(payload.action === "update" ? "定期支払いの変更を保存しました。"
           : payload.action === "pause" ? "自動追加を停止しました。"
-          : payload.action === "resume" ? "翌月以降の再開を保存しました。"
+          : payload.action === "resume" ? "自動追加を再開しました。"
           : payload.action === "archive" ? "定期支払いを削除しました。追加済みの明細は残ります。" : "定期支払いを追加しました。");
         // A read failure after a successful creation must not invite a duplicate retry.
         setLoading(true);
@@ -125,7 +123,7 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
     </table></div>}
     {form && data && <RecurringPaymentForm key={form.payment ? `${form.payment.id}-${form.payment.revision}` : "new"} selected={selected} currentUserId={currentUserId} data={data} payment={form.payment}
       close={() => setForm(null)} save={save} reloadLatest={reloadLatest} />}
-    {confirmation && data && <RecurringPaymentConfirmation key={`${confirmation.payment.id}-${confirmation.payment.revision}-${confirmation.action}`} {...confirmation} today={data.today}
+    {confirmation && data && <RecurringPaymentConfirmation key={`${confirmation.payment.id}-${confirmation.payment.revision}-${confirmation.action}`} {...confirmation}
       close={() => setConfirmation(null)} save={save} reloadLatest={reloadLatest} />}
   </section>;
 }
@@ -135,7 +133,7 @@ function RecurringPaymentRow({ payment, members, busy, onEdit, onAction }: { pay
   const config = payment.currentConfig;
   const actorName = members.find(member => member.id === config.actorUserId)?.name ?? "確認が必要です";
   const stateLabel = payment.state === "ACTIVE" ? "有効" : payment.state === "PAUSED" ? "停止中" : "要確認";
-  return <><tr className={tableStyles.transactionRow} data-expanded={expanded} data-recurring-payment-id={payment.id}>
+  return <tr className={tableStyles.transactionRow} data-expanded={expanded} data-recurring-payment-id={payment.id}>
     <td className={tableStyles.mobileSummary} colSpan={10}><button type="button" className={`${tableStyles.summaryButton} ${styles.summaryButton}`} aria-expanded={expanded}
       aria-label={`${config.merchant}の詳細を${expanded ? "閉じる" : "開く"}`} onClick={() => setExpanded(current => !current)}>
       <span className={tableStyles.summaryName}><b>{config.merchant}</b><small>毎月{config.dayOfMonth}日 · {actorName}</small></span>
@@ -148,19 +146,12 @@ function RecurringPaymentRow({ payment, members, busy, onEdit, onAction }: { pay
     <td data-label={`支払い割合（${members.map(member => member.name).join(", ")}）`} className={tableStyles.fullCell}><RecurringSplit config={config} members={members} /></td>
     <td data-label="メモ" className={`${tableStyles.fullCell} ${styles.memo}`}>{config.memo || "—"}</td>
     <td data-label="状態" className={tableStyles.fullCell}><span className={payment.state === "BLOCKED" ? "error-tag" : payment.state === "ACTIVE" ? "success-tag" : "class-tag personal"}>{stateLabel}</span>
-      {payment.state === "BLOCKED" && <small className={styles.blocked}>{blockedReasonLabel(payment.blockedReason)} 設定を確認して、翌月から再開してください。</small>}
-      {payment.pendingConfig && payment.pendingEffectiveMonth && <div className={styles.mobilePending}><PendingChange payment={payment} members={members} /></div>}</td>
+      {payment.state === "BLOCKED" && <small className={styles.blocked}>{blockedReasonLabel(payment.blockedReason)} 設定を確認して、再開してください。</small>}</td>
     <td data-label="操作" className={tableStyles.fullCell}><div className={styles.rowActions}><button type="button" className="text-button" disabled={busy} onClick={onEdit}>編集</button>
       {payment.state === "ACTIVE" ? <button type="button" className="text-button" disabled={busy} onClick={() => onAction("pause")}>停止</button>
         : <button type="button" className="text-button" disabled={busy} onClick={() => onAction("resume")}>再開</button>}
       <button type="button" className="danger-text" disabled={busy} onClick={() => onAction("archive")}>削除</button></div></td>
-  </tr>{payment.pendingConfig && payment.pendingEffectiveMonth && <tr className={`${tableStyles.feedbackRow} ${styles.pendingRow}`}><td colSpan={10} className={tableStyles.feedbackCell}><PendingChange payment={payment} members={members} /></td></tr>}</>;
-}
-
-function PendingChange({ payment, members }: { payment: RecurringPayment; members: WorkspaceMember[] }) {
-  const config = payment.pendingConfig;
-  if (!config || !payment.pendingEffectiveMonth) return null;
-  return <div className={styles.pending}><b>{monthLabel(payment.pendingEffectiveMonth)}から変更予定</b><span>毎月{config.dayOfMonth}日 / {money(config.amountYen)}</span><span>{config.merchant} · {config.method}</span><span>{members.find(member => member.id === config.actorUserId)?.name ?? "支払者の確認が必要です"} · {config.expenseClass === "PERSONAL" ? "個人費" : "共通費"}</span><RecurringSplit config={config} members={members} />{config.memo && <span className={styles.memo}>メモ：{config.memo}</span>}</div>;
+  </tr>;
 }
 
 function RecurringSplit({ config, members }: { config: RecurringPaymentConfig; members: WorkspaceMember[] }) {
@@ -215,7 +206,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
         if (failure instanceof RecurringRequestError && failure.code === "REVISION_CONFLICT") setConflict(true);
       } finally { savingRef.current = false; setSaving(false); }
     }}>
-      {payment && preview && <p className={styles.hint}>{monthLabel(preview.effectiveMonth)}分から変更します。追加済みの明細は変わりません。{payment.state !== "ACTIVE" && "保存後も自動追加は停止中です。再開は一覧から行ってください。"}</p>}
+      {payment && <p className={styles.hint}>保存した設定は直ちに反映されます。追加済みの明細は変わりません。{payment.state !== "ACTIVE" && "保存後も自動追加は停止中です。再開は一覧から行ってください。"}</p>}
       <fieldset disabled={saving} className={styles.fields}><div className="form-grid">
         <label className="full">毎月の日<select required value={config.dayOfMonth} onChange={event => patch({ dayOfMonth: Number(event.target.value) })}>{Array.from({ length: 31 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}日</option>)}</select></label>
         <label className="full">取引先<input required maxLength={240} value={config.merchant} onChange={event => {
@@ -245,19 +236,18 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
       {conflict && payment && <button type="button" className="text-button" disabled={saving} onClick={() => {
         if (window.confirm("入力中の内容を破棄して、最新の設定を読み込みますか？")) void reloadLatest(payment);
       }}>最新の設定で開き直す</button>}
-      <div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={close}>キャンセル</button><button type="submit" className="primary" disabled={saving || conflict || unavailableActor || !preview || !splitValid}>{saving ? "保存中…" : payment ? "翌月からの変更を保存" : "追加する"}</button></div>
+      <div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={close}>キャンセル</button><button type="submit" className="primary" disabled={saving || conflict || unavailableActor || !preview || !splitValid}>{saving ? "保存中…" : payment ? "変更を保存" : "追加する"}</button></div>
     </form>
   </RecurringDialog>;
 }
 
-function RecurringPaymentConfirmation({ action, payment, today, close, save, reloadLatest }: { action: StateAction; payment: RecurringPayment; today: string; close: () => void;
+function RecurringPaymentConfirmation({ action, payment, close, save, reloadLatest }: { action: StateAction; payment: RecurringPayment; close: () => void;
   save: (payload: Record<string, unknown>) => Promise<RecurringPaymentMutationResult>; reloadLatest: (payment: RecurringPayment) => Promise<void> }) {
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const verb = action === "pause" ? "停止" : action === "resume" ? "再開" : "削除";
-  const firstOn = action === "resume" ? nextScheduledOn({ ...payment, state: "ACTIVE", activeFromMonth: resumeFromMonth(payment, today) }, today) : null;
   return <RecurringDialog title={`定期支払いを${verb}`} busy={saving} close={close}>
     <form onSubmit={async event => {
       event.preventDefault(); if (savingRef.current) return; savingRef.current = true; setSaving(true); setError(null);
@@ -266,8 +256,8 @@ function RecurringPaymentConfirmation({ action, payment, today, close, save, rel
       finally { savingRef.current = false; setSaving(false); }
     }}>
       <p className={styles.confirmMerchant}>{payment.currentConfig.merchant}</p>
-      {action === "pause" && <p className={styles.confirmText}>今後の自動追加を直ちに停止します。追加済みの明細は残ります。再開は翌月以降になります。</p>}
-      {action === "resume" && <p className={styles.confirmText}>今月分は追加せず、{firstOn ? dateLabel(firstOn) : "翌月以降"}から再開します。停止期間分は追加しません。</p>}
+      {action === "pause" && <p className={styles.confirmText}>今後の自動追加を直ちに停止します。追加済みの明細は残ります。</p>}
+      {action === "resume" && <p className={styles.confirmText}>自動追加を再開します。予定日に明細を追加します。停止期間分は追加しません。</p>}
       {action === "archive" && <p className={styles.confirmText}>今後の自動追加を終了します。追加済みの明細は残ります。この設定は再開できません。</p>}
       {error && <p className="form-error" role="alert">{error}</p>}{conflict && <button type="button" className="text-button" disabled={saving} onClick={() => { void reloadLatest(payment); }}>最新の設定を確認する</button>}
       <div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={close}>キャンセル</button><button type="submit" className={action === "archive" ? `secondary ${styles.deleteButton}` : "primary"} disabled={saving || conflict}>{saving ? "保存中…" : `${verb}する`}</button></div>

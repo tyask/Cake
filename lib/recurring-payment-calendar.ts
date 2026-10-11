@@ -2,11 +2,7 @@ import type { RecurringPaymentConfig, RecurringPaymentState } from "./recurring-
 
 export interface RecurringPaymentSchedule {
   state: RecurringPaymentState;
-  startOn: string;
-  activeFromMonth: string;
   currentConfig: RecurringPaymentConfig;
-  pendingConfig: RecurringPaymentConfig | null;
-  pendingEffectiveMonth: string | null;
   lastGeneratedMonth: string | null;
 }
 
@@ -48,36 +44,19 @@ export function scheduledDate(month: string, dayOfMonth: number): string {
   return `${first.slice(0, 7)}-${String(Math.min(dayOfMonth, date.getUTCDate())).padStart(2, "0")}`;
 }
 
-export function configForMonth(payment: Pick<RecurringPaymentSchedule, "currentConfig" | "pendingConfig" | "pendingEffectiveMonth">, month: string): RecurringPaymentConfig {
-  return payment.pendingConfig && payment.pendingEffectiveMonth && monthOf(month) >= payment.pendingEffectiveMonth
-    ? payment.pendingConfig : payment.currentConfig;
-}
-
-export function pendingEffectiveMonth(startOn: string, today: string): string {
-  return [addMonths(monthOf(today), 1), monthOf(startOn)].sort().at(-1)!;
-}
-
-export function resumeFromMonth(payment: Pick<RecurringPaymentSchedule, "startOn" | "activeFromMonth">, today: string): string {
-  return [payment.activeFromMonth, pendingEffectiveMonth(payment.startOn, today)].sort().at(-1)!;
-}
-
 /** Past scheduled days are never returned as recovery work. */
 export function nextScheduledOn(payment: RecurringPaymentSchedule, today: string): string | null {
   if (payment.state !== "ACTIVE") return null;
-  let month = [monthOf(today), monthOf(payment.startOn), payment.activeFromMonth,
+  let month = [monthOf(today),
     ...(payment.lastGeneratedMonth ? [addMonths(payment.lastGeneratedMonth, 1)] : [])].sort().at(-1)!;
-  // At most the current candidate and the following month are needed: the first
-  // might precede today/startOn, and a pending day may change the second.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const date = scheduledDate(month, configForMonth(payment, month).dayOfMonth);
-    if (date >= today && date >= payment.startOn) return date;
-    month = addMonths(month, 1);
-  }
-  throw new RangeError("次回予定日を計算できませんでした。");
+  const date = scheduledDate(month, payment.currentConfig.dayOfMonth);
+  if (date >= today) return date;
+  month = addMonths(month, 1);
+  return scheduledDate(month, payment.currentConfig.dayOfMonth);
 }
 
 export function isDueToday(payment: RecurringPaymentSchedule, today: string): boolean {
-  return payment.state === "ACTIVE" && today >= payment.startOn && monthOf(today) >= payment.activeFromMonth
+  return payment.state === "ACTIVE"
     && (!payment.lastGeneratedMonth || payment.lastGeneratedMonth < monthOf(today))
-    && scheduledDate(monthOf(today), configForMonth(payment, monthOf(today)).dayOfMonth) === today;
+    && scheduledDate(monthOf(today), payment.currentConfig.dayOfMonth) === today;
 }
