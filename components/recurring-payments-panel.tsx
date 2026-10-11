@@ -37,9 +37,7 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
   const [confirmation, setConfirmation] = useState<{ action: StateAction; payment: RecurringPayment } | null>(null);
   const mounted = useRef(false);
   const requestId = useRef(0);
-  const dataReceivedAt = useRef(0);
   const workspaceId = selected.workspace.id;
-  const serverNow = data?.now;
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const id = ++requestId.current;
@@ -47,7 +45,6 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
       const response = await fetch(`/api/recurring-payments?${new URLSearchParams({ workspaceId })}`, { cache: "no-store", signal });
       const result = await readResponse<RecurringPaymentsResponse>(response);
       if (!mounted.current || id !== requestId.current) return null;
-      dataReceivedAt.current = performance.now();
       setData(result);
       setError(null);
       return result;
@@ -67,17 +64,6 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
     queueMicrotask(() => { if (!controller.signal.aborted) void load(controller.signal); });
     return () => { mounted.current = false; requestId.current += 1; controller.abort(); };
   }, [load]);
-
-  useEffect(() => {
-    if (!serverNow) return;
-    const now = new Date(serverNow);
-    // JST 09:00 is UTC midnight. Count elapsed time after receipt so network
-    // latency cannot trigger a refresh before the server reaches the boundary.
-    const nextRun = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
-    const delay = Math.max(0, nextRun - now.getTime() - (performance.now() - dataReceivedAt.current));
-    const timer = window.setTimeout(() => { setLoading(true); void load(); }, delay);
-    return () => window.clearTimeout(timer);
-  }, [serverNow, load]);
 
   async function save(payload: Record<string, unknown>) {
     requestId.current += 1;
@@ -205,7 +191,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
   let splitValid = true;
   try { validateSplitWeights(config.splitWeights, selected.members, config.expenseClass, config.actorUserId); } catch { splitValid = false; }
   let preview: ReturnType<typeof recurringFormPreview> | null = null;
-  try { preview = recurringFormPreview(config, new Date(data.now), payment); } catch { /* Invalid config has no preview. */ }
+  try { preview = recurringFormPreview(config, data.today, payment); } catch { /* Invalid config has no preview. */ }
   const patch = (update: Partial<RecurringPaymentConfig>) => { setConfig(current => ({ ...current, ...update })); if (!conflict) setError(null); };
   const applyDefaults = () => { patch(recurringFormDefaults(selected, config.merchant, config.actorUserId)); setCustomized(false); };
   return <RecurringDialog title={payment ? "定期支払いを編集" : "定期支払いを追加"} close={close} busy={saving}>
@@ -244,7 +230,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
           <button type="button" className="text-button" disabled={!config.actorUserId} onClick={applyDefaults}>取引先のルールを適用</button></div>
       </div><label className={`new-transaction-memo ${styles.memoLabel}`}>メモ<textarea rows={2} maxLength={MAX_TRANSACTION_MEMO_LENGTH} value={config.memo} onChange={event => patch({ memo: event.target.value })} /></label></fieldset>
       {preview && <div className={styles.preview}><b>毎月{config.dayOfMonth}日 · {money(config.amountYen)}</b><span>{payment ? "変更後の予定" : "初回予定"}：{preview.firstOn && dateLabel(preview.firstOn)}</span><span>{eligible.find(member => member.id === config.actorUserId)?.name ?? "支払者を選択してください"}の支払い · {config.expenseClass === "PERSONAL" ? "個人費" : "共通費"}</span><RecurringSplit config={config} members={selected.members} />
-        {config.dayOfMonth >= 29 && <small>その日がない月は月末に追加します。</small>}</div>}
+        {config.dayOfMonth >= 29 && <small>その日がない月は月末に追加します。</small>}{!payment && preview.firstOn === data.today && <small>本日の定期処理が終了している場合、今月分は追加されません。</small>}</div>}
       {payment && <p className={styles.current}>現在：毎月{payment.currentConfig.dayOfMonth}日 / {money(payment.currentConfig.amountYen)} / {payment.currentConfig.merchant}</p>}
       {error && <p className="form-error" role="alert">{error} 入力内容は保持しています。</p>}
       {conflict && payment && <button type="button" className="text-button" disabled={saving} onClick={() => {

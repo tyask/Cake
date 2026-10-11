@@ -26,31 +26,19 @@ test("new recurring payment selects an eligible actor and fixes a personal works
   assert.deepEqual(recurringFormDefaults(personal, "", "b"), { expenseClass: "PERSONAL", splitWeights: { a: 0, b: 1 } });
 });
 
-test("new payment preview keeps this month's future date and clamps month end", () => {
-  const now = new Date("2026-10-10T09:00:00+09:00");
-  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 1 }, now).firstOn, "2026-11-01");
-  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 27 }, now).firstOn, "2026-10-27");
-  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 31 }, new Date("2027-02-10T09:00:00+09:00")).firstOn, "2027-02-28");
-});
-
-test("new and edited previews advance today's date at exactly JST 09:00", () => {
-  const todayConfig = { ...config, dayOfMonth: 9 };
-  for (const existing of [undefined, payment]) {
-    assert.equal(recurringFormPreview(todayConfig, new Date("2026-10-09T08:59:59.999+09:00"), existing).firstOn, "2026-10-09");
-    assert.equal(recurringFormPreview(todayConfig, new Date("2026-10-09T09:00:00+09:00"), existing).firstOn, "2026-11-09");
-    assert.equal(recurringFormPreview(todayConfig, new Date("2026-10-09T23:59:59.999+09:00"), existing).firstOn, "2026-11-09");
-    assert.equal(recurringFormPreview({ ...config, dayOfMonth: 10 }, new Date("2026-10-09T09:00:00+09:00"), existing).firstOn, "2026-10-10");
-  }
+test("new payment preview uses today and the next matching monthly date", () => {
+  assert.deepEqual(recurringFormPreview({ ...config, dayOfMonth: 10 }, "2026-10-10"), { firstOn: "2026-10-10" });
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 1 }, "2026-10-10").firstOn, "2026-11-01");
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 27 }, "2026-10-10").firstOn, "2026-10-27");
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 31 }, "2027-02-10").firstOn, "2027-02-28");
 });
 
 test("editing previews the current month immediately but preserves the generated-month guard", () => {
-  const now = new Date("2026-10-10T08:59:59+09:00");
-  assert.deepEqual(recurringFormPreview({ ...config, dayOfMonth: 31 }, now, payment), { firstOn: "2026-10-31" });
-  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 10 }, now, payment).firstOn, "2026-10-10");
-  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 1 }, now, payment).firstOn, "2026-11-01");
+  assert.deepEqual(recurringFormPreview({ ...config, dayOfMonth: 31 }, "2026-10-10", payment), { firstOn: "2026-10-31" });
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 10 }, "2026-10-10", payment).firstOn, "2026-10-10");
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 1 }, "2026-10-10", payment).firstOn, "2026-11-01");
   const generated = { ...payment, lastGeneratedMonth: "2026-10-01" };
-  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 31 }, now, generated).firstOn, "2026-11-30");
-  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 10 }, now, generated).firstOn, "2026-11-10");
+  assert.equal(recurringFormPreview({ ...config, dayOfMonth: 31 }, "2026-10-10", generated).firstOn, "2026-11-30");
 });
 
 test("new members get zero without silently deleting an unknown saved participant", () => {

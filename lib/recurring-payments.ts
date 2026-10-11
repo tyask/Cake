@@ -68,7 +68,7 @@ const rowConfig = (row: Row): RecurringPaymentConfig => recurringPaymentConfigSc
   actorUserId: row.actor_user_id, expenseClass: row.expense_class, splitWeights: row.split_weights, memo: row.memo,
 });
 
-export function recurringPaymentRecord(row: Row, now: Date): RecurringPayment {
+export function recurringPaymentRecord(row: Row, today: string): RecurringPayment {
   const payment: RecurringPayment = {
     id: String(row.id), workspaceId: String(row.workspace_id), state: row.state as RecurringPayment["state"],
     revision: Number(row.revision),
@@ -76,7 +76,7 @@ export function recurringPaymentRecord(row: Row, now: Date): RecurringPayment {
     nextScheduledOn: null,
     blockedReason: row.blocked_reason == null ? null : String(row.blocked_reason), lastGeneratedMonth: nullableDate(row.last_generated_month),
   };
-  payment.nextScheduledOn = nextScheduledOn(payment, now);
+  payment.nextScheduledOn = nextScheduledOn(payment, today);
   return payment;
 }
 
@@ -178,14 +178,15 @@ export function createRecurringPaymentService(store: RecurringPaymentStore, opti
       const result = await store.list(workspaceId, userId, mode());
       if (!result.authorized) throw new RecurringPaymentError("このワークスペースを操作する権限がありません。", 403, "FORBIDDEN");
       const today = jstToday(now);
-      return { payments: result.payments.map(row => recurringPaymentRecord(row, now)), eligibleActorUserIds: result.eligibleActorUserIds, today, now: now.toISOString() };
+      return { payments: result.payments.map(row => recurringPaymentRecord(row, today)), eligibleActorUserIds: result.eligibleActorUserIds, today };
     } catch (error) { throw fixedServiceError(error); }
   }
   async function mutateRecurringPayment(userId: string, input: unknown, now: Date = new Date()): Promise<RecurringPaymentMutationResult> {
     try {
       const parsed = recurringPaymentMutationSchema.parse(input);
+      const today = jstToday(now);
       const result = await store.mutate(userId, parsed, mode(), now);
-      return { payment: recurringPaymentRecord(result.payment, now) };
+      return { payment: recurringPaymentRecord(result.payment, today) };
     } catch (error) { throw fixedServiceError(error); }
   }
   async function runRecurringPayments(input: RunOptions = {}): Promise<RecurringPaymentRunResult> {

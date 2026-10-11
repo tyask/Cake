@@ -16,7 +16,7 @@ function fixture(environment: Record<string, string | undefined> = {}) {
   const calls: unknown[][] = [];
   const dependencies = {
     currentUser: async () => ({ id: "test-user-a", name: "A", email: "test-a@cake.local", imageUrl: null }),
-    list: async (...args: unknown[]) => { calls.push(["list", ...args]); return { payments: [payment], eligibleActorUserIds: ["test-user-a"], today: "2026-10-10", now: "2026-10-10T00:00:00.000Z" }; },
+    list: async (...args: unknown[]) => { calls.push(["list", ...args]); return { payments: [payment], eligibleActorUserIds: ["test-user-a"], today: "2026-10-10" }; },
     mutate: async (...args: unknown[]) => { calls.push(["mutate", ...args]); return { payment }; },
     run: async (...args: unknown[]) => { calls.push(["run", ...args]); return summary; },
     environment: () => environment,
@@ -34,9 +34,7 @@ test("一覧APIは認証済み利用者とworkspaceのみをサービスへ渡�
   assert.equal(result.status, 200);
   assert.equal(result.headers.get("cache-control"), "no-store");
   assert.deepEqual(f.calls, [["list", workspaceId, "test-user-a"]]);
-  const body = await result.json();
-  assert.equal(body.payments[0].id, paymentId);
-  assert.equal(body.now, "2026-10-10T00:00:00.000Z");
+  assert.equal((await result.json()).payments[0].id, paymentId);
 });
 
 test("未認証の一覧と保存はサービスへ到達しない", async () => {
@@ -49,8 +47,7 @@ test("未認証の一覧と保存はサービスへ到達しない", async () =>
 
 test("一覧の不正workspace・日時上書き・重複workspaceを拒否する", async () => {
   const f = fixture();
-  for (const query of ["", "workspaceId=invalid", `workspaceId=${workspaceId}&today=2026-10-27`,
-    `workspaceId=${workspaceId}&now=2026-10-27T00:00:00Z`, `workspaceId=${workspaceId}&workspaceId=${workspaceId}`]) {
+  for (const query of ["", "workspaceId=invalid", `workspaceId=${workspaceId}&today=2026-10-27`, `workspaceId=${workspaceId}&workspaceId=${workspaceId}`]) {
     assert.equal((await f.handlers.GET(new Request(`https://cake.example/api/recurring-payments?${query}`))).status, 400);
   }
   assert.deepEqual(f.calls, []);
