@@ -195,6 +195,36 @@ CAKE_WORKTREE_ROOT=/tmp/cake-worktrees npm run task:start -- feature-name
 
 `.env.local`、`.vercel`、`node_modules`はコピーしません。新しいworktreeには上のローカルセットアップを参考に`.env.local`を作り、`DATABASE_URL`へ対象タスクのテストDBを設定します。本番用の環境ファイルを流用しないでください。Git連携のPreview DBはデプロイ時に作られるため、通常の環境変数取得だけではそのDB接続情報を得られない場合があります。ローカルでも実DBを使う場合はNeon Consoleで該当するテスト用ブランチを選び、接続情報を設定します。実DBの主要な検証はPreview上で行えます。
 
+### Codex Cloudで作業する場合
+
+選択したクラウド環境内でNode.js 24、Git、`gh`を確認し、`git fetch origin main`で接続を確認します。Gitの取得とGitHub APIの認証は別に確認してください。`gh auth status`と`gh api repos/tyask/Cake --jq .full_name`が失敗する場合、取得できてもPR作成ができるとは限りません。認証情報の値はログやPRへ出力しません。
+
+npmの既定キャッシュへ書き込めない環境では、書込み可能な一時ディレクトリを指定します。次の例は、クラウドの`/workspace/Cake`から開始する場合です。`task:start`内の`npm ci`にも同じキャッシュ設定を引き継ぎます。
+
+```bash
+cd /workspace/Cake
+export npm_config_cache=/tmp/cake-npm-cache
+npm ci
+npm run task:start -- cloud-check
+cd /workspace/Cake-worktrees/cloud-check
+npm run lint
+npm test
+npm run build
+npx --no-install tsc --noEmit
+```
+
+文書のみのテスト用PRはPreviewが不要です。検証結果を`/tmp/cake-verification.md`へ記録し、変更をコミットしてから次を実行します。アプリのソースコードを変更した場合は、通常のPreview検証手順に従ってください。
+
+```bash
+git push -u origin HEAD
+gh pr create --repo tyask/Cake --base main --head "$(git branch --show-current)" \
+  --draft --title 'test: Codex Cloudの開発手順を検証' \
+  --body-file /tmp/cake-verification.md
+gh pr view --repo tyask/Cake --json url,isDraft,headRefOid
+```
+
+pushやPR作成が失敗した場合は成功として記録せず、確認済みの操作と必要な設定を分けて報告します。
+
 ### 2. 開発し、コミットする
 
 コード変更後は次を実行します。業務ロジック・認可を変更した場合は回帰テストを追加・更新し、UI変更はPCとスマートフォンで表示・操作を確認します。
