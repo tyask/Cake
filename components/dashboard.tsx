@@ -238,7 +238,7 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
         {loading && <div className="loading-line" />}
         {selected && tab === "home" && <HomePanel selected={selected} pending={data.pendingInvitations.length} setTab={openTab} add={() => setTransactionModal(true)} refreshAction={<RefreshButton refreshing={refreshing} disabled={loading} onClick={() => { void refreshCurrentView(); }} />} refreshing={refreshing} />}
         {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} userId={data.user.id} add={() => setTransactionModal(true)} run={run} onRefresh={refreshCurrentView} refreshing={refreshing} />}
-        {selected && tab === "import" && <ImportPanel key={selected.workspace.id} selected={selected} run={run} />}
+        {selected && tab === "import" && <ImportPanel key={selected.workspace.id} selected={selected} currentUserId={data.user.id} run={run} />}
         {selected && tab === "settlement" && <SettlementPanel key={selected.workspace.id} selected={selected} run={run} refreshAction={<RefreshButton refreshing={refreshing} disabled={loading} onClick={() => { void refreshCurrentView(); }} />} refreshing={refreshing} />}
         {tab === "settings" && <>
           <PageHeading title="設定" />
@@ -291,12 +291,12 @@ const importFormats = {
   PAYPAY: { label: "PayPay", parse: parsePayPayCsv },
 };
 
-function ImportPanel({ selected, run }: { selected: WorkspaceData; run: (payload: Record<string, unknown>, success: string) => Promise<unknown> }) {
+function ImportPanel({ selected, currentUserId, run }: { selected: WorkspaceData; currentUserId: string; run: (payload: Record<string, unknown>, success: string) => Promise<unknown> }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [format, setFormat] = useState<keyof typeof importFormats>("PAYPAY");
   const [rows, setRows] = useState<PayPayPreviewRow[]>([]);
   const [fileName, setFileName] = useState("");
-  const [actorId, setActorId] = useState(selected.members[0]?.id ?? "");
+  const [actorId, setActorId] = useState(currentUserId);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [reading, setReading] = useState(false);

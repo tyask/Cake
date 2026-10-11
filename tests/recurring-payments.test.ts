@@ -67,7 +67,7 @@ test("現在設定とサーバー時刻から予定を返し、開始日・旧�
   }
   assert.equal(recurringPaymentRecord(raw, new Date("2026-10-10T09:00:00+09:00")).nextScheduledOn, "2026-11-10");
   assert.equal(recurringPaymentRecord(raw, new Date("2026-10-11T00:00:00+09:00")).nextScheduledOn, "2026-11-10");
-  assert.equal(raw.active_from_month, "2027-12-01");
+  assert.equal(raw["active_from_month" as keyof typeof raw], "2027-12-01");
 });
 
 test("割合は既存検証を再利用し、新参加者には0だけを補い保存値を変えない", () => {

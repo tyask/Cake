@@ -36,7 +36,7 @@ function parseAmount(value: string | undefined) {
 }
 
 export function defaultExpenseClass(merchant: string, rules: DefaultRule[]): ExpenseClass {
-  return matchingDefaultRule(merchant, rules)?.expenseClass ?? "PERSONAL";
+  return matchingDefaultRule(merchant, rules)?.expenseClass ?? "SHARED";
 }
 
 export function parsePayPayCsv(
@@ -88,7 +88,7 @@ export function parsePayPayCsv(
         method: row["取引方法"]?.trim() || "PayPay",
         amountYen,
         externalId,
-        ...transactionDefaults(merchant, rules, members, actorUserId),
+        ...transactionDefaults(merchant, rules, members, actorUserId, "SHARED"),
         duplicate,
         error,
       };

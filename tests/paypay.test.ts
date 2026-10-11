@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parsePayPayCsv, payPayDateToIso } from "../lib/paypay";
+import { defaultExpenseClass, parsePayPayCsv, payPayDateToIso } from "../lib/paypay";
 import type { WorkspaceMember } from "../lib/types";
 
 const members: WorkspaceMember[] = [
@@ -36,9 +36,21 @@ test("取引先の部分一致ルールは上の順番を採用し、割合も�
   assert.deepEqual(rows[0].splitWeights, { a: 1, b: 3 });
 });
 
-test("CSVの個人費は選んだ取引担当者の1:0でプレビューする", () => {
+test("一致ルールのないCSVは共有費とワークスペースのデフォルト割合でプレビューする", () => {
   const csv = "取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n2026/07/15 20:00:00,500,支払い,店舗,現金,abc";
-  const rows = parsePayPayCsv(csv, [], new Set(), members, "b");
+  const disabledRule = { id: "1", merchantContains: "店舗", expenseClass: "PERSONAL" as const, sortOrder: 0, splitWeights: null, enabled: false };
+  for (const rules of [[], [disabledRule], [{ ...disabledRule, enabled: true, merchantContains: "別店舗" }]]) {
+    const rows = parsePayPayCsv(csv, rules, new Set(), members, "b");
+    assert.equal(defaultExpenseClass("店舗", rules), "SHARED");
+    assert.equal(rows[0].expenseClass, "SHARED");
+    assert.deepEqual(rows[0].splitWeights, { a: 6, b: 4 });
+  }
+});
+
+test("CSVの個人費ルールは選んだ取引担当者の1:0でプレビューする", () => {
+  const csv = "取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n2026/07/15 20:00:00,500,支払い,店舗,現金,abc";
+  const rows = parsePayPayCsv(csv, [{ id: "1", merchantContains: "店舗", expenseClass: "PERSONAL", sortOrder: 0, splitWeights: null, enabled: true }], new Set(), members, "b");
+  assert.equal(rows[0].expenseClass, "PERSONAL");
   assert.deepEqual(rows[0].splitWeights, { a: 0, b: 1 });
 });
 

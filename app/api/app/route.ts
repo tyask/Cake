@@ -67,9 +67,10 @@ async function splitContext(workspaceId: string) {
 function resolveTransactionSplit(
   input: { merchant: string; actorUserId: string; expenseClass?: ExpenseClass; splitWeights?: SplitWeights },
   context: Awaited<ReturnType<typeof splitContext>>,
+  fallbackExpenseClass: ExpenseClass = "PERSONAL",
 ) {
   if (!context.members.some((member) => member.id === input.actorUserId)) throw new Error("取引担当者がワークスペースに参加していません。");
-  const defaults = transactionDefaults(input.merchant, context.rules, context.members, input.actorUserId);
+  const defaults = transactionDefaults(input.merchant, context.rules, context.members, input.actorUserId, fallbackExpenseClass);
   const expenseClass = input.expenseClass ?? defaults.expenseClass;
   const splitWeights = input.splitWeights === undefined
     ? expenseClass === "PERSONAL"
@@ -374,7 +375,7 @@ export async function POST(request: Request) {
       const input = z.object({ workspaceId: workspaceIdSchema, fileName: z.string().min(1).max(240), totalRows: z.number().int().nonnegative(), items: z.array(itemSchema).max(2000) }).parse(body);
       await requireWorkspaceMember(input.workspaceId, user.id);
       const context = await splitContext(input.workspaceId);
-      const items = input.items.map((item) => ({ ...item, ...resolveTransactionSplit(item, context) }));
+      const items = input.items.map((item) => ({ ...item, ...resolveTransactionSplit(item, context, "SHARED") }));
       const result = await persistPayPayImport({ ...input, items, userId: user.id });
       return Response.json({ ok: true, ...result });
     }
