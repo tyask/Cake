@@ -40,6 +40,8 @@ Productionの環境変数へ `CRON_SECRET` を設定してから、この機能�
 
 Previewには定期実行を期待せず、テストログイン中の `POST /api/recurring-payments/run` に `{ "workspaceId": "対象UUID" }` を送って当日予定を検証します。本人が参加するテストworkspaceに限り、日時を指定する入力は受け付けません。Production・Google認証では404になります。設定日の09:00以降に新規保存した設定は翌月予定のため、このAPIを呼んでも当日分は追加しません。固定日時による09:00境界・月末・即時変更/再開・設定日変更後の月内複数登録・同時実行・失敗時ロールバックのDB回帰は、対象タスクの `CAKE_TEST_DATABASE_URL` を設定して `npx tsx scripts/verify-recurring-payments.ts` で実行します。スクリプトは新規の検証データだけを作成・削除し、環境ファイルや本番の `DATABASE_URL` を読み込みません。
 
+実DB回帰の日付比較は、Neonが直接SELECTで返す`Date`とJSONB内の`YYYY-MM-DD`文字列を同じ暦日へ整形し、日時比較ではミリ秒を保持します。通常の`npm test`でもUTC・Asia/Tokyo・America/Los_Angelesでドライバーの返却型を使う回帰テストを実行します。このテストはDBへ接続せず、上記の実DB回帰とは別の検証です。
+
 ## 技術構成
 
 - Next.js 16 / React 19 / TypeScript
