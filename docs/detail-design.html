@@ -562,7 +562,7 @@
               <tr><td>必須列</td><td>取引日、出金金額（円）、取引内容、取引先、取引方法、取引番号。欠落時はファイル全体を例外。</td></tr>
               <tr><td>対象行・金額</td><td>取引内容をtrimした値が支払いと完全一致する行だけ。金額のカンマ/前後空白を除去し、数字のみ・正整数を許可。</td></tr>
               <tr><td>日時・外部ID</td><td><code>yyyy/MM/dd HH:mm:ss</code>を存在するJST日時として検証。<code>PayPay_YYYYMMDDHHMMSS_{取引番号}</code>を生成し、番号の先頭ゼロを保持。日時/actor編集後も保存IDは保持。</td></tr>
-              <tr><td>行の値</td><td>取引先はtrimして必須。取引方法が空ならPayPay。区分・割合はtransactionDefaultsで決める。</td></tr>
+              <tr><td>行の値</td><td>取引先はtrimして必須。取引方法が空ならPayPay。区分・割合はtransactionDefaultsのフォールバックをSHAREDとして決める。有効な一致ルールがなければ共有費とワークスペースのデフォルト割合、一致時はルールを優先する。bulkImport APIも費用区分省略時のフォールバックをSHAREDとする。通常明細のPERSONALフォールバックは維持する。ImportPanelにはログイン本人のcurrentUserIdを渡し、支払者actorIdの初期値に使う。支払者・区分・割合の手動変更は維持する。</td></tr>
               <tr><td>重複・衝突</td><td>既存IDとCSV内同一キーの一致行は初期選択OFF。同一CSVの繰返しは最初の一件だけ登録候補。同じキーで金額/取引先が異なる場合、既存sourceがPAYPAY以外の場合は衝突エラーとして登録不可。</td></tr>
               <tr><td>専用API照合</td><td>有効な外部IDをまとめ、最大2000件ずつ選択workspaceへ照合。照合完了前や失敗後に未確認のプレビューは表示しない。ファイル変更時の遅延応答は破棄する。</td></tr>
               <tr><td>原本</td><td><code>File.text()</code>で端末内解析。サーバーへ送るのは選択済みitems・ファイル名・件数で、CSV本文は保存しない。</td></tr>

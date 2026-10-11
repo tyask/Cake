@@ -69,9 +69,10 @@ export function transactionDefaults(
   rules: readonly DefaultRule[],
   members: readonly MemberWeight[],
   actorUserId: string,
+  fallbackExpenseClass: ExpenseClass = "PERSONAL",
 ): { expenseClass: ExpenseClass; splitWeights: SplitWeights } {
   const rule = matchingDefaultRule(merchant, rules);
-  const expenseClass = rule?.expenseClass ?? "PERSONAL";
+  const expenseClass = rule?.expenseClass ?? fallbackExpenseClass;
   if (expenseClass === "PERSONAL") {
     return { expenseClass, splitWeights: personalSplitWeights(members, actorUserId) };
   }
