@@ -453,4 +453,4 @@ npm run task:pr -- --title 'タイトル' --verification-file /tmp/cake-verifica
 
 ## QA導入前の読取診断
 
-既存Previewの手順とは独立した、GET専用の手動診断を用意しています。[QA診断手順](docs/qa-diagnostics.md)を参照してください。pool有効化や作成・返却を行わず、既存のbuild/DB/seed/Previewコマンドを変更しません。mainへの導入後に実行できますが、mergeは既存のProduction buildを起動し得ます。
+既存Previewの手順とは独立した、GET専用の手動診断を用意しています。[QA診断手順](docs/qa-diagnostics.md)を参照してください。Neonのbranch/parent/default/endpoint IDを既存GETから秘密なしで要約し、親候補の観測された子を確認できます。pool有効化や作成・返却を行わず、既存のbuild/DB/seed/Previewコマンドを変更しません。mainへの導入後に実行できますが、mergeは既存のProduction buildを起動し得ます。

@@ -183,7 +183,163 @@ test("preflightは有効化flagや承認なしでもGETだけを実施し、設�
   assert.equal(report.plan, null);
   assert.deepEqual(fixture.env, before);
   assert.equal(fixture.calls.some((call) => call.path.includes("/pulls/")), false);
+  assert.deepEqual(fixture.calls.map(({ method, hostname, path, search }) => ({ method, hostname, path, search })), [
+    { method: "GET", hostname: "api.vercel.com", path: `/v9/projects/${QA_PROJECT_ID}`, search: "?slug=fumin1" },
+    { method: "GET", hostname: "api.github.com", path: `/repos/${QA_REPOSITORY}/deployments`, search: `?task=${QA_TASK}&per_page=100&page=1` },
+    { method: "GET", hostname: "api.github.com", path: `/repos/${QA_REPOSITORY}/actions/variables`, search: "?per_page=30&page=1" },
+    { method: "GET", hostname: "console.neon.tech", path: `/projects/${QA_NEON_PROJECT_ID}`, search: "" },
+    { method: "GET", hostname: "console.neon.tech", path: `/projects/${QA_NEON_PROJECT_ID}/branches`, search: "?limit=100" },
+    { method: "GET", hostname: "console.neon.tech", path: `/projects/${QA_NEON_PROJECT_ID}/endpoints`, search: "" },
+    { method: "GET", hostname: "console.neon.tech", path: `/projects/${QA_NEON_PROJECT_ID}/branches/${parent.id}`, search: "" },
+    ...["qa1", "qa2", "qa3"].map((slot) => ({ method: "GET", hostname: "api.vercel.com", path: `/v4/aliases/${qaAlias(slot as "qa1" | "qa2" | "qa3")}`, search: "?slug=fumin1" })),
+  ]);
   assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+});
+
+test("Neon summaryはAPIのdefault・直接の親子関係・endpoint所属を観測し、名前から推測しない", async () => {
+  const fixture = new ReadFixture(), root = { ...parent, parent_id: null };
+  const branch = (id: string, name: string, parentId: string | null, isDefault = false) => ({
+    id, project_id: QA_NEON_PROJECT_ID, name, parent_id: parentId, default: isDefault,
+  });
+  fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches/${parent.id}`, { status: 200, data: { branch: root } });
+  fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches`, { status: 200, data: { branches: [
+    branch("br-z-preview", "preview/codex/task-42", parent.id),
+    branch("br-default-z", "another-default", null, true),
+    { id: "br-main", project_id: QA_NEON_PROJECT_ID, name: "main" },
+    branch("br-c-grandchild", "preview/codex/grandchild", "br-z-preview"),
+    branch("br-b-other", "preview/codex/elsewhere", "br-default-a"), root,
+    branch("br-a-direct", "experiment/one", parent.id),
+    branch("br-default-a", "observed-default", null, true),
+    { id: "br-production", project_id: QA_NEON_PROJECT_ID, name: "production", default: "true", parent_id: undefined },
+  ], pagination: { next: null } } });
+  fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/endpoints`, { status: 200, data: { endpoints: [
+    { id: "ep-z-preview", project_id: QA_NEON_PROJECT_ID, branch_id: "br-z-preview", host: database.host },
+    { id: "ep-a-direct", project_id: QA_NEON_PROJECT_ID, branch_id: "br-a-direct" },
+    { id: "ep-unavailable", project_id: QA_NEON_PROJECT_ID },
+  ], pagination: { next: null } } });
+  const report = await fixture.reader().inspect({ action: "preflight" });
+  assert.ok(report.native && report.parent);
+  assert.equal(report.native.projectId, QA_NEON_PROJECT_ID);
+  assert.equal(report.native.branchCount, 9); assert.equal(report.native.endpointCount, 3);
+  assert.deepEqual(report.native.branches.map((entry) => entry.branchId), [
+    "br-a-direct", "br-b-other", "br-c-grandchild", "br-default-a", "br-default-z", "br-main", "br-parent", "br-production", "br-z-preview",
+  ]);
+  assert.ok(report.native.branches.every((entry) => entry.projectId === QA_NEON_PROJECT_ID));
+  assert.deepEqual(report.native.defaultBranchIds, ["br-default-a", "br-default-z"]);
+  assert.deepEqual(report.native.observedPreviewCodexBranchIds, ["br-b-other", "br-c-grandchild", "br-z-preview"]);
+  assert.deepEqual(report.parent.candidateSummary, {
+    branch: { projectId: QA_NEON_PROJECT_ID, branchId: parent.id, name: parent.name, nameEvidence: "branch.name",
+      parentId: null, parentIdEvidence: "branch.parent_id", default: false, defaultEvidence: "branch.default" },
+    observedChildBranchIds: ["br-a-direct", "br-z-preview"], observedPreviewCodexChildBranchIds: ["br-z-preview"], childEvidence: "listed branch.parent_id",
+  });
+  for (const id of ["br-main", "br-production"]) {
+    const observed: NonNullable<Report["native"]>["branches"][number] = report.native.branches.find((entry) => entry.branchId === id)!;
+    assert.equal(observed.parentId, null); assert.equal(observed.parentIdEvidence, "unavailable");
+    assert.equal(observed.default, null); assert.equal(observed.defaultEvidence, "unavailable");
+  }
+  assert.deepEqual(report.native.endpoints, [
+    { projectId: QA_NEON_PROJECT_ID, endpointId: "ep-a-direct", branchId: "br-a-direct", branchIdEvidence: "endpoint.branch_id" },
+    { projectId: QA_NEON_PROJECT_ID, endpointId: "ep-unavailable", branchId: null, branchIdEvidence: "unavailable" },
+    { projectId: QA_NEON_PROJECT_ID, endpointId: "ep-z-preview", branchId: "br-z-preview", branchIdEvidence: "endpoint.branch_id" },
+  ]);
+  assert.equal(report.parent.emptyStateProven, false);
+  for (const name of ["Native parent empty state", "Native build and runtime identity", "Native cleanup behavior"]) {
+    assert.equal(report.prerequisites.find((entry) => entry.name === name)?.confirmed, false);
+  }
+  assert.equal(fixture.calls.length, 10);
+  assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+});
+
+test("Neon branch.defaultはbooleanだけを採用し、欠落・未知値を既定判定に使わない", async () => {
+  for (const value of [true, false, undefined, null, "true", 1, {}]) {
+    const fixture = new ReadFixture();
+    const observed = { ...parent, name: "main", default: value, parent_id: null };
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches`, { status: 200, data: { branches: [observed] } });
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches/${parent.id}`, { status: 200, data: { branch: observed } });
+    const report = await fixture.reader().inspect({ action: "preflight" });
+    assert.ok(report.native && report.parent);
+    assert.equal(report.native.branches[0].default, typeof value === "boolean" ? value : null);
+    assert.equal(report.native.branches[0].defaultEvidence, typeof value === "boolean" ? "branch.default" : "unavailable");
+    assert.deepEqual(report.native.defaultBranchIds, value === true ? [parent.id] : []);
+    assert.equal(report.native.branches[0].parentIdEvidence, "branch.parent_id");
+    assert.equal(report.parent.emptyStateProven, false);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+});
+
+test("Neon summaryは許可項目だけを返し、URIや資格情報のbranch名・不正参照は未確認にする", async () => {
+  for (const name of ["postgresql://qa-role:qa-password@ep-secret.neon.tech/db", "https://private.example/path", "//private.example/path",
+    "preview/codex/task\n", "a".repeat(256), "bootstrap-secret-fallback", ...secrets.slice(0, 3)]) {
+    const fixture = new ReadFixture();
+    fixture.env.GH_TOKEN = "bootstrap-secret-fallback";
+    const extras = { connection_uri: secrets[4], connection_string: secrets[4], role: "private-qa-role", password: "private-qa-password",
+      host: "ep-private.ap-southeast-1.aws.neon.tech", env: [{ key: "PRIVATE_API_KEY", value: secrets[3] }], user: "private-qa-user", privateValue: secrets[3] };
+    const observed = { ...parent, ...extras, name, parent_id: secrets[4], default: secrets[3] };
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}`, { status: 200, data: { project: { id: QA_NEON_PROJECT_ID, ...extras } } });
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches`, { status: 200, data: { branches: [observed] } });
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches/${parent.id}`, { status: 200, data: { branch: observed } });
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/endpoints`, { status: 200, data: {
+      endpoints: [{ id: "ep-observed", project_id: QA_NEON_PROJECT_ID, branch_id: secrets[4], ...extras }],
+    } });
+    const report = await fixture.reader().inspect({ action: "preflight" });
+    assert.ok(report.native && report.parent);
+    assert.deepEqual(report.native.branches[0], {
+      projectId: QA_NEON_PROJECT_ID, branchId: parent.id, name: null, nameEvidence: "unavailable",
+      parentId: null, parentIdEvidence: "unavailable", default: null, defaultEvidence: "unavailable",
+    });
+    assert.deepEqual(report.native.endpoints[0], {
+      projectId: QA_NEON_PROJECT_ID, endpointId: "ep-observed", branchId: null, branchIdEvidence: "unavailable",
+    });
+    assert.deepEqual(report.native.defaultBranchIds, []);
+    assert.deepEqual(report.native.observedPreviewCodexBranchIds, []);
+    assert.deepEqual(report.parent.candidateSummary.observedChildBranchIds, []);
+    assert.equal(report.parent.emptyStateProven, false);
+    const output = JSON.stringify(report);
+    for (const forbidden of [name, "private-qa-role", "private-qa-password", extras.host, "PRIVATE_API_KEY", "private-qa-user", "connection_uri", "connection_string"]) {
+      assert.equal(output.includes(forbidden), false, "complete report must contain only allowlisted metadata");
+    }
+    assert.equal(fixture.calls.length, 10);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+});
+
+test("Neon projectまたは一覧resourceの所属・IDが不正ならsummaryを公開しない", async () => {
+  for (const kind of ["project", "branch-project", "endpoint-project", "branch-id", "endpoint-id"] as const) {
+    const fixture = new ReadFixture();
+    if (kind === "project") fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}`, { status: 200, data: { project: { id: "wrong-project" } } });
+    else if (kind.startsWith("branch")) fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches`, { status: 200, data: {
+      branches: [{ ...parent, project_id: kind === "branch-project" ? "wrong-project" : QA_NEON_PROJECT_ID,
+        id: kind === "branch-id" ? `${parent.id}\n` : parent.id }],
+    } });
+    else fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/endpoints`, { status: 200, data: {
+      endpoints: [{ id: kind === "endpoint-id" ? "ep-unsafe\n" : "ep-observed", branch_id: parent.id,
+        project_id: kind === "endpoint-project" ? "wrong-project" : QA_NEON_PROJECT_ID }],
+    } });
+    const report = await fixture.reader().inspect({ action: "preflight" });
+    assert.equal(checked(report, "Neon metadata read").ok, false, kind);
+    assert.equal(checked(report, "Neon metadata read").reason.code, "identity-mismatch", kind);
+    assert.equal(report.native, null, kind);
+    assert.ok(report.parent);
+    assert.equal(report.parent.candidateSummary.childEvidence, "unavailable");
+    assert.equal(report.parent.candidateSummary.observedChildBranchIds, null);
+    assert.equal(report.parent.candidateSummary.observedPreviewCodexChildBranchIds, null);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+});
+
+test("候補親の一覧と既存個別GETの確認済みmetadataが矛盾した場合は親を未確認にする", async () => {
+  for (const change of [{ name: "different-parent" }, { parent_id: "br-other" }, { default: true }]) {
+    const fixture = new ReadFixture(), listed = { ...parent, parent_id: null };
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches`, { status: 200, data: { branches: [listed] } });
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches/${parent.id}`, { status: 200, data: { branch: { ...listed, ...change } } });
+    const report = await fixture.reader().inspect({ action: "preflight" });
+    assert.equal(checked(report, "Neon metadata read").ok, true);
+    assert.equal(checked(report, "Native parent configuration").ok, false);
+    assert.equal(checked(report, "Native parent configuration").reason.code, "identity-mismatch");
+    assert.equal(report.parent, null);
+    assert.equal(fixture.calls.length, 10);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
 });
 
 test("個別の認証不足を資格情報名付きで報告し、他providerの読取を保持する", async () => {
