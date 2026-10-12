@@ -174,9 +174,13 @@ npm run db:seed:test
 
 固定ユーザーは`test-a@cake.local`と`test-b@cake.local`です。テストユーザーに管理者権限はなく、通常アカウント二人の上限にも含めません。Vercel Productionでは、誤って`AUTH_MODE=test`を設定してもテストログインは無効になります。Preview・ローカル用には、本番と別のNeonプロジェクトにあるタスク専用DBを使用してください。
 
-## 固定QA枠（設定PRの適用前）
+## QA貸出枠（適用前・無効）
 
-検証枠は `qa1` / `qa2` / `qa3`。貸出台帳はDeployments＋Actions直列化を設計採用し、実装・権限・設定適用は未完了で、管理ブランチや管理DBは作成していません。予約・DB照合・旧処理停止・retention確認・URLの命名と台帳の選択肢は [固定QA運用](docs/qa-pool.md) に記載しています。実URL・DB名は未確認で、クラウドには適用していません。移行後は通常のcodex枝Previewを停止するため、以下の従来 `deploy:preview` / `task:pr` 手順をそのまま併用しません。
+検証枠は `qa1` / `qa2` / `qa3` と候補alias `cake-qa1-fumin.vercel.app` / `cake-qa2-fumin.vercel.app` / `cake-qa3-fumin.vercel.app`。Git枝は各PRの `codex/<task>` のまま使い、固定QA枝・台帳枝・DB保持用parkingは作りません。同じPRではNative DBと検証データを保持し、別PRへの貸出前には新DBの空状態を検査します。
+
+台帳は既存GitHub Environment `Preview` の専用task `cake-qa-lease`、payload protocol `cake-qa/v1`。短い単一Actions writerが予約・配置・alias更新・全deployment削除を直列化します。返却はNeon branchと全endpointの消失確認後だけです。詳細は [QA貸出運用](docs/qa-pool.md) を参照してください。
+
+現在は有効化前です。全既存PRの生成前ゲート、REST Native branching、候補alias割当、`queue: max`、cleanupの実環境検証は未実施で、実行環境に `NEON_API_KEY` がありません。新Secret・権限・ネットワーク・Productionのremote変更は今回行いません。必要な確認と明示承認が済むまで `CAKE_QA_POOL_ENABLED` をfalseまたは未設定に保ち、以下のdraft作成とローカル検証までで停止します。
 
 ## Codexとの開発フロー
 
@@ -222,12 +226,11 @@ npx --no-install tsc --noEmit
 文書のみのテスト用PRはPreviewが不要です。検証結果を`/tmp/cake-verification.md`へ記録し、変更をコミットしてから次を実行します。アプリのソースコードを変更した場合は、通常のPreview検証手順に従ってください。
 
 ```bash
-git push -u origin HEAD
-gh pr create --repo tyask/Cake --base main --head "$(git branch --show-current)" \
-  --draft --title 'test: Codex Cloudの開発手順を検証' \
-  --body-file /tmp/cake-verification.md
+npm run task:pr -- --draft --title 'test: Codex Cloudの開発手順を検証' --verification-file /tmp/cake-verification.md
 gh pr view --repo tyask/Cake --json url,isDraft,headRefOid
 ```
+
+`task:pr --draft` はPreview未検証を明示して作成・更新する入口です。repository variable `CAKE_QA_GIT_GATE_CONFIRMED=true` とcommit内 `vercel.json` のmain-only停止設定を確認し、originとHEADが一致しない場合だけpushしてdraftを作ります。ゲートを確認できない場合はpushも停止し、ローカル差分と未実行理由を報告します。
 
 pushやPR作成が失敗した場合は成功として記録せず、確認済みの操作と必要な設定を分けて報告します。
 
@@ -243,29 +246,39 @@ npm run build
 
 関連する設計書・READMEも更新して、変更したファイルをコミットします。接続文字列や認証情報はGitや検証報告へ保存しません。
 
-### 3. Previewで画面・APIを検証する
+### 3. 先にdraft PRを作成する
 
-下の「Previewへデプロイ」の初回設定を済ませ、専用worktreeで実行します。
+lint・test・buildとDB分離の確認状況をMarkdownファイルへ記載し、変更をcommitした専用worktreeで実行します。初回はOPEN PRがQA貸出の前提になるため、Previewを待つ前にdraftを作ります。
+
+```bash
+npm run task:pr -- --draft --title '変更内容を表すタイトル' --verification-file /tmp/cake-verification.md
+```
+
+Preview未実施の理由とブランチ・完全SHAを含むmain向けdraft PRを作成・更新します。push前に `CAKE_QA_GIT_GATE_CONFIRMED=true` と `git show HEAD:vercel.json` の `**: false` / `main: true`（他のtrueなし）を共通checkerで照合し、originとHEADが一致しない場合だけpushします。自動生成ゲートを確認できない場合はpushを止めます。文書のみの変更はPreview不要と記録できます。クラウド検証や有効化条件が不足する設定PRはdraftのままレビューします。
+
+### 4. 貸出済みPreviewで画面・APIを検証する
+
+下の「Previewへデプロイ」の設定と生成前ゲートを確認し、QA poolが明示承認で有効化された後に実行します。
 
 ```bash
 npm run deploy:preview
 ```
 
-クリーンな`codex/`ブランチを`origin`へpushし、Git連携で作られたPreviewを待ちます。ローカルのHEADと完全に一致するコミットのDeploymentが`READY`になった場合だけ、Deployment固有のURLを返します。確認は10秒間隔で最大15分です。失敗やタイムアウト時はURL・ビルドログを調べて修正し、同じコマンドを再実行します。
+コマンドは有効化、draft入口と共通の生成前ゲート、同feature枝の先行PRを確認してからクリーンなブランチをpushし、台帳の同PR・同lease・現在HEADのREADY記録を待ちます。CLIは台帳読取のみで、VercelやNeonを直接生成しません。満枠時は待機し、無効・失敗・timeoutは未検証として報告します。
 
-コミット・ブランチ・Preview URLを`.cake/preview.json`へ記録します。このフォルダはGitへ登録しません。画面とAPIが対象タスクのテストDBを使うこと、変更した挙動が動くことをPreview上で確認します。テストユーザーA・Bは共有ワークスペースへ参加済みで、管理者権限はありません。
+コミット、PR、lease、台帳記録、Deployment固有URL、Neon identityを `.cake/preview.json` に記録します。このフォルダはGitへ登録しません。Deployment固有URLで画面とAPI、PC・スマートフォンの表示・操作を検証し、対象PRのテストDBであることを確認します。固定aliasだけでコミットを判定しません。同じPRの追加commitは新headのレビュー・承認後に同lease・同DBを使い、入力・編集済みのQAデータを保持します。
 
-### 4. 検証結果を添えてPRを作成する
+### 5. 検証済みPR本文へ更新する
 
-変更内容、テストDBのブランチ名と隔離確認、lint・test・build、Preview上の画面・API、UI変更時のPC・スマートフォンの検証結果をMarkdownファイルへ記載します。DB変更がある場合は、追加したマイグレーションと公開中の旧版との互換性も記載します。未実行項目には理由を添えてください。
+変更内容、完全SHA、lease、Deployment ID/固有URL、Neon project/branch/endpointと隔離確認、migration・seed、lint・test・build、画面・APIの検証結果をMarkdownファイルへ記載します。DB変更は公開中の旧版との互換性も記録し、未実行項目には理由を添えます。接続文字列と資格情報は書きません。
 
 ```bash
 npm run task:pr -- --title '変更内容を表すタイトル' --verification-file /tmp/cake-verification.md
 ```
 
-最新のクリーンなブランチ・コミットとPreview記録が一致することを確認し、Preview URL・コミット・検証報告を含む`main`向けPRを作成します。既存のPRがある場合は、タイトルと本文を最新の検証結果へ更新します。検証後に変更した場合は、再コミット・再デプロイ・再検証が必要です。文書のみの変更はPreviewが不要なので、このコマンドを使わずに、その理由と検証結果を添えたPRを作成できます。
+最新HEAD・Preview記録・現在の台帳が一致することを確認し、同じPRの本文を更新します。検証後の変更は再commit・再deployment・再検証が必要です。draftからの公開とmergeはユーザーが判断します。
 
-### 5. レビューして手動マージする
+### 6. レビューして手動マージする
 
 GitHub Actionsの`ci`は、`main`向けPRと`main`・`codex/**`へのpushで`npm ci`、lint、test、buildを実行します。Node.js 24を使い、DBやVercelのSecretsは必要ありません。
 
@@ -302,22 +315,22 @@ Vercel上の通常のビルドでDBを準備します。環境変数の秘密情
 
 ### Previewへデプロイ
 
-本番とは別のNeonプロジェクトを、Vercel MarketplaceのNeonリソース`cake-preview`として用意します。親DBにはテスト用のスキーマとデータだけを登録し、本番のデータをコピーしません。
+PreviewはVercel Marketplaceの既存Neonリソース `cake-preview`、project `misty-meadow-88903426` を使う案です。本番projectを使わず、Native親も業務データ・既存アプリschemaを含まない空状態が必要です。既存親のschemaやデータ消去は自動実行せず、必要なら対象・影響と別途明示承認を確認します。
 
-`cake`への接続で次を設定します。
+有効化前に既存の接続設定を読み取り確認します。今回新Secret・資格情報・権限を登録しません。
 
-- 接続先は`Preview`だけにする。Production・Developmentへ接続しない。
-- 生成される環境変数を`CAKE_TEST_`で始める（DB接続は`CAKE_TEST_DATABASE_URL`）。
-- Preview Branching（Native Preview Branching）を有効にし、Gitブランチごとに独立したDBを作る。
-- `Resource must be active before deployment`を有効にし、DBが準備されてからビルドを始める。
+- 接続先はPreviewだけとし、Production・Developmentへ接続しない。
+- Native供給の接続変数は `CAKE_TEST_DATABASE_URL` を使う。
+- Preview action、Native Preview Branching、`Resource must be active before deployment` を確認する。
+- 全既存PRを含め、枠未取得時にdeployment/Neonを作らない生成前ゲートを確認する。`vercel.json` がない古いPRまで止まると推定しない。
+- 読取確認した空のNative親branch IDを `CAKE_QA_PARENT_BRANCH_ID`、レビュー済みPR番号→完全head SHAのJSON objectを `CAKE_QA_APPROVED_HEADS` として確認する。同PRの追加commitも新SHAの承認が必要。
+- 既存Previewの `AUTH_SECRET` と `AUTH_MODE=test`、読取確認した非秘密の本番endpoint host `CAKE_QA_PRODUCTION_DATABASE_HOST` を確認する。`AUTH_URL` はDeployment URLを自動検出する。
 
-同じGitブランチへの追加pushは同じDBブランチを使います。異なるタスクのDBと、本番のDBを共有しません。設定手順は[Neon公式のVercel連携](https://neon.com/docs/guides/vercel-managed-integration)を参照してください。
+初回Native hostが未確認のdeploymentはDB接続前のguardで停止します。その後Neon APIでproject・feature枝・parent・branch/endpoint ID・実hostを確認し、同feature枝の次deploymentに非秘密のlease/DB情報を渡します。DB保持parkingは不要です。接続情報はdeployment時のNative注入を使い、本番の `DATABASE_URL` へ切り替えません。 非秘密guard情報を作成requestの `env` / `build.env` へ渡す案は[公式client実装](https://raw.githubusercontent.com/vercel/vercel/main/packages/client/src/deploy.ts)に根拠がありますが、公開REST schemaにfieldの記載がなく、Git sourceとの組合せ・build/runtime注入はlive未検証です。詳細はQA貸出運用の確認事項に記載しています。
 
-VercelのEnvironment Variablesで、`Preview`を対象に`AUTH_SECRET`と`AUTH_MODE=test`を登録します。`AUTH_URL`は設定せず、Deployment URLの自動検出を使います。`http://localhost:3000`はローカル専用です。
+新PRはmigration前に空DBを実検査し、identity登録後に未適用migrationと固定サンプルを登録します。混入・別lease・前貸出endpointは削除して続行せず停止します。同PR更新は同DB identityを照合して入力・編集済みデータを保持します。build・runtime・直接DBコマンドも同じguardを通します。DB準備やbuildの失敗時はaliasを更新しません。
 
-PreviewのビルドとAPIは`CAKE_TEST_DATABASE_URL`を必須にし、通常の`DATABASE_URL`へ切り替えません。欠落時は停止します。Vercel上で未適用マイグレーションを適用し、テスト認証時にはテストユーザーと共有ワークスペースを登録してからアプリをビルドします。DB準備・ビルドの失敗時は新しいDeploymentを公開しません。
-
-環境設定後、コミット済みの専用worktreeから`npm run deploy:preview`を実行します。Git連携のPreviewには画面とAPIの両方が含まれ、PR作成前でも検証できます。Deployment固有のURLを使うため、ほかのタスクのデプロイで確認先が更新されることはありません。
+最初に `task:pr --draft` でPRを作り、有効化後に `deploy:preview` で台帳を読み取って同headの成功を待ちます。詳細と未検証事項は [QA貸出運用](docs/qa-pool.md) を参照してください。公式仕様は [Vercel Git生成停止](https://vercel.com/docs/project-configuration/git-configuration)、[deployment作成](https://vercel.com/docs/rest-api/deployments/create-a-new-deployment)、[Neon managed連携](https://neon.com/docs/guides/vercel-managed-integration) を参照してください。
 
 ### Productionへデプロイ
 
@@ -351,35 +364,15 @@ Productionだけを一覧表示する場合は次を実行します。
 npx vercel list --prod
 ```
 
-### Preview Deploymentの再デプロイ
+### Previewの更新と返却
 
-同じDeploymentを再ビルドする場合は、対象URLを指定します。環境変数を変更した場合も再デプロイが必要です。
+コード変更後は検証・commitして `deploy:preview` を実行します。同PR・同leaseの現在headをwriterが配置し、READYとDB identityを照合してaliasを更新します。直接 `vercel redeploy` で台帳外のdeploymentを追加しません。
 
-```bash
-npx vercel redeploy https://対象のpreview-url.vercel.app
-```
+返却はPR close/mergeまたは承認済みworkflow入口から、同leaseのwriterへ依頼します。writerは先に `deleting` を永続化し、intent/orphanを照合し、記録済み全IDのproject・feature枝・SHA・leaseを確認してcancel/deleteします。aliasの除去だけではDeployment固有URLのAPIを止めたことになりません。
 
-コード変更後は検証してコミットし、次で最新コミットのPreviewを取得します。PR作成前に再検証してください。
+最後の関連Vercel deployment削除でNative cleanupが発火します。Neon APIでbranchと全endpointの消失を確認した後だけ `free` にします。403、timeout、delete失敗や曖昧な残存は `deleting` のまま保持し、次leaseによる旧DBの再利用を拒否します。DB保持用parkingは残しません。[Neon cleanup公式仕様](https://neon.com/docs/guides/vercel-branch-cleanup)
 
-```bash
-npm run deploy:preview
-```
-
-### Preview Deploymentの削除
-
-最初に一覧から削除対象のURLを確認します。
-
-```bash
-npx vercel list --environment=preview
-```
-
-プロジェクト名ではなく、削除したいDeploymentの完全なURLを指定します。
-
-```bash
-npx vercel remove https://対象のpreview-url.vercel.app
-```
-
-この操作で削除されるのは指定したVercel Deploymentだけです。Vercelの環境変数やGitブランチは削除されません。NeonのDBブランチの削除は連携側のライフサイクルに従います。不要なテストDBはNeon Consoleで確認し、対象タスクのものだけを削除します。
+台帳外の手動削除、Productionや他PRの削除、直接Neon branch削除は行いません。権限・認証・削除承認が不足する場合は返却未完として報告します。資源消失は開始済みFunction/transactionの即停止保証ではなく、その実挙動はlive検証未実施です。
 
 ### ローカルのVercel開発サーバー
 
@@ -419,8 +412,9 @@ npm test          # 清算・CSV解析テスト
 npm run db:setup  # 未適用のDBマイグレーションを適用
 npm run db:seed:test # テストユーザーA・Bと共有ワークスペースを登録
 npm run task:start -- feature-name # 最新mainから専用ブランチとworktreeを作成
-npm run deploy:preview # ブランチをpushし、同じコミットのGit Previewを待つ
-npm run task:pr -- --title 'タイトル' --verification-file /tmp/cake-verification.md # 検証後にPRを作成
+npm run task:pr -- --draft --title 'タイトル' --verification-file /tmp/cake-verification.md # 先に未Previewのdraft PRを作成
+npm run deploy:preview # 有効化・ゲート・先行PR確認後にpushし、同HEADの台帳を読む
+npm run task:pr -- --title 'タイトル' --verification-file /tmp/cake-verification.md # 検証済みの同PR本文を更新
 ```
 
 ## 清算ルール

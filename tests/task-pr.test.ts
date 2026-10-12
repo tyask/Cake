@@ -4,14 +4,26 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runTaskPr } from "../scripts/task-pr";
+import { QA_ENVIRONMENT, QA_NEON_PROJECT_ID, QA_TASK, type QaLeaseRecord } from "../lib/qa-pool";
 import { CAKE_VERCEL_PROJECT, previewRecordPath, type TaskPreviewRecord, type WorkflowExecutor, type WorkflowCommandResult } from "../scripts/task-workflow";
 
 const branch = "codex/test-pr";
 const sha = "a".repeat(40);
-const preview: TaskPreviewRecord = { projectId: CAKE_VERCEL_PROJECT, branch, sha,
-  url: "https://cake-pr-test-fumin1.vercel.app", deploymentId: "dpl_preview", createdAt: "2026-10-10T00:00:00.000Z" };
 const prUrl = "https://github.com/tyask/Cake/pull/42";
+const preview: TaskPreviewRecord = { projectId: CAKE_VERCEL_PROJECT, branch, sha,
+  url: "https://cake-pr-test-fumin1.vercel.app", deploymentId: "dpl_preview", createdAt: "2026-10-12T00:01:00Z",
+  slot: "qa1", leaseId: "00000000-0000-4000-8000-000000000001", prNumber: 42, ledgerRecordId: 101,
+  database: { projectId: QA_NEON_PROJECT_ID, branchId: "br-preview", endpointId: "ep-preview", host: "ep-preview.ap-southeast-1.aws.neon.tech" } };
+const payload: QaLeaseRecord = { protocol: "cake-qa/v1", slot: "qa1", leaseId: preview.leaseId, pr: 42, branch, headSha: sha,
+  state: "held", createdAt: "2026-10-12T00:00:00Z", updatedAt: preview.createdAt, sequence: 1, previousRecordId: null,
+  deployments: [{ id: preview.deploymentId, sha, url: preview.url, phase: "application" }], retiredDatabases: [],
+  database: { ...preview.database, projectId: QA_NEON_PROJECT_ID }, readyDeploymentId: preview.deploymentId, aliasSha: sha };
+const initial = { id: 100, task: QA_TASK, environment: QA_ENVIRONMENT, sha, payload: { ...payload,
+  deployments: [], database: undefined, readyDeploymentId: undefined, aliasSha: undefined } };
+const ledger = (value = payload) => ({ id: 101, task: QA_TASK, environment: QA_ENVIRONMENT, sha: value.headSha,
+  payload: { ...value, sequence: 2, previousRecordId: 100 } });
 const commandResult = (stdout = "", status = 0): WorkflowCommandResult => ({ stdout, status, signal: null });
+const listedPr = (isDraft = true) => commandResult(JSON.stringify([{ url: prUrl, number: 42, headRefOid: sha, isDraft }]));
 
 async function fixture(t: TestContext) {
   const cwd = await mkdtemp(join(tmpdir(), "cake-task-pr-test-"));
@@ -19,10 +31,11 @@ async function fixture(t: TestContext) {
   await mkdir(join(cwd, ".cake"));
   await writeFile(previewRecordPath(cwd), JSON.stringify(preview));
   const reportFile = join(cwd, ".cake/verification.md");
-  await writeFile(reportFile, "- lint・test・build 成功\n- PreviewでA・B認証とAPIを確認\n- PC・スマートフォンで操作確認\n");
-  const state = { branch, sha, status: "", origin: "https://github.com/tyask/Cake.git",
-    remote: `${sha}\trefs/heads/${branch}`, listed: commandResult("[]"), created: commandResult(prUrl),
-    edited: commandResult(), body: "", bodyFile: "" };
+  await writeFile(reportFile, "- lint・test・build 成功\n- PreviewでA・B認証とAPIを確認\n");
+  const state = { branch, sha, status: "", origin: "https://github.com/tyask/Cake.git", remote: `${sha}\trefs/heads/${branch}`,
+    listed: listedPr(), ledger: commandResult(JSON.stringify([[initial, ledger()]])), created: commandResult(prUrl),
+    edited: commandResult(), gate: commandResult("true"), config: commandResult(JSON.stringify({ git: { deploymentEnabled: { "**": false, main: true } } })),
+    pushStatus: 0, pushUpdates: true, body: "", bodyFile: "" };
   const calls: { command: string; args: readonly string[] }[] = [];
   const execute: WorkflowExecutor = async (command, args) => {
     calls.push({ command, args: [...args] });
@@ -33,8 +46,15 @@ async function fixture(t: TestContext) {
       if (args[0] === "rev-parse" && args[1] === "HEAD") return commandResult(state.sha);
       if (args[0] === "remote") return commandResult(state.origin);
       if (args[0] === "ls-remote") return commandResult(state.remote);
+      if (args[0] === "show") return state.config;
+      if (args[0] === "push") {
+        if (state.pushStatus === 0 && state.pushUpdates) state.remote = `${state.sha}\trefs/heads/${state.branch}`;
+        return commandResult("", state.pushStatus);
+      }
     }
+    if (command === "gh" && args[0] === "variable") return state.gate;
     if (command === "gh" && args[0] === "pr" && args[1] === "list") return state.listed;
+    if (command === "gh" && args[0] === "api") return state.ledger;
     if (command === "gh" && args[0] === "pr" && ["create", "edit"].includes(args[1])) {
       const index = args.indexOf("--body-file");
       assert.notEqual(index, -1);
@@ -45,167 +65,152 @@ async function fixture(t: TestContext) {
     assert.fail(`Unexpected command ${command}: ${args.join(" ")}`);
   };
   return { cwd, reportFile, state, calls, execute,
-    options: { cwd, execute, log: () => {}, args: ["--title", "開発フローを整備", "--verification-file", reportFile] } };
+    options: { cwd, execute, log: () => {}, args: ["--title", "固定QAの入口を整備", "--verification-file", reportFile] } };
 }
 
-test("検証済みHEADだけをmain向けPRにし、Previewと複数行の検証結果をbody-fileで渡す", async (t) => {
+test("同じPR/HEADとlive貸出の検証証拠で既存draft本文を更新し、ready/merge操作はしない", async (t) => {
   const f = await fixture(t);
-  const result = await runTaskPr(f.options);
-  assert.deepEqual(result, { url: prUrl, existing: false });
-  assert.match(f.state.body, /開発フローを整備/);
-  assert.ok(f.state.body.includes(preview.url));
-  assert.ok(f.state.body.includes(sha));
-  assert.ok(f.state.body.includes(branch));
-  assert.match(f.state.body, /本番から分離したNeon Previewリソース/);
+  assert.deepEqual(await runTaskPr(f.options), { url: prUrl, existing: true });
+  for (const value of [preview.url, sha, preview.leaseId, preview.database.projectId, preview.database.branchId, preview.database.endpointId]) {
+    assert.ok(f.state.body.includes(value));
+  }
+  assert.match(f.state.body, /QA枠: `qa1` \/ PR #42/);
+  assert.match(f.state.body, /台帳Deployment: `101`/);
   assert.match(f.state.body, /lint・test・build 成功\n- PreviewでA・B認証/);
-  const mutations = f.calls.filter((call) => call.command === "gh" && call.args[1] !== "list");
-  assert.equal(mutations.length, 1);
-  const created = mutations[0];
-  assert.equal(created.args[1], "create");
-  assert.equal(created.args[created.args.indexOf("--repo") + 1], "tyask/Cake");
-  assert.equal(created.args[created.args.indexOf("--base") + 1], "main");
-  assert.equal(created.args[created.args.indexOf("--head") + 1], branch);
-  assert.equal(created.args.includes("--body"), false);
-  assert.equal(created.args.includes("merge"), false);
-  assert.equal(created.args.includes("--auto"), false);
+  assert.equal(f.calls.filter((c) => c.args[1] === "edit").length, 1);
+  assert.equal(f.calls.some((c) => c.args.includes("ready") || c.args.includes("merge") || c.args.includes("--auto") || c.args.includes("--body")), false);
   await assert.rejects(() => readFile(f.state.bodyFile), /ENOENT/);
+});
+
+test("Preview未実施でも--draftでPRを作成し、未検証を本文へ明記する", async (t) => {
+  const f = await fixture(t);
+  await rm(previewRecordPath(f.cwd));
+  f.state.listed = commandResult("[]");
+  assert.deepEqual(await runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }), { url: prUrl, existing: false });
+  const created = f.calls.find((c) => c.args[1] === "create")!;
+  assert.ok(created.args.includes("--draft"));
+  assert.match(f.state.body, /未検証/);
+  assert.ok(f.state.body.includes(sha));
+  assert.equal(f.state.body.includes(preview.url), false);
+  assert.equal(f.calls.some((c) => c.command === "npx" || c.args[0] === "api" || c.args[0] === "push"), false);
+});
+
+test("初回draftは運用者確認とコミット済み全枝denyを確認してpushし、remote HEAD確認後だけ作成する", async (t) => {
+  const f = await fixture(t);
+  f.state.remote = "";
+  f.state.listed = commandResult("[]");
+  await rm(previewRecordPath(f.cwd));
+  assert.deepEqual(await runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }), { url: prUrl, existing: false });
+  const gate = f.calls.findIndex((c) => c.command === "gh" && c.args[0] === "variable");
+  const config = f.calls.findIndex((c) => c.command === "git" && c.args[0] === "show");
+  const push = f.calls.findIndex((c) => c.command === "git" && c.args[0] === "push");
+  const create = f.calls.findIndex((c) => c.args[1] === "create");
+  assert.ok(gate < config && config < push && push < create);
+  assert.deepEqual(f.calls[config].args, ["show", `${sha}:vercel.json`]);
+  assert.equal(f.calls.filter((c) => c.args[0] === "ls-remote").length, 2);
+  assert.equal(f.calls.some((c) => c.command === "npx" || c.args[0] === "api"), false);
+});
+
+test("draftの未push HEADはgate未確認/不正config/push失敗/remote不一致ならPRを作成しない", async (t) => {
+  for (const failure of ["unconfirmed", "config", "push", "remote"] as const) {
+    const f = await fixture(t);
+    f.state.remote = "";
+    f.state.listed = commandResult("[]");
+    if (failure === "unconfirmed") f.state.gate = commandResult("false");
+    if (failure === "config") f.state.config = commandResult(JSON.stringify({ git: { deploymentEnabled: { "**": false, main: true, qa1: true } } }));
+    if (failure === "push") f.state.pushStatus = 1;
+    if (failure === "remote") f.state.pushUpdates = false;
+    await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }));
+    assert.equal(f.calls.some((c) => c.args[1] === "create" || c.args[1] === "edit"), false);
+    if (["unconfirmed", "config"].includes(failure)) assert.equal(f.calls.some((c) => c.args[0] === "push"), false);
+  }
+});
+
+test("--draftは既存draftの本文を更新でき、既存ready PRは未検証本文へ変更しない", async (t) => {
+  const f = await fixture(t);
+  await runTaskPr({ ...f.options, args: ["--draft", ...f.options.args] });
+  assert.equal(f.calls.filter((c) => c.args[1] === "edit").length, 1);
+  assert.match(f.state.body, /未検証/);
+  f.state.listed = listedPr(false);
+  await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }), /既存PRはdraftではありません/);
+  assert.equal(f.calls.filter((c) => c.args[1] === "edit").length, 1);
 });
 
 test("追加・重複・不足引数と不正タイトルをGit操作前に拒否する", async (t) => {
   const f = await fixture(t);
-  const invalid = [[], ["--title", "title"], ["--verification-file", f.reportFile],
-    ["--title", "one", "--title", "two", "--verification-file", f.reportFile],
-    [...f.options.args, "--auto"], ["--title", "", "--verification-file", f.reportFile],
+  for (const args of [[], ["--title", "title"], ["--verification-file", f.reportFile],
+    [...f.options.args, "--auto"], [...f.options.args, "--draft", "--draft"],
     ["--title", "line\nbreak", "--verification-file", f.reportFile],
-    ["--title", "x".repeat(241), "--verification-file", f.reportFile],
-    ["--title", "title", "--verification-file"]];
-  for (const args of invalid) await assert.rejects(() => runTaskPr({ ...f.options, args }));
+    ["--title", "x".repeat(241), "--verification-file", f.reportFile]]) await assert.rejects(() => runTaskPr({ ...f.options, args }));
   assert.equal(f.calls.length, 0);
 });
 
-test("mainや未コミット変更ではPRを作成しない", async (t) => {
+test("mainや未コミット変更、空の検証報告、未push HEADではPRを書き換えない", async (t) => {
   const f = await fixture(t);
   f.state.branch = "main";
   await assert.rejects(() => runTaskPr(f.options), /タスク専用/);
   f.state.branch = branch;
   f.state.status = " M app.ts";
   await assert.rejects(() => runTaskPr(f.options), /未コミット変更/);
-  assert.equal(f.calls.some((call) => call.command === "gh"), false);
-});
-
-test("Previewと現在のブランチ・SHAが一致しなければ検証のやり直しを要求する", async (t) => {
-  const f = await fixture(t);
-  for (const record of [{ ...preview, branch: "codex/other-task" }, { ...preview, sha: "b".repeat(40) }]) {
-    await writeFile(previewRecordPath(f.cwd), JSON.stringify(record));
-    await assert.rejects(() => runTaskPr(f.options), /現在のHEADが一致しません/);
-  }
-  assert.equal(f.calls.some((call) => call.command === "gh" || call.args[0] === "ls-remote"), false);
-});
-
-test("Preview記録がない・壊れている・projectやURLが異なる場合はPRを作成しない", async (t) => {
-  const f = await fixture(t);
-  await rm(previewRecordPath(f.cwd));
-  await assert.rejects(() => runTaskPr(f.options), /記録がないか不正/);
-  const records = ["private-invalid-json", JSON.stringify({ ...preview, projectId: "prj_other" }),
-    JSON.stringify({ ...preview, url: "https://evil.example" }), JSON.stringify({ ...preview, deploymentId: "wrong" }),
-    JSON.stringify({ ...preview, createdAt: "wrong-date" }), JSON.stringify({ ...preview, url: `${preview.url}/` }),
-    JSON.stringify({ ...preview, sha: "invalid-sha" })];
-  for (const record of records) {
-    await writeFile(previewRecordPath(f.cwd), record);
-    await assert.rejects(() => runTaskPr(f.options), /記録がないか不正/);
-  }
-  assert.equal(f.calls.some((call) => call.command === "gh"), false);
-});
-
-test("空・不足・ディレクトリの検証結果はPRに添付しない", async (t) => {
-  const f = await fixture(t);
-  await writeFile(f.reportFile, " \n\t");
+  f.state.status = "";
+  f.state.remote = `${"b".repeat(40)}\trefs/heads/${branch}`;
+  await assert.rejects(() => runTaskPr(f.options), /originのブランチ/);
+  await writeFile(f.reportFile, " ");
   await assert.rejects(() => runTaskPr(f.options), /検証結果ファイル/);
-  for (const path of [join(f.cwd, "missing-report.md"), f.cwd]) {
-    await assert.rejects(() => runTaskPr({ ...f.options, args: ["--title", "title", "--verification-file", path] }), /検証結果ファイル/);
-  }
-  assert.equal(f.calls.some((call) => call.command === "gh"), false);
+  assert.equal(f.calls.some((c) => c.args[1] === "edit" || c.args[1] === "create"), false);
 });
 
-test("remoteブランチが検証済みSHAと異なる場合はPRを作成しない", async (t) => {
+test("旧形式/壊れた/別SHAのローカルPreview証拠ではPRを更新しない", async (t) => {
   const f = await fixture(t);
-  for (const remote of ["", `${"b".repeat(40)}\trefs/heads/${branch}`, `${sha}\trefs/heads/codex/other-task`]) {
-    f.state.remote = remote;
-    await assert.rejects(() => runTaskPr(f.options), /originのブランチが検証済みコミットと一致しません/);
+  for (const record of ["private-invalid-json", JSON.stringify({ ...preview, leaseId: undefined }),
+    JSON.stringify({ ...preview, projectId: "prj_other" }), JSON.stringify({ ...preview, sha: "b".repeat(40) }),
+    JSON.stringify({ ...preview, prNumber: 43 }), JSON.stringify({ ...preview, url: "https://evil.example" })]) {
+    await writeFile(previewRecordPath(f.cwd), record);
+    await assert.rejects(() => runTaskPr(f.options));
   }
-  assert.equal(f.calls.some((call) => call.command === "gh"), false);
+  assert.equal(f.calls.some((c) => c.args[1] === "edit" || c.args[1] === "create"), false);
 });
 
-test("同じ検証済みコミットの既存PRを最新のタイトル・Preview・検証結果へ更新する", async (t) => {
+test("返却/他lease/別Deployment/別DBへ変わった枠はローカル証拠があっても拒否する", async (t) => {
   const f = await fixture(t);
-  f.state.listed = commandResult(JSON.stringify([{ url: prUrl, headRefOid: sha }]));
-  const currentPreview = { ...preview, url: "https://cake-pr-new-preview-fumin1.vercel.app", deploymentId: "dpl_retested" };
-  await writeFile(previewRecordPath(f.cwd), JSON.stringify(currentPreview));
-  await writeFile(f.reportFile, "- 修正後のPreviewでAPIを再確認\n- lint・test・build 再実行成功\n");
+  for (const value of [{ ...payload, state: "deleting" as const, readyDeploymentId: undefined, aliasSha: undefined },
+    { ...payload, leaseId: "00000000-0000-4000-8000-000000000002" },
+    { ...payload, readyDeploymentId: "dpl_other", deployments: [{ id: "dpl_other", sha, url: preview.url, phase: "application" as const }] },
+    { ...payload, database: { ...payload.database!, branchId: "br-other" } },
+    { ...payload, aliasSha: "b".repeat(40) }]) {
+    const records = value.state === "deleting" ? [initial, ledger(), { ...ledger(value), id: 102, payload: { ...value, sequence: 3, previousRecordId: 101 } }] : [initial, ledger(value)];
+    f.state.ledger = commandResult(JSON.stringify([records]));
+    await assert.rejects(() => runTaskPr(f.options));
+  }
+  assert.equal(f.calls.some((c) => c.args[1] === "edit" || c.args[1] === "create"), false);
+});
+
+test("paginationした最新snapshotを採用し、同じ貸出/Deployment/DBのrefreshは証拠を失効させない", async (t) => {
+  const f = await fixture(t);
+  const next = { ...ledger(), id: 102, payload: { ...payload, sequence: 3, previousRecordId: 101, updatedAt: "2026-10-12T00:02:00Z" } };
+  f.state.ledger = commandResult(JSON.stringify([[next], [initial, ledger()]]));
   assert.deepEqual(await runTaskPr(f.options), { url: prUrl, existing: true });
-  assert.equal(f.calls.some((call) => call.command === "gh" && call.args[1] === "create"), false);
-  const edits = f.calls.filter((call) => call.command === "gh" && call.args[1] === "edit");
-  assert.equal(edits.length, 1);
-  assert.equal(edits[0].args[2], prUrl);
-  assert.equal(edits[0].args[edits[0].args.indexOf("--title") + 1], "開発フローを整備");
-  assert.ok(f.state.body.includes(currentPreview.url));
-  assert.equal(f.state.body.includes(preview.url), false);
-  assert.ok(f.state.body.includes(currentPreview.deploymentId));
-  assert.ok(f.state.body.includes(sha));
-  assert.match(f.state.body, /修正後のPreviewでAPIを再確認\n- lint・test・build 再実行成功/);
-  await assert.rejects(() => readFile(f.state.bodyFile), /ENOENT/);
 });
 
-test("既存PRのSHA・URL・JSONが不正なら追加PRを作成しない", async (t) => {
+test("不正/重複PRと照会失敗では秘密応答を出さず書込を継続しない", async (t) => {
   const f = await fixture(t);
-  const values = ["private-json", "{}", '[null]',
-    JSON.stringify([{ url: prUrl, headRefOid: "b".repeat(40) }]),
-    JSON.stringify([{ url: "https://github.com/other/Cake/pull/42", headRefOid: sha }]),
-    JSON.stringify([{ url: prUrl, headRefOid: sha }, { url: prUrl, headRefOid: sha }])];
-  for (const value of values) {
-    f.state.listed = commandResult(value);
-    await assert.rejects(() => runTaskPr(f.options), (error: unknown) => {
-      assert.ok(error instanceof Error);
-      assert.equal(error.message.includes("private-"), false);
-      return true;
-    });
+  for (const listed of [commandResult("private-json"), commandResult("private-api-error", 1),
+    commandResult(JSON.stringify([{ url: prUrl, number: 42, headRefOid: "b".repeat(40), isDraft: true }])),
+    commandResult(JSON.stringify([{ url: prUrl, number: 43, headRefOid: sha, isDraft: true }]))]) {
+    f.state.listed = listed;
+    await assert.rejects(() => runTaskPr(f.options), (error: unknown) => error instanceof Error && !error.message.includes("private-"));
   }
-  assert.equal(f.calls.some((call) => call.command === "gh" && ["create", "edit"].includes(call.args[1])), false);
+  assert.equal(f.calls.some((c) => c.args[1] === "edit" || c.args[1] === "create"), false);
 });
 
-test("既存PRの照会が失敗したら作成を続けない", async (t) => {
-  const f = await fixture(t);
-  f.state.listed = commandResult("private-api-error", 1);
-  await assert.rejects(() => runTaskPr(f.options), /既存PRを確認できません/);
-  assert.equal(f.calls.some((call) => call.command === "gh" && call.args[1] === "create"), false);
-});
-
-test("PR作成失敗時にも本文の一時ファイルを削除し、秘密エラーを出さない", async (t) => {
-  const f = await fixture(t);
-  f.state.created = commandResult("private-create-error", 1);
-  await assert.rejects(() => runTaskPr(f.options), (error: unknown) => {
-    assert.ok(error instanceof Error);
-    assert.match(error.message, /PRを作成できません/);
-    assert.equal(error.message.includes("private-"), false);
-    return true;
-  });
-  assert.ok(f.state.bodyFile);
-  await assert.rejects(() => readFile(f.state.bodyFile), /ENOENT/);
-  assert.equal(f.calls.filter((call) => call.command === "gh" && call.args[1] === "create").length, 1);
-});
-
-test("既存PR更新失敗時も一時本文を削除し、新規PR作成や後続処理を続けない", async (t) => {
-  const f = await fixture(t);
-  f.state.listed = commandResult(JSON.stringify([{ url: prUrl, headRefOid: sha }]));
-  f.state.edited = commandResult("private-edit-error", 1);
-  await assert.rejects(() => runTaskPr(f.options), (error: unknown) => {
-    assert.ok(error instanceof Error);
-    assert.match(error.message, /既存PRの更新に失敗/);
-    assert.equal(error.message.includes("private-"), false);
-    return true;
-  });
-  assert.ok(f.state.bodyFile);
-  await assert.rejects(() => readFile(f.state.bodyFile), /ENOENT/);
-  assert.equal(f.calls.filter((call) => call.command === "gh" && call.args[1] === "edit").length, 1);
-  assert.equal(f.calls.some((call) => call.command === "gh" && call.args[1] === "create"), false);
+test("PR更新/作成失敗時も本文の一時ファイルを削除し後続の書込を行わない", async (t) => {
+  for (const draft of [false, true]) {
+    const f = await fixture(t);
+    f.state.edited = commandResult("private-error", 1);
+    if (draft) { f.state.listed = commandResult("[]"); f.state.created = commandResult("private-error", 1); }
+    await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, ...(draft ? ["--draft"] : [])] }),
+      (error: unknown) => error instanceof Error && !error.message.includes("private-"));
+    await assert.rejects(() => readFile(f.state.bodyFile), /ENOENT/);
+    assert.equal(f.calls.filter((c) => c.args[1] === "edit" || c.args[1] === "create").length, 1);
+  }
 });

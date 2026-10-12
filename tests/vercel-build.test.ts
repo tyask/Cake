@@ -3,9 +3,14 @@ import assert from "node:assert/strict";
 import { buildSteps, runVercelBuild, type BuildStep } from "../scripts/vercel-build";
 
 const previewEnvironment = {
-  VERCEL_ENV: "preview", AUTH_MODE: "test", CAKE_TEST_DATABASE_URL: "isolated-test-db", AUTH_SECRET: "test-secret",
+  VERCEL_ENV: "preview", AUTH_MODE: "test", AUTH_SECRET: "test-secret",
+  VERCEL_GIT_COMMIT_REF: "codex/feature", VERCEL_GIT_COMMIT_SHA: "a".repeat(40),
+  CAKE_QA_SLOT: "qa1", CAKE_QA_PR: "34", CAKE_QA_LEASE_TOKEN: "00000000-0000-4000-8000-000000000001",
+  CAKE_QA_SOURCE_BRANCH: "codex/feature", CAKE_QA_SOURCE_SHA: "a".repeat(40),
+  CAKE_TEST_DATABASE_URL: "postgresql://user:private@ep-preview-pooler.ap-southeast-1.aws.neon.tech/cake",
+  CAKE_QA_DATABASE_HOST: "ep-preview.ap-southeast-1.aws.neon.tech", CAKE_QA_PRODUCTION_DATABASE_HOST: "ep-production.ap-southeast-1.aws.neon.tech",
 };
-const productionEnvironment = { ...previewEnvironment, VERCEL_ENV: "production", AUTH_MODE: "google", DATABASE_URL: "production-db" };
+const productionEnvironment = { VERCEL_ENV: "production", AUTH_MODE: "google", AUTH_SECRET: "test-secret", DATABASE_URL: "production-db" };
 
 test("Previewのテスト認証ではDB更新・テスト登録・ビルドの順に実行する", () => {
   assert.deepEqual(buildSteps(previewEnvironment), ["db:setup", "db:seed:test", "build"]);
@@ -28,7 +33,18 @@ test("Productionではビルド成功後にDB更新を行い、テストユー�
 
 test("Development・ローカルではDB操作を行わない", () => {
   for (const VERCEL_ENV of ["development", undefined]) {
-    assert.deepEqual(buildSteps({ ...previewEnvironment, VERCEL_ENV }), ["build"]);
+    assert.deepEqual(buildSteps({ VERCEL_ENV }), ["build"]);
+  }
+});
+
+test("PreviewのleaseとDB比較情報が確認不能ならmigration・seed・buildをすべて止める", () => {
+  for (const changed of [{ CAKE_QA_SLOT: undefined }, { CAKE_QA_DATABASE_HOST: undefined }, { CAKE_QA_PRODUCTION_DATABASE_HOST: undefined }, { VERCEL_GIT_COMMIT_SHA: "b".repeat(40) }]) {
+    const executed: BuildStep[] = [];
+    assert.throws(() => runVercelBuild({ ...previewEnvironment, ...changed }, (step) => {
+      executed.push(step);
+      return 0;
+    }), /QA貸出とDBの照合/);
+    assert.deepEqual(executed, []);
   }
 });
 

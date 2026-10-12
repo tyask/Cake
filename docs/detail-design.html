@@ -777,20 +777,36 @@ BootstrapData extends BootstrapMetadata
               <tr><td><code>npm test</code></td><td><code>tsx --test tests/*.test.ts</code>。</td></tr>
               <tr><td><code>npm run lint</code> / <code>npm run build</code></td><td>ESLintとNext.js Production build・型/ルート検証。</td></tr>
               <tr><td><code>npm run db:setup</code></td><td>未適用番号付きSQLと適用履歴をatomicに追加。</td></tr>
-              <tr><td><code>npm run db:seed:test</code></td><td>固定テストユーザーA/Bを非管理者・有効として登録し、共有家計と所属を準備。繰返し実行しても重複しない。</td></tr>
-              <tr><td><code>npm run build:vercel</code></td><td>Previewは必須環境変数確認 → db:setup → テスト認証時db:seed:test → build。Productionは必須環境変数確認 → build → db:setup。いずれも失敗時に公開停止。Development/ローカルはbuildのみ。</td></tr>
-              <tr><td><code>npm run deploy:preview</code></td><td>scripts/task-preview.tsでクリーンなcodex/ブランチをpushし、HEADと同じコミットのGit PreviewがREADYになるまで待つ。Deployment固有のURLを記録。</td></tr>
-              <tr><td><code>npm run task:pr -- --title &lt;タイトル&gt; --verification-file &lt;Markdownファイル&gt;</code></td><td>最新ブランチ・コミットとPreview記録、非空の検証報告を確認してmain向けPRを作成。マージはしない。</td></tr>
+              <tr><td><code>npm run db:seed:test</code></td><td>固定テストユーザーA/Bを非管理者・有効として登録し、共有家計と所属を準備。QAでは新PRの空DB確認後に初回だけ固定サンプルを登録し、同PRの操作データを維持する。</td></tr>
+              <tr><td><code>npm run build:vercel</code></td><td>Previewは必須環境変数・DB接続前guard確認 → DB内の所有権/初回空状態確認 → db:setup → テスト認証時db:seed:test → build。Productionは必須環境変数確認 → build → db:setup。いずれも失敗時に公開停止。Development/ローカルはbuildのみ。</td></tr>
+              <tr><td><code>npm run deploy:preview</code></td><td>scripts/task-preview.tsでクリーンなcodex/ブランチとHEADを扱い、共通checkerで生成前ゲートとHEADのmain-only停止設定、pool有効化、先行main向けPRを確認してpushし、現在leaseに一致するwriterのREADY台帳記録からDeployment固有URLを記録。有効化前の移行設定PRは未検証事項を明記する。</td></tr>
+              <tr><td><code>npm run task:pr</code></td><td>draft入口は共通checkerで<code>CAKE_QA_GIT_GATE_CONFIRMED=true</code>とHEAD内<code>**: false / main: true</code>を確認し、必要時だけpushして未Previewのmain向けdraftを作成・更新する。QA pool運用では貸出前にPRを確定し、配置後の報告は現在head・lease・Preview記録と照合する。移行設定の未検証事項を隠さず、マージはしない。引数はREADMEを参照。</td></tr>
             </tbody>
           </table></div>
           <h3>タスクの分離とPreview記録</h3>
           <p>worktreeは元のリポジトリの兄弟<code>Cake-worktrees/&lt;タスク名&gt;</code>へ作成し、<code>CAKE_WORKTREE_ROOT</code>で変更できる。相対パスは元のリポジトリから解決する。既存ブランチ・作成先は上書きせず、<code>.env.local</code>・<code>.vercel</code>・<code>node_modules</code>はコピーしない。ローカル実DB検証には対象タスクのテスト用接続情報を設定する。</p>
-          <p>PreviewはVercelのGit連携で作り、10秒間隔・最大15分で同じHEADコミットのREADYを確認する。結果はGit対象外の<code>.cake/preview.json</code>へブランチ・コミット・Deployment URLとして保存する。PR作成時にクリーンな現在のブランチ・コミットと照合し、変更後の古い検証記録は拒否する。検証報告・PRに接続文字列や認証情報を記載しない。</p>
+          <p>QA pool運用では、貸出済みPRのfeature枝を完全SHA指定で既存Environment <code>Preview</code>へ配置する。現在PR head・leaseが一致するREADYだけをPreview記録として受理し、結果はGit対象外の<code>.cake/preview.json</code>へ保存する。検証結果の記録時にはクリーンな現在のブランチ・コミット・PR・leaseと照合し、古いheadや前のleaseの記録を拒否する。候補aliasとは別にDeployment固有URLで画面・APIを確認し、検証報告・PRに接続文字列や認証情報を記載しない。</p>
           <h3>固定QA枠の段階導入</h3>
-          <p>設定案はqa1/qa2/qa3の固定Git枝とNeon専用DBを再利用する。台帳はGitHub Deployments payloadと短いActions直列writerを設計採用する。実装・権限承認・実検証が完了するまでQA枠は作成しない。held/drainingは使用中、nullだけ空き。PR・完全SHA・操作者・世代tokenを保存し、失敗やPR closeで自動解放しない。旧deployment・実行中処理を停止し、DBに接続しない静的待機deploymentとretentionを確認してから返却する。詳細と未確認事項は<a href="qa-pool.md">固定QA運用</a>を参照。mainへのmergeと本番適用はユーザー確認後。</p>
-          <p>自動Gitデプロイは設定を含むコミットでmainとqa1/2/3だけ許可。古い枝・手動デプロイへ一律適用される保証はなく、移行時に実確認する。QAビルド・DB setup・seed・runtimeは確認済みCAKE_QA_DATABASE_HOSTとendpointを照合し、不一致はDB操作前に停止する。DB resetは行わない。</p>
+          <p><code>qa1</code>・<code>qa2</code>・<code>qa3</code>はPRへの貸出枠と候補aliasであり、固定QA Git枝や台帳Git枝を作らない。DBは本番と別のNeon projectで、feature枝ごとのNative Preview Branchingを使う。同じPRのpushは同じDBを使い、操作データを保持する。新PRへ枠を貸し直す際は新しいfeature枝・lease・DBが必要。待機用deploymentでDBを保持する運用は撤去する。</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>責務</th><th>設計</th></tr></thead>
+            <tbody>
+              <tr><td>貸出台帳</td><td>GitHub Deploymentsのtask <code>cake-qa-lease</code>、protocol <code>cake-qa/v1</code>のpayload snapshotが正本。PR・feature枝・完全SHA・lease・世代・前record ID・作成intent・Vercel deployment ID一覧・Neon project/branch/endpoint ID・host・返却済みDBを記録。payloadの連鎖と状態遷移を検証し、不正・欠落は停止する。</td></tr>
+              <tr><td>貸出状態</td><td><code>held</code>と<code>deleting</code>は使用中。未貸出または削除確認済みの<code>free</code>だけ空き。PR closeや失敗だけでfreeにしない。GitHub deployment statusは正本にせず、現writerはstatusを作成しない。将来追加する場合も<code>auto_inactive: false</code>で別の台帳recordを暗黙に無効化しない。</td></tr>
+              <tr><td>短い単一writer</td><td><code>pull_request_target</code>・<code>workflow_dispatch</code>・<code>schedule</code>を契機に、信頼するmain側コードだけで再照合・直列更新する。既存GitHub Environment <code>Preview</code>を使い、<code>queue: max</code>・<code>cancel-in-progress: false</code>を指定。長時間のbuild待ちはwriter外へ出す。</td></tr>
+              <tr><td>配置とalias</td><td>貸出先PRのfeature枝と完全SHAでVercel Previewを作成し、作成intentと返却対象IDを記録する。現在PR headと同じleaseで、<code>CAKE_QA_APPROVED_HEADS</code>の完全SHA承認に一致するREADY deploymentだけが候補aliasを更新する。同PRの更新も新head承認を必要とする。遅い旧headの完了・前leaseの再実行はaliasを更新しない。候補aliasの現環境での割当は未実施。</td></tr>
+              <tr><td>返却</td><td><code>held → deleting → free</code>。intentと孤立リソースを再照合し、所有先を確認した全recorded deployment IDを削除。同feature枝のNative branch・endpointの不在確認後だけfreeにする。失敗・不明・cleanup遅延はdeletingを維持。次leaseは旧branch ID・endpoint ID・hostを拒否する。</td></tr>
+            </tbody>
+          </table></div>
+          <p>GitHubの同concurrency groupは実行中1件、<code>queue: max</code>で待機最大100件。満杯時の追加要求はcancelされるため、イベントを確定済み状態として扱わず、schedule等でPR・head・lease・intentを再照合する。FIFOはgroupで待機を開始した時刻の順で、dispatch順は保証されない。<code>queue: max</code>と<code>cancel-in-progress: true</code>の組合せはvalidation error。仕様は<a href="https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idconcurrency">GitHub公式job concurrency</a>を参照。</p>
+          <p>Deployment payloadは追加JSON情報を保存できる。GitHub deployment statusの過去履歴は90日で削除されるため、status履歴から貸出状態を復元しない。snapshotの正本と検証条件は<a href="https://docs.github.com/en/rest/deployments/deployments#create-a-deployment">GitHub公式Deployments</a>、statusの自動inactiveと保持期間は<a href="https://docs.github.com/en/rest/deployments/statuses">GitHub公式deployment statuses</a>を参照。</p>
+          <p>初回deploymentで未確認のDB hostが供給された場合、QA build・DB setup・seed・runtimeはDB接続前guardで停止する。writerはNeon APIで本番とは別のproject・当該feature枝のNative branch・endpoint・hostへの所属を読取確認し、確認情報を同feature枝の次deploymentへ渡す。DB保持用の待機deploymentは使わない。接続前guardは<code>CAKE_QA_DATABASE_HOST</code>と接続先を照合し、読取確認済みの非秘密<code>CAKE_QA_PRODUCTION_DATABASE_HOST</code>との一致やlease/head不一致も拒否する。本番接続文字列をPreviewへ渡して比較しない。</p>
+          <p>Native親branchが空であることの証拠は、DB guardによる新PR DBの空状態確認を含む。初回migration/seed前にユーザーschema内のrelation・routine・型やデータの混入を検査し、空状態と所有権を確認できなければ停止する。migrationと固定サンプルは確認済みDBへ登録し、DB内にPR・feature枝・lease・host・DB名を記録する。同PRの後続migration/seed/runtimeはこの記録を照合し、別PR・前leaseや初回サンプルの再登録でデータを混在させない。schema消去の要否とNative親branchの準備は有効化前に確認する事項で、混入DBを自動resetしない。</p>
+          <p>配置APIとalias割当は<a href="https://vercel.com/docs/rest-api/deployments/create-a-new-deployment">Vercel公式create deployment</a>・<a href="https://vercel.com/docs/rest-api/aliases/assign-an-alias">assign alias</a>、Native DBは<a href="https://neon.com/docs/guides/vercel-managed-integration">Neon公式Vercel managed integration</a>を参照。同feature枝の最後のdeployment削除に伴うNative branch cleanupは<a href="https://neon.com/docs/guides/vercel-branch-cleanup">Neon公式cleanup</a>に従い、REST配置・削除を含む実環境でbranchとendpointの不在まで確認する。</p>
+          <div class="warning">QA poolは既定無効。提案writerの<code>CAKE_QA_POOL_ENABLED</code>・<code>CAKE_QA_GIT_GATE_CONFIRMED</code>・<code>CAKE_QA_NATIVE_CONFIRMED</code>・<code>CAKE_QA_DELETE_APPROVED</code>は、対応条件を確認・承認してからtrueへ設定する。全既存PRの貸出前Preview/DB生成を止めるremote gateの提案・確認が未完なら有効化しない。remote gate、Native REST配置、候補alias割当、queue: max、削除cleanupの実環境検証はすべて未実施。現在は<code>NEON_API_KEY</code>が実行環境になくlive確認を停止している。新secret・追加権限・network設定・Productionのremote変更は今回未許可。詳細と未確認事項は<a href="qa-pool.md">QA貸出運用</a>に記録し、承認後だけ有効化する。</div>
+          <p>消失確認は資源削除の確認であり、開始済みFunction/transactionの即停止を保証しない。現writerは実行中処理の監視APIを照会せず、この停止挙動はlive検証未実施。非秘密guard値をcreate requestのenv/build.envで渡す案は、<a href="https://raw.githubusercontent.com/vercel/vercel/main/packages/client/src/types.ts">公式clientのDeploymentOptions</a>と<a href="https://raw.githubusercontent.com/vercel/vercel/main/packages/client/src/deploy.ts">POST実装</a>に根拠がある。ただし公開REST schemaにはfieldの記載がなく、clientはfiles付与の経路でgitSourceを定義していない。writerのfilesなしgitSource併用・build/runtime注入・Native動作は推論とlive未検証を区別し、実環境で確認する。feature枝・project/branch環境変数はremote更新しない。</p>
           <h3>DB環境と公開順序</h3>
-          <p><code>vercel.json</code>はbuildCommandにbuild:vercel、regionにsin1を指定する。Vercel MarketplaceのNeonリソース<code>cake-preview</code>は本番と別のNeonプロジェクトを使い、Previewだけへ接続する。環境変数は<code>CAKE_TEST_</code>で始め、Native Preview Branchingを有効にする。リソース準備完了をデプロイ開始条件にし、Gitブランチごとの独立DBをビルドとAPIで共用する。</p>
+          <p><code>vercel.json</code>はbuildCommandにbuild:vercel、regionにsin1を指定する。Vercel MarketplaceのNeonリソース<code>cake-preview</code>は本番と別のNeonプロジェクトを使い、Previewだけへ接続する。環境変数は<code>CAKE_TEST_</code>で始め、貸出先feature枝のNative Preview BranchingでDBをビルドとAPIに共用する。貸出前の自動Git PreviewとDB生成を防ぐ設定は、設定を含まない古いPR、既存Preview、手動経路への効果も読取確認・実検証してから適用する。</p>
           <p>Previewは<code>CAKE_TEST_DATABASE_URL</code>が未設定なら停止し、通常の<code>DATABASE_URL</code>を代用しない。Productionはテストデータを登録しない。アプリビルド成功後に本番DBを更新し、更新失敗時には公開しない。DBは自動で巻き戻らないため、公開中の旧版との互換性を保ち、列・テーブルの削除や名前変更を段階的に行う。通常のリモートビルドが正規経路で、手動Productionデプロイは明示依頼時だけ行う。</p>
           <h3>CIとレビュー</h3>
           <p><code>.github/workflows/ci.yml</code>はmain向けPR、main・codex/**へのpushで単一job <code>ci</code>を実行する。Node.js 24、npmキャッシュ、contents:read権限を使い、npm ci → lint → test → build。外部環境の秘密情報は渡さず、Actionsは完全コミットSHAで固定する。同ブランチ・同イベントの古い実行を中止し、PRの検証をpushで中止しない。</p>
@@ -801,6 +817,12 @@ BootstrapData extends BootstrapMetadata
             <tbody>
               <tr><td><code>DATABASE_URL</code></td><td>Production・ローカルのDB接続。ローカルは対象タスクのテストDBを設定。</td></tr>
               <tr><td><code>CAKE_TEST_DATABASE_URL</code></td><td>PreviewのDB接続。ブランチ別のテスト用Neonから供給し、ビルド・実行時とも必須。</td></tr>
+              <tr><td><code>CAKE_QA_SLOT</code> / <code>CAKE_QA_PR</code> / <code>CAKE_QA_LEASE_TOKEN</code></td><td>確認済み貸出枠・PR・leaseの識別情報。PreviewのDB接続前とDB内の所有権guardで照合する。</td></tr>
+              <tr><td><code>CAKE_QA_SOURCE_BRANCH</code> / <code>CAKE_QA_SOURCE_SHA</code></td><td>貸出先feature枝と完全SHA。配置されたGit ref/SHAおよび台帳の現在headと照合し、旧head・前leaseの使用を拒否する。</td></tr>
+              <tr><td><code>CAKE_QA_DATABASE_HOST</code> / <code>CAKE_QA_PRODUCTION_DATABASE_HOST</code></td><td>Neon API等で読取確認した非秘密の貸出先DB hostと本番DB host。pooler差分を正規化して照合し、確認不足・同一hostはDB接続前に停止する。</td></tr>
+              <tr><td><code>CAKE_QA_PARENT_BRANCH_ID</code> / <code>CAKE_QA_APPROVED_HEADS</code></td><td>読取確認済みの空のNative親branch IDと、PR番号→完全head SHAの承認JSON object。同PR更新でも新headをレビュー・承認し、未承認headは配置しない。</td></tr>
+              <tr><td><code>CAKE_QA_POOL_ENABLED</code> / <code>CAKE_QA_GIT_GATE_CONFIRMED</code> / <code>CAKE_QA_NATIVE_CONFIRMED</code> / <code>CAKE_QA_DELETE_APPROVED</code></td><td>提案writerの有効化・全既存PRへのremote gate確認・Native動作確認・削除承認のswitch。既定無効で、対応条件の確認・承認前にtrueへ設定しない。</td></tr>
+              <tr><td><code>VERCEL_TOKEN</code> / <code>NEON_API_KEY</code></td><td>承認後のwriterによる所属確認、Preview配置、記録済みリソースの削除に必要な認証情報。今回の新規secret追加は未許可で、NEON_API_KEYは実行環境にない。値をGit・PR・検証ログへ出さない。</td></tr>
               <tr><td><code>AUTH_SECRET</code></td><td>Auth.js署名/暗号化。Preview・Productionビルドで必須。</td></tr>
               <tr><td><code>CRON_SECRET</code></td><td>定期支払いのCron認証用。Productionへ16文字以上の乱数を設定。欠落・Bearer不一致時は401でDBを呼ばない。</td></tr>
               <tr><td><code>AUTH_GOOGLE_ID</code> / <code>AUTH_GOOGLE_SECRET</code></td><td>GoogleモードのOAuth Client資格情報。</td></tr>
@@ -810,7 +832,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td><code>CAKE_WORKTREE_ROOT</code></td><td>タスク用worktreeの作成先。未設定なら元リポジトリの兄弟Cake-worktrees。</td></tr>
             </tbody>
           </table></div>
-          <div class="note">コード変更後の検証はlint・test・build。業務/認可変更は対応テストを追加・更新し、UI変更はPC/スマートフォンの表示・操作を確認する。検証完了後にコミットし、Preview上で動作確認してPRを作成する。文書のみの変更はPreview不要。変更内容・検証結果・Preview URL・PR URLを報告する。詳細な作業ルールは<a href="../AGENTS.md">AGENTS.md</a>。</div>
+          <div class="note">コード変更後の検証はlint・test・build。業務/認可変更は対応テストを追加・更新し、UI変更はPC/スマートフォンの表示・操作を確認する。QA pool有効時はmain向けPRの貸出後に現在head・leaseと一致するPreview上で動作確認し、結果をPRへ記録する。有効化前の移行設定PRは未検証事項を明記し、文書のみの変更はPreview不要。変更内容・検証結果・Preview URL・PR URLを報告する。詳細な作業ルールは<a href="../AGENTS.md">AGENTS.md</a>。</div>
         </section>
 
         <footer>Cake 家計管理アプリ 詳細設計書 · Version 1.1 · Source baseline 2026-10-10</footer>

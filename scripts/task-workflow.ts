@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { QA_ENVIRONMENT, QA_NEON_PROJECT_ID, QA_TASK, SLOTS, replayDeployments, type Slot } from "../lib/qa-pool";
 
 export const CAKE_REPOSITORY = "tyask/Cake";
 export const CAKE_VERCEL_PROJECT = "prj_Z37vquodhpRd08ZTAtYnP0qa59jD";
@@ -17,7 +18,14 @@ export type TaskPreviewRecord = {
   url: string;
   deploymentId: string;
   createdAt: string;
+  slot: Slot;
+  leaseId: string;
+  prNumber: number;
+  ledgerRecordId: number;
+  database: { projectId: string; branchId: string; endpointId: string; host: string };
 };
+
+export type TaskPullRequest = { url: string; number: number; headRefOid: string; isDraft: boolean };
 
 export const executeWorkflowCommand: WorkflowExecutor = (command, args, cwd) => new Promise((resolveResult, reject) => {
   const executable = process.platform === "win32" && command === "npx" ? "npx.cmd" : command;
@@ -94,6 +102,73 @@ export function previewRecordPath(cwd: string): string {
   return resolve(cwd, ".cake/preview.json");
 }
 
+export async function assertTaskGitGate(head: TaskHead, execute: WorkflowExecutor): Promise<void> {
+  const confirmed = await commandOutput(execute, "gh", ["variable", "get", "CAKE_QA_GIT_GATE_CONFIRMED", "--repo", CAKE_REPOSITORY], head.cwd,
+    "Git自動Preview停止の確認設定を取得できません。運用者の確認が必要です。pushを開始しません。");
+  if (confirmed !== "true") throw new Error("Git自動Preview停止は未確認です。運用者の確認が必要です。pushを開始しません。");
+  const committed = await commandOutput(execute, "git", ["show", `${head.sha}:vercel.json`], head.cwd,
+    "コミット済みvercel.jsonを確認できません。pushを開始しません。");
+  try {
+    const config = JSON.parse(committed);
+    const enabled: unknown = config?.git?.deploymentEnabled;
+    if (!enabled || typeof enabled !== "object" || Array.isArray(enabled)) throw new Error();
+    const rules = enabled as Record<string, unknown>;
+    if (rules["**"] !== false || rules.main !== true
+      || Object.entries(rules).some(([branch, value]) => branch !== "main" && value !== false)) throw new Error();
+  } catch {
+    throw new Error("コミット済みvercel.jsonで全feature枝のGit自動Preview停止を確認できません。pushを開始しません。");
+  }
+}
+
+export async function taskPullRequests(head: TaskHead, execute: WorkflowExecutor): Promise<TaskPullRequest[]> {
+  const listed = await commandOutput(execute, "gh", ["pr", "list", "--repo", CAKE_REPOSITORY, "--base", "main",
+    "--head", head.branch, "--state", "open", "--json", "url,number,headRefOid,isDraft"], head.cwd,
+  "既存PRを確認できませんでした。gh auth status とGitHubへの接続を確認してください。");
+  let value: unknown;
+  try { value = JSON.parse(listed); }
+  catch { throw new Error("GitHubのPR一覧を読み込めませんでした。"); }
+  if (!Array.isArray(value) || value.some((entry) => !entry || typeof entry !== "object" || Array.isArray(entry))) {
+    throw new Error("GitHubのPR一覧を読み込めませんでした。");
+  }
+  if (value.length > 1) throw new Error("同じブランチのPRが複数あります。GitHubのPR一覧を確認してください。");
+  return value.map((entry: Record<string, unknown>) => {
+    if (!Number.isSafeInteger(entry.number) || (entry.number as number) < 1
+      || typeof entry.headRefOid !== "string" || !/^[a-f0-9]{40}$/.test(entry.headRefOid)
+      || typeof entry.isDraft !== "boolean") throw new Error("GitHubのPR情報が不正です。");
+    const url = pullRequestUrl(entry.url);
+    if (url !== `https://github.com/${CAKE_REPOSITORY}/pull/${entry.number}`) throw new Error("GitHubのPR情報が不正です。");
+    return { url, number: entry.number as number, headRefOid: entry.headRefOid, isDraft: entry.isDraft };
+  });
+}
+
+export async function readyQaPreview(head: TaskHead, prNumber: number, execute: WorkflowExecutor): Promise<TaskPreviewRecord | null> {
+  const listed = await commandOutput(execute, "gh", ["api", "--paginate", "--slurp",
+    `repos/${CAKE_REPOSITORY}/deployments?task=${QA_TASK}&environment=${QA_ENVIRONMENT}&per_page=100`], head.cwd,
+  "固定QAの台帳を取得できませんでした。GitHubへの接続と権限を確認してください。");
+  let snapshots: ReturnType<typeof replayDeployments>;
+  try {
+    const pages: unknown = JSON.parse(listed);
+    if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) throw new Error();
+    snapshots = replayDeployments(pages.flat() as Parameters<typeof replayDeployments>[0]);
+  } catch { throw new Error("固定QAの台帳を読み込めませんでした。"); }
+  const matches = SLOTS.map((slot) => ({ slot, snapshot: snapshots[slot] }))
+    .filter(({ snapshot }) => snapshot?.payload.pr === prNumber && snapshot.payload.state !== "free");
+  if (matches.length > 1) throw new Error("同じPRに複数のQA枠があります。固定QAの台帳を確認してください。");
+  const match = matches[0];
+  if (!match?.snapshot) return null;
+  const { payload, id } = match.snapshot;
+  if (payload.state === "deleting") throw new Error("このPRのQA枠は返却処理中です。完了後に再予約してください。");
+  if (payload.branch !== head.branch || payload.headSha !== head.sha || payload.aliasSha !== head.sha
+    || !payload.readyDeploymentId || !payload.database) return null;
+  const deployment = payload.deployments.find((entry) => entry.id === payload.readyDeploymentId);
+  if (!deployment || deployment.sha !== head.sha || deployment.phase !== "application" || !deployment.url) {
+    throw new Error("固定QAの成功Deploymentと台帳が一致しません。");
+  }
+  return { projectId: CAKE_VERCEL_PROJECT, branch: head.branch, sha: head.sha,
+    url: previewUrl(deployment.url), deploymentId: deployment.id, createdAt: payload.updatedAt,
+    slot: match.slot, leaseId: payload.leaseId, prNumber, ledgerRecordId: id, database: { ...payload.database } };
+}
+
 export async function readPreviewRecord(cwd: string): Promise<TaskPreviewRecord> {
   try {
     const value = JSON.parse(await readFile(previewRecordPath(cwd), "utf8"));
@@ -101,13 +176,23 @@ export async function readPreviewRecord(cwd: string): Promise<TaskPreviewRecord>
       || value.projectId !== CAKE_VERCEL_PROJECT || !validTaskBranch(value.branch)
       || typeof value.sha !== "string" || !/^[a-f0-9]{40}$/.test(value.sha)
       || typeof value.deploymentId !== "string" || !/^dpl_[a-zA-Z0-9_-]+$/.test(value.deploymentId)
-      || typeof value.createdAt !== "string" || !Number.isFinite(Date.parse(value.createdAt))) throw new Error();
+      || typeof value.createdAt !== "string" || !Number.isFinite(Date.parse(value.createdAt))
+      || !SLOTS.includes(value.slot) || typeof value.leaseId !== "string"
+      || !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.leaseId)
+      || !Number.isSafeInteger(value.prNumber) || value.prNumber < 1
+      || !Number.isSafeInteger(value.ledgerRecordId) || value.ledgerRecordId < 1
+      || !value.database || value.database.projectId !== QA_NEON_PROJECT_ID
+      || typeof value.database.branchId !== "string" || !/^br-[a-z0-9-]+$/.test(value.database.branchId)
+      || typeof value.database.endpointId !== "string" || !/^ep-[a-z0-9-]+$/.test(value.database.endpointId)
+      || typeof value.database.host !== "string" || !/^ep-[a-z0-9-]+\.[a-z0-9.-]+\.neon\.tech$/.test(value.database.host)) throw new Error();
     const url = previewUrl(value.url);
     if (url !== value.url) throw new Error();
     return { projectId: value.projectId, branch: value.branch, sha: value.sha, url,
-      deploymentId: value.deploymentId, createdAt: value.createdAt };
+      deploymentId: value.deploymentId, createdAt: value.createdAt, slot: value.slot, leaseId: value.leaseId,
+      prNumber: value.prNumber, ledgerRecordId: value.ledgerRecordId, database: { projectId: value.database.projectId,
+        branchId: value.database.branchId, endpointId: value.database.endpointId, host: value.database.host } };
   } catch {
-    throw new Error("Previewの記録がないか不正です。npm run deploy:preview を実行し、Previewを検証してください。");
+    throw new Error("固定QAのPreview記録がないか不正です。npm run deploy:preview を実行し、Previewを検証してください。");
   }
 }
 

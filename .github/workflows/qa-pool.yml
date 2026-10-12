@@ -1,0 +1,85 @@
+name: QA pool
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: QA pool action
+        required: true
+        type: choice
+        options: [claim, release, refresh]
+        default: refresh
+      pr_number:
+        description: PR number (claim/release)
+        required: false
+        type: string
+      lease_id:
+        description: Current lease UUID (manual release)
+        required: false
+        type: string
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+  pull-requests: read
+  deployments: write
+
+jobs:
+  writer:
+    # Disabled until settings, the Preview approval policy, and resources have
+    # been reviewed. Forks and non-main manual runs never reach the writer.
+    if: >-
+      github.repository == 'tyask/Cake' &&
+      vars.CAKE_QA_POOL_ENABLED == 'true' &&
+      (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') &&
+      (github.event_name != 'pull_request_target' ||
+        (github.event.pull_request.head.repo.full_name == github.repository &&
+         github.event.pull_request.base.ref == 'main' &&
+         startsWith(github.event.pull_request.head.ref, 'codex/')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: Preview
+    concurrency:
+      group: cake-qa-pool-writer
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - name: Checkout trusted main scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tyask/Cake
+          ref: refs/heads/main
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install trusted dependencies
+        run: npm ci
+
+      - name: Reconcile QA pool
+        run: node --import tsx scripts/qa-pool-writer.ts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CAKE_QA_POOL_ENABLED: ${{ vars.CAKE_QA_POOL_ENABLED }}
+          CAKE_QA_GIT_GATE_CONFIRMED: ${{ vars.CAKE_QA_GIT_GATE_CONFIRMED }}
+          CAKE_QA_NATIVE_CONFIRMED: ${{ vars.CAKE_QA_NATIVE_CONFIRMED }}
+          CAKE_QA_DELETE_APPROVED: ${{ vars.CAKE_QA_DELETE_APPROVED }}
+          CAKE_QA_PRODUCTION_DATABASE_HOST: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
+          CAKE_QA_PARENT_BRANCH_ID: ${{ vars.CAKE_QA_PARENT_BRANCH_ID }}
+          CAKE_QA_APPROVED_HEADS: ${{ vars.CAKE_QA_APPROVED_HEADS }}
+          QA_ACTION: ${{ inputs.action }}
+          QA_PR_NUMBER: ${{ inputs.pr_number }}
+          QA_LEASE_ID: ${{ inputs.lease_id }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
