@@ -810,6 +810,10 @@ BootstrapData extends BootstrapMetadata
           <div class="note">コード変更後の検証はlint・test・build。業務/認可変更は対応テストを追加・更新し、UI変更はPC/スマートフォンの表示・操作を確認する。検証完了後にコミットし、Preview上で動作確認してPRを作成する。文書のみの変更はPreview不要。変更内容・検証結果・Preview URL・PR URLを報告する。詳細な作業ルールは<a href="../AGENTS.md">AGENTS.md</a>。</div>
         </section>
 
+        <section id="qa-diagnostics">
+          <h2>QA導入前の読取診断</h2>
+          <p>診断専用workflowはworkflow_dispatchだけでmainのcommitを読み、contents/pull-requests/deploymentsのread権限を使う。Environmentを指定せず、API資格情報はGET実行stepだけへ渡す。不足・401/403・対象不一致は秘密値を含めず報告する。probe/返却の計画は情報表示のみで実行入口を持たない。既存vercel.json、DB/build/seed、task-preview/task-prの経路は変更しない。詳細は<a href="qa-diagnostics.md">QA診断手順</a>を参照する。</p>
+        </section>
         <footer>Cake 家計管理アプリ 詳細設計書 · Version 1.1 · Source baseline 2026-10-10</footer>
       </main>
     </div>

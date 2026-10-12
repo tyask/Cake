@@ -865,6 +865,10 @@
           <div class="note">仕様変更時は本書と詳細設計を更新し、運用が変わる場合はREADMEも更新する。</div>
         </section>
 
+        <section id="qa-diagnostics">
+          <h2>QA導入前の診断</h2>
+          <p>既存Preview経路を変更せず、main限定の手動workflowで設定と資源をGETだけで確認する。貸出・生成・削除・alias変更・DB接続は行わない。詳細は<a href="qa-diagnostics.md">QA診断手順</a>を参照する。mainへのmergeは既存Production buildを起動し得る。</p>
+        </section>
         <footer>Cake 家計管理アプリ 基本設計書 · Version 1.1 · 更新日 2026-10-10</footer>
       </main>
     </div>

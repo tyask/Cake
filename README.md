@@ -450,3 +450,7 @@ npm run task:pr -- --title 'タイトル' --verification-file /tmp/cake-verifica
 一円未満の端数は合計してから丸め、二人の目標負担の合計が正味共通費と一致するようにします。
 
 差額が負の人から正の人へ、その絶対額を支払うよう表示します。清算完了はアプリ内のフラグ更新であり、実際の送金は行いません。
+
+## QA導入前の読取診断
+
+既存Previewの手順とは独立した、GET専用の手動診断を用意しています。[QA診断手順](docs/qa-diagnostics.md)を参照してください。pool有効化や作成・返却を行わず、既存のbuild/DB/seed/Previewコマンドを変更しません。mainへの導入後に実行できますが、mergeは既存のProduction buildを起動し得ます。
