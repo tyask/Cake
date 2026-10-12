@@ -24,6 +24,9 @@ const ledger = (value = payload) => ({ id: 101, task: QA_TASK, environment: QA_E
   payload: { ...value, sequence: 2, previousRecordId: 100 } });
 const commandResult = (stdout = "", status = 0): WorkflowCommandResult => ({ stdout, status, signal: null });
 const listedPr = (isDraft = true) => commandResult(JSON.stringify([{ url: prUrl, number: 42, headRefOid: sha, isDraft }]));
+const project = { id: CAKE_VERCEL_PROJECT, name: "cake", accountId: "team_D1Mcx2TdFWPKcypfu8KzNMub",
+  previewDeploymentsDisabled: false, link: { type: "github", org: "tyask", repo: "Cake", productionBranch: "main" },
+  deploymentPolicy: { deploymentSources: [{ enabled: true, environments: [{ type: "system", target: "preview" }], sources: ["rest-api"] }] } };
 
 async function fixture(t: TestContext) {
   const cwd = await mkdtemp(join(tmpdir(), "cake-task-pr-test-"));
@@ -35,6 +38,7 @@ async function fixture(t: TestContext) {
   const state = { branch, sha, status: "", origin: "https://github.com/tyask/Cake.git", remote: `${sha}\trefs/heads/${branch}`,
     listed: listedPr(), ledger: commandResult(JSON.stringify([[initial, ledger()]])), created: commandResult(prUrl),
     edited: commandResult(), gate: commandResult("true"), config: commandResult(JSON.stringify({ git: { deploymentEnabled: { "**": false, main: true } } })),
+    project: commandResult(JSON.stringify(project)),
     pushStatus: 0, pushUpdates: true, body: "", bodyFile: "" };
   const calls: { command: string; args: readonly string[] }[] = [];
   const execute: WorkflowExecutor = async (command, args) => {
@@ -53,6 +57,11 @@ async function fixture(t: TestContext) {
       }
     }
     if (command === "gh" && args[0] === "variable") return state.gate;
+    if (command === "npx") {
+      assert.ok(args.includes("api"));
+      assert.equal(args[args.indexOf("--method") + 1], "GET");
+      return state.project;
+    }
     if (command === "gh" && args[0] === "pr" && args[1] === "list") return state.listed;
     if (command === "gh" && args[0] === "api") return state.ledger;
     if (command === "gh" && args[0] === "pr" && ["create", "edit"].includes(args[1])) {
@@ -103,12 +112,27 @@ test("初回draftは運用者確認とコミット済み全枝denyを確認し�
   assert.deepEqual(await runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }), { url: prUrl, existing: false });
   const gate = f.calls.findIndex((c) => c.command === "gh" && c.args[0] === "variable");
   const config = f.calls.findIndex((c) => c.command === "git" && c.args[0] === "show");
+  const policy = f.calls.findIndex((c) => c.command === "npx");
   const push = f.calls.findIndex((c) => c.command === "git" && c.args[0] === "push");
   const create = f.calls.findIndex((c) => c.args[1] === "create");
-  assert.ok(gate < config && config < push && push < create);
+  assert.ok(gate < policy && policy < config && config < push && push < create);
   assert.deepEqual(f.calls[config].args, ["show", `${sha}:vercel.json`]);
   assert.equal(f.calls.filter((c) => c.args[0] === "ls-remote").length, 2);
-  assert.equal(f.calls.some((c) => c.command === "npx" || c.args[0] === "api"), false);
+  assert.equal(f.calls.some((c) => c.command === "gh" && c.args[0] === "api"), false);
+  assert.equal(f.calls.filter((c) => c.command === "npx").length, 1);
+});
+
+test("初回draftのpushは実project policyの欠落・Git許可・API失敗で停止する", async (t) => {
+  for (const response of [commandResult(JSON.stringify({ ...project, deploymentPolicy: undefined })),
+    commandResult(JSON.stringify({ ...project, deploymentPolicy: { deploymentSources: [{ enabled: true,
+      environments: [{ type: "system", target: "preview" }], sources: ["git", "rest-api"] }] } })),
+    commandResult("private-api-error", 1)]) {
+    const f = await fixture(t);
+    f.state.remote = ""; f.state.listed = commandResult("[]"); f.state.project = response;
+    await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }),
+      (error: unknown) => error instanceof Error && !error.message.includes("private-"));
+    assert.equal(f.calls.some((c) => c.args[0] === "push" || c.args[1] === "create" || c.args[1] === "edit"), false);
+  }
 });
 
 test("draftの未push HEADはgate未確認/不正config/push失敗/remote不一致ならPRを作成しない", async (t) => {

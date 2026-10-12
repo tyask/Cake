@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { assertPreviewSourcePolicy } from "../lib/qa-pool-gate";
 import { QA_ENVIRONMENT, QA_NEON_PROJECT_ID, QA_TASK, SLOTS, replayDeployments, type Slot } from "../lib/qa-pool";
 
 export const CAKE_REPOSITORY = "tyask/Cake";
@@ -106,6 +107,14 @@ export async function assertTaskGitGate(head: TaskHead, execute: WorkflowExecuto
   const confirmed = await commandOutput(execute, "gh", ["variable", "get", "CAKE_QA_GIT_GATE_CONFIRMED", "--repo", CAKE_REPOSITORY], head.cwd,
     "Git自動Preview停止の確認設定を取得できません。運用者の確認が必要です。pushを開始しません。");
   if (confirmed !== "true") throw new Error("Git自動Preview停止は未確認です。運用者の確認が必要です。pushを開始しません。");
+  const response = await commandOutput(execute, "npx", ["--yes", `vercel@${VERCEL_CLI_VERSION}`, "api",
+    `/v9/projects/${CAKE_VERCEL_PROJECT}`, "--scope", CAKE_VERCEL_SCOPE, "--method", "GET"], head.cwd,
+  "VercelのPreview生成前policyを読み取れません。pushを開始しません。");
+  try {
+    const project = JSON.parse(response);
+    if (project.id !== CAKE_VERCEL_PROJECT || project.accountId !== "team_D1Mcx2TdFWPKcypfu8KzNMub" || project.link?.productionBranch !== "main") throw new Error();
+    assertPreviewSourcePolicy(project);
+  } catch { throw new Error("PreviewへのGit生成を止める実policyが未確認です。pushを開始しません。"); }
   const committed = await commandOutput(execute, "git", ["show", `${head.sha}:vercel.json`], head.cwd,
     "コミット済みvercel.jsonを確認できません。pushを開始しません。");
   try {

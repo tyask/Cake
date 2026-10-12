@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { runQaRequest, type AliasTarget, type QaGateway, type QaPullRequest, type RemoteDeployment } from "../lib/qa-pool-service";
 import { HttpQaGateway, runQaWriter, type QaTransport } from "../scripts/qa-pool-writer";
+import { deletePlan, deletionApproval, probeApproval, type DeleteApproval, type DeletePlan, type ProbeApproval } from "../lib/qa-pool-authorization";
 import {
   nextRecord, QA_ENVIRONMENT, QA_NEON_PROJECT_ID, QA_PROJECT_ID, QA_REPOSITORY, QA_TASK, replayDeployments,
   type DatabaseIdentity, type GithubDeployment, type QaLeaseRecord, type SavedLease, type Slot,
@@ -36,6 +37,10 @@ class MemoryGateway implements QaGateway {
   native: DatabaseIdentity | null = null;
   gone = false;
   deletionAllowed = true;
+  generationAllowed = true;
+  cleanupGateError = false;
+  probeApprovals: ProbeApproval[] = [];
+  deleteApprovals: DeleteApproval[] = [];
   createBehavior: "ok" | "lost" | "failed" = "ok";
   createState = "BUILDING";
   databaseError = false;
@@ -45,6 +50,7 @@ class MemoryGateway implements QaGateway {
   logs: string[] = [];
   poolReads = 0;
   prReads = 0;
+  prQueries: number[] = [];
   onPool?: () => void;
   onPr?: () => void;
   onSave?: (saved: SavedLease) => void;
@@ -57,9 +63,15 @@ class MemoryGateway implements QaGateway {
         payload: { ...structuredClone(record), sequence: 2, previousRecordId: id } });
     }
     this.prs.set(record.pr, pullRequest(record));
+    this.deleteApprovals.push({ ...deletePlan(record), expiresAt: "2026-10-12T02:00:00.000Z" });
     for (const d of record.deployments) this.remotes.set(d.id, remote(record, d.id, "READY", d.phase, d.sha));
   }
-  async assertGate() { this.calls.push("gate"); if (this.gateError) throw new Error("gate failed"); }
+  generationEnabled() { return this.generationAllowed; }
+  async assertGate(mode: "create" | "probe" | "cleanup") {
+    this.calls.push(`gate:${mode}`);
+    if (mode === "cleanup" ? this.cleanupGateError : this.gateError) throw new Error("gate failed");
+  }
+  probeAuthorization(pr: number, head: string) { return probeApproval(JSON.stringify(this.probeApprovals), pr, head, Date.parse(now)); }
   async pool() { this.poolReads += 1; this.onPool?.(); return replayDeployments(this.records); }
   async save(record: QaLeaseRecord): Promise<SavedLease> {
     this.calls.push(`save:${record.state}`);
@@ -71,7 +83,7 @@ class MemoryGateway implements QaGateway {
     this.onSave?.(saved);
     return saved;
   }
-  async pullRequest(pr: number) { this.prReads += 1; this.onPr?.(); return structuredClone(this.prs.get(pr)!); }
+  async pullRequest(pr: number) { this.prReads += 1; this.prQueries.push(pr); this.onPr?.(); return structuredClone(this.prs.get(pr)!); }
   async openPullRequests() { return [...this.prs.values()].filter((pr) => pr.state === "open").map((pr) => structuredClone(pr)); }
   async deployments(record: QaLeaseRecord) { this.calls.push("list"); return [...this.remotes.values()].filter((d) => d.branch === record.branch).map((d) => structuredClone(d)); }
   async deployment(id: string) { this.calls.push(`get:${id}`); return structuredClone(this.remotes.get(id) ?? null); }
@@ -87,23 +99,30 @@ class MemoryGateway implements QaGateway {
   async databaseGone() { this.calls.push("databaseGone"); if (this.databaseError) throw new Error("Neon unavailable"); return this.gone; }
   async alias(slot: Slot) { return structuredClone(this.aliases.get(slot) ?? null); }
   async assignAlias(record: QaLeaseRecord, deployment: RemoteDeployment) { this.calls.push("assignAlias"); this.aliases.set(record.slot, { projectId: QA_PROJECT_ID, deploymentId: deployment.id }); }
-  deletionApproved() { return this.deletionAllowed; }
-  async deleteAlias(record: QaLeaseRecord) { this.calls.push("deleteAlias"); this.aliases.delete(record.slot); }
-  async deleteDeployment(deployment: RemoteDeployment) { this.calls.push(`delete:${deployment.id}`); if (this.deleteError) throw new Error("delete failed"); this.remotes.delete(deployment.id); }
-  async run(action: "claim" | "refresh" | "release" = "refresh", pr?: number, leaseId?: string) {
+  deletionApproved(plan: DeletePlan) { return this.deletionAllowed && deletionApproval(JSON.stringify(this.deleteApprovals), plan, Date.parse(now)); }
+  async deleteAlias(record: QaLeaseRecord, plan: DeletePlan) {
+    assert.deepEqual(plan, deletePlan(record)); assert.ok(this.deletionApproved(plan));
+    this.calls.push("deleteAlias"); this.aliases.delete(record.slot);
+  }
+  async deleteDeployment(record: QaLeaseRecord, deployment: RemoteDeployment, plan: DeletePlan) {
+    assert.deepEqual(plan, deletePlan(record)); assert.ok(this.deletionApproved(plan)); assert.ok(plan.deploymentIds.includes(deployment.id));
+    this.calls.push(`delete:${deployment.id}`); if (this.deleteError) throw new Error("delete failed"); this.remotes.delete(deployment.id);
+  }
+  async run(action: "claim" | "refresh" | "release" | "probe" = "refresh", pr?: number, leaseId?: string, requestSha?: string) {
     let tokens = 1000;
-    await runQaRequest(this, { action, pr, leaseId }, { now: () => now, token: () => uuid(++tokens), log: (message) => { this.logs.push(message); } });
+    await runQaRequest(this, { action, pr, leaseId, sha: requestSha }, { now: () => now, token: () => uuid(++tokens), log: (message) => { this.logs.push(message); } });
   }
   latest(slot: Slot = "qa1") { return replayDeployments(this.records)[slot]!; }
 }
 
 test("入口gate失敗と未承認PRは枠取得や生成APIに到達しない", async () => {
   const g = new MemoryGateway();
-  g.prs.set(42, { ...pullRequest(), approved: false });
+  g.prs.set(42, pullRequest());
   g.gateError = true;
   await assert.rejects(() => g.run("claim", 42));
-  assert.deepEqual(g.calls, ["gate"]);
+  assert.deepEqual(g.calls.filter((call) => call.startsWith("gate:")), ["gate:create"]);
   g.gateError = false;
+  g.prs.get(42)!.approved = false;
   await g.run("claim", 42);
   assert.equal(g.records.length, 0);
   assert.equal(g.calls.includes("create"), false);
@@ -301,6 +320,282 @@ test("別project/leaseの記録外Deploymentや固定aliasを採用・上書き�
   }
 });
 
+test("生成無効/生成gate失敗/未承認HEADでもcloseはdeletingと承認済みcleanupへ進む", async () => {
+  const g = new MemoryGateway();
+  g.seed(application());
+  g.native = database;
+  g.generationAllowed = false;
+  g.gateError = true;
+  g.prs.get(42)!.state = "closed";
+  g.prs.get(42)!.approved = false;
+  g.aliases.set("qa1", { projectId: QA_PROJECT_ID, deploymentId: "dpl_application" });
+  await g.run();
+  assert.equal(g.latest().payload.state, "deleting");
+  assert.ok(g.calls.includes("gate:cleanup"));
+  assert.equal(g.calls.includes("gate:create"), false);
+  assert.equal(g.calls.includes("create"), false);
+  assert.equal(g.remotes.size, 0);
+  g.native = null; g.gone = true;
+  await g.run();
+  assert.equal(g.latest().payload.state, "free");
+});
+
+test("手動releaseはopenの新HEAD承認や生成条件を必要とせず現在leaseの削除承認を使う", async () => {
+  const g = new MemoryGateway();
+  const record = application();
+  g.seed(record);
+  g.native = database; g.gone = true;
+  g.generationAllowed = false; g.gateError = true;
+  g.prs.get(42)!.sha = newSha; g.prs.get(42)!.approved = false;
+  await g.run("release", 42, record.leaseId);
+  assert.equal(g.latest().payload.state, "free");
+  assert.equal(g.latest().payload.headSha, sha);
+  assert.equal(g.calls.includes("create"), false);
+});
+
+test("削除manifestの全ID/lease/SHA/DB/alias/期限が違えばaliasもDeploymentも削除しない", async () => {
+  for (const mismatch of ["subset", "extra", "lease", "sha", "database", "alias", "expiry"] as const) {
+    const g = new MemoryGateway();
+    const record = application();
+    record.deployments.push({ id: "dpl_second", sha, phase: "application" });
+    g.seed(record); g.native = database;
+    g.prs.get(42)!.state = "closed";
+    g.aliases.set("qa1", { projectId: QA_PROJECT_ID, deploymentId: "dpl_application" });
+    const approval = g.deleteApprovals[0];
+    if (mismatch === "subset") approval.deploymentIds.pop();
+    if (mismatch === "extra") approval.deploymentIds.push("dpl_unknown");
+    if (mismatch === "lease") approval.leaseId = uuid(99);
+    if (mismatch === "sha") approval.headSha = newSha;
+    if (mismatch === "database") approval.database = { ...database, branchId: "br-other" };
+    if (mismatch === "alias") approval.alias = "other.vercel.app";
+    if (mismatch === "expiry") approval.expiresAt = "2026-10-12T00:00:00.000Z";
+    await g.run();
+    assert.equal(g.latest().payload.state, "deleting");
+    assert.equal(g.remotes.size, 2, mismatch);
+    assert.equal(g.aliases.get("qa1")!.deploymentId, "dpl_application");
+    assert.equal(g.calls.some((call) => call === "deleteAlias" || call.startsWith("delete:")), false, mismatch);
+  }
+});
+
+test("全IDのGET所属検証はalias削除より先に行い、後段IDがforeignなら何も削除しない", async () => {
+  const g = new MemoryGateway();
+  const record = application();
+  record.deployments.push({ id: "dpl_wrong", sha, phase: "application" });
+  g.seed(record); g.native = database;
+  g.prs.get(42)!.state = "closed";
+  g.aliases.set("qa1", { projectId: QA_PROJECT_ID, deploymentId: "dpl_application" });
+  const get = g.deployment.bind(g);
+  g.deployment = async (id) => {
+    const result = await get(id);
+    return id === "dpl_wrong" ? { ...result!, projectId: "prj_foreign" } : result;
+  };
+  await g.run();
+  assert.equal(g.calls.some((call) => call === "deleteAlias" || call.startsWith("delete:")), false);
+  assert.equal(g.aliases.has("qa1"), true);
+});
+
+test("alias削除成功後のDELETE失敗も同じ全ID manifestで再開できる", async () => {
+  const g = new MemoryGateway();
+  g.seed(application()); g.native = database;
+  g.prs.get(42)!.state = "closed";
+  g.aliases.set("qa1", { projectId: QA_PROJECT_ID, deploymentId: "dpl_application" });
+  const approved = structuredClone(g.deleteApprovals[0]);
+  g.deleteError = true;
+  await g.run();
+  assert.equal(g.latest().payload.state, "deleting");
+  assert.equal(g.aliases.has("qa1"), false);
+  g.deleteError = false; g.gone = true;
+  await g.run();
+  assert.equal(g.latest().payload.state, "free");
+  assert.deepEqual(g.deleteApprovals[0], approved);
+});
+
+test("alias削除後に承認が期限切れになれば残りDeploymentとfree更新を止める", async () => {
+  const g = new MemoryGateway();
+  g.seed(application()); g.native = database;
+  g.prs.get(42)!.state = "closed";
+  g.aliases.set("qa1", { projectId: QA_PROJECT_ID, deploymentId: "dpl_application" });
+  const remove = g.deleteAlias.bind(g);
+  g.deleteAlias = async (record, plan) => {
+    await remove(record, plan);
+    g.deleteApprovals[0].expiresAt = "2026-10-12T00:00:00.000Z";
+  };
+  await g.run();
+  assert.equal(g.aliases.has("qa1"), false);
+  assert.equal(g.remotes.size, 1);
+  assert.equal(g.latest().payload.state, "deleting");
+  assert.equal(g.calls.some((call) => call.startsWith("delete:")), false);
+  g.deleteApprovals[0].expiresAt = "2026-10-12T02:00:00.000Z";
+  g.gone = true;
+  await g.run();
+  assert.equal(g.latest().payload.state, "free");
+});
+
+test("DeploymentがありNative DBが不明なら削除manifestを許可せずdeletingを保持する", async () => {
+  const g = new MemoryGateway();
+  const record = lease();
+  record.deployments = [{ id: "dpl_provisioning", sha, phase: "provisioning" }];
+  g.seed(record);
+  g.prs.get(42)!.state = "closed";
+  await g.run();
+  assert.equal(g.latest().payload.state, "deleting");
+  assert.equal(g.calls.some((call) => call === "deleteAlias" || call.startsWith("delete:")), false);
+});
+
+test("作成前に返却する空leaseもNative存在を確認し、記録外DBがあればfreeにしない", async () => {
+  for (const unexpected of [false, true]) {
+    const g = new MemoryGateway();
+    g.seed(lease());
+    g.generationAllowed = false;
+    g.prs.get(42)!.state = "closed";
+    g.native = unexpected ? database : null;
+    await g.run();
+    assert.equal(g.latest().payload.state, unexpected ? "deleting" : "free");
+    assert.ok(g.calls.includes("database"));
+    assert.equal(g.calls.some((call) => call === "deleteAlias" || call.startsWith("delete:")), false);
+  }
+});
+
+test("disabled refreshはopen PRの新規claimを行わず既存cleanupだけを処理する", async () => {
+  const g = new MemoryGateway();
+  g.seed(application(lease(43, "qa2")));
+  g.native = database; g.generationAllowed = false;
+  g.prs.get(43)!.state = "closed";
+  g.prs.set(42, pullRequest());
+  g.openPullRequests = async () => { assert.fail("disabled must not enumerate creation candidates"); };
+  await g.run();
+  assert.equal(g.latest("qa2").payload.state, "deleting");
+  assert.equal(g.latest("qa1"), null);
+  assert.equal(g.calls.includes("create"), false);
+});
+
+test("probeは明示された単一PR/SHA/slotだけを使い他枠のcloseやaliasに触らない", async () => {
+  const g = new MemoryGateway();
+  const other = application(lease(43));
+  g.seed(other);
+  g.prs.get(43)!.state = "closed";
+  g.aliases.set("qa1", { projectId: QA_PROJECT_ID, deploymentId: "dpl_application" });
+  g.prs.set(42, { ...pullRequest(), approved: false });
+  g.generationAllowed = false;
+  g.probeApprovals = [{ projectId: QA_PROJECT_ID, pr: 42, sha, slot: "qa3", expiresAt: "2026-10-12T02:00:00.000Z" }];
+  await g.run("probe", 42, undefined, sha);
+  const probe = g.latest("qa3").payload;
+  assert.equal(probe.purpose, "probe");
+  assert.equal(probe.pr, 42);
+  assert.equal(g.latest("qa1").payload.state, "held");
+  assert.equal(g.prQueries.includes(43), false);
+  assert.equal(g.calls.includes("gate:create"), false);
+  assert.equal(g.calls.includes("gate:cleanup"), false);
+  assert.equal(g.calls.includes("assignAlias"), false);
+  assert.equal(g.aliases.get("qa1")!.deploymentId, "dpl_application");
+});
+
+test("probeは未承認/期限切れ/SHA不一致や承認枠使用中なら別枠へfallbackしない", async () => {
+  for (const failure of ["missing", "expired", "sha", "occupied"] as const) {
+    const g = new MemoryGateway();
+    g.generationAllowed = false;
+    g.prs.set(42, pullRequest());
+    if (failure !== "missing") g.probeApprovals = [{ projectId: QA_PROJECT_ID, pr: 42, sha,
+      slot: "qa2", expiresAt: failure === "expired" ? "2026-10-12T00:00:00.000Z" : "2026-10-12T02:00:00.000Z" }];
+    if (failure === "sha") g.prs.get(42)!.sha = newSha;
+    if (failure === "occupied") g.seed(lease(43, "qa2"));
+    if (failure === "occupied") await g.run("probe", 42, undefined, sha);
+    else await assert.rejects(() => g.run("probe", 42, undefined, sha));
+    assert.equal(g.calls.includes("create"), false);
+    assert.equal(g.latest("qa1"), null);
+  }
+});
+
+test("probe READYはaliasを作らず、通常refreshで新HEADを進めず、次SHA限定承認でDBを保持する", async () => {
+  const g = new MemoryGateway();
+  g.generationAllowed = false;
+  g.prs.set(42, { ...pullRequest(), approved: false });
+  g.probeApprovals = [{ projectId: QA_PROJECT_ID, pr: 42, sha, slot: "qa2", expiresAt: "2026-10-12T02:00:00.000Z" }];
+  await g.run("probe", 42, undefined, sha);
+  const leased = g.latest("qa2").payload;
+  g.native = database;
+  g.remotes.get("dpl_created1")!.state = "ERROR";
+  await g.run("probe", 42, leased.leaseId, sha);
+  g.remotes.get("dpl_created2")!.state = "READY";
+  await g.run("probe", 42, leased.leaseId, sha);
+  assert.equal(g.latest("qa2").payload.readyDeploymentId, "dpl_created2");
+  assert.equal(g.latest("qa2").payload.aliasSha, undefined);
+  const count = g.records.length;
+  g.prs.get(42)!.sha = newSha;
+  g.generationAllowed = true;
+  await g.run();
+  assert.equal(g.records.length, count);
+  await assert.rejects(() => g.run("probe", 42, leased.leaseId, newSha), /probe承認/);
+  g.probeApprovals.push({ projectId: QA_PROJECT_ID, pr: 42, sha: newSha, slot: "qa2", expiresAt: "2026-10-12T02:00:00.000Z" });
+  await g.run("probe", 42, leased.leaseId, newSha);
+  assert.equal(g.latest("qa2").payload.headSha, newSha);
+  assert.equal(g.latest("qa2").payload.leaseId, leased.leaseId);
+  assert.deepEqual(g.latest("qa2").payload.database, database);
+  assert.equal(g.calls.includes("assignAlias"), false);
+  assert.equal(g.aliases.size, 0);
+});
+
+test("probe承認がintent保存直後に期限切れなら未送信intentを消し、再承認後に生成を再試行できる", async () => {
+  const g = new MemoryGateway();
+  g.generationAllowed = false;
+  g.prs.set(42, pullRequest());
+  g.probeApprovals = [{ projectId: QA_PROJECT_ID, pr: 42, sha, slot: "qa1", expiresAt: "2026-10-12T02:00:00.000Z" }];
+  g.onSave = (saved) => { if (saved.payload.intent) g.probeApprovals[0].expiresAt = "2026-10-12T00:00:00.000Z"; };
+  await assert.rejects(() => g.run("probe", 42, undefined, sha), /期限切れ/);
+  assert.equal(g.calls.includes("create"), false);
+  assert.equal(g.latest().payload.state, "held");
+  assert.equal(g.latest().payload.intent, undefined);
+  assert.deepEqual(g.latest().payload.deployments, []);
+  g.onSave = undefined;
+  g.probeApprovals[0].expiresAt = "2026-10-12T02:00:00.000Z";
+  await g.run("probe", 42, g.latest().payload.leaseId, sha);
+  assert.equal(g.calls.filter((call) => call === "create").length, 1);
+  assert.equal(g.latest().payload.deployments[0].phase, "provisioning");
+});
+
+test("deletingへのprobeは有効な削除manifestがあってもcleanupを進めない", async () => {
+  const g = new MemoryGateway();
+  const record: QaLeaseRecord = { ...application(), purpose: "probe", aliasSha: undefined };
+  g.seed(record); g.native = database; g.gone = true;
+  const saved = g.latest();
+  await g.save(nextRecord(saved, { state: "deleting", readyDeploymentId: undefined }, now));
+  g.probeApprovals = [{ projectId: QA_PROJECT_ID, pr: 42, sha, slot: "qa1", expiresAt: "2026-10-12T02:00:00.000Z" }];
+  const count = g.records.length;
+  await assert.rejects(() => g.run("probe", 42, record.leaseId, sha), /probe/);
+  assert.equal(g.records.length, count);
+  assert.equal(g.latest().payload.state, "deleting");
+  assert.equal(g.remotes.size, 1);
+  assert.equal(g.calls.includes("gate:cleanup"), false);
+  assert.equal(g.calls.some((call) => call === "create" || call === "deleteAlias" || call.startsWith("delete:")), false);
+});
+
+test("probe入口のOPEN確認後にPRがcloseされても同じprobe実行からcleanupへ進まない", async () => {
+  const g = new MemoryGateway();
+  const record: QaLeaseRecord = { ...application(), purpose: "probe", aliasSha: undefined };
+  g.seed(record); g.native = database; g.gone = true;
+  g.probeApprovals = [{ projectId: QA_PROJECT_ID, pr: 42, sha, slot: "qa1", expiresAt: "2026-10-12T02:00:00.000Z" }];
+  g.onPr = () => { if (g.prReads === 2) g.prs.get(42)!.state = "closed"; };
+  await assert.rejects(() => g.run("probe", 42, record.leaseId, sha), /返却は別/);
+  assert.equal(g.latest().payload.state, "held");
+  assert.equal(g.calls.includes("gate:cleanup"), false);
+  assert.equal(g.calls.some((call) => call.startsWith("delete:")), false);
+});
+
+test("closed probeのcleanupはalias:null manifestを使い同名の外部aliasへ触らない", async () => {
+  const g = new MemoryGateway();
+  const record: QaLeaseRecord = { ...application(), purpose: "probe", aliasSha: undefined };
+  g.seed(record); g.native = database; g.gone = true; g.generationAllowed = false;
+  g.prs.get(42)!.state = "closed";
+  const foreign = { projectId: "prj_foreign", deploymentId: "dpl_other" };
+  g.aliases.set("qa1", foreign);
+  g.alias = async () => { assert.fail("probe never owns a fixed alias"); };
+  await g.run();
+  assert.equal(g.deleteApprovals[0].alias, null);
+  assert.equal(g.latest().payload.state, "free");
+  assert.deepEqual(g.aliases.get("qa1"), foreign);
+  assert.equal(g.calls.includes("deleteAlias"), false);
+});
+
 const environment = { GITHUB_TOKEN: "private-gh", VERCEL_TOKEN: "private-vercel", NEON_API_KEY: "private-neon",
   CAKE_QA_APPROVED_HEADS: JSON.stringify({ "42": sha }), CAKE_QA_POOL_ENABLED: "true", CAKE_QA_GIT_GATE_CONFIRMED: "true",
   CAKE_QA_NATIVE_CONFIRMED: "true", CAKE_QA_PRODUCTION_DATABASE_HOST: "ep-production.ap-southeast-1.aws.neon.tech", CAKE_QA_PARENT_BRANCH_ID: "br-parent" };
@@ -358,12 +653,14 @@ test("生成APIはoriginal feature枝/完全SHA/attemptを使い、build/runtime
     if (method === "POST") return { status: 200, data: vercelValue(remote(record, "dpl_provisioning", "BUILDING", "provisioning")) };
     const path = new URL(url).pathname;
     if (path === `/v9/projects/${QA_PROJECT_ID}`) return { status: 200, data: { id: QA_PROJECT_ID, name: "cake",
-      accountId: "team_D1Mcx2TdFWPKcypfu8KzNMub", link: { type: "github", org: "tyask", repo: "Cake", productionBranch: "main", repoId: 1318171856 } } };
+      accountId: "team_D1Mcx2TdFWPKcypfu8KzNMub", previewDeploymentsDisabled: false,
+      deploymentPolicy: { deploymentSources: [{ enabled: true, environments: [{ type: "system", target: "preview" }], sources: ["rest-api"] }] },
+      link: { type: "github", org: "tyask", repo: "Cake", productionBranch: "main", repoId: 1318171856 } } };
     if (path.endsWith("/pulls")) return { status: 200, data: [] };
     return { status: 200, data: { project: { id: QA_NEON_PROJECT_ID } } };
   };
-  const gateway = new HttpQaGateway(environment, transport);
-  await gateway.assertGate();
+  const gateway = new HttpQaGateway(environment, transport, "write");
+  await gateway.assertGate("create");
   await gateway.create(record);
   const post = calls.find((call) => call.method === "POST")!;
   const body = post.body as { project: string; gitSource: { ref: string; sha: string; repoId: number }; target?: string;
@@ -430,12 +727,28 @@ test("PR workflowの空QA_ACTIONはclaimへ解決し、環境payloadをshell引�
   assert.equal(gateway.records.some((entry) => (entry.payload as QaLeaseRecord).pr === 43), false);
 });
 
-test("disabled writerはevent読込/認証/API/台帳変更前に停止する", async () => {
+test("disabled writerのActions refreshは新規生成せず、local変更入口は拒否する", async () => {
   let apiCalls = 0;
   const gateway = new MemoryGateway();
+  gateway.generationAllowed = false;
+  gateway.prs.set(42, pullRequest());
   const transport: QaTransport = async () => { apiCalls++; return { status: 200, data: {} }; };
-  await runQaWriter({ CAKE_QA_POOL_ENABLED: "false", EVENT_PATH: "/missing/private-event" }, undefined, gateway);
-  assert.equal(gateway.calls.length, 0);
-  await runQaWriter({ CAKE_QA_POOL_ENABLED: "false" }, { action: "refresh" }, new HttpQaGateway(environment, transport));
+  await runQaWriter({ CAKE_QA_POOL_ENABLED: "false", EVENT_NAME: "schedule", GITHUB_ACTIONS: "true",
+    GITHUB_REPOSITORY: QA_REPOSITORY, GITHUB_REF: "refs/heads/main" }, { action: "refresh" }, gateway);
+  assert.ok(gateway.poolReads > 0);
+  assert.equal(gateway.calls.includes("create"), false);
+  assert.equal(gateway.records.length, 0);
+  await assert.rejects(() => runQaWriter({ CAKE_QA_POOL_ENABLED: "false" }, { action: "refresh" },
+    new HttpQaGateway(environment, transport)), /信頼済みmain/);
   assert.equal(apiCalls, 0);
+});
+
+test("disabled writerでもclosed leaseのexactmanifest cleanupはActions入口から進められる", async () => {
+  const gateway = new MemoryGateway();
+  gateway.seed(application()); gateway.native = database; gateway.gone = true; gateway.generationAllowed = false;
+  gateway.prs.get(42)!.state = "closed";
+  await runQaWriter({ CAKE_QA_POOL_ENABLED: "false", GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: QA_REPOSITORY,
+    GITHUB_REF: "refs/heads/main" }, { action: "refresh" }, gateway);
+  assert.equal(gateway.latest().payload.state, "free");
+  assert.equal(gateway.calls.includes("create"), false);
 });

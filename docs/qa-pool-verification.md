@@ -13,11 +13,13 @@
 - CLIはコミット済みGit停止設定と確認済みゲートを照合してpushし、draft PR作成と台帳読取によるPreview確認を行う。旧直接deploy/alias入口を停止。
 - README、AGENTS、両設計書、QA運用手順を更新。
 
-最終コードで `npm run lint`、`npm test`（**288成功・失敗0・skip0**）、`npx tsc --noEmit`、`npm run build`、`git diff --check` 成功。Next buildはローカルのビルドのみで、DB migration/seedやcloud deploymentを実行していない。UI変更はない。
+初版 `dd9926a` で `npm run lint`、`npm test`（**288成功・失敗0・skip0**）、`npx tsc --noEmit`、`npm run build`、`git diff --check` 成功。Next buildはローカルのビルドのみで、DB migration/seedやcloud deploymentを実行していない。UI変更はない。安全な導入口の追加補完結果は下記に記録する。
 
 回帰には満枠待機、全snapshot系列、token/資源の所有者、DB再利用拒否、SHA更新、stale alias、応答喪失、未解決intent、削除失敗、Native残存、HTTP拒否、Vercel/Neon全ページ読取を含む。Neon paginationは公式の `pagination.next` を使用。Vercel/Neon操作の回帰はmockであり、実クラウドの成功を意味しない。
 
 PGlite 0.5.8で、実11migration、空状態検査、未知表/routine/enum/extension-owned table拒否、marker不一致、bootstrap抑止、seed前混入、seed途中失敗rollback、初回seed、同PR再build時の既存値保持、ローカルseed再実行を**20/20成功**で確認。Neon接続や複数接続のロック競合は検証していない。再現スクリプトは `scripts/verify-preview-database-safety.mjs`。repo依存にはPGliteを追加していない。
+
+この20件は承認済みNeonテストDBへの実行ではなく、ローカルの一時メモリDBへの実SQL検証。保存先dataDirや実DB接続情報を使わず、setupのconnectをPGliteへ差し替え、終了時にdb.closeする。永続DBデータは残らず、/tmpに残るのは依存package・cache・検証ソースだけ。Neon上のmigration、seed、削除は未実施。
 
 ```bash
 npm install --prefix /tmp/cake-db-safety --no-save --no-package-lock --ignore-scripts @electric-sql/pglite@0.5.8
@@ -33,6 +35,20 @@ node --import tsx scripts/verify-preview-database-safety.mjs --pglite-module /tm
 Preview専用CAKE_TEST_DATABASE_URLのNative連携metadataはproject読取で確認。ただしNEON_API_KEYがなく、Neon project/親/feature branch/endpointやcleanupは直接確認できない。接続文字列・秘密値・owner向けAPI応答の全文は保存/表示していない。
 
 既存GitHub認証によるActions variablesの一覧読取は403（Resource not accessible by integration）。実際の有効化/承認変数は確認できず、権限を追加していない。新QA workflowはまだmainに存在せず、このdraft PRをpushしても運用を有効化しない。
+
+## 安全な導入口の追加補完
+
+- GET専用preflight、plan-probe、plan-releaseを追加。adapterは既定でGET以外をtransport呼出前に拒否する。ローカルの `npm run qa:inspect` またはmain限定の手動read-only jobで実行でき、pool/確認flagをtrueにする必要はない。
+- 通常の生成は実projectのPreview専用REST-only Deployment Sources policyと従来の確認flag双方を要求する。CLIのpush前も実policyをGETで再確認。mainのvercel.jsonを旧枝全体の停止証明として扱わず、remote policyの設定処理は追加していない。
+- 限定probeは期限付きのproject/PR/完全SHA/slot承認を要求し、指定枠・指定PRだけを処理する。purposeを台帳へ保存し、固定aliasや他枠に触れず、通常refreshではprobeの生成を進めない。新SHAは再承認して同lease/DBを保持する。
+- 削除はpool全体のbooleanを廃止し、project/PR/slot/lease/headSha/全deployment ID/alias/DB identity/期限の完全一致を要求。全IDの所属を最初のDELETEより前に照合し、毎DELETEとfree更新の前に承認を再確認。消失済みIDも承認対象集合から消さない。
+- cleanupを通常生成のenabled/Git/Native確認flag・最新head生成承認・親DB/本番host設定から分離。disabledでもcloseはdeletingへ進み、既知resourceの読取認証とID限定承認で返却できる。必要な認証や消失確認がない場合は保持する。
+
+GET-onlyの実preflightとPR #34/current head/qa1のplan-probeを実行。Vercel project、空のGitHub貸出台帳、3候補aliasの読取は成功。Preview policy、Neon API認証、Native親ID、本番host比較情報は未確認/未設定、GitHub Variables APIは403。生成計画はexecutionBlocked=trueで、承認・生成・削除・flag変更は行っていない。Team GETも403であり、plan/Owner条件は未確認だが、project GET 200を全Vercel不可と混同していない。
+
+全枝の生成前ゲート候補は [Deployment Policies](https://vercel.com/docs/deployments/deployment-policy) のproject override。PreviewだけにenabledのREST-only source ruleを要求する。Pro/Enterprise・Owner条件、GitSource付きRESTの受理、Neon生成前のGit拒否はlive未実証。現project GETでpolicyを確認できず、normal/probeの生成は停止する。previewDeploymentsDisabledをtrueにして手動RESTを許す方式は公式根拠がなく採用していない。
+
+追加回帰はGET-only拒否、秘密の出力抑制、403/404区別、全対象manifest/期限/部分承認拒否、Production資源除外、disabled cleanup、probe単一対象/no alias、新SHA保持、policy未確認拒否、生成前の承認失効時の安全な再試行を含む。補完後の `npm run lint`、`npm test`（**415成功・失敗0・skip0**）、`npx tsc --noEmit`、`npm run build`、`git diff --check` が成功。検査jobへの本番host比較設定の受け渡しもworkflow回帰6件で確認した。
 
 ## 未実施と有効化条件
 

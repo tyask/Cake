@@ -11,6 +11,7 @@ export type QaDeployment = { id: string; sha: string; url?: string; phase: "prov
 export type QaLeaseRecord = {
   protocol: "cake-qa/v1"; slot: Slot; leaseId: string; pr: number; branch: string; headSha: string;
   state: "held" | "deleting" | "free"; createdAt: string; updatedAt: string;
+  purpose?: "probe";
   sequence: number; previousRecordId: number | null; deployments: QaDeployment[];
   database?: DatabaseIdentity; retiredDatabases: DatabaseIdentity[];
   readyDeploymentId?: string; aliasSha?: string;
@@ -31,7 +32,7 @@ const object = (value: unknown): value is Record<string, unknown> => Boolean(val
 const deploymentId = (value: unknown): value is string => typeof value === "string" && /^dpl_[a-zA-Z0-9_-]+$/.test(value);
 const phase = (value: unknown) => value === "provisioning" || value === "application";
 export function qaAlias(slot: Slot): string { return `cake-${slot}-fumin.vercel.app`; }
-function validDatabase(value: unknown): value is DatabaseIdentity {
+export function validDatabase(value: unknown): value is DatabaseIdentity {
   return object(value) && value.projectId === QA_NEON_PROJECT_ID
     && Object.keys(value).every((key) => ["projectId", "branchId", "endpointId", "host"].includes(key))
     && typeof value.branchId === "string" && /^br-[a-z0-9-]+$/.test(value.branchId)
@@ -49,7 +50,8 @@ export function parseLeaseRecord(input: unknown): QaLeaseRecord {
     || !Array.isArray(value.deployments) || !Array.isArray(value.retiredDatabases)
     || value.retiredDatabases.some((db) => !validDatabase(db))
     || (value.database !== undefined && !validDatabase(value.database))) throw new Error("QA貸出payloadが不正です。");
-  const allowed = new Set(["protocol", "slot", "leaseId", "pr", "branch", "headSha", "state", "createdAt", "updatedAt", "sequence", "previousRecordId", "deployments", "database", "retiredDatabases", "readyDeploymentId", "aliasSha", "intent"]);
+  const allowed = new Set(["protocol", "slot", "leaseId", "pr", "branch", "headSha", "state", "purpose", "createdAt", "updatedAt", "sequence", "previousRecordId", "deployments", "database", "retiredDatabases", "readyDeploymentId", "aliasSha", "intent"]);
+  if (value.purpose !== undefined && value.purpose !== "probe" || value.purpose === "probe" && value.aliasSha !== undefined) throw new Error("限定probeの用途またはalias記録が不正です。");
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error("QA貸出payloadに未知の情報があります。");
   const ids = new Set<string>();
   for (const deployment of value.deployments) {
@@ -76,6 +78,7 @@ function validateTransition(previous: QaLeaseRecord, next: QaLeaseRecord): void 
     if (next.state !== "held" || next.leaseId === previous.leaseId || next.branch === previous.branch
       || next.database || next.deployments.length || next.intent) throw new Error("新貸出には新しいPR枝とleaseが必要です。");
   } else {
+    if (previous.purpose !== next.purpose) throw new Error("貸出の用途を途中で変更できません。");
     if (next.leaseId !== previous.leaseId || next.pr !== previous.pr || next.branch !== previous.branch || next.createdAt !== previous.createdAt) throw new Error("古いleaseまたは別の所有者の更新を拒否しました。");
     if (previous.state === "deleting" && next.state === "held" || previous.state === "held" && next.state === "free") throw new Error("QA返却の状態遷移が不正です。");
     if (previous.state === "deleting" && next.headSha !== previous.headSha) throw new Error("削除中のhead SHAを変更できません。");
@@ -134,13 +137,13 @@ export function nextRecord(saved: SavedLease, changes: Partial<QaLeaseRecord>, n
   validateTransition(saved.payload, next);
   return next;
 }
-export function claimRecord(pool: Pool, input: { pr: number; branch: string; sha: string; leaseId: string; now: string }): QaLeaseRecord | null {
+export function claimRecord(pool: Pool, input: { pr: number; branch: string; sha: string; leaseId: string; now: string; slot?: Slot; purpose?: "probe" }): QaLeaseRecord | null {
   if (Object.values(pool).some((saved) => saved && saved.payload.state !== "free" && saved.payload.pr === input.pr)) throw new Error("PRは既に枠を取得しています。");
-  const slot = SLOTS.find((s) => !pool[s] || pool[s]!.payload.state === "free");
-  if (!slot) return null;
+  const slot = input.slot ?? SLOTS.find((s) => !pool[s] || pool[s]!.payload.state === "free");
+  if (!slot || pool[slot] && pool[slot]!.payload.state !== "free") return null;
   const saved = pool[slot];
   const retiredDatabases = Object.values(pool).flatMap((s) => s?.payload.retiredDatabases ?? []);
-  const next = parseLeaseRecord({ protocol: "cake-qa/v1", slot, leaseId: input.leaseId, pr: input.pr, branch: input.branch, headSha: input.sha, state: "held", createdAt: input.now, updatedAt: input.now, sequence: (saved?.payload.sequence ?? 0) + 1, previousRecordId: saved?.id ?? null, deployments: [], retiredDatabases: [...new Map(retiredDatabases.map((db) => [db.branchId, db])).values()] });
+  const next = parseLeaseRecord({ protocol: "cake-qa/v1", slot, leaseId: input.leaseId, pr: input.pr, branch: input.branch, headSha: input.sha, state: "held", purpose: input.purpose, createdAt: input.now, updatedAt: input.now, sequence: (saved?.payload.sequence ?? 0) + 1, previousRecordId: saved?.id ?? null, deployments: [], retiredDatabases: [...new Map(retiredDatabases.map((db) => [db.branchId, db])).values()] });
   if (saved) validateTransition(saved.payload, next);
   if (Object.values(pool).some((s) => s && s.payload.branch === next.branch && s.payload.leaseId !== next.leaseId)) throw new Error("新しいPR枝で貸出を取得してください。");
   return next;

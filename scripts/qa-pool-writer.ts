@@ -5,10 +5,12 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import {
   featureBranch, fullSha, leaseToken, parseLeaseRecord, qaAlias, QA_ENVIRONMENT, QA_NEON_PROJECT_ID,
-  QA_PROJECT_ID, QA_REPOSITORY, QA_TASK, replayDeployments,
+  QA_PROJECT_ID, QA_REPOSITORY, QA_TASK, replayDeployments, sameDatabase,
   type DatabaseIdentity, type GithubDeployment, type QaLeaseRecord, type SavedLease,
 } from "../lib/qa-pool";
 import { runQaRequest, type QaGateway, type QaPullRequest, type QaRequest, type RemoteDeployment } from "../lib/qa-pool-service";
+import { assertPreviewSourcePolicy } from "../lib/qa-pool-gate";
+import { deletionApproval, deletePlan, probeApproval, type DeletePlan } from "../lib/qa-pool-authorization";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type JsonObject = Record<string, unknown>;
@@ -44,8 +46,9 @@ const transport: QaTransport = async (method, url, token, body) => {
 
 export class HttpQaGateway implements QaGateway {
   private repoId = 0;
-  constructor(private readonly env: Environment, private readonly request: QaTransport = transport) {}
+  constructor(private readonly env: Environment, private readonly request: QaTransport = transport, private readonly access: "read" | "write" = "read") {}
   private async api(provider: "github" | "vercel" | "neon", path: string, method = "GET", body?: unknown, missing = false): Promise<unknown> {
+    if (this.access === "read" && method !== "GET") throw new Error("GET専用検査から変更APIは呼び出せません。");
     const base = { github: "https://api.github.com", vercel: "https://api.vercel.com", neon: "https://console.neon.tech/api/v2" }[provider];
     const token = this.env[{ github: "GITHUB_TOKEN", vercel: "VERCEL_TOKEN", neon: "NEON_API_KEY" }[provider]];
     if (!token) throw new Error(`${provider} API認証がありません。`);
@@ -96,6 +99,7 @@ export class HttpQaGateway implements QaGateway {
     const head = object(pr.head), base = object(pr.base), repo = object(head.repo);
     const sha = str(head.sha);
     if (pr.state !== "open" && pr.state !== "closed") throw new Error("PR状態が不正です。");
+    if (safeNumber(pr.number) !== number) throw new Error("取得PR番号が対象と一致しません。");
     return { number: safeNumber(pr.number), state: pr.state, branch: str(head.ref), sha, repository: str(repo.full_name), base: str(base.ref), approved: this.approved(number, sha) };
   }
   async openPullRequests(): Promise<QaPullRequest[]> {
@@ -111,8 +115,10 @@ export class HttpQaGateway implements QaGateway {
       if (batch.length < 100) return result;
     }
   }
-  async assertGate(): Promise<void> {
-    for (const key of ["CAKE_QA_POOL_ENABLED", "CAKE_QA_GIT_GATE_CONFIRMED", "CAKE_QA_NATIVE_CONFIRMED"]) {
+  generationEnabled() { return this.env.CAKE_QA_POOL_ENABLED === "true"; }
+  probeAuthorization(pr: number, sha: string) { return probeApproval(this.env.CAKE_QA_PROBE_APPROVALS, pr, sha); }
+  async assertGate(mode: "create" | "probe" | "cleanup" = "create"): Promise<void> {
+    for (const key of mode === "create" ? ["CAKE_QA_POOL_ENABLED", "CAKE_QA_GIT_GATE_CONFIRMED", "CAKE_QA_NATIVE_CONFIRMED"] : []) {
       if (this.env[key] !== "true") throw new Error(`${key} の確認設定がありません。生成・削除を開始しません。`);
     }
     const project = object(await this.api("vercel", `/v9/projects/${QA_PROJECT_ID}`));
@@ -120,20 +126,12 @@ export class HttpQaGateway implements QaGateway {
     if (project.id !== QA_PROJECT_ID || project.name !== "cake" || project.accountId !== "team_D1Mcx2TdFWPKcypfu8KzNMub"
       || link.type !== "github" || link.org !== "tyask" || link.repo !== "Cake" || link.productionBranch !== "main") throw new Error("対象project/team/repositoryが一致しません。");
     this.repoId = safeNumber(link.repoId);
-    if (!/^ep-[a-z0-9-]+\.[a-z0-9.-]+\.neon\.tech$/.test(this.env.CAKE_QA_PRODUCTION_DATABASE_HOST ?? "")
-      || !/^br-[a-z0-9-]+$/.test(this.env.CAKE_QA_PARENT_BRANCH_ID ?? "")) throw new Error("本番hostまたはNative親branchの確認情報がありません。");
+    if (mode !== "cleanup") assertPreviewSourcePolicy(project);
+    if (mode !== "cleanup" && (!/^ep-[a-z0-9-]+\.[a-z0-9.-]+\.neon\.tech$/.test(this.env.CAKE_QA_PRODUCTION_DATABASE_HOST ?? "")
+      || !/^br-[a-z0-9-]+$/.test(this.env.CAKE_QA_PARENT_BRANCH_ID ?? ""))) throw new Error("本番hostまたはNative親branchの確認情報がありません。");
     // Fail before claiming if branch/endpoint verification cannot authenticate.
     const neonProject = object(object(await this.api("neon", `/projects/${QA_NEON_PROJECT_ID}`)).project);
     if (neonProject.id !== QA_NEON_PROJECT_ID) throw new Error("Neon project所属を確認できません。");
-    // Old PRs without the gate must be migrated/closed before activation; main config alone is insufficient.
-    for (const pr of await this.openPullRequests()) {
-      if (pr.repository !== QA_REPOSITORY || !featureBranch(pr.branch)) continue;
-      const content = object(await this.api("github", `/repos/${QA_REPOSITORY}/contents/vercel.json?ref=${pr.sha}`));
-      let config: JsonObject;
-      try { config = object(JSON.parse(Buffer.from(str(content.content), "base64").toString("utf8"))); } catch { throw new Error("既存PRのデプロイ停止設定を確認できません。"); }
-      const enabled = object(object(config.git).deploymentEnabled);
-      if (enabled["**"] !== false || enabled.main !== true || Object.entries(enabled).some(([key, value]) => key !== "main" && value !== false)) throw new Error("既存PRの自動Preview停止が未適用です。有効化できません。");
-    }
   }
   private remote(value: unknown): RemoteDeployment {
     const d = object(value), meta = object(d.meta), git = d.gitSource ? object(d.gitSource) : {};
@@ -175,6 +173,8 @@ export class HttpQaGateway implements QaGateway {
   async create(record: QaLeaseRecord): Promise<RemoteDeployment> {
     const intent = record.intent;
     if (record.state !== "held" || !intent || intent.sha !== record.headSha) throw new Error("貸出と作成intentがありません。");
+    await this.assertGate(record.purpose === "probe" ? "probe" : "create");
+    if (record.purpose === "probe" && this.probeAuthorization(record.pr, record.headSha)?.slot !== record.slot) throw new Error("限定probeの承認がありません。");
     const env = {
       AUTH_MODE: "test",
       CAKE_QA_SLOT: record.slot, CAKE_QA_PR: String(record.pr), CAKE_QA_LEASE_TOKEN: record.leaseId,
@@ -208,13 +208,14 @@ export class HttpQaGateway implements QaGateway {
     const endpointResponse = object(await this.api("neon", `/projects/${QA_NEON_PROJECT_ID}/endpoints`));
     return { branches, endpoints: array(endpointResponse.endpoints).map(object) };
   }
-  async database(record: QaLeaseRecord): Promise<DatabaseIdentity | null> {
+  async database(record: QaLeaseRecord, mode: "create" | "cleanup" = "create"): Promise<DatabaseIdentity | null> {
     const { branches, endpoints } = await this.neonResources();
-    const matches = branches.filter((b) => b.name === `preview/${record.branch}`);
+    const matches = branches.filter((b) => mode === "cleanup" && record.database ? b.id === record.database.branchId : b.name === `preview/${record.branch}`);
     if (!matches.length) return null;
     if (matches.length !== 1) throw new Error("Native枝名が重複しています。");
     const branch = matches[0];
-    if (branch.project_id !== QA_NEON_PROJECT_ID || branch.parent_id !== this.env.CAKE_QA_PARENT_BRANCH_ID || branch.default !== false || branch.protected !== false
+    if (branch.project_id !== QA_NEON_PROJECT_ID || branch.default !== false || branch.protected !== false
+      || mode === "create" && branch.parent_id !== this.env.CAKE_QA_PARENT_BRANCH_ID
       || !Number.isFinite(Date.parse(String(branch.created_at))) || Date.parse(String(branch.created_at)) < Date.parse(record.createdAt)) throw new Error("Native枝の親・作成時刻・隔離を確認できません。");
     const found = endpoints.filter((e) => e.branch_id === branch.id && e.type === "read_write");
     if (found.length !== 1) throw new Error("Native書込みendpointを一意に確認できません。");
@@ -239,32 +240,160 @@ export class HttpQaGateway implements QaGateway {
     return { projectId: str(alias.projectId), deploymentId: str(alias.deploymentId ?? object(alias.deployment).id) };
   }
   async assignAlias(record: QaLeaseRecord, deployment: RemoteDeployment) {
+    if (record.purpose === "probe") throw new Error("限定probeは固定aliasを変更できません。");
     await this.api("vercel", `/v2/deployments/${deployment.id}/aliases`, "POST", { alias: qaAlias(record.slot) });
   }
-  deletionApproved() { return this.env.CAKE_QA_DELETE_APPROVED === "true"; }
-  async deleteAlias(record: QaLeaseRecord) {
-    if (!this.deletionApproved() || record.state !== "deleting") throw new Error("削除は未承認です。");
+  deletionApproved(plan: DeletePlan) { return deletionApproval(this.env.CAKE_QA_DELETE_APPROVALS, plan); }
+  async deleteAlias(record: QaLeaseRecord, plan: DeletePlan) {
+    if (!this.deletionApproved(plan) || record.state !== "deleting" || record.purpose === "probe"
+      || !isDeepStrictEqual(deletePlan(record), plan)) throw new Error("正確なresource IDへの削除承認がありません。");
     await this.api("vercel", `/v2/aliases/${qaAlias(record.slot)}`, "DELETE");
   }
-  async deleteDeployment(deployment: RemoteDeployment) {
-    if (!this.deletionApproved()) throw new Error("削除は未承認です。");
+  async deleteDeployment(record: QaLeaseRecord, deployment: RemoteDeployment, plan: DeletePlan) {
+    if (!this.deletionApproved(plan) || record.state !== "deleting" || !isDeepStrictEqual(deletePlan(record), plan)
+      || !plan.deploymentIds.includes(deployment.id) || deployment.leaseId !== record.leaseId || deployment.projectId !== QA_PROJECT_ID) throw new Error("正確なresource IDへの削除承認がありません。");
     const value = object(await this.api("vercel", `/v13/deployments/${deployment.id}`, "DELETE"));
     if (value.state !== "DELETED") throw new Error("deployment削除応答を確認できません。");
   }
+
+  /** All outputs are curated metadata; remote bodies and environment values stay private. */
+  async inspect(options: { action: "preflight" | "plan-probe" | "plan-release"; pr?: number; sha?: string; leaseId?: string; slot?: QaLeaseRecord["slot"] }) {
+    if (this.access !== "read") throw new Error("検査にはGET専用adapterを使ってください。");
+    if (options.action === "plan-probe" && (!Number.isSafeInteger(options.pr) || Number(options.pr) < 1
+      || !fullSha(options.sha) || !options.slot || !["qa1", "qa2", "qa3"].includes(options.slot))) throw new Error("限定probe計画にはOPEN PRの最新完全SHAと指定枠が必要です。");
+    if (options.action === "plan-release" && (!Number.isSafeInteger(options.pr) || Number(options.pr) < 1 || !leaseToken(options.leaseId))) throw new Error("削除計画には現在のPRとlease IDが必要です。");
+    const checks: { name: string; ok: boolean; detail: string }[] = [];
+    const check = async <T>(name: string, read: () => Promise<T>): Promise<T | undefined> => {
+      try { const value = await read(); checks.push({ name, ok: true, detail: "読取・照合成功" }); return value; }
+      catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        const status = /API (\d{3})/.exec(message)?.[1];
+        checks.push({ name, ok: false, detail: status ? `読取API ${status}。未確認として保持。` : "認証・設定・識別情報が不足または不一致。未確認として保持。" });
+        return undefined;
+      }
+    };
+    const project = await check("Vercel project", async () => {
+      const value = object(await this.api("vercel", `/v9/projects/${QA_PROJECT_ID}`));
+      const link = object(value.link);
+      if (value.id !== QA_PROJECT_ID || value.name !== "cake" || value.accountId !== "team_D1Mcx2TdFWPKcypfu8KzNMub"
+        || link.type !== "github" || link.org !== "tyask" || link.repo !== "Cake" || link.productionBranch !== "main"
+        || !Number.isSafeInteger(link.repoId) || Number(link.repoId) < 1) throw new Error("対象が不一致です。");
+      return value;
+    });
+    await check("Preview source policy", async () => { assertPreviewSourcePolicy(project); return true; });
+    const pool = await check("GitHub lease ledger", () => this.pool());
+    const variables = await check("GitHub repository Variables read", async () => {
+      const names: string[] = [];
+      for (let page = 1; ; page++) {
+        if (page > 100) throw new Error("変数一覧が大きすぎます。");
+        const data = object(await this.api("github", `/repos/${QA_REPOSITORY}/actions/variables?per_page=30&page=${page}`));
+        const batch = array(data.variables);
+        names.push(...batch.map((v) => str(object(v).name)));
+        if (batch.length < 30) return names;
+      }
+    });
+    const native = await check("Neon metadata read", async () => {
+      const p = object(object(await this.api("neon", `/projects/${QA_NEON_PROJECT_ID}`)).project);
+      if (p.id !== QA_NEON_PROJECT_ID) throw new Error("Neon projectが不一致です。");
+      const resources = await this.neonResources();
+      return { branchCount: resources.branches.length, endpointCount: resources.endpoints.length };
+    });
+    const parent = await check("Native parent configuration", async () => {
+      const id = this.env.CAKE_QA_PARENT_BRANCH_ID;
+      if (!id || !/^br-[a-z0-9-]+$/.test(id)) throw new Error("Native親IDが未設定です。");
+      const value = object(object(await this.api("neon", `/projects/${QA_NEON_PROJECT_ID}/branches/${id}`)).branch);
+      if (value.id !== id || value.project_id !== QA_NEON_PROJECT_ID) throw new Error("Native親のprojectが不一致です。");
+      return { projectId: QA_NEON_PROJECT_ID, branchId: id, emptyStateProven: false };
+    });
+    await check("Production comparison host configured", async () => {
+      if (!/^ep-[a-z0-9-]+\.[a-z0-9.-]+\.neon\.tech$/.test(this.env.CAKE_QA_PRODUCTION_DATABASE_HOST ?? "")) throw new Error("本番host比較設定がありません。");
+      return true;
+    });
+    const aliases: Record<string, unknown> = {};
+    for (const slot of ["qa1", "qa2", "qa3"] as const) {
+      const value = await check(`Alias ${slot}`, () => this.alias(slot));
+      aliases[slot] = value === undefined ? "unconfirmed" : value;
+    }
+    const requiredVariables = ["CAKE_QA_POOL_ENABLED", "CAKE_QA_GIT_GATE_CONFIRMED", "CAKE_QA_NATIVE_CONFIRMED",
+      "CAKE_QA_PRODUCTION_DATABASE_HOST", "CAKE_QA_PARENT_BRANCH_ID", "CAKE_QA_APPROVED_HEADS", "CAKE_QA_PROBE_APPROVALS", "CAKE_QA_DELETE_APPROVALS"];
+    const summary = {
+      readOnly: true, projectId: QA_PROJECT_ID, neonProjectId: QA_NEON_PROJECT_ID, checks,
+      missingRepositoryVariables: variables ? requiredVariables.filter((name) => !variables.includes(name)) : null,
+      native: native ?? null,
+      parent: parent ?? null, aliases,
+      slots: pool ? Object.fromEntries(Object.entries(pool).map(([slot, saved]) => [slot, saved ? {
+        state: saved.payload.state, purpose: saved.payload.purpose ?? "normal", pr: saved.payload.pr, leaseId: saved.payload.leaseId,
+        headSha: saved.payload.headSha, deploymentIds: saved.payload.deployments.map((d) => d.id), database: saved.payload.database ?? null,
+      } : null])) : null,
+      plan: null as unknown,
+    };
+    if (options.action === "preflight") return summary;
+    if (!options.pr || !Number.isSafeInteger(options.pr)) throw new Error("計画には対象PR番号が必要です。");
+    const pr = await check("Target PR", () => this.pullRequest(options.pr!));
+    if (!pr || !pool || pr.repository !== QA_REPOSITORY || pr.base !== "main" || !featureBranch(pr.branch)) return summary;
+    if (options.action === "plan-probe") {
+      if (!fullSha(options.sha) || pr.state !== "open" || pr.sha !== options.sha || !options.slot || !["qa1", "qa2", "qa3"].includes(options.slot)) throw new Error("限定probe計画にはOPEN PRの最新完全SHAと指定枠が必要です。");
+      const existing = Object.values(pool).find((s) => s && s.payload.state !== "free" && s.payload.pr === pr.number);
+      if (existing && (existing.payload.purpose !== "probe" || existing.payload.slot !== options.slot || existing.payload.state !== "held")) throw new Error("対象PRは別の貸出で使用中または返却中です。限定probe計画を作成しません。");
+      const occupied = pool[options.slot];
+      if (occupied && occupied.payload.state !== "free"
+        && !(occupied.payload.purpose === "probe" && occupied.payload.pr === pr.number)) throw new Error("指定枠は別の貸出で使用中です。");
+      summary.plan = { action: "probe", projectId: QA_PROJECT_ID, neonProjectId: QA_NEON_PROJECT_ID,
+        pr: pr.number, branch: pr.branch, sha: pr.sha, slot: options.slot,
+        maximumNewDeployments: occupied && occupied.payload.state !== "free" && occupied.payload.database ? 1 : 2, fixedAliasChanges: false,
+        approvalFields: ["projectId", "pr", "sha", "slot", "expiresAt"],
+        executionBlocked: checks.some((c) => !c.ok && ["Vercel project", "Preview source policy", "GitHub lease ledger", "Neon metadata read", "Native parent configuration", "Production comparison host configured", "Target PR"].includes(c.name)),
+        requires: ["実policyの読取一致", "期限付きprobe承認", "確認済み空Native親IDと本番host", "信頼済みmainの手動writer"],
+        deletionRequiresSeparateExactResourceApproval: true };
+      return summary;
+    }
+    const saved = Object.values(pool).find((s) => s && s.payload.state !== "free" && s.payload.pr === options.pr);
+    if (!saved || !options.leaseId || saved.payload.leaseId !== options.leaseId) throw new Error("削除計画には現在のPRとlease IDが必要です。");
+    const record = saved.payload;
+    const planned = await check("Exact deletion resources", async () => {
+      if (record.intent || record.deployments.length && !record.database) throw new Error("作成intentまたはDB所属が未確認です。");
+      const remote = await this.deployments(record);
+      for (const d of remote) {
+        const known = record.deployments.find((v) => v.id === d.id);
+        if (!known || known.sha !== d.sha || d.projectId !== QA_PROJECT_ID || !(d.target === null || d.target === "preview")
+          || d.branch !== record.branch || d.leaseId !== record.leaseId || d.pr !== record.pr) throw new Error("未記録または別貸出のdeploymentがあります。");
+      }
+      for (const known of record.deployments) {
+        const d = await this.deployment(known.id);
+        if (d && (d.sha !== known.sha || d.phase !== known.phase || d.projectId !== QA_PROJECT_ID || !(d.target === null || d.target === "preview")
+          || d.branch !== record.branch || d.leaseId !== record.leaseId || d.pr !== record.pr)) throw new Error("deployment IDの所属が不一致です。");
+      }
+      if (record.database) {
+        const actual = await this.database(record, "cleanup");
+        if (actual ? !sameDatabase(actual, record.database) : !(await this.databaseGone(record.database))) throw new Error("DB識別子の再読取が不一致です。");
+      }
+      const alias = record.purpose === "probe" ? null : await this.alias(record.slot);
+      if (alias && (alias.projectId !== QA_PROJECT_ID || !record.deployments.some((d) => d.id === alias.deploymentId))) throw new Error("aliasは別貸出です。");
+      return deletePlan(record);
+    });
+    summary.plan = planned ?? null;
+    return summary;
+  }
 }
 
-export async function runQaWriter(env: Environment = process.env, request?: QaRequest, gateway?: QaGateway): Promise<void> {
-  if (env.CAKE_QA_POOL_ENABLED !== "true") { console.log("Cake: QA poolは未有効化です。生成・削除・台帳変更を実行しません。"); return; }
+export async function runQaWriter(env: Environment = process.env, request?: QaRequest, gateway?: QaGateway, apiTransport: QaTransport = transport): Promise<void> {
   if (!request) {
     const event = env.EVENT_PATH ? object(JSON.parse(await readFile(env.EVENT_PATH, "utf8"))) : {};
     const action = env.QA_ACTION?.trim() || (env.EVENT_NAME === "schedule" || env.EVENT_NAME === "pull_request_target" && event.action === "closed" ? "refresh" : "claim");
-    if (!["claim", "release", "refresh"].includes(action)) throw new Error("QA操作が不正です。");
+    if (["preflight", "plan-probe", "plan-release"].includes(action)) {
+      const reader = new HttpQaGateway({ ...env, GITHUB_TOKEN: env.GITHUB_TOKEN ?? env.GH_TOKEN }, apiTransport);
+      const report = await reader.inspect({ action: action as "preflight" | "plan-probe" | "plan-release",
+        pr: env.QA_PR_NUMBER ? safeNumber(Number(env.QA_PR_NUMBER)) : undefined, sha: env.QA_SOURCE_SHA,
+        slot: env.QA_SLOT as QaLeaseRecord["slot"] | undefined, leaseId: env.QA_LEASE_ID });
+      console.log(JSON.stringify(report, null, 2)); return;
+    }
+    if (!["claim", "release", "refresh", "probe"].includes(action)) throw new Error("QA操作が不正です。");
     const pr = env.QA_PR_NUMBER ? safeNumber(Number(env.QA_PR_NUMBER)) : event.number ? safeNumber(event.number) : undefined;
-    request = { action: action as QaRequest["action"], pr, leaseId: env.QA_LEASE_ID };
+    request = { action: action as QaRequest["action"], pr, leaseId: env.QA_LEASE_ID, sha: env.QA_SOURCE_SHA };
   }
   // Mutations must run in the single reviewed Actions writer, never from a local CLI.
   if (env.GITHUB_ACTIONS !== "true" || env.GITHUB_REPOSITORY !== QA_REPOSITORY || env.GITHUB_REF !== "refs/heads/main") throw new Error("信頼済みmainの単一Actions writerから実行してください。");
-  await runQaRequest(gateway ?? new HttpQaGateway(env), request, { token: randomUUID });
+  await runQaRequest(gateway ?? new HttpQaGateway(env, apiTransport, "write"), request, { token: randomUUID });
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   void runQaWriter().catch(() => { console.error("QA writerが確認不能で停止しました。枠・削除対象記録を保持します。"); process.exitCode = 1; });

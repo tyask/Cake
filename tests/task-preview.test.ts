@@ -21,12 +21,16 @@ const ledger = (value = payload) => ({ id: 101, task: QA_TASK, environment: QA_E
   payload: { ...value, sequence: 2, previousRecordId: 100 } });
 const commandResult = (stdout = "", status = 0): WorkflowCommandResult => ({ stdout, status, signal: null });
 const listing = (records: unknown[]) => commandResult(JSON.stringify([records.length ? [initial, ...records] : []]));
+const project = { id: CAKE_VERCEL_PROJECT, name: "cake", accountId: "team_D1Mcx2TdFWPKcypfu8KzNMub",
+  previewDeploymentsDisabled: false, link: { type: "github", org: "tyask", repo: "Cake", productionBranch: "main" },
+  deploymentPolicy: { deploymentSources: [{ enabled: true, environments: [{ type: "system", target: "preview" }], sources: ["rest-api"] }] } };
 
 async function fixture(t: TestContext, outcomes: (WorkflowCommandResult | Error)[] = [listing([ledger()])]) {
   const cwd = await mkdtemp(join(tmpdir(), "cake-task-preview-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const state = { branch, sha, status: "", origin: "git@github.com:tyask/Cake.git", pushStatus: 0,
     enabled: commandResult("true"), gate: commandResult("true"), config: commandResult(JSON.stringify({ git: { deploymentEnabled: { "**": false, main: true } } })),
+    project: commandResult(JSON.stringify(project)),
     prs: commandResult(JSON.stringify([{ url: "https://github.com/tyask/Cake/pull/42", number: 42, headRefOid: sha, isDraft: true }])) };
   const calls: { command: string; args: readonly string[]; cwd: string }[] = [];
   let clock = 0;
@@ -51,6 +55,11 @@ async function fixture(t: TestContext, outcomes: (WorkflowCommandResult | Error)
         return result;
       }
     }
+    if (command === "npx") {
+      assert.ok(args.includes("api"));
+      assert.equal(args[args.indexOf("--method") + 1], "GET");
+      return state.project;
+    }
     assert.fail(`Unexpected command ${command}: ${args.join(" ")}`);
   };
   return { cwd, state, calls, sleeps, execute, options: { cwd, execute, log: () => {}, now: () => clock,
@@ -68,7 +77,10 @@ test("有効な固定QAだけを待ち、同じPR/HEADの成功DeploymentとDB�
   const polling = f.calls.filter((c) => c.command === "gh" && c.args[0] === "api");
   assert.equal(polling.length, 2);
   assert.ok(polling.every((c) => c.args.includes("--paginate") && c.args.includes("--slurp")));
-  assert.equal(f.calls.some((c) => c.command === "npx" || c.args.includes("deploy") || c.args.includes("alias") || c.args.includes("workflow")), false);
+  const policyReads = f.calls.filter((c) => c.command === "npx");
+  assert.equal(policyReads.length, 1);
+  assert.ok(policyReads[0].args.some((arg) => arg.includes(`/v9/projects/${CAKE_VERCEL_PROJECT}`)));
+  assert.equal(f.calls.some((c) => c.args.includes("deploy") || c.args.includes("alias") || c.args.includes("workflow")), false);
 });
 
 test("未設定/無効/設定照会失敗ではpushやQA台帳APIに入らない", async (t) => {
@@ -95,6 +107,19 @@ test("有効化済みでもHEADがGit Previewを再許可する場合やgate未�
     if (unsafe === "missing") f.state.config = commandResult("{}", 1);
     await assert.rejects(() => runTaskPreview(f.options), /pushを開始しません/);
     assert.equal(f.calls.some((c) => c.args[0] === "push" || c.args[0] === "api"), false);
+  }
+});
+
+test("ローカル設定と確認flagがあっても実projectのREST限定policy未確認/照会失敗ではpushしない", async (t) => {
+  for (const response of [commandResult(JSON.stringify({ ...project, deploymentPolicy: undefined })),
+    commandResult(JSON.stringify({ ...project, previewDeploymentsDisabled: true })),
+    commandResult(JSON.stringify({ ...project, deploymentPolicy: { deploymentSources: [{ enabled: true,
+      environments: [{ type: "system", target: "preview" }], sources: ["git", "rest-api"] }] } })),
+    commandResult("private-api-error", 1)]) {
+    const f = await fixture(t);
+    f.state.project = response;
+    await assert.rejects(() => runTaskPreview(f.options), (error: unknown) => error instanceof Error && !error.message.includes("private-"));
+    assert.equal(f.calls.some((c) => c.args[0] === "push" || c.command === "gh" && c.args[0] === "api"), false);
   }
 });
 
