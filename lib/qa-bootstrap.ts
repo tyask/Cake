@@ -16,6 +16,19 @@ export type QaBootstrapCheck = { name: string; ok: boolean; reason: QaBootstrapR
 type Alias = { projectId: typeof QA_PROJECT_ID; deploymentId: string };
 type PullRequest = { number: number; state: "open" | "closed"; branch: string; sha: string };
 type RemoteDeployment = { id: string; projectId: string; target: string | null; branch: string; sha: string; leaseId: string; pr: number; phase: "provisioning" | "application" };
+type NeonResources = { branches: JsonObject[]; endpoints: JsonObject[] };
+type NeonBranchMetadata = {
+  projectId: typeof QA_NEON_PROJECT_ID; branchId: string; name: string | null; nameEvidence: "branch.name" | "unavailable";
+  parentId: string | null; parentIdEvidence: "branch.parent_id" | "unavailable";
+  default: boolean | null; defaultEvidence: "branch.default" | "unavailable";
+};
+type NeonMetadata = {
+  projectId: typeof QA_NEON_PROJECT_ID; branchCount: number; endpointCount: number; branches: NeonBranchMetadata[];
+  endpoints: { projectId: typeof QA_NEON_PROJECT_ID; endpointId: string; branchId: string | null; branchIdEvidence: "endpoint.branch_id" | "unavailable" }[];
+  defaultBranchIds: string[]; observedPreviewCodexBranchIds: string[];
+};
+type HostComparisonResult = "match" | "no-match" | "unknown";
+type ProductionHostComparison = { result: HostComparisonResult; endpoints: { endpointId: string; result: HostComparisonResult }[] | null };
 export type ProbePlan = {
   action: "plan-probe"; executionEnabled: false; projectId: typeof QA_PROJECT_ID; neonProjectId: typeof QA_NEON_PROJECT_ID;
   pr: number; branch: string; sha: string; headSha: string; slot: Slot; maximumNewDeployments: number;
@@ -32,8 +45,13 @@ export type QaBootstrapReport = {
   projectId: typeof QA_PROJECT_ID; neonProjectId: typeof QA_NEON_PROJECT_ID;
   checks: QaBootstrapCheck[]; prerequisites: { name: string; confirmed: boolean; requirement: string }[];
   missingRepositoryVariables: string[] | null;
-  native: { branchCount: number; endpointCount: number } | null;
-  parent: { projectId: typeof QA_NEON_PROJECT_ID; branchId: string; emptyStateProven: false } | null;
+  native: NeonMetadata | null;
+  productionHostComparison: ProductionHostComparison;
+  parent: {
+    projectId: typeof QA_NEON_PROJECT_ID; branchId: string; emptyStateProven: false;
+    candidateSummary: { branch: NeonBranchMetadata; observedChildBranchIds: string[] | null;
+      observedPreviewCodexChildBranchIds: string[] | null; childEvidence: "listed branch.parent_id" | "unavailable" };
+  } | null;
   sourcePolicy: { requirement: "Preview-only REST API source policy"; confirmed: boolean; previewDeploymentsDisabled: boolean | null; previewRuleCount: number | null; sources: string[] | null };
   aliases: Record<Slot, Alias | null | "unconfirmed">;
   slots: Record<Slot, { state: QaLeaseRecord["state"]; purpose: "probe" | "normal"; pr: number; leaseId: string; headSha: string; deploymentIds: string[]; database: DatabaseIdentity | null } | null> | null;
@@ -54,13 +72,61 @@ const array = (value: unknown): unknown[] => {
 };
 const positiveInteger = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0;
 const deploymentId = (value: unknown): value is string => typeof value === "string" && /^dpl_[a-zA-Z0-9_-]+$/.test(value);
-const branchId = (value: unknown): value is string => typeof value === "string" && /^br-[a-z0-9-]+$/.test(value);
-const endpointId = (value: unknown): value is string => typeof value === "string" && /^ep-[a-z0-9-]+$/.test(value);
+const branchId = (value: unknown): value is string => typeof value === "string" && /^br-[a-z0-9-]+$/.exec(value)?.[0] === value;
+const endpointId = (value: unknown): value is string => typeof value === "string" && /^ep-[a-z0-9-]+$/.exec(value)?.[0] === value;
 const databaseHost = (value: unknown): value is string => typeof value === "string" && /^ep-[a-z0-9-]+\.[a-z0-9.-]+\.neon\.tech$/.test(value);
 const normalizedHost = (value: unknown): string => {
   if (!databaseHost(value)) fail("invalid-response");
   return (value as string).replace(/-pooler(?=\.)/, "");
 };
+
+function comparisonHost(value: unknown): { normalized: string; endpointId: string } | null {
+  if (typeof value !== "string" || value.length > 253) return null;
+  const labels = value.toLowerCase().split(".");
+  if (labels.length < 4 || labels.at(-2) !== "neon" || labels.at(-1) !== "tech"
+    || labels.some((label) => label.length > 63 || /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.exec(label)?.[0] !== label)) return null;
+  const id = labels[0].replace(/-pooler$/, "");
+  if (!endpointId(id) || id.endsWith("-")) return null;
+  return { normalized: [id, ...labels.slice(1)].join("."), endpointId: id };
+}
+
+function productionHostComparison(resources: NeonResources | undefined, productionValue: unknown): ProductionHostComparison {
+  const production = comparisonHost(productionValue);
+  const endpoints = resources ? resources.endpoints.map((endpoint): NonNullable<ProductionHostComparison["endpoints"]>[number] => {
+    const observed = comparisonHost(endpoint.host);
+    const result: HostComparisonResult = !production || !observed || observed.endpointId !== endpoint.id ? "unknown"
+      : production.normalized === observed.normalized ? "match"
+      : production.endpointId === observed.endpointId ? "unknown" : "no-match";
+    return { endpointId: endpoint.id as string, result };
+  }).sort((a, b) => a.endpointId < b.endpointId ? -1 : a.endpointId > b.endpointId ? 1 : 0) : null;
+  return { result: endpoints?.some((endpoint) => endpoint.result === "match") ? "match"
+    : endpoints?.length && endpoints.every((endpoint) => endpoint.result === "no-match") ? "no-match" : "unknown", endpoints };
+}
+
+function neonBranchMetadata(branch: JsonObject, env: Environment): NeonBranchMetadata {
+  const value = branch.name;
+  const name = typeof value === "string" && value.length <= 255 && /^[a-zA-Z0-9]/.test(value)
+    && !/[^a-zA-Z0-9._/-]/.test(value)
+    && !comparisonHost(value)
+    && ![env.GITHUB_TOKEN, env.GH_TOKEN, env.VERCEL_TOKEN, env.NEON_API_KEY, env.CAKE_QA_PRODUCTION_DATABASE_HOST].includes(value) ? value : null;
+  const parentAvailable = Object.hasOwn(branch, "parent_id") && (branch.parent_id === null || branchId(branch.parent_id));
+  const defaultAvailable = typeof branch.default === "boolean";
+  return { projectId: QA_NEON_PROJECT_ID, branchId: branch.id as string, name, nameEvidence: name === null ? "unavailable" : "branch.name",
+    parentId: parentAvailable ? branch.parent_id as string | null : null, parentIdEvidence: parentAvailable ? "branch.parent_id" : "unavailable",
+    default: defaultAvailable ? branch.default as boolean : null, defaultEvidence: defaultAvailable ? "branch.default" : "unavailable" };
+}
+
+function neonMetadata(resources: NeonResources, env: Environment): NeonMetadata {
+  const byId = (a: { branchId: string }, b: { branchId: string }) => a.branchId < b.branchId ? -1 : a.branchId > b.branchId ? 1 : 0;
+  const branches = resources.branches.map((branch) => neonBranchMetadata(branch, env)).sort(byId);
+  return { projectId: QA_NEON_PROJECT_ID, branchCount: branches.length, endpointCount: resources.endpoints.length, branches,
+    endpoints: resources.endpoints.map((endpoint): NeonMetadata["endpoints"][number] => ({ projectId: QA_NEON_PROJECT_ID,
+      endpointId: endpoint.id as string, branchId: branchId(endpoint.branch_id) ? endpoint.branch_id : null,
+      branchIdEvidence: branchId(endpoint.branch_id) ? "endpoint.branch_id" : "unavailable" }))
+      .sort((a, b) => a.endpointId < b.endpointId ? -1 : a.endpointId > b.endpointId ? 1 : 0),
+    defaultBranchIds: branches.filter((branch) => branch.default === true).map((branch) => branch.branchId),
+    observedPreviewCodexBranchIds: branches.filter((branch) => branch.name?.startsWith("preview/codex/")).map((branch) => branch.branchId) };
+}
 
 // Provider bases and credentials cannot be supplied by workflow inputs or remote responses.
 const BASES = { github: "https://api.github.com", vercel: "https://api.vercel.com", neon: "https://console.neon.tech/api/v2" } as const;
@@ -160,7 +226,7 @@ export class ReadOnlyQaBootstrap {
     return { projectId: QA_PROJECT_ID, deploymentId: id };
   }
 
-  private async neonResources(): Promise<{ branches: JsonObject[]; endpoints: JsonObject[] }> {
+  private async neonResources(): Promise<NeonResources> {
     const readList = async (kind: "branches" | "endpoints") => {
       const values: JsonObject[] = [], seen = new Set<string>();
       let cursor: string | undefined;
@@ -222,7 +288,7 @@ export class ReadOnlyQaBootstrap {
       && d.branch === record.branch && d.sha === known.sha && d.phase === known.phase && d.leaseId === record.leaseId && d.pr === record.pr);
   }
 
-  private async releaseResources(record: QaLeaseRecord, resources: { branches: JsonObject[]; endpoints: JsonObject[] }): Promise<ReleasePlan> {
+  private async releaseResources(record: QaLeaseRecord, resources: NeonResources): Promise<ReleasePlan> {
     if (record.intent) fail("unresolved-intent");
     // A creation claim without a known Native identity never becomes an approval candidate.
     if (!record.database) fail("native-identity-unconfirmed");
@@ -328,12 +394,21 @@ export class ReadOnlyQaBootstrap {
       if (p.id !== QA_NEON_PROJECT_ID) fail("identity-mismatch");
       return this.neonResources();
     });
+    const native = resources ? neonMetadata(resources, this.env) : null;
     const parent = await check("Native parent configuration", async () => {
       const id = this.env.CAKE_QA_PARENT_BRANCH_ID;
       if (!branchId(id)) fail("missing-configuration", "CAKE_QA_PARENT_BRANCH_ID");
       const b = object(object(await this.api("neon", `/projects/${QA_NEON_PROJECT_ID}/branches/${id}`)).branch);
       if (b.id !== id || b.project_id !== QA_NEON_PROJECT_ID) fail("identity-mismatch");
-      return { projectId: QA_NEON_PROJECT_ID as typeof QA_NEON_PROJECT_ID, branchId: id, emptyStateProven: false as const };
+      const branch = neonBranchMetadata(b, this.env), listed = native?.branches.find((candidate) => candidate.branchId === id);
+      if (listed && (listed.name !== null && branch.name !== null && listed.name !== branch.name
+        || listed.parentIdEvidence === "branch.parent_id" && branch.parentIdEvidence === "branch.parent_id" && listed.parentId !== branch.parentId
+        || listed.default !== null && branch.default !== null && listed.default !== branch.default)) fail("identity-mismatch");
+      const children = native?.branches.filter((candidate) => candidate.parentIdEvidence === "branch.parent_id" && candidate.parentId === id);
+      return { projectId: QA_NEON_PROJECT_ID as typeof QA_NEON_PROJECT_ID, branchId: id, emptyStateProven: false as const,
+        candidateSummary: { branch, observedChildBranchIds: children ? children.map((child) => child.branchId) : null,
+          observedPreviewCodexChildBranchIds: children ? children.filter((child) => child.name?.startsWith("preview/codex/")).map((child) => child.branchId) : null,
+          childEvidence: native ? "listed branch.parent_id" as const : "unavailable" as const } };
     });
     await check("Production comparison host configured", async () => {
       if (!databaseHost(this.env.CAKE_QA_PRODUCTION_DATABASE_HOST)) fail("missing-configuration", "CAKE_QA_PRODUCTION_DATABASE_HOST");
@@ -350,7 +425,7 @@ export class ReadOnlyQaBootstrap {
       action: options.action, readOnly: true, executionEnabled: false, executionReason: "bootstrap-has-no-mutating-operation",
       projectId: QA_PROJECT_ID, neonProjectId: QA_NEON_PROJECT_ID, checks, prerequisites: [], sourcePolicy,
       missingRepositoryVariables: variables ? requiredVariables.filter((name) => !variables.has(name)) : null,
-      native: resources ? { branchCount: resources.branches.length, endpointCount: resources.endpoints.length } : null,
+      native, productionHostComparison: productionHostComparison(resources, this.env.CAKE_QA_PRODUCTION_DATABASE_HOST),
       parent: parent ?? null, aliases,
       slots: pool ? Object.fromEntries(SLOTS.map((slot) => {
         const saved = pool[slot];
