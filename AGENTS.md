@@ -41,6 +41,6 @@
 
 ## 固定QA移行の段階適用
 
-- 固定QA枠は `qa1` / `qa2` / `qa3`。予約・配置・返却は [docs/qa-pool.md](docs/qa-pool.md) に従う。台帳の保存方式は未決定。貸出状態held/drainingは使用中で、保存方式と排他を確定するまで枠を配置しない。
+- 固定QA枠は `qa1` / `qa2` / `qa3`。予約・配置・返却は [docs/qa-pool.md](docs/qa-pool.md) に従う。台帳はGitHub Deployments＋Actions直列化を設計採用し、未実装。貸出状態held/drainingは使用中で、保存方式と排他を確定するまで枠を配置しない。
 - 移行の設定PRはクラウド読取・DB/retention確認ができない場合、未検証事項を明示してdraftで作成する。通常codex枝のPreview停止設定により、従来deploy:previewの完了を前提にしない。適用と本番へのmergeはユーザーが行う。
 - QA枝を作成する前に使用元完全SHAと生成Preview/DBの範囲を説明し、枠/DB/retentionを確認する。接続文字列や資格情報は出力しない。

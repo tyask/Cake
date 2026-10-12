@@ -176,7 +176,7 @@ npm run db:seed:test
 
 ## 固定QA枠（設定PRの適用前）
 
-検証枠は `qa1` / `qa2` / `qa3`。貸出台帳の保存方式は検討中で、管理ブランチや管理DBは作成していません。予約・DB照合・旧処理停止・retention確認・URLの命名と台帳の選択肢は [固定QA運用](docs/qa-pool.md) に記載しています。実URL・DB名は未確認で、クラウドには適用していません。移行後は通常のcodex枝Previewを停止するため、以下の従来 `deploy:preview` / `task:pr` 手順をそのまま併用しません。
+検証枠は `qa1` / `qa2` / `qa3`。貸出台帳はDeployments＋Actions直列化を設計採用し、実装・権限・設定適用は未完了で、管理ブランチや管理DBは作成していません。予約・DB照合・旧処理停止・retention確認・URLの命名と台帳の選択肢は [固定QA運用](docs/qa-pool.md) に記載しています。実URL・DB名は未確認で、クラウドには適用していません。移行後は通常のcodex枝Previewを停止するため、以下の従来 `deploy:preview` / `task:pr` 手順をそのまま併用しません。
 
 ## Codexとの開発フロー
 

@@ -787,7 +787,7 @@ BootstrapData extends BootstrapMetadata
           <p>worktreeは元のリポジトリの兄弟<code>Cake-worktrees/&lt;タスク名&gt;</code>へ作成し、<code>CAKE_WORKTREE_ROOT</code>で変更できる。相対パスは元のリポジトリから解決する。既存ブランチ・作成先は上書きせず、<code>.env.local</code>・<code>.vercel</code>・<code>node_modules</code>はコピーしない。ローカル実DB検証には対象タスクのテスト用接続情報を設定する。</p>
           <p>PreviewはVercelのGit連携で作り、10秒間隔・最大15分で同じHEADコミットのREADYを確認する。結果はGit対象外の<code>.cake/preview.json</code>へブランチ・コミット・Deployment URLとして保存する。PR作成時にクリーンな現在のブランチ・コミットと照合し、変更後の古い検証記録は拒否する。検証報告・PRに接続文字列や認証情報を記載しない。</p>
           <h3>固定QA枠の段階導入</h3>
-          <p>設定案はqa1/qa2/qa3の固定Git枝とNeon専用DBを再利用する。台帳の保存方式は未決定で、GitHub Issue・Environments・専用管理DB等を比較する。保存先と排他を確定するまでQA枠は作成しない。held/drainingは使用中、nullだけ空き。PR・完全SHA・操作者・世代tokenを保存し、失敗やPR closeで自動解放しない。旧deployment・実行中処理を停止し、DBに接続しない静的待機deploymentとretentionを確認してから返却する。詳細と未確認事項は<a href="qa-pool.md">固定QA運用</a>を参照。mainへのmergeと本番適用はユーザー確認後。</p>
+          <p>設定案はqa1/qa2/qa3の固定Git枝とNeon専用DBを再利用する。台帳はGitHub Deployments payloadと短いActions直列writerを設計採用する。実装・権限承認・実検証が完了するまでQA枠は作成しない。held/drainingは使用中、nullだけ空き。PR・完全SHA・操作者・世代tokenを保存し、失敗やPR closeで自動解放しない。旧deployment・実行中処理を停止し、DBに接続しない静的待機deploymentとretentionを確認してから返却する。詳細と未確認事項は<a href="qa-pool.md">固定QA運用</a>を参照。mainへのmergeと本番適用はユーザー確認後。</p>
           <p>自動Gitデプロイは設定を含むコミットでmainとqa1/2/3だけ許可。古い枝・手動デプロイへ一律適用される保証はなく、移行時に実確認する。QAビルド・DB setup・seed・runtimeは確認済みCAKE_QA_DATABASE_HOSTとendpointを照合し、不一致はDB操作前に停止する。DB resetは行わない。</p>
           <h3>DB環境と公開順序</h3>
           <p><code>vercel.json</code>はbuildCommandにbuild:vercel、regionにsin1を指定する。Vercel MarketplaceのNeonリソース<code>cake-preview</code>は本番と別のNeonプロジェクトを使い、Previewだけへ接続する。環境変数は<code>CAKE_TEST_</code>で始め、Native Preview Branchingを有効にする。リソース準備完了をデプロイ開始条件にし、Gitブランチごとの独立DBをビルドとAPIで共用する。</p>

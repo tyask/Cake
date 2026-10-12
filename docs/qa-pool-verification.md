@@ -21,6 +21,6 @@ Vercel MCPのfumin1/cake読取は403（そのscopeへの認証権限なし）。
 
 このPRは通常codex枝の自動Preview停止を含む導入準備で、従来deploy:previewはそのまま併用しない。専用テストDBとcloud読取が確認できないため、Previewを生成せず、ユーザーの許可範囲でdraft PRを作成する。成功したPreview URLや生成済みDB名を報告しない。
 
-ユーザーの再検討指示に従い、貸出台帳の保存方式は未確定。管理ブランチ、Issue、DB、Environmentを作成/変更せず、保存先に依存しない状態モデルだけを追加した。比較と移行/返却手順は [qa-pool.md](qa-pool.md)。排他保存の実装がないので貸出・配置はまだ開始できない。
+ユーザーの再検討指示に従い、GitHub Deployments台帳＋Actionsの短い単一writerを設計採用。管理ブランチ案は保留。管理ブランチ、Issue、DB、Environmentを作成/変更せず、保存先に依存しない状態モデルだけを追加した。比較と移行/返却手順は [qa-pool.md](qa-pool.md)。deployments:write権限追加とEnvironments qa1/2/3作成は承認後。排他保存workflowは未実装なので貸出・配置はまだ開始できない。最新GitHub公式queue:max（100pending）とstatus auto_inactiveの仕様は確認したが、Cakeで新workflowは実行していない。statusを貸出正本にせず、専用task/payloadを再生する設計。
 
 既存認証のfumin1/cake読取アクセス、Neon test project読取、保持方式、台帳保存先が確認できた後、別段階でQA枠を配置して実検証する。新資格情報・永続アクセス・課金/権限/ネットワーク変更・不可逆resetが必要なら別承認。mainへのmerge・Production適用は行わない。
