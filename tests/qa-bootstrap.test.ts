@@ -342,6 +342,155 @@ test("候補親の一覧と既存個別GETの確認済みmetadataが矛盾した
   }
 });
 
+test("本番host比較はpoolerを第一DNSlabelだけで正規化し、DNSの大小文字も同一視する", async () => {
+  const direct = "ep-shared.ap-southeast-1.aws.neon.tech", pooled = "ep-shared-pooler.ap-southeast-1.aws.neon.tech";
+  for (const [production, observed] of [[direct, direct], [pooled, direct], [direct, pooled], [pooled, pooled], [direct.toUpperCase(), pooled.toUpperCase()]]) {
+    const fixture = new ReadFixture(); fixture.env.CAKE_QA_PRODUCTION_DATABASE_HOST = production;
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/endpoints`, { status: 200, data: { endpoints: [
+      { id: "ep-shared", project_id: QA_NEON_PROJECT_ID, branch_id: parent.id, host: observed },
+    ] } });
+    const report = await fixture.reader().inspect({ action: "preflight" });
+    assert.deepEqual(report.productionHostComparison, { result: "match", endpoints: [{ endpointId: "ep-shared", result: "match" }] });
+    assert.equal(JSON.stringify(report).includes(".neon.tech"), false);
+    assert.equal(fixture.calls.length, 10);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+});
+
+test("全endpointの確認済み不一致だけをno-matchにし、隔離・Native起源・空DBの証明にしない", async () => {
+  const fixture = new ReadFixture();
+  fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/endpoints`, { status: 200, data: { endpoints: [
+    { id: "ep-z", project_id: QA_NEON_PROJECT_ID, branch_id: parent.id, host: "ep-z-pooler.us-east-2.aws.neon.tech" },
+    { id: "ep-a", project_id: QA_NEON_PROJECT_ID, branch_id: parent.id, host: "ep-a.ap-southeast-1.aws.neon.tech" },
+  ] } });
+  const report = await fixture.reader().inspect({ action: "preflight" });
+  assert.deepEqual(report.productionHostComparison, { result: "no-match", endpoints: [
+    { endpointId: "ep-a", result: "no-match" }, { endpointId: "ep-z", result: "no-match" },
+  ] });
+  assert.equal(report.parent?.emptyStateProven, false);
+  for (const name of ["Native parent empty state", "Native build and runtime identity", "Native cleanup behavior"]) {
+    assert.equal(report.prerequisites.find((entry) => entry.name === name)?.confirmed, false);
+  }
+  assert.equal(JSON.stringify(report).includes(".neon.tech"), false);
+  assert.equal(fixture.calls.length, 10);
+  assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+});
+
+test("確認済みmatchを集約し、不明endpointまたは同IDの異なるsuffixをno-matchにしない", async () => {
+  const same = { id: "ep-production", project_id: QA_NEON_PROJECT_ID, branch_id: parent.id,
+    host: "ep-production.ap-southeast-1.aws.neon.tech" };
+  const other = { id: "ep-other", project_id: QA_NEON_PROJECT_ID, branch_id: parent.id,
+    host: "ep-other.ap-southeast-1.aws.neon.tech" };
+  const unknown = { id: "ep-unknown", project_id: QA_NEON_PROJECT_ID, branch_id: parent.id };
+  for (const [endpoints, result] of [
+    [[unknown, other], "unknown"], [[unknown, same, other], "match"],
+    [[{ ...same, host: "ep-production.us-east-2.aws.neon.tech" }], "unknown"],
+    [[{ ...same, host: "ep-production.ap-southeast-1-pooler.aws.neon.tech" }], "unknown"],
+  ] as const) {
+    const fixture = new ReadFixture();
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/endpoints`, { status: 200, data: { endpoints } });
+    const report = await fixture.reader().inspect({ action: "preflight" });
+    assert.equal(report.productionHostComparison.result, result);
+    assert.ok(report.productionHostComparison.endpoints);
+    assert.deepEqual(report.productionHostComparison.endpoints.map((entry) => entry.endpointId), endpoints.map((entry) => entry.id).sort());
+    if (endpoints.length === 1) assert.equal(report.productionHostComparison.endpoints[0].result, "unknown");
+    assert.equal(JSON.stringify(report).includes(".neon.tech"), false);
+    assert.equal(fixture.calls.length, 10);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+});
+
+test("本番またはendpointのhost欠落・不正形式・endpoint ID矛盾はunknownを返す", async () => {
+  const invalid = [undefined, null, false, 42, {}, "", secrets[4], "https://ep-production.ap-southeast-1.aws.neon.tech",
+    "ep-production.ap-southeast-1.aws.neon.tech:5432", "ep-production.ap-southeast-1.aws.neon.tech/db",
+    "ep-production.ap-southeast-1.aws.neon.tech\n", " ep-production.ap-southeast-1.aws.neon.tech",
+    "ep-production.ap-southeast-1.aws.neon.tech.", "ep-production..aws.neon.tech", "ep-production.-region.aws.neon.tech",
+    "ep-production.region-.aws.neon.tech", `ep-production.${"a".repeat(64)}.neon.tech`, `ep-${"a".repeat(240)}.aws.neon.tech`];
+  for (const side of ["production", "endpoint"] as const) for (const value of invalid) {
+    const fixture = new ReadFixture();
+    if (side === "production") fixture.env.CAKE_QA_PRODUCTION_DATABASE_HOST = value as string | undefined;
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/endpoints`, { status: 200, data: { endpoints: [
+      { id: "ep-production", project_id: QA_NEON_PROJECT_ID, branch_id: parent.id,
+        host: side === "endpoint" ? value : "ep-production.ap-southeast-1.aws.neon.tech" },
+    ] } });
+    const report = await fixture.reader().inspect({ action: "preflight" });
+    assert.deepEqual(report.productionHostComparison, { result: "unknown", endpoints: [{ endpointId: "ep-production", result: "unknown" }] });
+    assert.equal(JSON.stringify(report).includes(".neon.tech"), false);
+    assert.equal(fixture.calls.length, 10);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+  const fixture = new ReadFixture();
+  fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/endpoints`, { status: 200, data: { endpoints: [
+    { id: "ep-contradiction", project_id: QA_NEON_PROJECT_ID, branch_id: parent.id, host: "ep-production.ap-southeast-1.aws.neon.tech" },
+  ] } });
+  const report = await fixture.reader().inspect({ action: "preflight" });
+  assert.deepEqual(report.productionHostComparison, { result: "unknown", endpoints: [{ endpointId: "ep-contradiction", result: "unknown" }] });
+  assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+
+  const malformed = new ReadFixture();
+  malformed.env.CAKE_QA_PRODUCTION_DATABASE_HOST = "ep-edge--pooler.ap-southeast-1.aws.neon.tech";
+  malformed.responses.set(`/projects/${QA_NEON_PROJECT_ID}/endpoints`, { status: 200, data: { endpoints: [
+    { id: "ep-edge-", project_id: QA_NEON_PROJECT_ID, branch_id: parent.id, host: malformed.env.CAKE_QA_PRODUCTION_DATABASE_HOST },
+  ] } });
+  const malformedReport = await malformed.reader().inspect({ action: "preflight" });
+  assert.deepEqual(malformedReport.productionHostComparison, { result: "unknown", endpoints: [{ endpointId: "ep-edge-", result: "unknown" }] });
+  assert.equal(JSON.stringify(malformedReport).includes(".neon.tech"), false);
+  assert.equal(malformed.calls.length, 10);
+  assertDisabled(malformedReport); assertPrivate(malformedReport); malformed.assertReadOnly();
+});
+
+test("Neon一覧が空または未確認なら本番host比較をunknownとし、部分一覧を公開しない", async () => {
+  for (const kind of ["empty", "project-denied", "branch-page-denied", "endpoint-incomplete"] as const) {
+    const fixture = new ReadFixture();
+    if (kind === "project-denied") fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}`, { status: 403, data: { message: secrets[3] } });
+    if (kind === "branch-page-denied") fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches`, (url) => url.searchParams.has("cursor")
+      ? { status: 403, data: { message: secrets[3] } } : { status: 200, data: { branches: [parent], pagination: { next: "next-branches" } } });
+    if (kind === "endpoint-incomplete") fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/endpoints`, { status: 200, data: {
+      endpoints: [{ id: "ep-production", project_id: QA_NEON_PROJECT_ID, host: fixture.env.CAKE_QA_PRODUCTION_DATABASE_HOST }], pagination: { next: "unknown-page" },
+    } });
+    const report = await fixture.reader().inspect({ action: "preflight" });
+    assert.deepEqual(report.productionHostComparison, { result: "unknown", endpoints: kind === "empty" ? [] : null });
+    assert.equal(checked(report, "Neon metadata read").ok, kind === "empty");
+    assert.equal(JSON.stringify(report).includes(".neon.tech"), false);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+});
+
+test("本番hostやpooler同値をbranch名に注入してもmetadata summaryから出力しない", async () => {
+  for (const name of ["ep-production.ap-southeast-1.aws.neon.tech", "ep-production-pooler.ap-southeast-1.aws.neon.tech", "ep-production.ap-southeast-1.aws.neon.tech".toUpperCase()]) {
+    const fixture = new ReadFixture(), observed = { ...parent, name };
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches`, { status: 200, data: { branches: [observed] } });
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches/${parent.id}`, { status: 200, data: { branch: observed } });
+    const report = await fixture.reader().inspect({ action: "preflight" });
+    assert.equal(report.native?.branches[0].name, null);
+    assert.equal(report.native?.branches[0].nameEvidence, "unavailable");
+    assert.equal(report.parent?.candidateSummary.branch.name, null);
+    assert.equal(JSON.stringify(report).toLowerCase().includes(".neon.tech"), false);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+});
+
+test("本番host比較は既存probe・release計画とGET集合を変更しない", async () => {
+  for (const action of ["plan-probe", "plan-release"] as const) {
+    const fixture = new ReadFixture(); fixture.setRecord(application());
+    // A normal held lease cannot become a probe; release remains valid.
+    const report = await fixture.reader().inspect(action === "plan-probe" ? { action, pr: 42, sha, slot: "qa1" } : { action, pr: 42, leaseId });
+    assert.deepEqual(report.productionHostComparison, { result: "no-match", endpoints: [{ endpointId: database.endpointId, result: "no-match" }] });
+    if (action === "plan-release") assertReleasePlan(report, fixture.record!);
+    else assert.equal(report.plan, null);
+    assert.equal(fixture.calls.length, action === "plan-release" ? 15 : 11);
+    assert.equal(JSON.stringify(report.productionHostComparison).includes(".neon.tech"), false);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+  const fixture = new ReadFixture(); fixture.setRecord(application()); fixture.env.CAKE_QA_PRODUCTION_DATABASE_HOST = database.host;
+  const report = await fixture.reader().inspect({ action: "plan-release", pr: 42, leaseId });
+  assert.equal(report.productionHostComparison.result, "match");
+  assert.equal(report.plan, null);
+  assert.equal(checked(report, "Exact release resources").reason.code, "identity-mismatch");
+  assert.equal(fixture.calls.length, 11);
+  assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+});
+
 test("個別の認証不足を資格情報名付きで報告し、他providerの読取を保持する", async () => {
   for (const [credential, check, hostname, survivingCheck] of [
     ["GITHUB_TOKEN", "GitHub lease ledger", "api.github.com", "Vercel project"],

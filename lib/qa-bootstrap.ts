@@ -27,6 +27,8 @@ type NeonMetadata = {
   endpoints: { projectId: typeof QA_NEON_PROJECT_ID; endpointId: string; branchId: string | null; branchIdEvidence: "endpoint.branch_id" | "unavailable" }[];
   defaultBranchIds: string[]; observedPreviewCodexBranchIds: string[];
 };
+type HostComparisonResult = "match" | "no-match" | "unknown";
+type ProductionHostComparison = { result: HostComparisonResult; endpoints: { endpointId: string; result: HostComparisonResult }[] | null };
 export type ProbePlan = {
   action: "plan-probe"; executionEnabled: false; projectId: typeof QA_PROJECT_ID; neonProjectId: typeof QA_NEON_PROJECT_ID;
   pr: number; branch: string; sha: string; headSha: string; slot: Slot; maximumNewDeployments: number;
@@ -44,6 +46,7 @@ export type QaBootstrapReport = {
   checks: QaBootstrapCheck[]; prerequisites: { name: string; confirmed: boolean; requirement: string }[];
   missingRepositoryVariables: string[] | null;
   native: NeonMetadata | null;
+  productionHostComparison: ProductionHostComparison;
   parent: {
     projectId: typeof QA_NEON_PROJECT_ID; branchId: string; emptyStateProven: false;
     candidateSummary: { branch: NeonBranchMetadata; observedChildBranchIds: string[] | null;
@@ -77,11 +80,35 @@ const normalizedHost = (value: unknown): string => {
   return (value as string).replace(/-pooler(?=\.)/, "");
 };
 
+function comparisonHost(value: unknown): { normalized: string; endpointId: string } | null {
+  if (typeof value !== "string" || value.length > 253) return null;
+  const labels = value.toLowerCase().split(".");
+  if (labels.length < 4 || labels.at(-2) !== "neon" || labels.at(-1) !== "tech"
+    || labels.some((label) => label.length > 63 || /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.exec(label)?.[0] !== label)) return null;
+  const id = labels[0].replace(/-pooler$/, "");
+  if (!endpointId(id) || id.endsWith("-")) return null;
+  return { normalized: [id, ...labels.slice(1)].join("."), endpointId: id };
+}
+
+function productionHostComparison(resources: NeonResources | undefined, productionValue: unknown): ProductionHostComparison {
+  const production = comparisonHost(productionValue);
+  const endpoints = resources ? resources.endpoints.map((endpoint): NonNullable<ProductionHostComparison["endpoints"]>[number] => {
+    const observed = comparisonHost(endpoint.host);
+    const result: HostComparisonResult = !production || !observed || observed.endpointId !== endpoint.id ? "unknown"
+      : production.normalized === observed.normalized ? "match"
+      : production.endpointId === observed.endpointId ? "unknown" : "no-match";
+    return { endpointId: endpoint.id as string, result };
+  }).sort((a, b) => a.endpointId < b.endpointId ? -1 : a.endpointId > b.endpointId ? 1 : 0) : null;
+  return { result: endpoints?.some((endpoint) => endpoint.result === "match") ? "match"
+    : endpoints?.length && endpoints.every((endpoint) => endpoint.result === "no-match") ? "no-match" : "unknown", endpoints };
+}
+
 function neonBranchMetadata(branch: JsonObject, env: Environment): NeonBranchMetadata {
   const value = branch.name;
   const name = typeof value === "string" && value.length <= 255 && /^[a-zA-Z0-9]/.test(value)
     && !/[^a-zA-Z0-9._/-]/.test(value)
-    && ![env.GITHUB_TOKEN, env.GH_TOKEN, env.VERCEL_TOKEN, env.NEON_API_KEY].includes(value) ? value : null;
+    && !comparisonHost(value)
+    && ![env.GITHUB_TOKEN, env.GH_TOKEN, env.VERCEL_TOKEN, env.NEON_API_KEY, env.CAKE_QA_PRODUCTION_DATABASE_HOST].includes(value) ? value : null;
   const parentAvailable = Object.hasOwn(branch, "parent_id") && (branch.parent_id === null || branchId(branch.parent_id));
   const defaultAvailable = typeof branch.default === "boolean";
   return { projectId: QA_NEON_PROJECT_ID, branchId: branch.id as string, name, nameEvidence: name === null ? "unavailable" : "branch.name",
@@ -398,7 +425,7 @@ export class ReadOnlyQaBootstrap {
       action: options.action, readOnly: true, executionEnabled: false, executionReason: "bootstrap-has-no-mutating-operation",
       projectId: QA_PROJECT_ID, neonProjectId: QA_NEON_PROJECT_ID, checks, prerequisites: [], sourcePolicy,
       missingRepositoryVariables: variables ? requiredVariables.filter((name) => !variables.has(name)) : null,
-      native,
+      native, productionHostComparison: productionHostComparison(resources, this.env.CAKE_QA_PRODUCTION_DATABASE_HOST),
       parent: parent ?? null, aliases,
       slots: pool ? Object.fromEntries(SLOTS.map((slot) => {
         const saved = pool[slot];
