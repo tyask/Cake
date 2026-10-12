@@ -38,7 +38,7 @@ export async function runTaskPreview({
   log(`Cake: ${head.branch} (${head.sha.slice(0, 7)}) をpushします。`);
   // A failed or pending deployment must not leave older evidence usable.
   await rm(previewRecordPath(head.cwd), { force: true });
-  await commandOutput(execute, "git", ["push", "--set-upstream", "origin", head.branch], head.cwd,
+  await commandOutput(execute, "git", ["push", "origin", `${head.sha}:refs/heads/${head.branch}`], head.cwd,
     "ブランチのpushに失敗しました。Gitの接続と認証を確認してください。");
 
   const deadline = now() + timeoutMs;

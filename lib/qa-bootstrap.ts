@@ -3,6 +3,7 @@ import {
   QA_NEON_PROJECT_ID, QA_PROJECT_ID, QA_REPOSITORY, QA_TASK, SLOTS,
   type DatabaseIdentity, type GithubDeployment, type Pool, type QaLeaseRecord, type Slot,
 } from "./qa-bootstrap-ledger";
+import { decodeGitConfigFile, type GitConfigEvidence } from "./qa-pool-gate";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type JsonObject = Record<string, unknown>;
@@ -29,6 +30,7 @@ type NeonMetadata = {
 };
 type HostComparisonResult = "match" | "no-match" | "unknown";
 type ProductionHostComparison = { result: HostComparisonResult; endpoints: { endpointId: string; result: HostComparisonResult }[] | null };
+type GitConfigurationProof = GitConfigEvidence & { branch: string };
 export type ProbePlan = {
   action: "plan-probe"; executionEnabled: false; projectId: typeof QA_PROJECT_ID; neonProjectId: typeof QA_NEON_PROJECT_ID;
   pr: number; branch: string; sha: string; headSha: string; slot: Slot; maximumNewDeployments: number;
@@ -52,7 +54,8 @@ export type QaBootstrapReport = {
     candidateSummary: { branch: NeonBranchMetadata; observedChildBranchIds: string[] | null;
       observedPreviewCodexChildBranchIds: string[] | null; childEvidence: "listed branch.parent_id" | "unavailable" };
   } | null;
-  sourcePolicy: { requirement: "Preview-only REST API source policy"; confirmed: boolean; previewDeploymentsDisabled: boolean | null; previewRuleCount: number | null; sources: string[] | null };
+  gitConfiguration: { scope: "repository-git-trigger-configuration"; backendForcedDeploymentPreventionProven: false;
+    main: GitConfigurationProof | null; target: (GitConfigurationProof & { pr: number }) | null };
   aliases: Record<Slot, Alias | null | "unconfirmed">;
   slots: Record<Slot, { state: QaLeaseRecord["state"]; purpose: "probe" | "normal"; pr: number; leaseId: string; headSha: string; deploymentIds: string[]; database: DatabaseIdentity | null } | null> | null;
   plan: ProbePlan | ReleasePlan | null;
@@ -105,10 +108,13 @@ function productionHostComparison(resources: NeonResources | undefined, producti
 
 function neonBranchMetadata(branch: JsonObject, env: Environment): NeonBranchMetadata {
   const value = branch.name;
+  const lowerName = typeof value === "string" ? value.toLowerCase() : "";
+  const privateValues = [env.GITHUB_TOKEN, env.GH_TOKEN, env.VERCEL_TOKEN, env.NEON_API_KEY, env.CAKE_QA_PRODUCTION_DATABASE_HOST]
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
   const name = typeof value === "string" && value.length <= 255 && /^[a-zA-Z0-9]/.test(value)
     && !/[^a-zA-Z0-9._/-]/.test(value)
-    && !comparisonHost(value)
-    && ![env.GITHUB_TOKEN, env.GH_TOKEN, env.VERCEL_TOKEN, env.NEON_API_KEY, env.CAKE_QA_PRODUCTION_DATABASE_HOST].includes(value) ? value : null;
+    && !lowerName.includes(".neon.tech")
+    && !privateValues.some((item) => lowerName.includes(item.toLowerCase())) ? value : null;
   const parentAvailable = Object.hasOwn(branch, "parent_id") && (branch.parent_id === null || branchId(branch.parent_id));
   const defaultAvailable = typeof branch.default === "boolean";
   return { projectId: QA_NEON_PROJECT_ID, branchId: branch.id as string, name, nameEvidence: name === null ? "unavailable" : "branch.name",
@@ -218,6 +224,21 @@ export class ReadOnlyQaBootstrap {
     return { number, state: value.state as PullRequest["state"], branch: head.ref as string, sha: head.sha as string };
   }
 
+  private async gitConfiguration(branch: string, sha: string): Promise<GitConfigurationProof> {
+    if (!fullSha(sha)) fail("git-commit-unconfirmed", "complete immutable commit SHA");
+    const response = await this.api("github", `/repos/${QA_REPOSITORY}/contents/vercel.json?ref=${sha}`);
+    try {
+      const file = decodeGitConfigFile(response);
+      return { branch, commitSha: sha, blobSha: file.blobSha };
+    } catch { fail("git-configuration-unconfirmed", "committed main-only Git configuration with verified blob SHA"); }
+  }
+
+  private async mainGitConfiguration(): Promise<GitConfigurationProof> {
+    const branch = object(await this.api("github", `/repos/${QA_REPOSITORY}/branches/main`)), commit = object(branch.commit);
+    if (branch.name !== "main" || !fullSha(commit.sha)) fail("git-commit-unconfirmed", "current main with a complete immutable commit SHA");
+    return this.gitConfiguration("main", commit.sha);
+  }
+
   private async aliases(slot: Slot): Promise<Alias | null> {
     const value = await this.api("vercel", `/v4/aliases/${qaAlias(slot)}`, "GET", "alias");
     if (value === null) return null;
@@ -293,7 +314,8 @@ export class ReadOnlyQaBootstrap {
     // A creation claim without a known Native identity never becomes an approval candidate.
     if (!record.database) fail("native-identity-unconfirmed");
     const identity = record.database;
-    if (databaseHost(this.env.CAKE_QA_PRODUCTION_DATABASE_HOST) && identity.host === normalizedHost(this.env.CAKE_QA_PRODUCTION_DATABASE_HOST)
+    const productionHost = comparisonHost(this.env.CAKE_QA_PRODUCTION_DATABASE_HOST)?.normalized;
+    if (productionHost !== undefined && productionHost === comparisonHost(identity.host)?.normalized
       || identity.branchId === this.env.CAKE_QA_PARENT_BRANCH_ID) fail("identity-mismatch");
     const remote = await this.deployments(record);
     if (remote.some((d) => !this.matches(record, d))) fail("identity-mismatch");
@@ -353,40 +375,12 @@ export class ReadOnlyQaBootstrap {
         || link.type !== "github" || link.org !== "tyask" || link.repo !== "Cake" || link.productionBranch !== "main" || !positiveInteger(link.repoId)) fail("identity-mismatch");
       return value;
     });
-    const sourcePolicy: QaBootstrapReport["sourcePolicy"] = { requirement: "Preview-only REST API source policy", confirmed: false,
-      previewDeploymentsDisabled: typeof project?.previewDeploymentsDisabled === "boolean" ? project.previewDeploymentsDisabled : null, previewRuleCount: null, sources: null };
-    await check("Preview source policy", async () => {
+    await check("Preview enabled", async () => {
       if (!project) fail("prerequisite-unconfirmed", "Vercel project read");
-      if (!project.deploymentPolicy) fail("prerequisite-unconfirmed", sourcePolicy.requirement);
-      const policy = object(project.deploymentPolicy);
-      if (!Array.isArray(policy.deploymentSources)) fail("prerequisite-unconfirmed", sourcePolicy.requirement);
-      if (Object.keys(policy).some((key) => !["deploymentSources", "gitSources"].includes(key))) fail("invalid-response");
-      const rules = policy.deploymentSources.map(object);
-      const allowedSources = ["cli", "deploy-hook", "git", "integration", "rest-api", "v0"];
-      const environments = new Set<string>();
-      for (const rule of rules) {
-        if (typeof rule.enabled !== "boolean" || Object.keys(rule).some((key) => !["enabled", "environments", "sources"].includes(key))
-          || !array(rule.environments).length || array(rule.sources).some((s) => typeof s !== "string" || !allowedSources.includes(s))) fail("invalid-response");
-        for (const item of array(rule.environments)) {
-          const env = object(item);
-          if (!(env.type === "system" && ["preview", "production"].includes(String(env.target)) && Object.keys(env).every((key) => ["type", "target"].includes(key))
-            || env.type === "custom" && typeof env.environmentId === "string" && env.environmentId.length > 0 && Object.keys(env).every((key) => ["type", "environmentId"].includes(key)))) fail("invalid-response");
-          const key = env.type === "system" ? String(env.target) : `custom:${env.environmentId}`;
-          if (environments.has(key)) fail("invalid-response");
-          environments.add(key);
-        }
-      }
-      const preview = rules.filter((r) => array(r.environments).some((e) => object(e).type === "system" && object(e).target === "preview"));
-      sourcePolicy.previewRuleCount = preview.length;
-      const observedSources = preview.flatMap((r) => array(r.sources));
-      if (observedSources.some((s) => typeof s !== "string" || !allowedSources.includes(s))) fail("invalid-response");
-      sourcePolicy.sources = [...new Set(observedSources as string[])].sort();
-      sourcePolicy.confirmed = project.previewDeploymentsDisabled === false && preview.length === 1 && preview[0].enabled === true
-        && array(preview[0].sources).length === 1 && array(preview[0].sources)[0] === "rest-api"
-        && array(preview[0].environments).every((e) => object(e).type === "system" && object(e).target === "preview");
-      if (!sourcePolicy.confirmed) fail("policy-requirement-unmet", sourcePolicy.requirement);
+      if (project.previewDeploymentsDisabled !== false) fail("prerequisite-unconfirmed", "Preview deployments enabled");
       return true;
     });
+    const mainGit = options.action === "plan-release" ? undefined : await check("Main Git configuration", () => this.mainGitConfiguration());
     const pool = await check("GitHub lease ledger", () => this.pool());
     const variables = await check("GitHub repository Variables read", () => this.variableNames());
     const resources = await check("Neon metadata read", async () => {
@@ -421,9 +415,17 @@ export class ReadOnlyQaBootstrap {
     }
     const requiredVariables = ["CAKE_QA_POOL_ENABLED", "CAKE_QA_GIT_GATE_CONFIRMED", "CAKE_QA_NATIVE_CONFIRMED", "CAKE_QA_PRODUCTION_DATABASE_HOST",
       "CAKE_QA_PARENT_BRANCH_ID", "CAKE_QA_APPROVED_HEADS", "CAKE_QA_PROBE_APPROVALS", "CAKE_QA_DELETE_APPROVALS"];
+    const pr = options.pr ? await check("Target PR", () => this.pullRequest(options.pr!)) : undefined;
+    const targetGit = options.pr && options.action !== "plan-release" ? await check("Target Git configuration", async () => {
+      if (!pr) fail("prerequisite-unconfirmed", "Target PR read");
+      if (pr.state !== "open" || options.sha && pr.sha !== options.sha) fail("stale-sha", "OPEN PR current head must equal the requested full SHA");
+      return { ...await this.gitConfiguration(pr.branch, pr.sha), pr: pr.number };
+    }) : undefined;
     const report: QaBootstrapReport = {
       action: options.action, readOnly: true, executionEnabled: false, executionReason: "bootstrap-has-no-mutating-operation",
-      projectId: QA_PROJECT_ID, neonProjectId: QA_NEON_PROJECT_ID, checks, prerequisites: [], sourcePolicy,
+      projectId: QA_PROJECT_ID, neonProjectId: QA_NEON_PROJECT_ID, checks, prerequisites: [],
+      gitConfiguration: { scope: "repository-git-trigger-configuration", backendForcedDeploymentPreventionProven: false,
+        main: mainGit ?? null, target: targetGit ?? null },
       missingRepositoryVariables: variables ? requiredVariables.filter((name) => !variables.has(name)) : null,
       native, productionHostComparison: productionHostComparison(resources, this.env.CAKE_QA_PRODUCTION_DATABASE_HOST),
       parent: parent ?? null, aliases,
@@ -434,17 +436,18 @@ export class ReadOnlyQaBootstrap {
       })) as QaBootstrapReport["slots"] : null, plan: null,
     };
     const prerequisite = (name: string, confirmed: boolean, requirement: string) => report.prerequisites.push({ name, confirmed, requirement });
-    for (const name of ["Vercel project", "Preview source policy", "GitHub lease ledger", "Neon metadata read", "Native parent configuration", "Production comparison host configured"]) {
+    for (const name of ["Vercel project", "Preview enabled", ...(options.action === "plan-release" ? [] : ["Main Git configuration"]),
+      "GitHub lease ledger", "Neon metadata read", "Native parent configuration", "Production comparison host configured"]) {
       prerequisite(name, checks.some((c) => c.name === name && c.ok), name);
     }
-    prerequisite("Native parent empty state", false, "separate database verification; metadata does not prove an empty database");
+    if (options.pr) prerequisite("Target PR", Boolean(pr), "same-repository feature PR targeting main with an exact full current SHA");
+    if (options.pr && options.action !== "plan-release") prerequisite("Target Git configuration", Boolean(targetGit), "OPEN PR current head with committed main-only Git configuration and verified blob SHA");
+    prerequisite("Native parent initial state", false, "separate database verification of an empty database or the exact approved two-person fixture; metadata does not prove the initial state");
     prerequisite("Native build and runtime identity", false, "separate live verification of Native isolation and guard injection");
     prerequisite("Native cleanup behavior", false, "separate live verification of branch and endpoint cleanup");
     prerequisite("Reviewed authorization", false, "separate reviewed authorization before any future mutation");
     prerequisite("Mutating implementation", false, "this bootstrap has no mutating operation");
     if (options.action === "preflight") return report;
-    const pr = await check("Target PR", () => this.pullRequest(options.pr!));
-    prerequisite("Target PR", Boolean(pr), "same-repository feature PR targeting main with an exact full current SHA");
     if (options.action === "plan-probe") {
       report.plan = await check("Probe prerequisites", async () => {
         if (!pr || !pool) fail("prerequisite-unconfirmed");

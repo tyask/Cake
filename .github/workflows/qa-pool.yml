@@ -43,46 +43,23 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
       contains(fromJSON('["preflight","plan-probe","plan-release"]'), inputs.action)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    environment: Preview
     permissions:
       contents: read
       pull-requests: read
       deployments: read
-    concurrency:
-      group: cake-qa-pool-writer
-      queue: max
-      cancel-in-progress: false
-    steps:
-      - name: Checkout trusted main scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: tyask/Cake
-          ref: refs/heads/main
-          persist-credentials: false
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24"
-          cache: npm
-      - name: Install trusted dependencies
-        run: npm ci
-      - name: Inspect without mutations
-        run: node --import tsx scripts/qa-pool-writer.ts
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_PATH: ${{ github.event_path }}
-          GITHUB_TOKEN: ${{ github.token }}
-          QA_ACTION: ${{ inputs.action }}
-          QA_PR_NUMBER: ${{ inputs.pr_number }}
-          QA_LEASE_ID: ${{ inputs.lease_id }}
-          QA_SOURCE_SHA: ${{ inputs.source_sha }}
-          QA_SLOT: ${{ inputs.slot }}
-          CAKE_QA_PRODUCTION_DATABASE_HOST: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
-          CAKE_QA_PARENT_BRANCH_ID: ${{ vars.CAKE_QA_PARENT_BRANCH_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+    uses: ./.github/workflows/qa-private-run.yml
+    with:
+      mode: pool
+      action: ${{ inputs.action }}
+      pr_number: ${{ inputs.pr_number }}
+      lease_id: ${{ inputs.lease_id }}
+      source_sha: ${{ inputs.source_sha }}
+      slot: ${{ inputs.slot }}
+    secrets:
+      # A transient workflow-call secret masks the existing Variable before any step starts.
+      production_database_host: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
   writer:
     # Generation stays disabled. Close/explicit cleanup can run independently.
     if: >-
@@ -97,52 +74,20 @@ jobs:
         (github.event.pull_request.head.repo.full_name == github.repository &&
          github.event.pull_request.base.ref == 'main' &&
          startsWith(github.event.pull_request.head.ref, 'codex/')))
-    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
       deployments: write
-    timeout-minutes: 5
-    environment: Preview
-    concurrency:
-      group: cake-qa-pool-writer
-      queue: max
-      cancel-in-progress: false
-    steps:
-      - name: Checkout trusted main scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: tyask/Cake
-          ref: refs/heads/main
-          persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install trusted dependencies
-        run: npm ci
-
-      - name: Reconcile QA pool
-        run: node --import tsx scripts/qa-pool-writer.ts
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_PATH: ${{ github.event_path }}
-          GITHUB_TOKEN: ${{ github.token }}
-          CAKE_QA_POOL_ENABLED: ${{ vars.CAKE_QA_POOL_ENABLED }}
-          CAKE_QA_GIT_GATE_CONFIRMED: ${{ vars.CAKE_QA_GIT_GATE_CONFIRMED }}
-          CAKE_QA_NATIVE_CONFIRMED: ${{ vars.CAKE_QA_NATIVE_CONFIRMED }}
-          CAKE_QA_DELETE_APPROVALS: ${{ vars.CAKE_QA_DELETE_APPROVALS }}
-          CAKE_QA_PROBE_APPROVALS: ${{ vars.CAKE_QA_PROBE_APPROVALS }}
-          CAKE_QA_PRODUCTION_DATABASE_HOST: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
-          CAKE_QA_PARENT_BRANCH_ID: ${{ vars.CAKE_QA_PARENT_BRANCH_ID }}
-          CAKE_QA_APPROVED_HEADS: ${{ vars.CAKE_QA_APPROVED_HEADS }}
-          QA_ACTION: ${{ inputs.action }}
-          QA_PR_NUMBER: ${{ inputs.pr_number }}
-          QA_LEASE_ID: ${{ inputs.lease_id }}
-          QA_SOURCE_SHA: ${{ inputs.source_sha }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+    uses: ./.github/workflows/qa-private-run.yml
+    with:
+      mode: pool
+      action: ${{ inputs.action }}
+      pr_number: ${{ inputs.pr_number }}
+      lease_id: ${{ inputs.lease_id }}
+      source_sha: ${{ inputs.source_sha }}
+      slot: ${{ inputs.slot }}
+    secrets:
+      # A transient workflow-call secret masks the existing Variable before any step starts.
+      production_database_host: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}

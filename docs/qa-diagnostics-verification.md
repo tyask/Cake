@@ -1,5 +1,11 @@
 # 診断専用bootstrapの検証
 
+この文書はPR #35の診断専用bootstrap導入前に記録した過去の検証報告である。以下の319件というテスト数、remote head、公開保留、Preview source policyの確認結果は当時の対象commitと操作範囲の記録であり、現在のPR #34の結果や必須条件を表さない。
+
+2026-10-12のPR #34のHobby対応では、有料のPreview source policyを必須にする診断を、同一repositoryのmain/対象PRの完全SHAにあるmain-only Git設定とblob SHAの確認へ置き換える。新しい証拠は `gitConfiguration.scope: repository-git-trigger-configuration` とcommit/blobの識別情報を示し、 `backendForcedDeploymentPreventionProven: false` を維持する。project全体の強制停止やNativeのlive実証を意味しない。現行手順は [QA診断手順](qa-diagnostics.md) と [QA貸出運用](qa-pool.md)、今回の検証結果とテスト数は [QA pool検証報告](qa-pool-verification.md) を参照する。
+
+今回のActions host対策は既存repository Variableを一時的な `workflow_call` secretへ渡すコード変更であり、remote Secretの登録・移動や値・権限の変更を伴わない。Native要約・本番比較結果のhost省略、台帳/削除manifestの非秘密QA DB identity、runnerのstep envのmaskを区別し、過去ログの消去や実Actionsでのmask確認は行っていない。PR #34への許可済みcommit/push/本文更新と、別途承認が必要なmainへのmerge・Production自動配置・生成実証・削除を分ける。
+
 2026-10-12。`origin/main`の`1877f0ff88b5250225db5d590a06e3c1e656ecb9`から、`npm run task:start -- qa-readonly-bootstrap`で独立したbranch/worktreeを作成。元worktreeの資格情報・Vercel設定・依存ディレクトリはコピーしていない。依存は専用worktreeで`npm ci`を実行した。default cacheがworkspace外で利用できなかったため、書込可能な`/tmp/cake-bootstrap-npm-cache`で再実行して成功した。
 
 ## 対象と不変条件
@@ -15,7 +21,7 @@
 
 GET専用adapterの変更method拒否、資格情報なし/空入力の診断、秘密の出力抑制、401/403/404区別、全ページ読取、破損台帳・古いSHA・満枠・Production/別lease/資源不一致拒否、Native消失の照合、生成設定なしでも既知資源を計画できること、PRの後続push後も記録済みheadを返却対象に使うことを回帰で確認した。
 
-実際のGETでVercel project/linkと空の貸出台帳を確認。Preview policyは未確認、Variables APIは403、Neon API key・親ID・本番host比較情報は不足として個別に報告できた。候補alias3件は404。API応答本文・秘密値を保存/出力していない。資格情報を外してoptional dispatch入力を空文字にした実CLIもexit0で不足を報告した。
+当時のGETでVercel project/linkと空の貸出台帳を確認。旧診断のPreview source policyは未確認だったが、このpolicy確認はHobby対応後の必須条件ではない。Variables APIは403、Neon API key・親ID・本番host比較情報は不足として個別に報告できた。候補alias3件は404。API応答本文・秘密値を保存/出力していない。資格情報を外してoptional dispatch入力を空文字にした実CLIもexit0で不足を報告した。
 
 今回の新枝はremoteに存在せず、Vercel deployment一覧は200・0件。main、PR #33、PR #34のremote headは上記/既知値のままであることを確認した。
 

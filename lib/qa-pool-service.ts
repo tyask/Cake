@@ -11,13 +11,14 @@ export type RemoteDeployment = {
   pr: number; attemptId: string; phase: QaDeployment["phase"]; state: string; url?: string;
 };
 export type AliasTarget = { projectId: string; deploymentId: string };
+export type QaGateTarget = { pr: number; branch: string; sha: string };
 export interface QaGateway {
   pool(): Promise<Pool>;
   save(record: QaLeaseRecord): Promise<SavedLease>;
   pullRequest(pr: number): Promise<QaPullRequest>;
   openPullRequests(): Promise<QaPullRequest[]>;
   generationEnabled(): boolean;
-  assertGate(mode: "create" | "probe" | "cleanup"): Promise<void>;
+  assertGate(mode: "create" | "probe" | "cleanup", target?: QaGateTarget): Promise<void>;
   probeAuthorization(pr: number, sha: string): ProbeApproval | null;
   deployments(record: QaLeaseRecord): Promise<RemoteDeployment[]>;
   deployment(id: string): Promise<RemoteDeployment | null>;
@@ -39,10 +40,7 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
   const token = options.token ?? randomUUID;
   const log = options.log ?? console.log;
   let pool = await gateway.pool();
-  let createGateChecked = false;
-  const assertCreateGate = async () => {
-    if (!createGateChecked) { await gateway.assertGate("create"); createGateChecked = true; }
-  };
+  const gateTarget = (pr: QaPullRequest): QaGateTarget => ({ pr: pr.number, branch: pr.branch, sha: pr.sha });
   const assertCurrent = async (saved: SavedLease) => {
     const latest = (await gateway.pool())[saved.payload.slot];
     if (latest?.id !== saved.id || latest.payload.leaseId !== saved.payload.leaseId || latest.payload.state !== saved.payload.state) throw new Error("貸出世代が変わりました。旧処理を停止します。");
@@ -148,10 +146,11 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
         || pr.state !== "open" || pr.sha !== request.sha) {
         throw new Error("probeのPR・SHA・枠または期限付き承認が一致しません。");
       }
+      await gateway.assertGate("probe", gateTarget(pr));
     } else {
       if (!gateway.generationEnabled()) { log(`Cake: ${record.slot} は生成無効のため保持します。`); return; }
       if (pr.state !== "open" || !pr.approved) { log(`Cake: PR #${record.pr} の最新SHA承認を待っています。`); return; }
-      await assertCreateGate();
+      await gateway.assertGate("create", gateTarget(pr));
     }
     saved = await recover(saved);
     record = saved.payload;
@@ -178,6 +177,7 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
       const current = await gateway.pullRequest(record.pr);
       if (!validPr(current) || current.branch !== record.branch || current.state !== "open" || current.sha !== record.headSha) return;
       if (probing ? gateway.probeAuthorization(record.pr, record.headSha)?.slot !== record.slot : !current.approved || !gateway.generationEnabled()) return;
+      await gateway.assertGate(probing ? "probe" : "create", gateTarget(current));
       saved = await save(saved, { intent: { sha: record.headSha, phase: record.database ? "application" : "provisioning", attemptId: token(), startedAt: now() } });
       await assertCurrent(saved);
       if (probing && gateway.probeAuthorization(record.pr, record.headSha)?.slot !== record.slot) {
@@ -240,9 +240,10 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
     if (!Number.isSafeInteger(request.pr) || Number(request.pr) < 1 || !fullSha(request.sha)) throw new Error("probeには対象PRと完全SHAが必要です。");
     const approval = gateway.probeAuthorization(request.pr!, request.sha);
     if (!approval) throw new Error("対象PR・SHAへの期限付きprobe承認がありません。");
-    await gateway.assertGate("probe");
     const pr = await gateway.pullRequest(request.pr!);
     if (!validPr(pr) || pr.state !== "open" || pr.sha !== request.sha) throw new Error("probe対象PRの最新SHAが一致しません。");
+    await gateway.assertGate("probe", gateTarget(pr));
+    if (gateway.probeAuthorization(pr.number, pr.sha)?.slot !== approval.slot) throw new Error("probe承認が期限切れまたは変更されました。貸出を開始しません。");
     const existing = Object.values(pool).find((saved) => saved && saved.payload.state !== "free" && saved.payload.pr === pr.number);
     if (existing) {
       if (existing.payload.state !== "held" || existing.payload.purpose !== "probe" || existing.payload.slot !== approval.slot
@@ -270,7 +271,7 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
     if (Object.values(pool).some((s) => s?.payload.branch === pr.branch)) { log(`Cake: PR #${pr.number} は返却済みです。新しいタスク枝とPRを作成してください。`); continue; }
     const record = claimRecord(pool, { pr: pr.number, branch: pr.branch, sha: pr.sha, leaseId: token(), now: now() });
     if (!record) { log(`Cake: PR #${pr.number} は空きQA枠を待っています。`); break; }
-    await assertCreateGate();
+    await gateway.assertGate("create", gateTarget(pr));
     const saved = await gateway.save(record);
     pool[record.slot] = saved;
     await reconcile(saved);

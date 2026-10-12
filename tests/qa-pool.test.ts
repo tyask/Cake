@@ -102,8 +102,12 @@ test("auto Git deployment only permits main and denies slash-containing feature 
   const config = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
   assert.deepEqual(config.git.deploymentEnabled, { "**": false, main: true });
   const workflow = readFileSync(new URL("../.github/workflows/qa-pool.yml", import.meta.url), "utf8");
-  assert.match(workflow, /queue: max/);
-  assert.match(workflow, /cancel-in-progress: false/);
-  assert.match(workflow, /ref: refs\/heads\/main/);
+  const runner = readFileSync(new URL("../.github/workflows/qa-private-run.yml", import.meta.url), "utf8");
+  const poolRunner = runner.slice(runner.indexOf("\n  pool:\n"), runner.indexOf("\n  diagnostics:\n"));
+  assert.equal(workflow.match(/uses: \.\/\.github\/workflows\/qa-private-run\.yml\s+with:\s+mode: pool/g)?.length, 2);
+  assert.doesNotMatch(workflow, /concurrency:/);
+  assert.match(poolRunner, /group: cake-qa-pool-writer\s+queue: max\s+cancel-in-progress: false/);
+  assert.match(poolRunner, /repository: tyask\/Cake\s+ref: refs\/heads\/main\s+persist-credentials: false/);
+  assert.match(poolRunner, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /CAKE_QA_POOL_ENABLED/);
 });

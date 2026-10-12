@@ -182,9 +182,11 @@ npm run db:seed:test
 
 台帳は既存GitHub Environment `Preview` の専用task `cake-qa-lease`、payload protocol `cake-qa/v1`。短い単一Actions writerが予約・配置・alias更新・承認された全deployment削除を直列化します。GET専用の `preflight` と `plan-release` は通常運用の有効化と分け、限定生成は対象・期限を承認した手動 `probe` で行います。probeの候補aliasは自動更新しません。返却はNeon branchと全endpointの消失確認後だけです。詳細は [QA貸出運用](docs/qa-pool.md) を参照してください。
 
-現在は有効化前です。全既存PRの生成前ゲート、REST Native branching、候補alias割当、`queue: max`、cleanupの実環境検証は未実施で、実行環境に `NEON_API_KEY` がありません。公式の生成前ゲート候補は [Deployment Policies](https://vercel.com/docs/deployments/deployment-policy) のproject overrideでPreview専用REST-only sourceを許可する方式ですが、実projectに適合policyを確認できていません。team GETも403のためPro/EnterpriseのplanとOwnerによる設定適用条件が確認できず、現時点の実証はblockedです。新Secret・権限・ネットワーク・Productionのremote変更は今回行いません。
+現在は有効化前です。Hobbyではmainと稼働対象枝の `vercel.json` に `git.deploymentEnabled: {"**": false, "main": true}` を入れ、今後の枝は更新済みmainから作ります。main以外をtrueにする規則は禁止です。全remote 14枝の読取監査ではPR #34の枝だけが適合し、main（`37a55b8`）・PR #33・他の枝は未導入で、古いPreview枝もremoteに残っています。PR #33の将来の設定だけの変更にも別途承認が必要で、今回は変更しません。古い枝・設定変更・直接REST/CLI・first-party callerは迂回し得るため、project全体の強制停止を保証しません。有料Deployment Policiesを必須にせず、未検証API fieldへのfallbackも追加しません。Vercel Proへの変更・課金は不要ですが、Native Neonの既存plan・無料枠は別条件で確認し、無課金を保証しません。
 
-`preflight` はGET以外を拒否するtransportで台帳、project/source policy、repository Variables名、Neon metadata件数の読取・照合結果と不足を報告します。対象PR/current headと指定枠はGET専用の `plan-probe` で追加照合できます。flagをtrueにせず、生成・台帳変更・削除・環境変数更新・DB操作を行いません。実projectのPreview専用REST-only policyに適合した後の生成実証は、同一repositoryのレビュー済み現在head、対象project・PR・枠を `CAKE_QA_PROBE_APPROVALS` のJSON配列へ明示承認し、期限内の手動probeに限定します。同じmainの単一queueを使い、pool/Gitゲート確認/Native確認flagはfalseまたは未設定のまま実証できます。probeのために未実証flagを先にtrueへ変えません。認証scopeは生成・削除の承認とは分けます。
+`preflight` はGET以外を拒否するtransportで台帳、project/link、mainの完全SHAにあるGit設定、repository Variables名、Neon metadata件数の読取・照合結果と不足を報告します。対象PR/current headと指定枠はGET専用の `plan-probe` で追加照合できます。貸出取得前とREST POST直前には同一repositoryのmainと対象PRの完全SHAにあるmain-only設定を確認します。flagをtrueにせず、生成・台帳変更・削除・環境変数更新・DB操作を行いません。設定済みのOPEN PRへの生成実証は `CAKE_QA_PROBE_APPROVALS` のJSON配列の `projectId` / `pr` / `sha` / `slot` / `expiresAt` の5項目だけに完全一致する、期限内の手動probeに限定します。同じmainの単一queueを使い、pool/Gitゲート確認/Native確認flagはfalseまたは未設定のまま実証できます。確認flagは実際のGit停止と全稼働枝の監査、Nativeの実証後だけtrueにし、probeのために先に変更しません。認証scopeは生成・削除の承認とは分けます。
+
+初回移行ではQAを無効・承認なし・空台帳のまま、ユーザーがこのHobby修正を含むPR #34を手動mergeしてmainへwriterとGit設定を導入します。mainに設定がない間は生成・probe・通常CLIを停止しますが、無効状態での導入mergeは可能です。mainのProductionを維持するためmergeは自動Production deploymentを開始し、その承認は必要です。今回のPR #34へのcommit/push/本文更新はこのリスクを含め明示承認済みですが、merge・Preview/probe・pool有効化・削除・remote設定変更・PR #33編集は含みません。通常ゲートをflagや抜道引数で通したとは扱いません。merge後のPR #34はCLOSEDとなるため、限定probeには別の設定済みOPEN PRと個別承認が必要で、今回は新PRを作りません。REST Native、alias、queue、cleanupのlive実証は未実施で、実行環境に `NEON_API_KEY` もありません。
 
 PGliteの実SQL検証はローカルWASMの一時メモリDBで行います。承認済みNeon DBを使用せず、実環境の接続情報も読み込みません。検証データは永続化せず、Neonのmigration・seed実測とは区別します。QA親DBへの別途承認済みの限定変更は [QA貸出運用](docs/qa-pool.md) に記録しています。[再現用スクリプト](scripts/verify-preview-database-safety.mjs)と [検証報告](docs/qa-pool-verification.md) を参照してください。
 
@@ -201,7 +203,7 @@ npm run task:start -- feature-name
 cd ../Cake-worktrees/feature-name
 ```
 
-`origin`を取得し、最新の`origin/main`から`codex/feature-name`と専用worktreeを作成して`npm ci`を実行します。タスク名は60文字以内の英小文字・数字・ハイフンで指定します。既存のブランチやフォルダは上書きしません。依存関係のインストールに失敗した場合は、作成済みworktreeで`npm ci`を再実行します。
+`origin`を取得し、main-only Git設定を導入した最新の`origin/main`から`codex/feature-name`と専用worktreeを作成して`npm ci`を実行します。タスク名は60文字以内の英小文字・数字・ハイフンで指定します。既存のブランチやフォルダは上書きしません。依存関係のインストールに失敗した場合は、作成済みworktreeで`npm ci`を再実行します。
 
 作成先は元のリポジトリの兄弟フォルダ`Cake-worktrees/<タスク名>`です。別の場所に作る場合は、実行時の`CAKE_WORKTREE_ROOT`で指定します。相対パスは元のリポジトリから解決します。
 
@@ -236,7 +238,7 @@ npm run task:pr -- --draft --title 'test: Codex Cloudの開発手順を検証' -
 gh pr view --repo tyask/Cake --json url,isDraft,headRefOid
 ```
 
-`task:pr --draft` はPreview未検証を明示して作成・更新する入口です。repository variable `CAKE_QA_GIT_GATE_CONFIRMED=true` とcommit内 `vercel.json` のmain-only停止設定を確認し、originとHEADが一致しない場合だけpushしてdraftを作ります。ゲートを確認できない場合はpushも停止し、ローカル差分と未実行理由を報告します。
+`task:pr --draft` はPreview未検証を明示して作成・更新する通常入口です。repository variable `CAKE_QA_GIT_GATE_CONFIRMED=true` に加え、同一repositoryのmainと対象HEADの完全SHAにある `vercel.json` のmain-only停止設定を確認し、originとHEADが一致しない場合だけpushしてdraftを作ります。ゲートを確認できない場合は通常CLIのpushを停止し、ローカル差分と未実行理由を報告します。初回のPR #34導入は上記の明示承認済み限定作業として扱います。
 
 pushやPR作成が失敗した場合は成功として記録せず、確認済みの操作と必要な設定を分けて報告します。
 
@@ -260,7 +262,7 @@ lint・test・buildとDB分離の確認状況をMarkdownファイルへ記載し
 npm run task:pr -- --draft --title '変更内容を表すタイトル' --verification-file /tmp/cake-verification.md
 ```
 
-Preview未実施の理由とブランチ・完全SHAを含むmain向けdraft PRを作成・更新します。push前に `CAKE_QA_GIT_GATE_CONFIRMED=true` と `git show HEAD:vercel.json` の `**: false` / `main: true`（他のtrueなし）を共通checkerで照合し、originとHEADが一致しない場合だけpushします。自動生成ゲートを確認できない場合はpushを止めます。文書のみの変更はPreview不要と記録できます。クラウド検証や有効化条件が不足する設定PRはdraftのままレビューします。
+Preview未実施の理由とブランチ・完全SHAを含むmain向けdraft PRを作成・更新します。通常のpush前に `CAKE_QA_GIT_GATE_CONFIRMED=true` と、同一repositoryのmain/対象HEADを完全SHAで読む `vercel.json` の `**: false` / `main: true`（main以外のtrueなし）を共通checkerで照合し、originとHEADが一致しない場合だけpushします。生成前設定を確認できない場合は通常CLIのpushを止めます。文書のみの変更はPreview不要と記録できます。クラウド検証や有効化条件が不足する設定PRはdraftのままレビューします。
 
 ### 4. 貸出済みPreviewで画面・APIを検証する
 
@@ -270,7 +272,7 @@ Preview未実施の理由とブランチ・完全SHAを含むmain向けdraft PR�
 npm run deploy:preview
 ```
 
-コマンドは有効化、draft入口と共通の生成前ゲート、同feature枝の先行PRを確認してからクリーンなブランチをpushし、台帳の同PR・同lease・現在HEADのREADY記録を待ちます。CLIは台帳読取のみで、VercelやNeonを直接生成しません。満枠時は待機し、無効・失敗・timeoutは未検証として報告します。
+コマンドは有効化、draft入口と共通の生成前ゲート、同feature枝の先行PRを確認してから検証した完全SHAをpush元refspecに固定してクリーンなブランチをpushし、台帳の同PR・同lease・現在HEADのREADY記録を待ちます。CLIは台帳読取のみで、VercelやNeonを直接生成しません。満枠時は待機し、無効・失敗・timeoutは未検証として報告します。
 
 コミット、PR、lease、台帳記録、Deployment固有URL、Neon identityを `.cake/preview.json` に記録します。このフォルダはGitへ登録しません。Deployment固有URLで画面とAPI、PC・スマートフォンの表示・操作を検証し、対象PRのテストDBであることを確認します。固定aliasだけでコミットを判定しません。同じPRの追加commitは新headのレビュー・承認後に同lease・同DBを使い、入力・編集済みのQAデータを保持します。
 
@@ -328,15 +330,17 @@ PreviewはVercel Marketplaceの既存Neonリソース `cake-preview`、project `
 - 接続先はPreviewだけとし、Production・Developmentへ接続しない。
 - Native供給の接続変数は `CAKE_TEST_DATABASE_URL` を使う。
 - Preview action、Native Preview Branching、`Resource must be active before deployment` を確認する。
-- 全既存PRを含む生成前ゲートは、実projectのDeployment PoliciesでPreviewだけのREST-only source許可を読み取り確認する。Pro/EnterpriseとOwnerによる適用条件も確認し、未設定・継承だけ・重複・Production混在・他source許可なら生成を停止する。今回policyをremote適用しない。`vercel.json` がない古いPRまで止まると推定しない。
-- 読取確認した承認済みQA初期fixtureのNative親branch IDを `CAKE_QA_PARENT_BRANCH_ID` として確認し、実際の子DBでもfixtureを照合する。metadata読取だけではNativeの親選択や子DBの受入条件を証明できない。通常運用の生成は実policyに加えpool/Gitゲート確認/Native確認flagのtrueと、`CAKE_QA_APPROVED_HEADS`のPR番号→完全head SHA承認を必要とする。同PRの追加commitも新SHAの承認が必要。
-- 限定probeのrepository variable `CAKE_QA_PROBE_APPROVALS` はJSON配列とし、 `projectId` / `pr` / `sha` / `slot` / `expiresAt` に一致する現在headだけを明示承認する。probeは手動入口限定で、追加pushも新SHAへの期限付き承認を必要とする。
+- 生成前にmainと対象PRの完全SHAにある `vercel.json` の `git.deploymentEnabled: {"**": false, "main": true}` を確認し、貸出取得前とREST POST直前にも再照合する。main以外のtrueは許可しない。全稼働枝を監査し、設定がない古い枝まで止まると推定しない。Ignored Build StepはNative DB生成前ゲートにしない。
+- 読取確認した承認済みQA初期fixtureのNative親branch IDを `CAKE_QA_PARENT_BRANCH_ID` として確認し、実際の子DBでもfixtureを照合する。metadata読取だけではNativeの親選択や子DBの受入条件を証明できない。通常運用の生成はmain/対象PRのGit設定に加えpool/Gitゲート確認/Native確認flagのtrueと、`CAKE_QA_APPROVED_HEADS`のPR番号→完全head SHA承認を必要とする。同PRの追加commitも新SHAの承認が必要。
+- 限定probeのrepository variable `CAKE_QA_PROBE_APPROVALS` はJSON配列とし、 `projectId` / `pr` / `sha` / `slot` / `expiresAt` の5項目だけに一致する現在headを明示承認する。probeは手動入口限定で、追加pushも新SHAへの期限付き承認を必要とする。
 - 削除はGET専用 `plan-release` の全対象と完全一致する期限付き `CAKE_QA_DELETE_APPROVALS` を使う。一括の削除許可boolean、Native/cleanup確認flag、tokenの書込みscopeで対象ID承認を代用しない。
-- 既存Previewの `AUTH_SECRET` と `AUTH_MODE=test`、読取確認した非秘密の本番endpoint host `CAKE_QA_PRODUCTION_DATABASE_HOST` を確認する。`AUTH_URL` はDeployment URLを自動検出する。
+- 既存Previewの `AUTH_SECRET` と `AUTH_MODE=test`、既存repository Variableにある読取確認済みの非秘密本番endpoint host `CAKE_QA_PRODUCTION_DATABASE_HOST` を確認する。`AUTH_URL` はDeployment URLを自動検出する。
 
-初回Native hostが未確認のdeploymentはDB接続前のguardで停止します。Nativeが未実証の段階ではflagをtrueへ変えず、明示承認した手動probeでこの配置とNeon APIのproject・feature枝・parent・branch/endpoint ID・実hostを確認します。同feature枝の次の手動probeへ非秘密のlease/DB情報を渡し、Deployment固有URLで実証します。同PR更新は同lease・同DBを維持しますが、新headのprobe承認が必要です。候補aliasの自動更新や通常運用への自動切替は行いません。接続情報はNative注入を使い、本番の `DATABASE_URL` へ切り替えません。 非秘密guard情報を作成requestの `env` / `build.env` へ渡す案は[公式client実装](https://raw.githubusercontent.com/vercel/vercel/main/packages/client/src/deploy.ts)に根拠がありますが、公開REST schemaにfieldの記載がなく、Git sourceとの組合せ・build/runtime注入はlive未検証です。詳細はQA貸出運用の確認事項に記載しています。
+writerはclaimとintentを先に保存し、REST `gitSource` でNative DBをアプリbuild前に生成します。初回Native hostが未確認のdeploymentはDBクライアント作成前のguardで停止します。Nativeが未実証の段階ではflagをtrueへ変えず、明示承認した手動probeでこの配置とNeon APIのproject・feature枝・parent・作成時刻・branch/endpoint ID・実hostを確認します。同feature枝の次の手動probeへ確認済みの非秘密lease/DB情報を渡し、phaseがapplicationの同headのDeployment固有URLでDB受入れ・migration/seedを実証します。同PR更新は同lease・同DBを維持しますが、新headのprobe承認が必要です。新PRは新しいGit refとDBを使います。候補aliasの自動更新や通常運用への自動切替は行いません。接続情報はNative注入を使い、本番の `DATABASE_URL` へ切り替えません。非秘密guard情報を作成requestの `env` / `build.env` へ渡す案は[公式client実装](https://raw.githubusercontent.com/vercel/vercel/main/packages/client/src/deploy.ts)に根拠がありますが、公開REST schemaにfieldの記載がなく、Git sourceとの組合せ・build/runtime注入はlive未検証です。詳細はQA貸出運用の確認事項に記載しています。
 
 新PRはlease markerがない初回に、migration前の実DBが空または承認済みQA初期fixtureと厳密一致することを検査してidentityを登録します。空DBでは未適用migrationと固定サンプルを登録し、fixture一致時は`seeded_at`を記録して既存fixtureを使用します。混入・別lease・前貸出endpointは削除して続行せず停止します。同PR更新は同DB identityを照合し、レビュー済みの未適用migrationだけを適用します。初期fixtureの再検査・再登録・権限修復をせず入力・編集済みデータを保持します。build・runtime・直接DBコマンドも同じguardを通します。DB準備やbuildの失敗時はaliasを更新しません。
+
+QA読取検査のJSON/CLI出力はdeployment URL・接続文字列・資格情報を省略しますが、台帳と削除manifestの非秘密DB hostは識別情報として含まれ得ます。Actionsでは既存repository Variableのhostをcallerの `jobs.secrets` から一時的な `workflow_call` secretへ渡し、runnerがstep envの表示前にmaskするコードへ変更します。remote Secretの登録・移動や権限変更は行いません。Preview Environmentの同名Variable overrideはcallerを経由できないため、以前と同じ実効値であるとは推定しません。新workflowのmain導入前のログや既存ログには非秘密hostが表示され得ます。過去ログの消去や実Actionsでのmask確認は行っておらず、host値を報告へ転記しません。詳細は [QA貸出運用](docs/qa-pool.md) を参照してください。
 
 最初に `task:pr --draft` でPRを作り、有効化後に `deploy:preview` で台帳を読み取って同headの成功を待ちます。詳細と未検証事項は [QA貸出運用](docs/qa-pool.md) を参照してください。公式仕様は [Vercel Git生成停止](https://vercel.com/docs/project-configuration/git-configuration)、[deployment作成](https://vercel.com/docs/rest-api/deployments/create-a-new-deployment)、[Neon managed連携](https://neon.com/docs/guides/vercel-managed-integration) を参照してください。
 
@@ -461,4 +465,4 @@ npm run task:pr -- --title 'タイトル' --verification-file /tmp/cake-verifica
 
 ## QA導入前の読取診断
 
-既存Previewの手順とは独立した、GET専用の手動診断を用意しています。[QA診断手順](docs/qa-diagnostics.md)を参照してください。Neonのbranch/parent/default/endpoint IDを既存GETから秘密なしで要約し、親候補の観測された子を確認できます。供給された本番hostとQA endpointsの比較は、host値を出さず`match`・`no-match`・`unknown`で報告します。比較結果は本番project全体の分離、空DB、Native生成設定の証明ではありません。pool有効化や作成・返却を行わず、既存のbuild/DB/seed/Previewコマンドを変更しません。mainへの導入後に実行できますが、mergeは既存のProduction buildを起動し得ます。
+GET専用の手動診断は、同一repositoryのmain/対象PRの完全SHAにあるmain-only Git設定とblobを確認します。Git設定の証拠は枝内の自動生成設定に限り、`backendForcedDeploymentPreventionProven: false`を維持します。[QA診断手順](docs/qa-diagnostics.md)を参照してください。Neonのbranch/parent/default/endpoint IDを既存GETから秘密なしで要約し、親候補の観測された子を確認できます。供給された本番hostとQA endpointsの比較は、host値を出さず`match`・`no-match`・`unknown`で報告します。比較結果は本番project全体の分離、空DB、Native生成設定の証明ではありません。診断単体はpool有効化や作成・返却、build/DB/seed/Previewコマンドを実行しません。mainへの導入後に実行できますが、mergeは既存のProduction buildを起動し得ます。

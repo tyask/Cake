@@ -1,34 +1,47 @@
-/** Read-only validation of an explicit project override; never applies remote settings. */
-export function assertPreviewSourcePolicy(project: unknown): void {
-  const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
-  if (!object(project) || project.previewDeploymentsDisabled !== false || !object(project.deploymentPolicy)
-    || Object.keys(project.deploymentPolicy).some((key) => !["deploymentSources", "gitSources"].includes(key))
-    || !Array.isArray(project.deploymentPolicy.deploymentSources)) {
-    throw new Error("Preview専用Deployment Sources policyを読取確認できません。生成を停止します。");
+import { createHash } from "node:crypto";
+
+export const MAX_GIT_CONFIG_BYTES = 64 * 1024;
+export type GitConfigEvidence = { commitSha: string; blobSha: string };
+export type GitConfigFile = { config: unknown; blobSha: string; size: number; path: "vercel.json" };
+
+function object(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    && [Object.prototype, null].includes(Object.getPrototypeOf(value));
+}
+
+/** Validate committed branch rules without changing Vercel settings. */
+export function assertMainOnlyGitConfig(config: unknown): void {
+  try {
+    if (!object(config) || !Object.hasOwn(config, "git") || !object(config.git)
+      || !Object.hasOwn(config.git, "deploymentEnabled") || !object(config.git.deploymentEnabled)) throw new Error();
+    const rules = config.git.deploymentEnabled;
+    if (!Object.hasOwn(rules, "**") || !Object.hasOwn(rules, "main") || rules["**"] !== false || rules.main !== true
+      || Reflect.ownKeys(rules).some((branch) => typeof branch !== "string" || typeof rules[branch] !== "boolean"
+        || (branch !== "main" && rules[branch] !== false))) throw new Error();
+  } catch {
+    throw new Error("vercel.jsonでmain以外のGit自動Preview停止を確認できません。");
   }
-  const rules = project.deploymentPolicy.deploymentSources;
-  const environments = new Set<string>();
-  for (const rule of rules) {
-    if (!object(rule) || typeof rule.enabled !== "boolean" || !Array.isArray(rule.environments) || !rule.environments.length
-      || !Array.isArray(rule.sources) || rule.sources.some((source) => typeof source !== "string" || !["cli", "deploy-hook", "git", "integration", "rest-api", "v0"].includes(source))
-      || Object.keys(rule).some((key) => !["enabled", "environments", "sources"].includes(key))) throw new Error("Deployment Sources policyの形式を確認できません。");
-    for (const env of rule.environments) {
-      if (!object(env) || !(env.type === "system" && typeof env.target === "string" && ["preview", "production"].includes(env.target)
-        && Object.keys(env).every((key) => ["type", "target"].includes(key))
-        || env.type === "custom" && typeof env.environmentId === "string" && env.environmentId.length > 0
-        && Object.keys(env).every((key) => ["type", "environmentId"].includes(key)))) throw new Error("policy環境の形式を確認できません。");
-      const key = env.type === "system" ? String(env.target) : `custom:${env.environmentId}`;
-      if (environments.has(key)) throw new Error("policy環境が重複しています。");
-      environments.add(key);
-    }
-  }
-  const preview = rules.filter((rule) => object(rule) && Array.isArray(rule.environments)
-    && rule.environments.some((env) => object(env) && env.type === "system" && env.target === "preview"));
-  if (preview.length !== 1) throw new Error("Preview policyが未設定・重複・継承のみです。生成を停止します。");
-  const rule = preview[0];
-  if (!object(rule) || rule.enabled !== true || !Array.isArray(rule.sources) || rule.sources.length !== 1 || rule.sources[0] !== "rest-api"
-    || !Array.isArray(rule.environments) || !rule.environments.length
-    || rule.environments.some((env) => !object(env) || env.type !== "system" || env.target !== "preview")) {
-    throw new Error("PreviewだけにREST APIを許可するpolicyが有効ではありません。生成を停止します。");
+}
+
+/** Validate a complete GitHub Contents file response and its Git blob identity. */
+export function decodeGitConfigFile(response: unknown, expected?: { blobSha?: string }): GitConfigFile {
+  try {
+    if (!object(response) || response.type !== "file" || response.path !== "vercel.json" || response.name !== "vercel.json"
+      || response.encoding !== "base64" || !Number.isSafeInteger(response.size) || Number(response.size) < 1
+      || Number(response.size) > MAX_GIT_CONFIG_BYTES || typeof response.sha !== "string" || !/^[a-f0-9]{40}$/.test(response.sha)
+      || typeof response.content !== "string" || response.content.length > MAX_GIT_CONFIG_BYTES * 2
+      || Object.hasOwn(response, "target") || Object.hasOwn(response, "submodule_git_url")) throw new Error();
+    if (expected?.blobSha !== undefined && (!/^[a-f0-9]{40}$/.test(expected.blobSha) || response.sha !== expected.blobSha)) throw new Error();
+    const content = response.content.replace(/\r?\n/g, "");
+    if (!content || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content)) throw new Error();
+    const bytes = Buffer.from(content, "base64");
+    if (bytes.length !== response.size || bytes.length > MAX_GIT_CONFIG_BYTES || bytes.toString("base64") !== content) throw new Error();
+    const blobSha = createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
+    if (blobSha !== response.sha) throw new Error();
+    const config: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    assertMainOnlyGitConfig(config);
+    return { config, blobSha, size: bytes.length, path: "vercel.json" };
+  } catch {
+    throw new Error("GitHubのコミット固定vercel.jsonの形式・内容・blob SHAを確認できません。");
   }
 }

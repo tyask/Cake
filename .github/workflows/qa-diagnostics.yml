@@ -35,31 +35,16 @@ permissions:
 jobs:
   inspect:
     if: github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout reviewed main commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24"
-          cache: npm
-      - name: Install dependencies without API credentials
-        run: npm ci
-      - name: Inspect without mutations
-        run: node --import tsx scripts/qa-bootstrap.ts
-        env:
-          QA_BOOTSTRAP_ACTION: ${{ inputs.action }}
-          QA_BOOTSTRAP_PR_NUMBER: ${{ inputs.pr_number }}
-          QA_BOOTSTRAP_SOURCE_SHA: ${{ inputs.source_sha }}
-          QA_BOOTSTRAP_SLOT: ${{ inputs.slot }}
-          QA_BOOTSTRAP_LEASE_ID: ${{ inputs.lease_id }}
-          GITHUB_TOKEN: ${{ github.token }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          CAKE_QA_PARENT_BRANCH_ID: ${{ vars.CAKE_QA_PARENT_BRANCH_ID }}
-          CAKE_QA_PRODUCTION_DATABASE_HOST: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
+    uses: ./.github/workflows/qa-private-run.yml
+    with:
+      mode: diagnostics
+      action: ${{ inputs.action }}
+      pr_number: ${{ inputs.pr_number }}
+      source_sha: ${{ inputs.source_sha }}
+      slot: ${{ inputs.slot }}
+      lease_id: ${{ inputs.lease_id }}
+    secrets:
+      # The runner masks this transient secret before printing step env.
+      production_database_host: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { assertPreviewSourcePolicy } from "../lib/qa-pool-gate";
+import { MAX_GIT_CONFIG_BYTES, assertMainOnlyGitConfig, decodeGitConfigFile } from "../lib/qa-pool-gate";
 import { QA_ENVIRONMENT, QA_NEON_PROJECT_ID, QA_TASK, SLOTS, replayDeployments, type Slot } from "../lib/qa-pool";
 
 export const CAKE_REPOSITORY = "tyask/Cake";
@@ -104,29 +104,39 @@ export function previewRecordPath(cwd: string): string {
 }
 
 export async function assertTaskGitGate(head: TaskHead, execute: WorkflowExecutor): Promise<void> {
+  const committed = await commandOutput(execute, "git", ["show", `${head.sha}:vercel.json`], head.cwd,
+    "コミット済みvercel.jsonを確認できません。pushを開始しません。");
+  try {
+    if (Buffer.byteLength(committed, "utf8") > MAX_GIT_CONFIG_BYTES) throw new Error();
+    assertMainOnlyGitConfig(JSON.parse(committed));
+  } catch {
+    throw new Error("コミット済みvercel.jsonで全feature枝のGit自動Preview停止を確認できません。pushを開始しません。");
+  }
   const confirmed = await commandOutput(execute, "gh", ["variable", "get", "CAKE_QA_GIT_GATE_CONFIRMED", "--repo", CAKE_REPOSITORY], head.cwd,
     "Git自動Preview停止の確認設定を取得できません。運用者の確認が必要です。pushを開始しません。");
   if (confirmed !== "true") throw new Error("Git自動Preview停止は未確認です。運用者の確認が必要です。pushを開始しません。");
   const response = await commandOutput(execute, "npx", ["--yes", `vercel@${VERCEL_CLI_VERSION}`, "api",
     `/v9/projects/${CAKE_VERCEL_PROJECT}`, "--scope", CAKE_VERCEL_SCOPE, "--method", "GET"], head.cwd,
-  "VercelのPreview生成前policyを読み取れません。pushを開始しません。");
+  "Vercelのproject接続設定を読み取れません。pushを開始しません。");
   try {
     const project = JSON.parse(response);
-    if (project.id !== CAKE_VERCEL_PROJECT || project.accountId !== "team_D1Mcx2TdFWPKcypfu8KzNMub" || project.link?.productionBranch !== "main") throw new Error();
-    assertPreviewSourcePolicy(project);
-  } catch { throw new Error("PreviewへのGit生成を止める実policyが未確認です。pushを開始しません。"); }
-  const committed = await commandOutput(execute, "git", ["show", `${head.sha}:vercel.json`], head.cwd,
-    "コミット済みvercel.jsonを確認できません。pushを開始しません。");
+    if (project.id !== CAKE_VERCEL_PROJECT || project.name !== "cake" || project.accountId !== "team_D1Mcx2TdFWPKcypfu8KzNMub"
+      || project.previewDeploymentsDisabled !== false || project.link?.type !== "github" || project.link.org !== "tyask"
+      || project.link.repo !== "Cake" || project.link.productionBranch !== "main") throw new Error();
+  } catch { throw new Error("対象project/team/repositoryとmainへの接続設定を確認できません。pushを開始しません。"); }
+  const main = await commandOutput(execute, "gh", ["api", "--method", "GET", `repos/${CAKE_REPOSITORY}/branches/main`], head.cwd,
+    "GitHubのmainコミットを読み取れません。pushを開始しません。");
+  let mainSha: string;
   try {
-    const config = JSON.parse(committed);
-    const enabled: unknown = config?.git?.deploymentEnabled;
-    if (!enabled || typeof enabled !== "object" || Array.isArray(enabled)) throw new Error();
-    const rules = enabled as Record<string, unknown>;
-    if (rules["**"] !== false || rules.main !== true
-      || Object.entries(rules).some(([branch, value]) => branch !== "main" && value !== false)) throw new Error();
-  } catch {
-    throw new Error("コミット済みvercel.jsonで全feature枝のGit自動Preview停止を確認できません。pushを開始しません。");
-  }
+    const branch = JSON.parse(main);
+    if (branch.name !== "main" || typeof branch.commit?.sha !== "string" || !/^[a-f0-9]{40}$/.test(branch.commit.sha)) throw new Error();
+    mainSha = branch.commit.sha;
+  } catch { throw new Error("GitHubのmain完全SHAを確認できません。pushを開始しません。"); }
+  const mainConfig = await commandOutput(execute, "gh", ["api", "--method", "GET",
+    `repos/${CAKE_REPOSITORY}/contents/vercel.json?ref=${mainSha}`], head.cwd,
+  "GitHubのmainにあるvercel.jsonを読み取れません。pushを開始しません。");
+  try { decodeGitConfigFile(JSON.parse(mainConfig)); }
+  catch { throw new Error("mainのコミット済みvercel.jsonでGit自動Preview停止を確認できません。mainへの設定反映と全有効枝の確認が必要です。pushを開始しません。"); }
 }
 
 export async function taskPullRequests(head: TaskHead, execute: WorkflowExecutor): Promise<TaskPullRequest[]> {

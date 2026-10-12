@@ -8,8 +8,8 @@ import {
   QA_PROJECT_ID, QA_REPOSITORY, QA_TASK, replayDeployments, sameDatabase,
   type DatabaseIdentity, type GithubDeployment, type QaLeaseRecord, type SavedLease,
 } from "../lib/qa-pool";
-import { runQaRequest, type QaGateway, type QaPullRequest, type QaRequest, type RemoteDeployment } from "../lib/qa-pool-service";
-import { assertPreviewSourcePolicy } from "../lib/qa-pool-gate";
+import { runQaRequest, type QaGateTarget, type QaGateway, type QaPullRequest, type QaRequest, type RemoteDeployment } from "../lib/qa-pool-service";
+import { decodeGitConfigFile, type GitConfigEvidence } from "../lib/qa-pool-gate";
 import { deletionApproval, deletePlan, probeApproval, type DeletePlan } from "../lib/qa-pool-authorization";
 
 type Environment = Readonly<Record<string, string | undefined>>;
@@ -117,21 +117,49 @@ export class HttpQaGateway implements QaGateway {
   }
   generationEnabled() { return this.env.CAKE_QA_POOL_ENABLED === "true"; }
   probeAuthorization(pr: number, sha: string) { return probeApproval(this.env.CAKE_QA_PROBE_APPROVALS, pr, sha); }
-  async assertGate(mode: "create" | "probe" | "cleanup" = "create"): Promise<void> {
-    for (const key of mode === "create" ? ["CAKE_QA_POOL_ENABLED", "CAKE_QA_GIT_GATE_CONFIRMED", "CAKE_QA_NATIVE_CONFIRMED"] : []) {
-      if (this.env[key] !== "true") throw new Error(`${key} の確認設定がありません。生成・削除を開始しません。`);
-    }
-    const project = object(await this.api("vercel", `/v9/projects/${QA_PROJECT_ID}`));
-    const link = object(project.link);
+  private assertProject(value: unknown): JsonObject {
+    const project = object(value), link = object(project.link);
     if (project.id !== QA_PROJECT_ID || project.name !== "cake" || project.accountId !== "team_D1Mcx2TdFWPKcypfu8KzNMub"
       || link.type !== "github" || link.org !== "tyask" || link.repo !== "Cake" || link.productionBranch !== "main") throw new Error("対象project/team/repositoryが一致しません。");
     this.repoId = safeNumber(link.repoId);
-    if (mode !== "cleanup") assertPreviewSourcePolicy(project);
+    return project;
+  }
+  private async gitConfiguration(branch: string, sha: string): Promise<GitConfigEvidence & { branch: string }> {
+    if (!fullSha(sha)) throw new Error("Git設定の完全commit SHAを確認できません。");
+    const file = decodeGitConfigFile(await this.api("github", `/repos/${QA_REPOSITORY}/contents/vercel.json?ref=${sha}`));
+    return { branch, commitSha: sha, blobSha: file.blobSha };
+  }
+  private async mainGitConfiguration(): Promise<GitConfigEvidence & { branch: string }> {
+    const branch = object(await this.api("github", `/repos/${QA_REPOSITORY}/branches/main`));
+    if (branch.name !== "main") throw new Error("mainの現在commitを確認できません。");
+    return this.gitConfiguration("main", str(object(branch.commit).sha));
+  }
+  private async currentTarget(target: QaGateTarget): Promise<QaPullRequest> {
+    if (!Number.isSafeInteger(target.pr) || target.pr < 1 || !featureBranch(target.branch) || !fullSha(target.sha)) throw new Error("Git設定の対象PR・feature枝・完全SHAがありません。");
+    const pr = await this.pullRequest(target.pr);
+    if (pr.state !== "open" || pr.repository !== QA_REPOSITORY || pr.base !== "main"
+      || pr.branch !== target.branch || pr.sha !== target.sha) throw new Error("生成対象PRの現在OPEN headが一致しません。");
+    return pr;
+  }
+  async assertGate(mode: "create" | "probe" | "cleanup" = "create", target?: QaGateTarget): Promise<void> {
+    for (const key of mode === "create" ? ["CAKE_QA_POOL_ENABLED", "CAKE_QA_GIT_GATE_CONFIRMED", "CAKE_QA_NATIVE_CONFIRMED"] : []) {
+      if (this.env[key] !== "true") throw new Error(`${key} の確認設定がありません。生成・削除を開始しません。`);
+    }
+    const project = this.assertProject(await this.api("vercel", `/v9/projects/${QA_PROJECT_ID}`));
+    if (mode !== "cleanup" && project.previewDeploymentsDisabled !== false) throw new Error("Previewが有効であることを確認できません。");
     if (mode !== "cleanup" && (!/^ep-[a-z0-9-]+\.[a-z0-9.-]+\.neon\.tech$/.test(this.env.CAKE_QA_PRODUCTION_DATABASE_HOST ?? "")
       || !/^br-[a-z0-9-]+$/.test(this.env.CAKE_QA_PARENT_BRANCH_ID ?? ""))) throw new Error("本番hostまたはNative親branchの確認情報がありません。");
     // Fail before claiming if branch/endpoint verification cannot authenticate.
     const neonProject = object(object(await this.api("neon", `/projects/${QA_NEON_PROJECT_ID}`)).project);
     if (neonProject.id !== QA_NEON_PROJECT_ID) throw new Error("Neon project所属を確認できません。");
+    if (mode !== "cleanup") {
+      if (!target || !Number.isSafeInteger(target.pr) || target.pr < 1 || !featureBranch(target.branch) || !fullSha(target.sha)) throw new Error("Git設定の対象PR・feature枝・完全SHAがありません。");
+      // Re-read each immutable config for every target and every creation attempt.
+      await this.mainGitConfiguration();
+      await this.gitConfiguration(target.branch, target.sha);
+      const pr = await this.currentTarget(target);
+      if (mode === "create" && !pr.approved || mode === "probe" && !this.probeAuthorization(pr.number, pr.sha)) throw new Error("対象PRの現在SHAへの生成承認がありません。");
+    }
   }
   private remote(value: unknown): RemoteDeployment {
     const d = object(value), meta = object(d.meta), git = d.gitSource ? object(d.gitSource) : {};
@@ -173,7 +201,7 @@ export class HttpQaGateway implements QaGateway {
   async create(record: QaLeaseRecord): Promise<RemoteDeployment> {
     const intent = record.intent;
     if (record.state !== "held" || !intent || intent.sha !== record.headSha) throw new Error("貸出と作成intentがありません。");
-    await this.assertGate(record.purpose === "probe" ? "probe" : "create");
+    await this.assertGate(record.purpose === "probe" ? "probe" : "create", { pr: record.pr, branch: record.branch, sha: record.headSha });
     if (record.purpose === "probe" && this.probeAuthorization(record.pr, record.headSha)?.slot !== record.slot) throw new Error("限定probeの承認がありません。");
     const env = {
       AUTH_MODE: "test",
@@ -272,15 +300,12 @@ export class HttpQaGateway implements QaGateway {
         return undefined;
       }
     };
-    const project = await check("Vercel project", async () => {
-      const value = object(await this.api("vercel", `/v9/projects/${QA_PROJECT_ID}`));
-      const link = object(value.link);
-      if (value.id !== QA_PROJECT_ID || value.name !== "cake" || value.accountId !== "team_D1Mcx2TdFWPKcypfu8KzNMub"
-        || link.type !== "github" || link.org !== "tyask" || link.repo !== "Cake" || link.productionBranch !== "main"
-        || !Number.isSafeInteger(link.repoId) || Number(link.repoId) < 1) throw new Error("対象が不一致です。");
-      return value;
+    const project = await check("Vercel project", async () => this.assertProject(await this.api("vercel", `/v9/projects/${QA_PROJECT_ID}`)));
+    await check("Preview enabled", async () => {
+      if (project?.previewDeploymentsDisabled !== false) throw new Error("Previewが有効であることを確認できません。");
+      return true;
     });
-    await check("Preview source policy", async () => { assertPreviewSourcePolicy(project); return true; });
+    const mainGit = options.action === "plan-release" ? undefined : await check("Main Git configuration", () => this.mainGitConfiguration());
     const pool = await check("GitHub lease ledger", () => this.pool());
     const variables = await check("GitHub repository Variables read", async () => {
       const names: string[] = [];
@@ -316,8 +341,30 @@ export class HttpQaGateway implements QaGateway {
     }
     const requiredVariables = ["CAKE_QA_POOL_ENABLED", "CAKE_QA_GIT_GATE_CONFIRMED", "CAKE_QA_NATIVE_CONFIRMED",
       "CAKE_QA_PRODUCTION_DATABASE_HOST", "CAKE_QA_PARENT_BRANCH_ID", "CAKE_QA_APPROVED_HEADS", "CAKE_QA_PROBE_APPROVALS", "CAKE_QA_DELETE_APPROVALS"];
+    let selectedPr: QaPullRequest | undefined;
+    let targetGit: (GitConfigEvidence & { branch: string; pr: number }) | undefined;
+    if (options.pr && options.action !== "plan-release") {
+      selectedPr = await check("Target PR", async () => {
+        const value = await this.pullRequest(options.pr!);
+        if (value.repository !== QA_REPOSITORY || value.base !== "main" || !featureBranch(value.branch) || !fullSha(value.sha)) throw new Error("対象PRの所属が一致しません。");
+        return value;
+      });
+      if (selectedPr && selectedPr.repository === QA_REPOSITORY && selectedPr.base === "main" && featureBranch(selectedPr.branch)) {
+        if (options.action === "plan-probe" && (selectedPr.state !== "open" || selectedPr.sha !== options.sha)) throw new Error("限定probe計画にはOPEN PRの最新完全SHAと指定枠が必要です。");
+        const target = { pr: selectedPr.number, branch: selectedPr.branch, sha: options.sha ?? selectedPr.sha };
+        targetGit = await check("Target Git configuration", async () => {
+          await this.currentTarget(target);
+          return { ...await this.gitConfiguration(target.branch, target.sha), pr: target.pr };
+        });
+      }
+    }
+    const generationChecks = ["Vercel project", "Preview enabled", "Main Git configuration", "Target Git configuration",
+      "GitHub lease ledger", "Neon metadata read", "Native parent configuration", "Production comparison host configured", "Target PR"];
     const summary = {
       readOnly: true, projectId: QA_PROJECT_ID, neonProjectId: QA_NEON_PROJECT_ID, checks,
+      generationBlocked: options.action !== "plan-release" && checks.some((c) => !c.ok && generationChecks.includes(c.name)),
+      gitConfiguration: { scope: "repository-git-trigger-configuration", backendForcedDeploymentPreventionProven: false,
+        main: mainGit ?? null, target: targetGit ?? null },
       missingRepositoryVariables: variables ? requiredVariables.filter((name) => !variables.includes(name)) : null,
       native: native ?? null,
       parent: parent ?? null, aliases,
@@ -329,7 +376,7 @@ export class HttpQaGateway implements QaGateway {
     };
     if (options.action === "preflight") return summary;
     if (!options.pr || !Number.isSafeInteger(options.pr)) throw new Error("計画には対象PR番号が必要です。");
-    const pr = await check("Target PR", () => this.pullRequest(options.pr!));
+    const pr = options.action === "plan-release" ? await check("Target PR", () => this.pullRequest(options.pr!)) : selectedPr;
     if (!pr || !pool || pr.repository !== QA_REPOSITORY || pr.base !== "main" || !featureBranch(pr.branch)) return summary;
     if (options.action === "plan-probe") {
       if (!fullSha(options.sha) || pr.state !== "open" || pr.sha !== options.sha || !options.slot || !["qa1", "qa2", "qa3"].includes(options.slot)) throw new Error("限定probe計画にはOPEN PRの最新完全SHAと指定枠が必要です。");
@@ -342,8 +389,8 @@ export class HttpQaGateway implements QaGateway {
         pr: pr.number, branch: pr.branch, sha: pr.sha, slot: options.slot,
         maximumNewDeployments: occupied && occupied.payload.state !== "free" && occupied.payload.database ? 1 : 2, fixedAliasChanges: false,
         approvalFields: ["projectId", "pr", "sha", "slot", "expiresAt"],
-        executionBlocked: checks.some((c) => !c.ok && ["Vercel project", "Preview source policy", "GitHub lease ledger", "Neon metadata read", "Native parent configuration", "Production comparison host configured", "Target PR"].includes(c.name)),
-        requires: ["実policyの読取一致", "期限付きprobe承認", "確認済み空Native親IDと本番host", "信頼済みmainの手動writer"],
+        executionBlocked: summary.generationBlocked || !targetGit,
+        requires: ["現在mainと対象PR完全SHAのmain-only Git設定の読取一致", "期限付きprobe承認", "確認済みQA初期状態のNative親IDと本番host", "信頼済みmainの手動writer"],
         deletionRequiresSeparateExactResourceApproval: true };
       return summary;
     }

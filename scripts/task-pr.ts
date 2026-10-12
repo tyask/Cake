@@ -55,7 +55,7 @@ export async function runTaskPr({
     "originの検証対象コミットを確認できませんでした。Gitの接続と認証を確認してください。");
   if (remote !== `${head.sha}\trefs/heads/${head.branch}` && draft) {
     await assertTaskGitGate(head, execute);
-    await commandOutput(execute, "git", ["push", "--set-upstream", "origin", head.branch], head.cwd,
+    await commandOutput(execute, "git", ["push", "origin", `${head.sha}:refs/heads/${head.branch}`], head.cwd,
       "ブランチのpushに失敗しました。Gitの接続と認証を確認してください。");
     remote = await commandOutput(execute, "git", ["ls-remote", "--heads", "origin", `refs/heads/${head.branch}`], head.cwd,
       "push後のoriginのコミットを確認できませんでした。");

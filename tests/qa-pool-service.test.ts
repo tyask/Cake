@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runQaRequest, type AliasTarget, type QaGateway, type QaPullRequest, type RemoteDeployment } from "../lib/qa-pool-service";
+import { createHash } from "node:crypto";
+import { runQaRequest, type AliasTarget, type QaGateTarget, type QaGateway, type QaPullRequest, type RemoteDeployment } from "../lib/qa-pool-service";
 import { HttpQaGateway, runQaWriter, type QaTransport } from "../scripts/qa-pool-writer";
 import { deletePlan, deletionApproval, probeApproval, type DeleteApproval, type DeletePlan, type ProbeApproval } from "../lib/qa-pool-authorization";
 import {
@@ -46,6 +47,8 @@ class MemoryGateway implements QaGateway {
   databaseError = false;
   deleteError = false;
   gateError = false;
+  gateTargets: { mode: string; target?: QaGateTarget }[] = [];
+  gateTargetError?: (target: QaGateTarget) => boolean;
   calls: string[] = [];
   logs: string[] = [];
   poolReads = 0;
@@ -67,9 +70,14 @@ class MemoryGateway implements QaGateway {
     for (const d of record.deployments) this.remotes.set(d.id, remote(record, d.id, "READY", d.phase, d.sha));
   }
   generationEnabled() { return this.generationAllowed; }
-  async assertGate(mode: "create" | "probe" | "cleanup") {
+  async assertGate(mode: "create" | "probe" | "cleanup", target?: QaGateTarget) {
     this.calls.push(`gate:${mode}`);
+    this.gateTargets.push({ mode, target: target && structuredClone(target) });
     if (mode === "cleanup" ? this.cleanupGateError : this.gateError) throw new Error("gate failed");
+    if (mode !== "cleanup") {
+      assert.ok(target, "creation gates require their exact PR target");
+      if (this.gateTargetError?.(target)) throw new Error("target gate failed");
+    }
   }
   probeAuthorization(pr: number, head: string) { return probeApproval(JSON.stringify(this.probeApprovals), pr, head, Date.parse(now)); }
   async pool() { this.poolReads += 1; this.onPool?.(); return replayDeployments(this.records); }
@@ -142,6 +150,25 @@ test("空き枠取得は永続intentを先に保存し、provisioningのIDを追
   assert.ok(intentIndex > 0);
   assert.ok(g.calls.indexOf("create") > g.calls.indexOf("save:held"));
   assert.equal(g.calls.includes("assignAlias"), false);
+  assert.ok(g.gateTargets.filter((entry) => entry.mode === "create").every((entry) => entry.target?.pr === 42 && entry.target.branch === "codex/task-42" && entry.target.sha === sha));
+});
+
+test("通常refreshの各PRは個別の対象ゲートを通り、不適合PRのclaimを保存しない", async () => {
+  const g = new MemoryGateway();
+  g.prs.set(42, pullRequest()); g.prs.set(43, pullRequest(lease(43)));
+  g.gateTargetError = (target) => target.pr === 43;
+  await assert.rejects(() => g.run(), /target gate/);
+  assert.equal(g.calls.filter((call) => call === "create").length, 1);
+  assert.equal(g.records.some((entry) => (entry.payload as QaLeaseRecord).pr === 43), false);
+  assert.ok(g.gateTargets.some((entry) => entry.target?.pr === 43));
+});
+
+test("probeのPR適格性確認は生成ゲートと最初のlease保存より先に行う", async () => {
+  const g = new MemoryGateway();
+  g.prs.set(42, { ...pullRequest(), state: "closed" });
+  g.probeApprovals = [{ projectId: QA_PROJECT_ID, pr: 42, sha, slot: "qa1", expiresAt: "2026-10-12T02:00:00.000Z" }];
+  await assert.rejects(() => g.run("probe", 42, undefined, sha), /最新SHA/);
+  assert.deepEqual(g.gateTargets, []); assert.deepEqual(g.records, []);
 });
 
 test("3枠使用中は4番目のPRを待機させ、追加Deployment/DBを生成しない", async () => {
@@ -600,6 +627,12 @@ const environment = { GITHUB_TOKEN: "private-gh", VERCEL_TOKEN: "private-vercel"
   CAKE_QA_APPROVED_HEADS: JSON.stringify({ "42": sha }), CAKE_QA_POOL_ENABLED: "true", CAKE_QA_GIT_GATE_CONFIRMED: "true",
   CAKE_QA_NATIVE_CONFIRMED: "true", CAKE_QA_PRODUCTION_DATABASE_HOST: "ep-production.ap-southeast-1.aws.neon.tech", CAKE_QA_PARENT_BRANCH_ID: "br-parent" };
 
+function gitFile() {
+  const source = Buffer.from(JSON.stringify({ git: { deploymentEnabled: { "**": false, main: true } } }));
+  return { type: "file", name: "vercel.json", path: "vercel.json", encoding: "base64", size: source.length,
+    content: source.toString("base64"), sha: createHash("sha1").update(`blob ${source.length}\0`).update(source).digest("hex") };
+}
+
 test("GitHub台帳は全pageを読み、Deployments statusに依存せず最新payloadを復元する", async () => {
   const first = lease(), saved = { id: 1, payload: first };
   const next = nextRecord(saved, { state: "deleting" }, now);
@@ -656,11 +689,13 @@ test("生成APIはoriginal feature枝/完全SHA/attemptを使い、build/runtime
       accountId: "team_D1Mcx2TdFWPKcypfu8KzNMub", previewDeploymentsDisabled: false,
       deploymentPolicy: { deploymentSources: [{ enabled: true, environments: [{ type: "system", target: "preview" }], sources: ["rest-api"] }] },
       link: { type: "github", org: "tyask", repo: "Cake", productionBranch: "main", repoId: 1318171856 } } };
-    if (path.endsWith("/pulls")) return { status: 200, data: [] };
+    if (path.endsWith("/pulls/42")) return { status: 200, data: { number: 42, state: "open", head: { ref: record.branch, sha, repo: { full_name: QA_REPOSITORY } }, base: { ref: "main" } } };
+    if (path.endsWith("/branches/main")) return { status: 200, data: { name: "main", commit: { sha: newSha } } };
+    if (path.endsWith("/contents/vercel.json")) return { status: 200, data: gitFile() };
     return { status: 200, data: { project: { id: QA_NEON_PROJECT_ID } } };
   };
   const gateway = new HttpQaGateway(environment, transport, "write");
-  await gateway.assertGate("create");
+  await gateway.assertGate("create", { pr: record.pr, branch: record.branch, sha: record.headSha });
   await gateway.create(record);
   const post = calls.find((call) => call.method === "POST")!;
   const body = post.body as { project: string; gitSource: { ref: string; sha: string; repoId: number }; target?: string;

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { HttpQaGateway, runQaWriter, type QaTransport } from "../scripts/qa-pool-writer";
 import { runQaInspection } from "../scripts/qa-pool-inspect";
 import { deletePlan } from "../lib/qa-pool-authorization";
@@ -9,6 +10,11 @@ import {
 } from "../lib/qa-pool";
 
 const sha = "a".repeat(40), otherSha = "b".repeat(40);
+function gitFile(config: unknown = { git: { deploymentEnabled: { "**": false, main: true } } }) {
+  const source = Buffer.from(JSON.stringify(config));
+  return { type: "file", name: "vercel.json", path: "vercel.json", encoding: "base64", size: source.length,
+    content: source.toString("base64"), sha: createHash("sha1").update(`blob ${source.length}\0`).update(source).digest("hex") };
+}
 const leaseId = "00000000-0000-4000-8000-000000000042";
 const attemptId = "00000000-0000-4000-8000-000000000900";
 const secrets = ["inspect-secret-github", "inspect-secret-vercel", "inspect-secret-neon", "inspect-secret-response", "postgresql://inspect-secret-db"];
@@ -57,7 +63,6 @@ class ReadFixture {
   record?: QaLeaseRecord;
   project = { id: QA_PROJECT_ID, name: "cake", accountId: "team_D1Mcx2TdFWPKcypfu8KzNMub",
     previewDeploymentsDisabled: false,
-    deploymentPolicy: { deploymentSources: [{ enabled: true, environments: [{ type: "system", target: "preview" }], sources: ["rest-api"] }] },
     link: { type: "github", org: "tyask", repo: "Cake", productionBranch: "main", repoId: 1318171856 },
     env: [{ key: "DATABASE_URL", value: secrets[4] }], privateValue: secrets[3] };
   pr = { number: 42, state: "open", head: { sha, ref: "codex/task-42", repo: { full_name: QA_REPOSITORY } }, base: { ref: "main" }, privateValue: secrets[3] };
@@ -69,9 +74,14 @@ class ReadFixture {
     this.calls.push({ method, path, search: url.search, body });
     assert.equal(method, "GET", "the fixture must never receive a mutation");
     assert.equal(body, undefined);
-    const override = this.responses.get(path);
+    const override = this.responses.get(path + url.search) ?? this.responses.get(path);
     if (override) return structuredClone(override);
     if (path === `/v9/projects/${QA_PROJECT_ID}`) return { status: 200, data: structuredClone(this.project) };
+    if (path === `/repos/${QA_REPOSITORY}/branches/main`) return { status: 200, data: { name: "main", commit: { sha: otherSha } } };
+    if (path === `/repos/${QA_REPOSITORY}/contents/vercel.json`) {
+      assert.ok([sha, otherSha].includes(url.searchParams.get("ref") ?? ""), "configuration reads must be pinned to a complete commit");
+      return { status: 200, data: gitFile() };
+    }
     if (path === `/repos/${QA_REPOSITORY}/deployments`) return { status: 200, data: structuredClone(this.records) };
     if (path === `/repos/${QA_REPOSITORY}/actions/variables`) {
       const page = Number(url.searchParams.get("page")), names = this.variableNames.slice((page - 1) * 30, page * 30);
@@ -117,7 +127,11 @@ test("disabled・未承認でもpreflightは読取を実施し、環境flag・�
   const f = new ReadFixture(), before = structuredClone(f.env);
   const report = await f.reader().inspect({ action: "preflight" });
   assert.equal(report.readOnly, true);
-  for (const name of ["Vercel project", "Preview source policy", "GitHub lease ledger", "GitHub repository Variables read", "Neon metadata read"]) assert.equal(checked(report, name).ok, true);
+  for (const name of ["Vercel project", "Preview enabled", "Main Git configuration", "GitHub lease ledger", "GitHub repository Variables read", "Neon metadata read"]) assert.equal(checked(report, name).ok, true);
+  assert.deepEqual(report.gitConfiguration.main, { branch: "main", commitSha: otherSha, blobSha: gitFile().sha });
+  assert.equal(report.gitConfiguration.target, null);
+  assert.equal(report.gitConfiguration.scope, "repository-git-trigger-configuration");
+  assert.equal(report.gitConfiguration.backendForcedDeploymentPreventionProven, false);
   assert.equal(report.plan, null);
   assert.deepEqual(report.missingRepositoryVariables, []);
   assert.deepEqual(f.env, before);
@@ -131,6 +145,56 @@ test("Variablesを全page読むが値は返さず、必要な変数名の不足�
   assert.deepEqual(report.missingRepositoryVariables, ["CAKE_QA_DELETE_APPROVALS"]);
   assert.equal(f.calls.filter((call) => call.path.endsWith("/actions/variables")).length, 2);
   assertPrivate(report); f.assertReadOnly();
+});
+
+test("preflightの対象PR指定はcurrent headへ固定し、mainとtargetのcommit/blob証跡を返す", async () => {
+  const f = new ReadFixture();
+  const report = await f.reader().inspect({ action: "preflight", pr: 42 });
+  assert.equal(report.generationBlocked, false);
+  assert.deepEqual(report.gitConfiguration.target, { pr: 42, branch: "codex/task-42", commitSha: sha, blobSha: gitFile().sha });
+  assert.equal(checked(report, "Target Git configuration").ok, true);
+  const refs = f.calls.filter((call) => call.path.endsWith("/contents/vercel.json")).map((call) => new URLSearchParams(call.search).get("ref"));
+  assert.deepEqual(refs, [otherSha, sha]);
+  f.assertReadOnly(); assertPrivate(report);
+});
+
+test("main-only設定の未mergeはpreflightでblockedと報告し、対象の証明と他のGET結果を保持する", async () => {
+  const f = new ReadFixture();
+  f.responses.set(`/repos/${QA_REPOSITORY}/contents/vercel.json?ref=${otherSha}`, { status: 200, data: gitFile({ buildCommand: secrets[3] }) });
+  const report = await f.reader().inspect({ action: "preflight", pr: 42 });
+  assert.equal(report.generationBlocked, true);
+  assert.equal(checked(report, "Main Git configuration").ok, false);
+  assert.equal(checked(report, "Target Git configuration").ok, true);
+  assert.equal(report.gitConfiguration.main, null);
+  assert.equal(report.gitConfiguration.target?.commitSha, sha);
+  assert.equal(checked(report, "GitHub lease ledger").ok, true);
+  f.assertReadOnly(); assertPrivate(report);
+});
+
+test("Git設定の401/403/404・無効JSON・非boolean・target有効化はprobe計画をblockedにする", async () => {
+  for (const ref of [otherSha, sha]) for (const response of [
+    { status: 401, data: { message: secrets[3] } }, { status: 403, data: { message: secrets[3] } }, { status: 404, data: null },
+    { status: 200, data: { ...gitFile(), content: Buffer.from(secrets[3]).toString("base64") } },
+    { status: 200, data: gitFile({ git: { deploymentEnabled: { "**": false, main: "true" } } }) },
+    { status: 200, data: gitFile({ git: { deploymentEnabled: { "**": false, main: true, "codex/*": true } } }) },
+  ]) {
+    const f = new ReadFixture(); f.responses.set(`/repos/${QA_REPOSITORY}/contents/vercel.json?ref=${ref}`, response);
+    const report = await f.reader().inspect({ action: "plan-probe", pr: 42, sha, slot: "qa2" });
+    assert.equal(report.generationBlocked, true);
+    assert.equal((report.plan as { executionBlocked: boolean }).executionBlocked, true);
+    assert.equal(checked(report, ref === sha ? "Target Git configuration" : "Main Git configuration").ok, false);
+    f.assertReadOnly(); assertPrivate(report);
+  }
+});
+
+test("生成設定が欠落していてもplan-releaseはGitの読取なしで正確なmanifestを返す", async () => {
+  const f = new ReadFixture(), record = application(); f.setRecord(record);
+  f.responses.set(`/repos/${QA_REPOSITORY}/branches/main`, { status: 403, data: { message: secrets[3] } });
+  f.responses.set(`/repos/${QA_REPOSITORY}/contents/vercel.json`, { status: 404, data: null });
+  const report = await f.reader().inspect({ action: "plan-release", pr: 42, leaseId });
+  assert.deepEqual(report.plan, deletePlan(record));
+  assert.equal(f.calls.some((call) => call.path.endsWith("/branches/main") || call.path.endsWith("/contents/vercel.json")), false);
+  f.assertReadOnly(); assertPrivate(report);
 });
 
 test("NEON_API_KEYなしはNative確認をblockedにして他の読取結果を保持する", async () => {
@@ -150,7 +214,7 @@ test("403・project 404は資源なしにせず、remote error bodyを伏せて�
     const report = await f.reader().inspect({ action: "preflight" });
     assert.equal(checked(report, "Vercel project").ok, false);
     assert.match(checked(report, "Vercel project").detail, new RegExp(String(status)));
-    assert.equal(checked(report, "Preview source policy").ok, false);
+    assert.equal(checked(report, "Preview enabled").ok, false);
     assertPrivate(report); f.assertReadOnly();
   }
 });
@@ -173,7 +237,7 @@ test("projectのGit連携種別・repo ID不一致を読取成功と扱わない
     f.responses.set(`/v9/projects/${QA_PROJECT_ID}`, { status: 200, data: { ...f.project, link } });
     const report = await f.reader().inspect({ action: "preflight" });
     assert.equal(checked(report, "Vercel project").ok, false);
-    assert.equal(checked(report, "Preview source policy").ok, false);
+    assert.equal(checked(report, "Preview enabled").ok, false);
     f.assertReadOnly();
   }
 });
@@ -198,6 +262,7 @@ test("plan-probeは現在OPEN headと指定slotだけを計画し、承認やali
   assert.equal(result.pr, 42); assert.equal(result.sha, sha); assert.equal(result.slot, "qa2");
   assert.equal(result.maximumNewDeployments, 2);
   assert.equal(result.fixedAliasChanges, false);
+  assert.deepEqual(report.gitConfiguration.target, { pr: 42, branch: "codex/task-42", commitSha: sha, blobSha: gitFile().sha });
   assert.equal(result.deletionRequiresSeparateExactResourceApproval, true);
   assert.equal(f.env.CAKE_QA_PROBE_APPROVALS, undefined);
   assert.equal(f.calls.some((call) => call.path === "/v7/deployments"), false);
@@ -359,6 +424,7 @@ test("probe返却manifestはalias nullで、aliasの追加照合・変更をし�
 
 test("default readerは正確な承認があってもPOST・DELETEをtransport前に拒否する", async () => {
   const f = new ReadFixture();
+  f.env.CAKE_QA_APPROVED_HEADS = JSON.stringify({ "42": sha });
   Object.assign(f.env, { CAKE_QA_POOL_ENABLED: "true", CAKE_QA_GIT_GATE_CONFIRMED: "true", CAKE_QA_NATIVE_CONFIRMED: "true" });
   const record = { ...application(), state: "deleting" as const }, target = deletePlan(record);
   f.env.CAKE_QA_DELETE_APPROVALS = JSON.stringify([{ ...target, expiresAt: "2099-01-01T00:00:00.000Z" }]);

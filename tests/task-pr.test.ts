@@ -1,5 +1,6 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +10,13 @@ import { CAKE_VERCEL_PROJECT, previewRecordPath, type TaskPreviewRecord, type Wo
 
 const branch = "codex/test-pr";
 const sha = "a".repeat(40);
+const mainSha = "b".repeat(40);
+const gitConfig = { git: { deploymentEnabled: { "**": false, main: true } } };
+const contents = (config: unknown = gitConfig) => {
+  const bytes = Buffer.from(JSON.stringify(config));
+  return { type: "file", name: "vercel.json", path: "vercel.json", encoding: "base64", size: bytes.length,
+    sha: createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex"), content: bytes.toString("base64") };
+};
 const prUrl = "https://github.com/tyask/Cake/pull/42";
 const preview: TaskPreviewRecord = { projectId: CAKE_VERCEL_PROJECT, branch, sha,
   url: "https://cake-pr-test-fumin1.vercel.app", deploymentId: "dpl_preview", createdAt: "2026-10-12T00:01:00Z",
@@ -25,8 +33,7 @@ const ledger = (value = payload) => ({ id: 101, task: QA_TASK, environment: QA_E
 const commandResult = (stdout = "", status = 0): WorkflowCommandResult => ({ stdout, status, signal: null });
 const listedPr = (isDraft = true) => commandResult(JSON.stringify([{ url: prUrl, number: 42, headRefOid: sha, isDraft }]));
 const project = { id: CAKE_VERCEL_PROJECT, name: "cake", accountId: "team_D1Mcx2TdFWPKcypfu8KzNMub",
-  previewDeploymentsDisabled: false, link: { type: "github", org: "tyask", repo: "Cake", productionBranch: "main" },
-  deploymentPolicy: { deploymentSources: [{ enabled: true, environments: [{ type: "system", target: "preview" }], sources: ["rest-api"] }] } };
+  previewDeploymentsDisabled: false, link: { type: "github", org: "tyask", repo: "Cake", productionBranch: "main" } };
 
 async function fixture(t: TestContext) {
   const cwd = await mkdtemp(join(tmpdir(), "cake-task-pr-test-"));
@@ -37,8 +44,10 @@ async function fixture(t: TestContext) {
   await writeFile(reportFile, "- lint・test・build 成功\n- PreviewでA・B認証とAPIを確認\n");
   const state = { branch, sha, status: "", origin: "https://github.com/tyask/Cake.git", remote: `${sha}\trefs/heads/${branch}`,
     listed: listedPr(), ledger: commandResult(JSON.stringify([[initial, ledger()]])), created: commandResult(prUrl),
-    edited: commandResult(), gate: commandResult("true"), config: commandResult(JSON.stringify({ git: { deploymentEnabled: { "**": false, main: true } } })),
+    edited: commandResult(), gate: commandResult("true"), config: commandResult(JSON.stringify(gitConfig)),
     project: commandResult(JSON.stringify(project)),
+    main: commandResult(JSON.stringify({ name: "main", commit: { sha: mainSha } })),
+    mainConfig: commandResult(JSON.stringify(contents())),
     pushStatus: 0, pushUpdates: true, body: "", bodyFile: "" };
   const calls: { command: string; args: readonly string[] }[] = [];
   const execute: WorkflowExecutor = async (command, args) => {
@@ -52,7 +61,10 @@ async function fixture(t: TestContext) {
       if (args[0] === "ls-remote") return commandResult(state.remote);
       if (args[0] === "show") return state.config;
       if (args[0] === "push") {
-        if (state.pushStatus === 0 && state.pushUpdates) state.remote = `${state.sha}\trefs/heads/${state.branch}`;
+        if (state.pushStatus === 0 && state.pushUpdates) {
+          const [pushedSha, pushedRef] = args[2].split(":");
+          state.remote = `${pushedSha}\t${pushedRef}`;
+        }
         return commandResult("", state.pushStatus);
       }
     }
@@ -63,7 +75,11 @@ async function fixture(t: TestContext) {
       return state.project;
     }
     if (command === "gh" && args[0] === "pr" && args[1] === "list") return state.listed;
-    if (command === "gh" && args[0] === "api") return state.ledger;
+    if (command === "gh" && args[0] === "api") {
+      if (args.includes("repos/tyask/Cake/branches/main")) return state.main;
+      if (args.includes(`repos/tyask/Cake/contents/vercel.json?ref=${mainSha}`)) return state.mainConfig;
+      return state.ledger;
+    }
     if (command === "gh" && args[0] === "pr" && ["create", "edit"].includes(args[1])) {
       const index = args.indexOf("--body-file");
       assert.notEqual(index, -1);
@@ -104,7 +120,7 @@ test("Preview未実施でも--draftでPRを作成し、未検証を本文へ明�
   assert.equal(f.calls.some((c) => c.command === "npx" || c.args[0] === "api" || c.args[0] === "push"), false);
 });
 
-test("初回draftは運用者確認とコミット済み全枝denyを確認してpushし、remote HEAD確認後だけ作成する", async (t) => {
+test("Hobbyの初回draftはlocalとmainの停止設定・運用者確認後にpushし、remote HEAD確認後だけ作成する", async (t) => {
   const f = await fixture(t);
   f.state.remote = "";
   f.state.listed = commandResult("[]");
@@ -112,26 +128,73 @@ test("初回draftは運用者確認とコミット済み全枝denyを確認し�
   assert.deepEqual(await runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }), { url: prUrl, existing: false });
   const gate = f.calls.findIndex((c) => c.command === "gh" && c.args[0] === "variable");
   const config = f.calls.findIndex((c) => c.command === "git" && c.args[0] === "show");
-  const policy = f.calls.findIndex((c) => c.command === "npx");
+  const projectRead = f.calls.findIndex((c) => c.command === "npx");
+  const mainRead = f.calls.findIndex((c) => c.args.includes("repos/tyask/Cake/branches/main"));
+  const mainConfigRead = f.calls.findIndex((c) => c.args.includes(`repos/tyask/Cake/contents/vercel.json?ref=${mainSha}`));
   const push = f.calls.findIndex((c) => c.command === "git" && c.args[0] === "push");
   const create = f.calls.findIndex((c) => c.args[1] === "create");
-  assert.ok(gate < policy && policy < config && config < push && push < create);
+  assert.ok(config < gate && gate < projectRead && projectRead < mainRead && mainRead < mainConfigRead && mainConfigRead < push && push < create);
   assert.deepEqual(f.calls[config].args, ["show", `${sha}:vercel.json`]);
+  assert.deepEqual(f.calls[push].args, ["push", "origin", `${sha}:refs/heads/${branch}`]);
   assert.equal(f.calls.filter((c) => c.args[0] === "ls-remote").length, 2);
-  assert.equal(f.calls.some((c) => c.command === "gh" && c.args[0] === "api"), false);
+  const mainCalls = f.calls.filter((c) => c.command === "gh" && c.args[0] === "api");
+  assert.equal(mainCalls.length, 2);
+  assert.ok(mainCalls.every((c) => c.args[c.args.indexOf("--method") + 1] === "GET"));
   assert.equal(f.calls.filter((c) => c.command === "npx").length, 1);
 });
 
-test("初回draftのpushは実project policyの欠落・Git許可・API失敗で停止する", async (t) => {
-  for (const response of [commandResult(JSON.stringify({ ...project, deploymentPolicy: undefined })),
-    commandResult(JSON.stringify({ ...project, deploymentPolicy: { deploymentSources: [{ enabled: true,
-      environments: [{ type: "system", target: "preview" }], sources: ["git", "rest-api"] }] } })),
+test("ゲート照会中にlocal HEADが動いても確認済みSHAだけをpushする", async (t) => {
+  const f = await fixture(t);
+  f.state.remote = ""; f.state.listed = commandResult("[]");
+  const execute: WorkflowExecutor = async (command, args, cwd) => {
+    const result = await f.execute(command, args, cwd);
+    if (command === "gh" && args.includes("repos/tyask/Cake/branches/main")) f.state.sha = "c".repeat(40);
+    return result;
+  };
+  await runTaskPr({ ...f.options, execute, args: [...f.options.args, "--draft"] });
+  const pushes = f.calls.filter((c) => c.command === "git" && c.args[0] === "push");
+  assert.deepEqual(pushes.map((c) => c.args), [["push", "origin", `${sha}:refs/heads/${branch}`]]);
+  assert.equal(f.state.remote, `${sha}\trefs/heads/${branch}`);
+  assert.equal(f.state.body.includes("c".repeat(40)), false);
+});
+
+test("初回draftのpushはproject接続不一致・Preview無効・API失敗で停止する", async (t) => {
+  for (const response of [commandResult(JSON.stringify({ ...project, link: undefined })),
+    commandResult(JSON.stringify({ ...project, link: { ...project.link, org: "other" } })),
+    commandResult(JSON.stringify({ ...project, previewDeploymentsDisabled: true })),
+    commandResult(JSON.stringify({ ...project, previewDeploymentsDisabled: undefined })),
     commandResult("private-api-error", 1)]) {
     const f = await fixture(t);
     f.state.remote = ""; f.state.listed = commandResult("[]"); f.state.project = response;
     await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }),
       (error: unknown) => error instanceof Error && !error.message.includes("private-"));
     assert.equal(f.calls.some((c) => c.args[0] === "push" || c.args[1] === "create" || c.args[1] === "edit"), false);
+  }
+});
+
+test("localが正しく確認flagがtrueでもmainの停止設定が欠落・不正・読取失敗ならpushとPR変更を行わない", async (t) => {
+  for (const failure of [commandResult(JSON.stringify(contents({}))),
+    commandResult(JSON.stringify(contents({ git: { deploymentEnabled: { "**": false, main: true, qa1: true } } }))),
+    commandResult(JSON.stringify({ ...contents(), type: "symlink" })),
+    commandResult(JSON.stringify({ ...contents(), size: "60" })),
+    commandResult(JSON.stringify({ ...contents(), sha: "c".repeat(40) })),
+    commandResult("private-json"), commandResult("private-404", 1), commandResult("private-403", 1)]) {
+    const f = await fixture(t);
+    f.state.remote = ""; f.state.listed = commandResult("[]"); f.state.mainConfig = failure;
+    await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }),
+      (error: unknown) => error instanceof Error && !error.message.includes("private-"));
+    assert.equal(f.calls.some((c) => c.args[0] === "push" || c.args[1] === "create" || c.args[1] === "edit"), false);
+  }
+});
+
+test("main参照が不正・照会不可の場合はContentsを取得せずpushしない", async (t) => {
+  for (const main of [commandResult(JSON.stringify({ name: "feature", commit: { sha: mainSha } })),
+    commandResult(JSON.stringify({ name: "main", commit: { sha: "short" } })),
+    commandResult("private-json"), commandResult("private-403", 1)]) {
+    const f = await fixture(t);
+    f.state.remote = ""; f.state.listed = commandResult("[]"); f.state.main = main;
+    await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }));
+    assert.equal(f.calls.some((c) => c.args.some((arg) => arg.includes("/contents/")) || c.args[0] === "push" || c.args[1] === "create"), false);
   }
 });
 
@@ -147,6 +210,7 @@ test("draftの未push HEADはgate未確認/不正config/push失敗/remote不一�
     await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }));
     assert.equal(f.calls.some((c) => c.args[1] === "create" || c.args[1] === "edit"), false);
     if (["unconfirmed", "config"].includes(failure)) assert.equal(f.calls.some((c) => c.args[0] === "push"), false);
+    if (failure === "config") assert.equal(f.calls.some((c) => c.command === "gh" && c.args[0] === "variable" || c.command === "npx" || c.args[0] === "api"), false);
   }
 });
 

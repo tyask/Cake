@@ -1,74 +1,58 @@
-# QA貸出方式への見直し検証
+# QA貸出方式の検証記録
 
-2026-10-12。PR #34 の保存済みhead `76487b0683e908d7bc470f042623475b2546ceda` を取得して実装を再構成。元executorの未コミット変更は取得・転用していない。base mainは `1877f0ff88b5250225db5d590a06e3c1e656ecb9`。AGENTS.mdを確認し、repo/.agents と workspace/.agents/skills に追加の作業指示はなかった。
+2026-10-12。対象はdraft [PR #34](https://github.com/tyask/Cake/pull/34)、`codex/fixed-qa-pool`。今回の開始headは `81988ad23ae155f20aeb380292ad07fb3f64f985`。元executorの未コミット変更は転用していない。AGENTS.mdと利用可能な作業指示を確認した。
 
-## 実装とローカル検証
+## Hobby向けの生成前ゲート
 
-- qa1/2/3は貸出枠・候補aliasのみ。固定QA枝、台帳Git枝、DB保持parkingを撤去。
-- GitHub Deploymentの専用task/payloadを全ページから再生する台帳と、信頼済みmainを用いる短い単一Actions writerを追加。queue:max、cancel-in-progress:false、既存Environment Previewを使い、未有効化が既定。
-- claim後だけ生成intentを永続化してPreviewを開始。満枠・未承認head・ゲート未確認は生成しない。応答喪失は記録とmetadataから復元し、盲目的に再作成しない。
-- 同PR更新はlease/slot/Native DBを保持し、現在headのREADYとDB identityを確認してalias更新。古いlease、別project/PR/枝/SHA、共有deployment ID、DB識別子変更を拒否。
-- close/merge/手動返却はdeletingを永続化。記録済み全IDを照合して削除し、Neon branchと全endpointの消失を確認後だけfree。不可逆削除の承認がない場合と確認失敗は枠を保持。
-- 新DBはmigration前に空状態を検査してPR/枝/lease/endpoint markerを登録。適用済み002を書き換えず、Preview限定で既知の実アカウントbootstrap INSERTを抑止。固定seedは初回のみ。同PRの更新でプロフィール・権限状態・家計・所属・割合・明細をseedが上書きしない。既存のログイン時認可処理は変更していない。
-- CLIはコミット済みGit停止設定と確認済みゲートを照合してpushし、draft PR作成と台帳読取によるPreview確認を行う。旧直接deploy/alias入口を停止。
-- README、AGENTS、両設計書、QA運用手順を更新。
+有料Deployment Sources policyを必須条件から除き、同一repositoryのmainと対象PRの完全commit SHAにある `vercel.json` を検査する。`git.deploymentEnabled` は `**: false`、`main: true`、main以外のtrueなし、boolean値だけを許可する。GitHub Contents応答のfile/path/encoding/実byte数/64KiB上限を検査し、Git blob SHAを再計算して照合する。Contents検証はGit tree modeの証明を含まない。
 
-初版 `dd9926a` で `npm run lint`、`npm test`（**288成功・失敗0・skip0**）、`npx tsc --noEmit`、`npm run build`、`git diff --check` 成功。Next buildはローカルのビルドのみで、DB migration/seedやcloud deploymentを実行していない。UI変更はない。安全な導入口の追加補完結果は下記に記録する。
+writerはPRごとに検査し、最初のlease、生成intentの保存前、REST POST直前に読み直す。最後にOPEN/current head/所属/承認を再確認する。全PR共通の生成ゲートcacheは使わない。通常生成の3確認flagと完全SHA承認、限定probeの5項目だけの期限付き承認は維持する。cleanupはGit設定不足から独立させ、既存のproject/lease/resource照合と削除対象別承認を維持する。
 
-回帰には満枠待機、全snapshot系列、token/資源の所有者、DB再利用拒否、SHA更新、stale alias、応答喪失、未解決intent、削除失敗、Native残存、HTTP拒否、Vercel/Neon全ページ読取を含む。Neon paginationは公式の `pagination.next` を使用。Vercel/Neon操作の回帰はmockであり、実クラウドの成功を意味しない。
+通常CLIはコミット済みHEADとremote mainを検査し、確認flagだけでは通さない。push元は検査済み完全SHAのrefspecに固定し、検査中にローカルHEADが動いても未検査commitを送らない。force pushや迂回flagは追加していない。
 
-PGlite 0.5.8で、実11migration、空状態検査、未知表/routine/enum/extension-owned table拒否、marker不一致、bootstrap抑止、seed前混入、seed途中失敗rollback、初回seed、同PR再build時の既存値保持、ローカルseed再実行を**23/23成功**で確認。Neon接続や複数接続のロック競合は検証していない。再現スクリプトは `scripts/verify-preview-database-safety.mjs`。repo依存にはPGliteを追加していない。
+検査結果は `scope: repository-git-trigger-configuration`、main/対象commit/blobの証跡、`backendForcedDeploymentPreventionProven: false` を返す。この運用はproject全体の技術的な排他ではない。設定のない古い枝、設定改変、別REST/CLI、first-party callerは迂回し得る。Ignored Build StepもNative生成前の停止根拠にしない。
 
-この23件は承認済みNeonテストDBへの実行ではなく、ローカルの一時メモリDBへの実SQL検証。保存先dataDirや実DB接続情報を使わず、setupのconnectをPGliteへ差し替え、終了時にdb.closeする。永続DBデータは残らず、/tmpに残るのは依存package・cache・検証ソースだけ。Neon上のmigration、seed、削除は未実施。
+read-onlyの14 remote枝監査ではPR34だけが適合し、main `37a55b8`、PR33、他の古い枝は未導入だった。稼働枝を個別に更新または凍結し、将来の枝は更新済みmainから作る必要がある。PR33と他のremote枝は今回変更しない。
 
-2人fixtureのローカル補完では、検証済みQA環境のAをサイト管理者、Bを一般利用者として登録し、既存のダミーアドレスを使う。QAの再ログインは保存済み状態を照合するだけで、無効化や権限を修復しない。従来のローカル用fixtureは両者非管理者のまま。`npm run lint`、`npm test`（**439成功・失敗0・skip0**）、`npx tsc --noEmit --incremental false`、`npm run build`、`git diff --check` が成功した。クラウドの接続情報を外して検証し、push・Preview生成・Neonへの書き込みは行っていない。このローカル補完は、既存親DBの承認済み変更やNativeの親選択・実環境検証の完了を意味しない。
+## Actionsでのhost表示対策
 
-### 承認済みfixture baseへのローカル対応
+既存repository Variable `CAKE_QA_PRODUCTION_DATABASE_HOST` をcallerの `jobs.secrets` から一時的な `workflow_call` secretへ渡し、共通runnerが従来と同じenv名でguardへ供給する。remote Secretの新規登録・移動、Variable値や権限の変更はない。値そのものを取得・表示して検証していない。
 
-上記fixture/loginの成果をlocal commit `3046536` に保存した後、初回の受入を「空DB、または承認済み2人fixture」に変更した。アプリschemaとextensionの正規catalog fingerprint、元の11migrationのsource hashと適用履歴、A管理者/B一般のダミーidentity・名前・有効状態、固定共有workspaceとOWNER/MEMBER各weight 1、guard singleton/revision 4、業務7表の0件を照合する。未知schema・改変・混入は修復せず停止する。承認fixtureの検査とseeded marker登録は同じtransaction。既存markerの同PRは初期値を再検査・再登録せず、プロフィール・降格・無効化・家計データを保持する。レビュー済み追加migrationは従来どおり適用できる。Productionのmigration原文・認証と従来local fixtureは維持した。
+[GitHubのcontext availability](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#context-availability)、公式workflow schema/parser、[runnerのmask初期化](https://github.com/actions/runner/blob/main/src/Runner.Worker/Worker.cs)により、job secretでのvars利用とstep表示前のmask開始を確認した。公式 `@actions/workflow-parser` 0.3.61で3 workflowのparse/convert errorは0件。実Actionsでのmaskは未検証で、過去ログは変更していない。
 
-最終ローカル検証は `npm run lint`、`npm test`（**449成功・失敗0・skip0**）、`npx tsc --noEmit --incremental false`、`npm run build`、`git diff --check` 成功。`CAKE_LOCAL_PGLITE_MODULE` に上記の外部インストール先を指定し、一時メモリDB 4個で**実SQL 67/67成功**を全testsに含めた。正規base受入、行・schema・migration・guardの混入/変更拒否、失敗時rollback、別lease拒否、同PR編集保持、Production bootstrap原文とseed接続前拒否を検証した。クラウド接続情報を外した検証であり、Neonへの追加書込みはない。
+hostはrepository-level Variableを契約とする。callerにEnvironmentがないため、Preview Environmentの同名Variable overrideを以前と同じ実効値として引き継ぐ保証はない。既存Preview Environmentの資格情報解決は維持し、単一writer queueはcalleeのpool jobだけに置く。診断はEnvironment/queueを使わず、読取権限とtrusted mainのdispatch SHA checkoutを維持する。JSON/削除manifestの非秘密DB host識別情報とActions step envのmaskは別の扱いである。
 
-2026-10-12 13:18:32 UTC、承認対象QA parentのproject/branch/endpointをread-onlyで確認し、canonical fingerprintと全11カテゴリの件数・hashが一致した。A/Bの初期値・共有workspace・guard revision 4もread-onlyの集計で確認した。実Native childの生成・初回claim・新ログインのlive検証は未実施。別途13:04:30 UTCに対象別承認で完了したQA mainのA管理者化1行/旧管理者削除1行は、今回のローカル検証や追加DB操作と区別する。
+既存診断の要約も補強した。Native枝名にhostや既知資格情報が埋め込まれていても名前を省略し、Production hostが大文字・pooler表記でも一致する返却計画を拒否する。新規回帰3件は修正前の失敗と修正後の成功を確認した。実値の取得やresource操作は行っていない。
 
-remote PR34はdraft/head `4dd1724` のままでCI 2件成功。最新main `37a55b8` のPR35/36診断はfixture/auth/DB guardを変更しておらず、台帳readerも互換。READMEと設計HTML 2件は更新箇所が重なるが、mainのmerge/rebaseは行っていない。今回のlocal headは未pushのため最新head CIは未実施。
+## Native・DB・権限の維持
 
-PR34の`vercel.json`はfeature枝のGit deploymentを停止する指定（`**: false`、`main: true`）。対象feature枝のdeployment一覧GETは0件。ただし実projectはPreview生成が有効で、REST-only生成前policyとGitゲート確認variableは確認できず、全Native生成経路やincoming HEAD設定の評価順序も未実証。pushでPreview/DBが発生しない保証には使わない。push・新deployment・remote設定・Secret・cleanupは今回禁止のまま。将来の公開には明示的なpush許可と生成前ゲート確認、生成試験には対象計画と別の承認が必要。既存draft PR34のmergeは行わない。
+qa1/qa2/qa3は貸出枠と候補aliasだけ。固定QA/台帳Git枝やDB保持parkingは作らない。GitHub Deploymentsの専用task/payloadを正本とし、statusのauto_inactiveで解放しない。claim→intent→REST Native生成→host未確認buildのDB接続前停止→Native metadata照合→application buildの順序を維持する。
+
+同PRはleaseとDB identityを保ち、最新成功headだけをaliasへ割り当てる。新PRでは新feature枝/DBを要求する。close/手動返却はまずdeletingを保存し、全deployment IDと対象別承認を照合して削除し、旧Native branch/全endpoint消失後だけfreeにする。失敗や確認不能は保持する。資源削除を実行中Function/transactionの即停止保証として扱わない。
+
+今回のfixture/auth/migration実装変更はない。開始headには、空DBまたは承認済み2人fixtureの厳密受入、A管理者/B一般、固定共有家計、11migration/正規schema/guard revision 4、業務7表の混入拒否、同PR編集保持、SELECT-only QAログインが含まれる。適用済みmigrationとProduction認証は変更していない。
+
+過去の承認済みQA親DB変更と今回の作業は分ける。13:04:30 UTCのA管理者化1行/旧管理者削除1行と、13:18:32 UTCのcanonical fingerprint/11カテゴリ一致のread-only確認は前の作業の証跡。今回はDBへ書き込んでいない。13:29:38 UTCのmain診断ではQA branch/endpointが各5件で以前と同じ集合だったが、瞬間的な作成や後続変更は否定しない。
+
+## ローカル検証
+
+最終構成で `npm run lint`、`npm test`（**543成功・失敗0・skip0**）、`npx tsc --noEmit --incremental false`、`npm run build`、`git diff --check` が成功した。クラウド接続情報を外し、PGlite 0.5.8の一時メモリDB4個による実SQL67件の検証を全testsに含めた。今回packageやmigrationの追加・変更はなく、検証データをNeonへ保存していない。ローカルNext buildはcloud deploymentやmigration/seedを実行していない。
+
+開始headの前回結果は449 tests成功/失敗0/skip0、実SQL67/67、lint/型/build成功。今回の検証ではworkflow抽出で移動した安全性assertionも更新した。最新main `37a55b8` をPR34側へ取り込み（local merge `8658443`）、既存診断処理を保持してファイル追加の衝突を解消した。remote mainは変更していない。最新headのCI結果はPR本文とChecksで確認する。
+
+再現例:
 
 ```bash
 npm install --prefix /tmp/cake-db-safety --no-save --no-package-lock --ignore-scripts @electric-sql/pglite@0.5.8
 node --import tsx scripts/verify-preview-database-safety.mjs --pglite-module /tmp/cake-db-safety/node_modules/@electric-sql/pglite/dist/index.js
 ```
 
-## 実環境のread-only確認
+## 公開範囲と残る確認
 
-既存VERCEL_TOKENの通常認証で対象projectのREST GETが200。project ID/name、team、GitHub repository、Production Branch=mainを照合。deployment一覧とwithGitRepoInfo=trueのGETも200。PR #33の `5776adfca96d17d166234c4a38d7c286bb47982a` に対応するREADY deploymentを読取確認し、変更していない。
+今回はコード/文書/テスト、PR34へのcommit・通常push・draft本文更新と最新CI確認を承認された範囲で行う。push前の2026-10-12 14:26:13 UTC、対象feature枝のVercel一覧GETは200・全ページ0件だった。push後も同じGET専用手段で照合し、結果をPR本文へ記録する。
 
-候補 `cake-qa1-fumin.vercel.app` / qa2 / qa3のalias GETはすべて404。ただし現在の認証scopeでの未発見であり、グローバルな空き・割当可能性・未使用期間の名前予約保証にはならない。PR #34のfeature枝に対応するVercel一覧はv6/v7とも200・0件だった。
+QA poolとHobby対応workflowはまだmain未導入で、既存の読取専用診断はmainに存在する。通常CLI/create/probeはmainの設定不足で停止する。初回導入はQA無効・承認なし・空/free台帳を確認してユーザーが手動mergeする手順とし、未実証flagをtrueにしない。mainへのmergeは自動Production deploymentを開始するため今回実施しない。mergeでPR34はCLOSEDとなるので、将来のprobeには別の設定済みOPEN PRと対象別承認が必要。今回は新PRを作らない。
 
-Preview専用CAKE_TEST_DATABASE_URLのNative連携metadataはproject読取で確認。ただしNEON_API_KEYがなく、Neon project/親/feature branch/endpointやcleanupは直接確認できない。接続文字列・秘密値・owner向けAPI応答の全文は保存/表示していない。
+HobbyのGit停止指定を保ったREST gitSource+完全SHA+env/build.envでのNative生成、Native親選択、build/runtime注入、同PR DB保持、alias衝突/割当/予約、queue:maxの実workflow、最後のdeployment削除後のNative消失はlive未検証。公開REST schemaと公式client実装のfieldの差は運用手順に明記する。Vercel Proへの変更は不要だが、Neonの既存plan/無料枠は別条件であり、無課金全体の保証はしない。
 
-既存GitHub認証によるActions variablesの一覧読取は403（Resource not accessible by integration）。実際の有効化/承認変数は確認できず、権限を追加していない。新QA workflowはまだmainに存在せず、このdraft PRをpushしても運用を有効化しない。
-
-## 安全な導入口の追加補完
-
-- GET専用preflight、plan-probe、plan-releaseを追加。adapterは既定でGET以外をtransport呼出前に拒否する。ローカルの `npm run qa:inspect` またはmain限定の手動read-only jobで実行でき、pool/確認flagをtrueにする必要はない。
-- 通常の生成は実projectのPreview専用REST-only Deployment Sources policyと従来の確認flag双方を要求する。CLIのpush前も実policyをGETで再確認。mainのvercel.jsonを旧枝全体の停止証明として扱わず、remote policyの設定処理は追加していない。
-- 限定probeは期限付きのproject/PR/完全SHA/slot承認を要求し、指定枠・指定PRだけを処理する。purposeを台帳へ保存し、固定aliasや他枠に触れず、通常refreshではprobeの生成を進めない。新SHAは再承認して同lease/DBを保持する。
-- 削除はpool全体のbooleanを廃止し、project/PR/slot/lease/headSha/全deployment ID/alias/DB identity/期限の完全一致を要求。全IDの所属を最初のDELETEより前に照合し、毎DELETEとfree更新の前に承認を再確認。消失済みIDも承認対象集合から消さない。
-- cleanupを通常生成のenabled/Git/Native確認flag・最新head生成承認・親DB/本番host設定から分離。disabledでもcloseはdeletingへ進み、既知resourceの読取認証とID限定承認で返却できる。必要な認証や消失確認がない場合は保持する。
-
-GET-onlyの実preflightとPR #34/current head/qa1のplan-probeを実行。Vercel project、空のGitHub貸出台帳、3候補aliasの読取は成功。Preview policy、Neon API認証、Native親ID、本番host比較情報は未確認/未設定、GitHub Variables APIは403。生成計画はexecutionBlocked=trueで、承認・生成・削除・flag変更は行っていない。Team GETも403であり、plan/Owner条件は未確認だが、project GET 200を全Vercel不可と混同していない。
-
-全枝の生成前ゲート候補は [Deployment Policies](https://vercel.com/docs/deployments/deployment-policy) のproject override。PreviewだけにenabledのREST-only source ruleを要求する。Pro/Enterprise・Owner条件、GitSource付きRESTの受理、Neon生成前のGit拒否はlive未実証。現project GETでpolicyを確認できず、normal/probeの生成は停止する。previewDeploymentsDisabledをtrueにして手動RESTを許す方式は公式根拠がなく採用していない。
-
-追加回帰はGET-only拒否、秘密の出力抑制、403/404区別、全対象manifest/期限/部分承認拒否、Production資源除外、disabled cleanup、probe単一対象/no alias、新SHA保持、policy未確認拒否、生成前の承認失効時の安全な再試行を含む。補完後の `npm run lint`、`npm test`（**415成功・失敗0・skip0**）、`npx tsc --noEmit`、`npm run build`、`git diff --check` が成功。検査jobへの本番host比較設定の受け渡しもworkflow回帰6件で確認した。
-
-## 未実施と有効化条件
-
-- 全既存PR（設定のない旧枝を含む）の生成前Gitゲート、REST Git sourceによるNative branching、同PRの実DB保持、alias割当と衝突、queue:maxの実workflow、最後のdeployment削除後のNative branch/endpoint消失は未実施。
-- 公開REST create schemaにはenv/build.envの記載がない。[公式client型](https://raw.githubusercontent.com/vercel/vercel/main/packages/client/src/types.ts)と[POST実装](https://raw.githubusercontent.com/vercel/vercel/main/packages/client/src/deploy.ts)はfieldを支持するが、client自身はfilesを使う経路であり、filesなしGitSourceとの組合せ、build/runtime注入、Native動作は推論・live未検証。欠落時はDB接続前guardで停止する。targetは公式仕様どおり省略してpreview、forceNew=1はintent単位の一度だけの作成に使う。
-- 本番host比較と空Native親の確認、Neon API認証、Actions権限、既存Preview環境の実行/承認方針、確認済みhead設定、有効化・不可逆削除の承認が必要。今回は新Secret・資格情報配置、権限適用、ネットワーク変更、実配置/削除、main/Production変更、mergeを実行していない。
-- 実Previewの画面/API、Function/transaction停止挙動、複数接続の競合、retentionによる途中削除は未検証。資源消失を実行中処理の即停止保証と混同しない。
-
-以上が未確認のためQA workflowを有効化せず、draft PRとしてレビューを続ける。最新headのGitHub CI結果はPRのChecksとPR本文を参照。実配置・検証済みQA URLや生成済みNeon枝を報告しない。
+Production/mainへの変更、manual Preview/probe、pool/確認flag有効化、remote設定/Secrets/権限/ネットワーク変更、不可逆削除、PR33/他枝変更は行わない。実配置済みQA URLやNative成功を報告しない。
