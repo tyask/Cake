@@ -13,6 +13,7 @@
     "task:start": "node --import tsx scripts/start-task.ts",
     "deploy:preview": "node --import tsx scripts/task-preview.ts",
     "task:pr": "node --import tsx scripts/task-pr.ts",
+    "qa:inspect": "node --import tsx scripts/qa-pool-inspect.ts",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {

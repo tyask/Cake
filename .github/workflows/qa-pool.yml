@@ -1,0 +1,93 @@
+name: QA pool
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: QA pool action
+        required: true
+        type: choice
+        options: [preflight, plan-probe, plan-release, probe, claim, release, refresh]
+        default: refresh
+      pr_number:
+        description: PR number (claim/release)
+        required: false
+        type: string
+      lease_id:
+        description: Current lease UUID (manual release)
+        required: false
+        type: string
+      source_sha:
+        description: Reviewed full SHA (plan-probe/probe)
+        required: false
+        type: string
+      slot:
+        description: Exact slot for plan-probe
+        required: false
+        type: choice
+        options: [qa1, qa2, qa3]
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  inspect:
+    if: >-
+      github.repository == 'tyask/Cake' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      contains(fromJSON('["preflight","plan-probe","plan-release"]'), inputs.action)
+    permissions:
+      contents: read
+      pull-requests: read
+      deployments: read
+    uses: ./.github/workflows/qa-private-run.yml
+    with:
+      mode: pool
+      action: ${{ inputs.action }}
+      pr_number: ${{ inputs.pr_number }}
+      lease_id: ${{ inputs.lease_id }}
+      source_sha: ${{ inputs.source_sha }}
+      slot: ${{ inputs.slot }}
+    secrets:
+      # A transient workflow-call secret masks the existing Variable before any step starts.
+      production_database_host: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+  writer:
+    # Generation stays disabled. Close/explicit cleanup can run independently.
+    if: >-
+      github.repository == 'tyask/Cake' &&
+      (vars.CAKE_QA_POOL_ENABLED == 'true' ||
+       (github.event_name == 'pull_request_target' && github.event.action == 'closed') ||
+       (github.event_name == 'workflow_dispatch' && contains(fromJSON('["probe","claim","release","refresh"]'), inputs.action)) ||
+       (github.event_name == 'schedule' && vars.CAKE_QA_DELETE_APPROVALS != '')) &&
+      (github.event_name != 'workflow_dispatch' || !contains(fromJSON('["preflight","plan-probe","plan-release"]'), inputs.action)) &&
+      (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') &&
+      (github.event_name != 'pull_request_target' ||
+        (github.event.pull_request.head.repo.full_name == github.repository &&
+         github.event.pull_request.base.ref == 'main' &&
+         startsWith(github.event.pull_request.head.ref, 'codex/')))
+    permissions:
+      contents: read
+      pull-requests: read
+      deployments: write
+    uses: ./.github/workflows/qa-private-run.yml
+    with:
+      mode: pool
+      action: ${{ inputs.action }}
+      pr_number: ${{ inputs.pr_number }}
+      lease_id: ${{ inputs.lease_id }}
+      source_sha: ${{ inputs.source_sha }}
+      slot: ${{ inputs.slot }}
+    secrets:
+      # A transient workflow-call secret masks the existing Variable before any step starts.
+      production_database_host: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}

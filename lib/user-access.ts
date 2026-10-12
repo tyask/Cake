@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { db } from "./db";
-import { TEST_USERS } from "./test-users";
+import { isTestAuthEnabled } from "./auth-mode";
+import { QA_TEST_USERS } from "./test-users";
+import { activeTestUsers, canUseAdministratorRole, isKnownTestIdentity } from "./test-fixture-context";
 import { profileNameSchema } from "./user-profile";
 import type { AppUser, RegisteredUser } from "./types";
 
@@ -11,9 +13,7 @@ export function normalizeEmail(value: unknown): string | null {
   return z.email().safeParse(email).success ? email : null;
 }
 
-export function isTestIdentity(user: { id?: string; email?: string | null }) {
-  return TEST_USERS.some((testUser) => testUser.id === user.id && testUser.email === normalizeEmail(user.email));
-}
+export const isTestIdentity = isKnownTestIdentity;
 
 function registeredUser(row: Record<string, unknown>): RegisteredUser {
   return {
@@ -68,12 +68,27 @@ export async function updateDisplayName(user: AppUser, name: string): Promise<Ap
   const saved = registeredUser(rows[0]);
   return {
     id: saved.id, email: saved.email, name: saved.name, imageUrl: saved.imageUrl,
-    isAdmin: isTestIdentity(saved) ? false : saved.isAdmin,
+    isAdmin: canUseAdministratorRole(saved),
   };
 }
 
 export async function ensureTestUser(user: AppUser): Promise<boolean> {
-  if (!isTestIdentity(user)) return false;
+  if (!isTestAuthEnabled()) return false;
+  let users;
+  try { users = activeTestUsers(); } catch { return false; }
+  const email = normalizeEmail(user.email);
+  const expected = users.find((fixture) => fixture.id === user.id && fixture.email === email);
+  if (!expected) return false;
+  if (users === QA_TEST_USERS) {
+    // QA users are seeded once. Login must never repair permissions or re-enable them.
+    const rows = await db()`
+      SELECT id FROM app_users
+      WHERE id = ${expected.id} AND email = ${expected.email}
+        AND is_enabled = true AND is_admin = ${"isAdmin" in expected && expected.isAdmin}
+      LIMIT 1
+    `;
+    return rows.length === 1;
+  }
   const rows = await db()`
     INSERT INTO app_users (id, email, name, image_url, is_admin, is_enabled)
     VALUES (${user.id}, ${user.email}, ${user.name}, NULL, false, true)
@@ -94,27 +109,30 @@ export class UserAccessError extends Error {
 // Read the role again for management requests; a session never grants administrator privileges.
 export async function requireAdministrator(user: AppUser): Promise<RegisteredUser> {
   const current = await findSessionUser(user.id, user.email);
-  if (!current?.isAdmin || isTestIdentity(current)) {
+  if (!current || !canUseAdministratorRole(current)) {
     throw new UserAccessError("利用者を管理する権限がありません。", 403);
   }
   return current;
 }
 
 export async function listRegisteredUsers(actor: AppUser): Promise<RegisteredUser[]> {
+  const current = await requireAdministrator(actor);
+  const includeQaFixtures = isTestIdentity(current);
   const rows = await db()`
     SELECT * FROM app_users
     WHERE EXISTS (
       SELECT 1 FROM app_users administrator
       WHERE administrator.id = ${actor.id} AND administrator.email = ${actor.email}
         AND administrator.is_admin = true AND administrator.is_enabled = true
-    ) AND NOT ((id = 'test-user-a' AND email = 'test-a@cake.local')
-      OR (id = 'test-user-b' AND email = 'test-b@cake.local'))
+    ) AND (${includeQaFixtures} OR NOT ((id = 'test-user-a' AND email = 'test-a@cake.local')
+      OR (id = 'test-user-b' AND email = 'test-b@cake.local')))
     ORDER BY is_admin DESC, is_enabled DESC, created_at ASC
   `;
   return rows.map(registeredUser);
 }
 
 export async function registerUser(actor: AppUser, email: string, name?: string): Promise<void> {
+  await requireAdministrator(actor);
   const sql = db();
   const rows = await sql`
     INSERT INTO app_users (id, email, name, is_admin, is_enabled)
@@ -131,6 +149,7 @@ export async function registerUser(actor: AppUser, email: string, name?: string)
 }
 
 export async function disableUser(actor: AppUser, userId: string): Promise<void> {
+  await requireAdministrator(actor);
   const rows = await db()`
     UPDATE app_users target SET is_enabled = false, updated_at = now()
     WHERE target.id = ${userId} AND target.is_admin = false AND target.is_enabled = true

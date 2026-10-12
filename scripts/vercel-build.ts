@@ -15,6 +15,7 @@ export function buildSteps(environment: BuildEnvironment): BuildStep[] {
       throw new Error(`Vercelの${targetLabel}環境に ${variable} を設定してください。`);
     }
   }
+  databaseConnectionString(environment);
   // Build first to avoid changing the live DB when compilation fails. Vercel
   // can publish only after this build command's migration step also succeeds.
   if (target === "production") return ["build", "db:setup"];
@@ -31,9 +32,6 @@ function executeStep(step: BuildStep, environment: BuildEnvironment): number {
   };
   console.log(`Cake: ${step} を実行します。`);
   const childEnvironment = { ...process.env, ...environment };
-  if (environment.VERCEL_ENV === "preview") {
-    childEnvironment.DATABASE_URL = databaseConnectionString(environment);
-  }
   const result = spawnSync(process.execPath, args[step], { stdio: "inherit", env: childEnvironment });
   return result.error || result.status === null ? 1 : result.status;
 }

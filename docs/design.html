@@ -528,9 +528,20 @@
           <p>初回表示、ワークスペース切替、ホーム・取引明細・清算への移動は<code>full</code>で明細・清算・履歴まで取得する。取込・設定への移動と保存後は<code>metadata</code>でユーザー、ワークスペース一覧、招待、選択先、参加者、ルールを取得する。同じワークスペースでは取得済みの明細・清算・履歴を保持し、選択先が変われば全データを再取得する。</p>
           <p>通常のログイン済み<code>GET /api/app</code>は利用可否確認と画面用の集約取得を各1 SQLで行い、<code>full</code>・<code>metadata</code>ともに2 SQL・2回のNeon往復となる。初めてのワークスペース作成などでは追加処理がある。読込ではプロフィールをDBへ書き戻さない。</p>
           <h3>開発・Preview・Productionの配置</h3>
-          <p>設計合意後、<code>npm run task:start -- &lt;タスク名&gt;</code>で最新の<code>origin/main</code>から<code>codex/&lt;タスク名&gt;</code>と専用worktreeを作成する。元の未コミット変更は保持し、環境ファイルや依存関係のコピーは行わない。開発・lint・test・buildの完了後にコミットし、<code>npm run deploy:preview</code>でブランチをpushする。</p>
-          <p>Git連携で作成されたPreviewのコミットがHEADと一致し、READYになったことを確認してDeployment固有のURLで画面・APIを検証する。テストDBは本番とは別のNeonプロジェクトからGitブランチごとに作成する。Previewのビルドと実行時は<code>CAKE_TEST_DATABASE_URL</code>を必須にし、通常の<code>DATABASE_URL</code>を代用しない。ビルドではマイグレーション、テスト認証時のデータ登録、アプリビルドの順に実行する。</p>
-          <p>検証後、結果とPreview URLを含む<code>main</code>向けPRを作成する。必須CIが成功し、ユーザーがレビューして手動でマージした後、Productionでアプリビルド、本番DB更新の順に実行し、成功時だけ公開する。DB更新は自動で巻き戻らず、公開中の旧版と互換性を保つ。手動のProductionデプロイは明示依頼時だけ行う。具体的な環境設定と操作はREADME、作業規則は<code>AGENTS.md</code>に従う。</p>
+          <p>固定QAは<code>qa1</code>・<code>qa2</code>・<code>qa3</code>の貸出枠と候補aliasだけを持ち、固定QA Git枝・台帳Git枝・DB保持用の待機deploymentは作らない。貸出先は同一repositoryのmain向けOPEN PRとそのfeature枝で、Previewは既存Environment <code>Preview</code>を使う。新PRは新しいGit refとNative Preview Branchingの専用DBを使い、同じPRへのpushではそのDBと操作データを維持する。枠数を超えたPRは待機し、承認済みwriterは貸出前にPreview/DBを生成しない。</p>
+          <p>貸出台帳の正本はGitHub Deploymentsのtask <code>cake-qa-lease</code>に保存するprotocol <code>cake-qa/v1</code>のpayload snapshot。PR・feature枝・完全SHA・lease token・配置/DBのIDと状態を記録し、GitHubのdeployment statusから貸出状態を判断しない。<code>pull_request_target</code>・手動dispatch・scheduleを受ける短い単一Actions writerが<code>queue: max</code>・<code>cancel-in-progress: false</code>で直列更新する。最大100件の待機と、dispatch順ではないFIFOの仕様に従い、queue overflowや古いイベントも再照合で扱う。仕様は<a href="https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency">GitHub公式concurrency</a>を参照。</p>
+          <p>GET専用の<code>preflight</code>はpoolや確認flagを有効化せず、台帳・project/link・mainの完全SHAのGit設定・repository Variables名・Neon metadata件数の読取・照合結果と不足を報告する。対象PR/current head・指定枠はGET専用<code>plan-probe</code>で追加確認する。GET以外をtransportで拒否し、生成・台帳更新・削除・環境変数変更・DB操作を行わない。認証scopeと操作承認、Native/cleanupの実証結果は分けて扱う。</p>
+          <p>Native未実証の初回確認は、同一repositoryのmain/対象PRの完全SHAにあるmain-only Git設定を照合し、projectId/pr/sha/slot/expiresAtの5項目だけに完全一致する期限付き承認を得た手動<code>probe</code>で実施する。pool/Gitゲート確認/Native確認flagはfalseまたは未設定のまま、信頼済みmainの同じqueueと貸出枠を使う。snapshotの<code>purpose: probe</code>で通常運用と区別する。claimとintentを先に記録し、REST gitSourceでNative DBをアプリbuild前に生成する。初回hostが未確認ならDBクライアント作成前に停止し、Neonのproject・親・feature枝・branch作成時刻・endpointを確認して、同feature枝・同leaseの次の手動probeでphaseがapplicationのDB操作を検証する。候補aliasを自動更新せず、固有URL・Native identityと親選択・guard注入・初回DB受入条件・migration/seedを記録する。同PRのpushでは新headの期限付き承認を更新し、同lease・同DBを保持する。</p>
+          <p>新PRのNative branchは承認済みQA初期fixtureの親から作る設計とする。lease markerがない初回だけ、空DBまたは現行001〜011のschema・migration台帳と固定二人（管理者A・一般B）・共有家計・所属・revision 4のguard・空の業務7表に厳密一致するDBを受け入れる。fixture一致時はseed済みidentityを登録し、空DBではmigrationと固定サンプルを登録する。未知object・データや既知baseのsource/schemaのずれはfail closedで停止し、検証定義や親の変更にはレビュー・明示承認が必要で、自動reset・自動修復を行わない。Nativeの親選択は未実証であり、設定値や親ID読取だけでは確認済みとしない。同PRのmarker登録後はidentityを照合して編集データ・名前・権限・停止状態を保持し、初期fixtureの再検査・修復をしない。受入後はレビュー済みの後続migrationも適用できる。照合条件は<a href="qa-pool.md">QA貸出運用</a>に記載する。通常運用の有効化後は、現在PR head・lease・明示承認された完全SHAに一致するREADYだけが候補aliasを更新できる。probeの成功から確認flagや通常運用を自動有効化しない。</p>
+          <p>返却前の<code>plan-release</code>はGET専用で、project・PR・slot・lease・head SHA・全記録deployment IDの昇順配列・alias hostname（probeはnull）・DB identityまたはnullを含むmanifestを返すだけとする。PR close/手動返却時は先に<code>held → deleting</code>を記録し、削除承認待ちでも使用中として保持する。承認時に期限を添え、削除前に全項目が完全一致する承認とintent/orphan・全記録IDの所有先を確認し、承認対象だけ削除する。Native branchと全endpointの消失後だけfreeにし、失敗・不明・遅延はdeletingで保持する。cancel APIとFunction/transaction監視は未実装で、資源消失を即停止保証にしない。詳細は<a href="qa-pool.md">QA貸出運用</a>を参照。</p>
+          <div class="warning">QA poolは既定無効。Hobbyではmainと稼働対象枝の<code>vercel.json</code>に<code>git.deploymentEnabled: {"**": false, "main": true}</code>を入れ、今後の枝は更新済みmainから作る。main以外をtrueにする規則は禁止。貸出取得前・REST POST直前・通常CLIのpush前にmain/対象commitの完全SHAの設定を確認する。有料Deployment Policiesや未検証API field、新しい抜道flagを必要条件にしない。Vercel Proへの変更・課金は不要だが、Native Neonの既存plan・無料枠は別条件で確認し、無課金を保証しない。古い枝・設定変更・直接REST/CLI・first-party callerは迂回し得るため、project全体の強制停止を保証しない。Ignored Build StepはNative DB生成前ゲートの代用にならない。</div>
+          <p>全remote 14枝の読取監査ではPR #34の枝だけが適合し、main（<code>37a55b8</code>）・PR #33・他の枝は未導入で、古いPreview枝もremoteに残る。全稼働枝の監査と実際のGit停止、REST Native、alias、queue、cleanupはlive未実証で、確認flagを先にtrueへ変えない。新secret・追加権限・network設定・Productionのremote設定変更、PR #33の編集は今回未許可。PR #33への将来の設定だけの変更にも別途承認を必要とする。限定生成承認と削除ID承認を分け、包括booleanで削除を許可しない。</p>
+          <p>初回移行はQA無効・承認なし・空台帳のまま、ユーザーがHobby修正を含むPR #34を手動mergeしてwriterとGit設定をmainへ導入する。mainに設定がない間は生成・probe・通常CLIを止めるが、無効状態での導入mergeは可能。mainのProductionを維持するためmergeによる自動Production deploymentにはユーザーの承認が必要。今回のPR #34へのcommit/push/本文更新はリスクを含め明示承認済みの限定作業で、通常ゲート成功やflagの確認完了とは扱わない。merge後のPR #34はCLOSEDとなるため、生成実証には別の設定済みOPEN PRと個別承認が必要で、今回は作成しない。</p>
+          <p>Actionsの非秘密本番hostは既存repository Variableをcallerの<code>jobs.secrets</code>から一時的な<code>workflow_call</code> secretへ渡し、runnerがstep env表示前にmaskするコードへ変更する。remote Secret登録・移動や権限変更はしない。Preview Environmentの同名Variable overrideはcallerを経由できず、以前と同じ実効値とは推定しない。main導入前と既存ログにはraw hostが含まれ得る。過去ログの消去や実Actionsでのmask確認は行っておらず、raw値を報告へ転記しない。読取検査JSONのdeployment URL省略と、台帳・削除manifestの非秘密DB identityは区別する。</p>
+          <p>PGliteの実SQL検証はローカルWASMの一時メモリDBで実施し、検証データは永続化しない。承認済みNeon DBや実環境の接続情報は使用せず、Neon上のmigration/seedと複数接続競合の実測とは区別する。検証SQLのDELETE/DROPはその一時DB内だけに限る。QA親DBへの別途承認済みの限定変更は<a href="qa-pool.md">QA貸出運用</a>に記録する。</p>
+          <p>設計合意後、<code>npm run task:start -- &lt;タスク名&gt;</code>でmain-only Git設定を導入した最新の<code>origin/main</code>から<code>codex/&lt;タスク名&gt;</code>と専用worktreeを作成する。元の未コミット変更は保持し、環境ファイルや依存関係のコピーは行わない。開発・lint・test・buildの完了後にコミットし、通常ゲートを確認して<code>task:pr --draft</code>で先にmain向けPRを作る。QA poolの承認済み有効化後、<code>npm run deploy:preview</code>が同PR・同lease・現在HEADの台帳記録を読む。</p>
+          <p>QA poolを有効化した運用では、main向けPRの貸出を確定してからwriterがfeature枝の完全SHAをPreviewへ配置する。QA poolの未有効化中は、移行設定PRの完了条件に従来の自動Preview成功を要求せず、未検証事項を記載する。Previewのビルドと実行時は<code>CAKE_TEST_DATABASE_URL</code>を必須にし、通常の<code>DATABASE_URL</code>を代用しない。DB接続前のlease・host照合とDB内の初回受入条件/所有権guardに成功した後、未適用migration、seed確認、アプリビルドの順に実行する。固定サンプルは空DBの初回だけ登録し、継承fixtureや同PRの既存データを修復しない。</p>
+          <p>検証後、結果とPreview URLを<code>main</code>向けPRへ記録する。必須CIが成功し、ユーザーがレビューして手動でマージした後、Productionでアプリビルド、本番DB更新の順に実行し、成功時だけ公開する。DB更新は自動で巻き戻らず、公開中の旧版と互換性を保つ。手動のProductionデプロイは明示依頼時だけ行う。具体的な環境設定と操作はREADME、作業規則は<code>AGENTS.md</code>に従う。</p>
         </section>
 
         <section id="requirements">
@@ -792,7 +803,7 @@
               <tr><td>ルール編集・並べ替え・名称変更・削除</td><td>可</td><td>可</td><td>不可</td></tr>
             </tbody>
           </table></div>
-          <p>明細の金額・割合等の編集と削除は未清算のみ。メモは清算状態にかかわらず更新できる。利用者の登録・停止はワークスペースの所有者とは独立した管理者専用操作であり、通常メンバーやテストユーザーに権限を付与しない。</p>
+          <p>明細の金額・割合等の編集と削除は未清算のみ。メモは清算状態にかかわらず更新できる。利用者の登録・停止はワークスペースの所有者とは独立した管理者専用操作であり、通常メンバーには権限を付与しない。新QA固定fixtureでは有効なQA identityとDB権限を確認したAだけサイト管理者として扱い、Bと従来ローカルfixtureは非管理者とする。</p>
           <h3>操作記録</h3>
           <p>明細は作成者・更新者・作成日時・更新日時、ワークスペースは所有者・作成日時・更新日時、ルールは作成者・作成日時を保持する。清算とCSV取込は専用履歴に完了者／取込者と日時・計算結果／登録件数を残す。汎用の全操作履歴や各項目の変更前後履歴は持たない。</p>
         </section>
@@ -859,7 +870,7 @@
               <tr><td>D9</td><td>利用者制限</td><td>通常の有効アカウントは管理者を含め二人まで。テストA/Bは別扱いでProductionでは無効。</td></tr>
               <tr><td>D10</td><td>割合の保持</td><td>各明細に割合を保存する。デフォルトは新しい共有費の初期値。既存明細へ変更を反映する場合は明示的なルール適用を行う。</td></tr>
               <tr><td>D11</td><td>フィルタ</td><td>列ごとの値を端末内へ自動保存。ユーザー・ワークスペース単位で分離し、端末間同期はしない。</td></tr>
-              <tr><td>D12</td><td>開発・公開</td><td>最新mainからタスク専用worktreeを作り、独立DB付きGit Previewで検証後にPRを作成する。ユーザーが必須CIを確認して手動マージし、本番のビルド・DB更新成功後に公開する。</td></tr>
+              <tr><td>D12</td><td>開発・公開</td><td>最新mainから専用worktreeを作り、ローカル検証と生成前ゲート確認後にdraft PRを作成する。明示承認された限定probeまたは有効化後の独立DB付きPreviewで検証し、ユーザーが必須CIを確認して手動マージする。本番のビルド・DB更新成功後に公開する。</td></tr>
             </tbody>
           </table></div>
           <div class="note">仕様変更時は本書と詳細設計を更新し、運用が変わる場合はREADMEも更新する。</div>
@@ -867,7 +878,7 @@
 
         <section id="qa-diagnostics">
           <h2>QA導入前の診断</h2>
-          <p>既存Preview経路を変更せず、main限定の手動workflowで設定と資源をGETだけで確認する。貸出・生成・削除・alias変更・DB接続は行わない。詳細は<a href="qa-diagnostics.md">QA診断手順</a>を参照する。mainへのmergeは既存Production buildを起動し得る。</p>
+          <p>main限定の手動workflowで同一repositoryのmain/対象PRの完全SHAにあるmain-only Git設定とblob、既存資源をGETだけで確認する。証拠は枝内のGit自動生成設定に限り、<code>backendForcedDeploymentPreventionProven: false</code>を維持する。貸出・生成・削除・alias変更・DB接続は行わない。詳細は<a href="qa-diagnostics.md">QA診断手順</a>を参照する。mainへのmergeは既存Production buildを起動し得る。</p>
         </section>
         <footer>Cake 家計管理アプリ 基本設計書 · Version 1.1 · 更新日 2026-10-10</footer>
       </main>

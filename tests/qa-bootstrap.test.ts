@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { ReadOnlyQaBootstrap, type QaBootstrapTransport } from "../lib/qa-bootstrap";
 import { runQaBootstrap } from "../scripts/qa-bootstrap";
 import {
@@ -8,6 +9,11 @@ import {
 } from "../lib/qa-bootstrap-ledger";
 
 const sha = "a".repeat(40), otherSha = "b".repeat(40);
+function gitFile(config: unknown = { git: { deploymentEnabled: { "**": false, main: true } } }) {
+  const bytes = Buffer.from(typeof config === "string" ? config : JSON.stringify(config));
+  return { type: "file", path: "vercel.json", name: "vercel.json", encoding: "base64", size: bytes.length,
+    content: bytes.toString("base64"), sha: createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex") };
+}
 const leaseId = "00000000-0000-4000-8000-000000000042";
 const attemptId = "00000000-0000-4000-8000-000000000900";
 const secrets = ["bootstrap-secret-github", "bootstrap-secret-vercel", "bootstrap-secret-neon", "bootstrap-secret-response", "postgresql://bootstrap-secret-db"];
@@ -81,7 +87,6 @@ class ReadFixture {
   record?: QaLeaseRecord;
   project = {
     id: QA_PROJECT_ID, name: "cake", accountId: "team_D1Mcx2TdFWPKcypfu8KzNMub", previewDeploymentsDisabled: false,
-    deploymentPolicy: { deploymentSources: [{ enabled: true, environments: [{ type: "system", target: "preview" }], sources: ["rest-api"] }] },
     link: { type: "github", org: "tyask", repo: "Cake", productionBranch: "main", repoId: 1318171856 },
     env: [{ key: "DATABASE_URL", value: secrets[4] }], privateValue: secrets[3],
   };
@@ -99,9 +104,14 @@ class ReadFixture {
     this.calls.push({ method, hostname: url.hostname, path, search: url.search, token });
     assert.equal(method, "GET", "bootstrap transport must never receive a mutation");
     assert.ok(["api.vercel.com", "api.github.com", "console.neon.tech"].includes(url.hostname));
-    const override = this.responses.get(path);
+    const override = this.responses.get(path + url.search) ?? this.responses.get(path);
     if (override) return structuredClone(typeof override === "function" ? override(url) : override);
     if (path === `/v9/projects/${QA_PROJECT_ID}`) return { status: 200, data: structuredClone(this.project) };
+    if (path === `/repos/${QA_REPOSITORY}/branches/main`) return { status: 200, data: { name: "main", commit: { sha: otherSha } } };
+    if (path === `/repos/${QA_REPOSITORY}/contents/vercel.json`) {
+      assert.ok([sha, otherSha].includes(url.searchParams.get("ref") ?? ""), "configuration reads must use pinned complete commit SHAs");
+      return { status: 200, data: gitFile() };
+    }
     if (path === `/repos/${QA_REPOSITORY}/deployments`) {
       const page = Number(url.searchParams.get("page") ?? 1), limit = Number(url.searchParams.get("per_page") ?? 100);
       return { status: 200, data: structuredClone(this.records.slice((page - 1) * limit, page * limit)) };
@@ -177,7 +187,7 @@ function assertReleasePlan(report: Report, record: QaLeaseRecord) {
 test("preflightは有効化flagや承認なしでもGETだけを実施し、設定と資源を変更しない", async () => {
   const fixture = new ReadFixture(), before = structuredClone(fixture.env);
   const report = await fixture.reader().inspect({ action: "preflight" });
-  for (const name of ["Vercel project", "Preview source policy", "GitHub lease ledger", "GitHub repository Variables read", "Neon metadata read", "Native parent configuration", "Production comparison host configured"]) {
+  for (const name of ["Vercel project", "Preview enabled", "Main Git configuration", "GitHub lease ledger", "GitHub repository Variables read", "Neon metadata read", "Native parent configuration", "Production comparison host configured"]) {
     assert.equal(checked(report, name).ok, true, name);
   }
   assert.equal(report.plan, null);
@@ -185,6 +195,8 @@ test("preflightは有効化flagや承認なしでもGETだけを実施し、設�
   assert.equal(fixture.calls.some((call) => call.path.includes("/pulls/")), false);
   assert.deepEqual(fixture.calls.map(({ method, hostname, path, search }) => ({ method, hostname, path, search })), [
     { method: "GET", hostname: "api.vercel.com", path: `/v9/projects/${QA_PROJECT_ID}`, search: "?slug=fumin1" },
+    { method: "GET", hostname: "api.github.com", path: `/repos/${QA_REPOSITORY}/branches/main`, search: "" },
+    { method: "GET", hostname: "api.github.com", path: `/repos/${QA_REPOSITORY}/contents/vercel.json`, search: `?ref=${otherSha}` },
     { method: "GET", hostname: "api.github.com", path: `/repos/${QA_REPOSITORY}/deployments`, search: `?task=${QA_TASK}&per_page=100&page=1` },
     { method: "GET", hostname: "api.github.com", path: `/repos/${QA_REPOSITORY}/actions/variables`, search: "?per_page=30&page=1" },
     { method: "GET", hostname: "console.neon.tech", path: `/projects/${QA_NEON_PROJECT_ID}`, search: "" },
@@ -194,6 +206,81 @@ test("preflightは有効化flagや承認なしでもGETだけを実施し、設�
     ...["qa1", "qa2", "qa3"].map((slot) => ({ method: "GET", hostname: "api.vercel.com", path: `/v4/aliases/${qaAlias(slot as "qa1" | "qa2" | "qa3")}`, search: "?slug=fumin1" })),
   ]);
   assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+});
+
+test("任意のpreflight対象PRは現在OPEN headへ固定し、commitとblobだけを証跡に返す", async () => {
+  const fixture = new ReadFixture(), before = structuredClone(fixture.env);
+  const report = await fixture.reader().inspect({ action: "preflight", pr: 42, sha });
+  assert.deepEqual(report.gitConfiguration.target, { pr: 42, branch: fixture.pr.head.ref, commitSha: sha, blobSha: gitFile().sha });
+  assert.equal(checked(report, "Target Git configuration").ok, true);
+  assert.equal(report.prerequisites.find((entry) => entry.name === "Target Git configuration")?.confirmed, true);
+  assert.deepEqual(fixture.calls.filter((call) => call.path.endsWith("/contents/vercel.json")).map((call) => new URLSearchParams(call.search).get("ref")), [otherSha, sha]);
+  assert.deepEqual(fixture.env, before); assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+});
+
+test("mainまたは対象のGit設定が欠落・権限不足・不正なら未確認として他の読取結果を保持する", async () => {
+  const failures: Response[] = [
+    ...[401, 403, 404].map((status) => ({ status, data: { message: secrets[3], url: secrets[4] } })),
+    { status: 200, data: gitFile({ buildCommand: secrets[3] }) },
+    { status: 200, data: gitFile({ git: { deploymentEnabled: { "**": false, main: true, "codex/*": true } } }) },
+    { status: 200, data: gitFile({ git: { deploymentEnabled: { "**": false, main: "true" } } }) },
+    { status: 200, data: gitFile("private-unparseable-json") },
+    { status: 200, data: { ...gitFile(), sha: "c".repeat(40) } },
+  ];
+  for (const ref of [otherSha, sha]) for (const response of failures) {
+    const fixture = new ReadFixture();
+    fixture.responses.set(`/repos/${QA_REPOSITORY}/contents/vercel.json?ref=${ref}`, response);
+    const report = await fixture.reader().inspect({ action: "plan-probe", pr: 42, sha, slot: "qa2" });
+    const name = ref === otherSha ? "Main Git configuration" : "Target Git configuration";
+    assert.equal(checked(report, name).ok, false);
+    assert.equal(report.prerequisites.find((entry) => entry.name === name)?.confirmed, false);
+    assert.equal(ref === otherSha ? report.gitConfiguration.main : report.gitConfiguration.target, null);
+    assert.equal(checked(report, "Neon metadata read").ok, true);
+    assert.equal(checked(report, "GitHub lease ledger").ok, true);
+    assert.ok(report.plan, "the plan remains information with explicit unmet prerequisites");
+    if (response.status >= 400) assert.equal(checked(report, name).reason.status, response.status);
+    else assert.equal(checked(report, name).reason.code, "git-configuration-unconfirmed");
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+});
+
+test("現在mainのbranch名と完全SHAが未確認ならContentsを取得せず安全な理由を返す", async () => {
+  for (const response of [
+    { status: 403, data: { message: secrets[3] } }, { status: 404, data: null },
+    { status: 200, data: { name: "other", commit: { sha: otherSha } } },
+    { status: 200, data: { name: "main", commit: { sha: otherSha.slice(0, 7) } } },
+    { status: 200, data: { name: "main", commit: { sha: otherSha.toUpperCase() } } },
+  ]) {
+    const fixture = new ReadFixture(); fixture.responses.set(`/repos/${QA_REPOSITORY}/branches/main`, response);
+    const report = await fixture.reader().inspect({ action: "preflight" });
+    assert.equal(checked(report, "Main Git configuration").ok, false);
+    assert.equal(report.gitConfiguration.main, null);
+    assert.equal(fixture.calls.some((call) => call.path.endsWith("/contents/vercel.json")), false);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+});
+
+test("preflightのclosedまたは古いSHAの対象はGit証跡を返さず固定Contentsを読まない", async () => {
+  for (const failure of ["closed", "stale"] as const) {
+    const fixture = new ReadFixture();
+    if (failure === "closed") fixture.pr.state = "closed";
+    const report = await fixture.reader().inspect({ action: "preflight", pr: 42, sha: failure === "stale" ? otherSha : sha });
+    assert.equal(report.gitConfiguration.target, null);
+    assert.equal(checked(report, "Target Git configuration").reason.code, "stale-sha");
+    assert.equal(fixture.calls.filter((call) => call.path.endsWith("/contents/vercel.json")).length, 1);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+});
+
+test("返却manifestはmainと対象Git設定の欠落に依存せずGit APIを追加しない", async () => {
+  const fixture = new ReadFixture(), record = application(); fixture.setRecord(record);
+  fixture.responses.set(`/repos/${QA_REPOSITORY}/branches/main`, { status: 403, data: { message: secrets[3] } });
+  fixture.responses.set(`/repos/${QA_REPOSITORY}/contents/vercel.json`, { status: 404, data: null });
+  const report = await fixture.reader().inspect({ action: "plan-release", pr: 42, leaseId });
+  assertReleasePlan(report, record);
+  assert.equal(report.gitConfiguration.main, null); assert.equal(report.gitConfiguration.target, null);
+  assert.equal(fixture.calls.some((call) => call.path.endsWith("/branches/main") || call.path.endsWith("/contents/vercel.json")), false);
+  fixture.assertReadOnly(); assertPrivate(report);
 });
 
 test("Neon summaryはAPIのdefault・直接の親子関係・endpoint所属を観測し、名前から推測しない", async () => {
@@ -243,10 +330,10 @@ test("Neon summaryはAPIのdefault・直接の親子関係・endpoint所属を�
     { projectId: QA_NEON_PROJECT_ID, endpointId: "ep-z-preview", branchId: "br-z-preview", branchIdEvidence: "endpoint.branch_id" },
   ]);
   assert.equal(report.parent.emptyStateProven, false);
-  for (const name of ["Native parent empty state", "Native build and runtime identity", "Native cleanup behavior"]) {
+  for (const name of ["Native parent initial state", "Native build and runtime identity", "Native cleanup behavior"]) {
     assert.equal(report.prerequisites.find((entry) => entry.name === name)?.confirmed, false);
   }
-  assert.equal(fixture.calls.length, 10);
+  assert.equal(fixture.calls.length, 12);
   assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
 });
 
@@ -298,7 +385,7 @@ test("Neon summaryは許可項目だけを返し、URIや資格情報のbranch�
     for (const forbidden of [name, "private-qa-role", "private-qa-password", extras.host, "PRIVATE_API_KEY", "private-qa-user", "connection_uri", "connection_string"]) {
       assert.equal(output.includes(forbidden), false, "complete report must contain only allowlisted metadata");
     }
-    assert.equal(fixture.calls.length, 10);
+    assert.equal(fixture.calls.length, 12);
     assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
   }
 });
@@ -337,7 +424,7 @@ test("候補親の一覧と既存個別GETの確認済みmetadataが矛盾した
     assert.equal(checked(report, "Native parent configuration").ok, false);
     assert.equal(checked(report, "Native parent configuration").reason.code, "identity-mismatch");
     assert.equal(report.parent, null);
-    assert.equal(fixture.calls.length, 10);
+    assert.equal(fixture.calls.length, 12);
     assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
   }
 });
@@ -352,7 +439,7 @@ test("本番host比較はpoolerを第一DNSlabelだけで正規化し、DNSの�
     const report = await fixture.reader().inspect({ action: "preflight" });
     assert.deepEqual(report.productionHostComparison, { result: "match", endpoints: [{ endpointId: "ep-shared", result: "match" }] });
     assert.equal(JSON.stringify(report).includes(".neon.tech"), false);
-    assert.equal(fixture.calls.length, 10);
+    assert.equal(fixture.calls.length, 12);
     assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
   }
 });
@@ -368,11 +455,11 @@ test("全endpointの確認済み不一致だけをno-matchにし、隔離・Nati
     { endpointId: "ep-a", result: "no-match" }, { endpointId: "ep-z", result: "no-match" },
   ] });
   assert.equal(report.parent?.emptyStateProven, false);
-  for (const name of ["Native parent empty state", "Native build and runtime identity", "Native cleanup behavior"]) {
+  for (const name of ["Native parent initial state", "Native build and runtime identity", "Native cleanup behavior"]) {
     assert.equal(report.prerequisites.find((entry) => entry.name === name)?.confirmed, false);
   }
   assert.equal(JSON.stringify(report).includes(".neon.tech"), false);
-  assert.equal(fixture.calls.length, 10);
+  assert.equal(fixture.calls.length, 12);
   assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
 });
 
@@ -395,7 +482,7 @@ test("確認済みmatchを集約し、不明endpointまたは同IDの異なるsu
     assert.deepEqual(report.productionHostComparison.endpoints.map((entry) => entry.endpointId), endpoints.map((entry) => entry.id).sort());
     if (endpoints.length === 1) assert.equal(report.productionHostComparison.endpoints[0].result, "unknown");
     assert.equal(JSON.stringify(report).includes(".neon.tech"), false);
-    assert.equal(fixture.calls.length, 10);
+    assert.equal(fixture.calls.length, 12);
     assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
   }
 });
@@ -416,7 +503,7 @@ test("本番またはendpointのhost欠落・不正形式・endpoint ID矛盾は
     const report = await fixture.reader().inspect({ action: "preflight" });
     assert.deepEqual(report.productionHostComparison, { result: "unknown", endpoints: [{ endpointId: "ep-production", result: "unknown" }] });
     assert.equal(JSON.stringify(report).includes(".neon.tech"), false);
-    assert.equal(fixture.calls.length, 10);
+    assert.equal(fixture.calls.length, 12);
     assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
   }
   const fixture = new ReadFixture();
@@ -435,7 +522,7 @@ test("本番またはendpointのhost欠落・不正形式・endpoint ID矛盾は
   const malformedReport = await malformed.reader().inspect({ action: "preflight" });
   assert.deepEqual(malformedReport.productionHostComparison, { result: "unknown", endpoints: [{ endpointId: "ep-edge-", result: "unknown" }] });
   assert.equal(JSON.stringify(malformedReport).includes(".neon.tech"), false);
-  assert.equal(malformed.calls.length, 10);
+  assert.equal(malformed.calls.length, 12);
   assertDisabled(malformedReport); assertPrivate(malformedReport); malformed.assertReadOnly();
 });
 
@@ -470,6 +557,58 @@ test("本番hostやpooler同値をbranch名に注入してもmetadata summaryか
   }
 });
 
+test("Native名に埋め込まれたprefix/suffix・大小文字・poolerのhostも要約から省略する", async () => {
+  const host = environment().CAKE_QA_PRODUCTION_DATABASE_HOST;
+  const poolerHost = host.replace("ep-production.", "ep-production-pooler.");
+  for (const name of [`preview/${host}`, `${host}/copied`, `preview/${host.toUpperCase()}/copied`,
+    `preview/${poolerHost}`, `${poolerHost.toUpperCase()}/copied`, "preview/ep-unknown.us-east-2.aws.neon.tech/copied"]) {
+    const fixture = new ReadFixture(), observed = { ...parent, name };
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches`, { status: 200, data: { branches: [observed] } });
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches/${parent.id}`, { status: 200, data: { branch: observed } });
+    const report = await fixture.reader().inspect({ action: "preflight" });
+    assert.equal(report.native?.branches[0].name, null);
+    assert.equal(report.native?.branches[0].nameEvidence, "unavailable");
+    assert.equal(report.parent?.candidateSummary.branch.name, null);
+    assert.equal(JSON.stringify(report.native).toLowerCase().includes(".neon.tech"), false);
+    assert.equal(JSON.stringify(report.parent).toLowerCase().includes(".neon.tech"), false);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+});
+
+test("Native名に埋め込まれた既知credentialと供給host文字列も要約から省略する", async () => {
+  const names = [secrets[0], secrets[1], secrets[2], "bootstrap-secret-fallback", "supplied-production-marker"]
+    .flatMap((value) => [`preview/${value}`, `${value}/copied`, `preview/${value.toUpperCase()}/copied`]);
+  for (const name of names) {
+    const fixture = new ReadFixture(), observed = { ...parent, name };
+    fixture.env.GH_TOKEN = "bootstrap-secret-fallback";
+    fixture.env.CAKE_QA_PRODUCTION_DATABASE_HOST = "supplied-production-marker";
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches`, { status: 200, data: { branches: [observed] } });
+    fixture.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches/${parent.id}`, { status: 200, data: { branch: observed } });
+    const report = await fixture.reader().inspect({ action: "preflight" });
+    assert.equal(report.native?.branches[0].name, null);
+    assert.equal(report.parent?.candidateSummary.branch.name, null);
+    assert.equal(JSON.stringify(report.native).toLowerCase().includes(name.toLowerCase()), false);
+    assert.equal(JSON.stringify(report.parent).toLowerCase().includes(name.toLowerCase()), false);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+  const fixture = new ReadFixture(); fixture.env.GH_TOKEN = "";
+  const report = await fixture.reader().inspect({ action: "preflight" });
+  assert.equal(report.native?.branches[0].name, parent.name, "an empty credential must not hide safe branch names");
+});
+
+test("本番hostの大小文字・pooler表記が一致する場合は返却計画を作らない", async () => {
+  for (const productionHost of [database.host.toUpperCase(),
+    database.host.replace("ep-native.", "ep-native-pooler."), database.host.replace("ep-native.", "ep-native-pooler.").toUpperCase()]) {
+    const fixture = new ReadFixture(); fixture.setRecord(application());
+    fixture.env.CAKE_QA_PRODUCTION_DATABASE_HOST = productionHost;
+    const report = await fixture.reader().inspect({ action: "plan-release", pr: 42, leaseId });
+    assert.equal(report.productionHostComparison.result, "match");
+    assert.equal(report.plan, null);
+    assert.equal(checked(report, "Exact release resources").reason.code, "identity-mismatch");
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
+  }
+});
+
 test("本番host比較は既存probe・release計画とGET集合を変更しない", async () => {
   for (const action of ["plan-probe", "plan-release"] as const) {
     const fixture = new ReadFixture(); fixture.setRecord(application());
@@ -478,7 +617,7 @@ test("本番host比較は既存probe・release計画とGET集合を変更しな�
     assert.deepEqual(report.productionHostComparison, { result: "no-match", endpoints: [{ endpointId: database.endpointId, result: "no-match" }] });
     if (action === "plan-release") assertReleasePlan(report, fixture.record!);
     else assert.equal(report.plan, null);
-    assert.equal(fixture.calls.length, action === "plan-release" ? 15 : 11);
+    assert.equal(fixture.calls.length, action === "plan-release" ? 15 : 14);
     assert.equal(JSON.stringify(report.productionHostComparison).includes(".neon.tech"), false);
     assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
   }
@@ -560,7 +699,7 @@ test("Git連携種別・repo ID・production branchの不一致を成功とし�
     fixture.responses.set(`/v9/projects/${QA_PROJECT_ID}`, { status: 200, data: { ...fixture.project, link } });
     const report = await fixture.reader().inspect({ action: "preflight" });
     assert.equal(checked(report, "Vercel project").ok, false, change);
-    assert.equal(checked(report, "Preview source policy").ok, false, change);
+    assert.equal(checked(report, "Preview enabled").ok, false, change);
     fixture.assertReadOnly();
   }
 });
@@ -920,19 +1059,20 @@ test("既知のNative identityの返却計画は生成時だけ必要な設定�
   fixture.assertReadOnly();
 });
 
-test("Preview sourceの未知設定・重複・productionとの混在は確認済みpolicyとしない", async () => {
-  for (const sources of [["git"], ["rest-api", "rest-api"], [secrets[3]]]) {
+test("Hobbyのpolicy未設定や未知のpolicy項目を代替ゲートにせず、Git設定の証跡だけを返す", async () => {
+  for (const deploymentPolicy of [undefined, {}, { deploymentSources: [{ enabled: true, sources: ["git", secrets[3]] }] }]) {
     const fixture = new ReadFixture();
-    fixture.project.deploymentPolicy.deploymentSources[0].sources = sources;
+    fixture.responses.set(`/v9/projects/${QA_PROJECT_ID}`, { status: 200, data: { ...fixture.project, deploymentPolicy } });
     const report = await fixture.reader().inspect({ action: "preflight" });
-    assert.equal(checked(report, "Preview source policy").ok, false);
-    assertPrivate(report); fixture.assertReadOnly();
+    assert.equal(checked(report, "Preview enabled").ok, true);
+    assert.equal(checked(report, "Main Git configuration").ok, true);
+    assert.deepEqual(report.gitConfiguration, {
+      scope: "repository-git-trigger-configuration", backendForcedDeploymentPreventionProven: false,
+      main: { branch: "main", commitSha: otherSha, blobSha: gitFile().sha }, target: null,
+    });
+    assert.equal(Object.hasOwn(report, "sourcePolicy"), false);
+    assertDisabled(report); assertPrivate(report); fixture.assertReadOnly();
   }
-  const fixture = new ReadFixture();
-  fixture.project.deploymentPolicy.deploymentSources[0].environments.push({ type: "system", target: "production" });
-  const report = await fixture.reader().inspect({ action: "preflight" });
-  assert.equal(checked(report, "Preview source policy").ok, false);
-  assertPrivate(report); fixture.assertReadOnly();
 });
 
 test("正確な承認と有効化flagがあってもGET guardはmutationをtransport前に拒否する", async () => {
