@@ -17,9 +17,11 @@
 
 回帰には満枠待機、全snapshot系列、token/資源の所有者、DB再利用拒否、SHA更新、stale alias、応答喪失、未解決intent、削除失敗、Native残存、HTTP拒否、Vercel/Neon全ページ読取を含む。Neon paginationは公式の `pagination.next` を使用。Vercel/Neon操作の回帰はmockであり、実クラウドの成功を意味しない。
 
-PGlite 0.5.8で、実11migration、空状態検査、未知表/routine/enum/extension-owned table拒否、marker不一致、bootstrap抑止、seed前混入、seed途中失敗rollback、初回seed、同PR再build時の既存値保持、ローカルseed再実行を**20/20成功**で確認。Neon接続や複数接続のロック競合は検証していない。再現スクリプトは `scripts/verify-preview-database-safety.mjs`。repo依存にはPGliteを追加していない。
+PGlite 0.5.8で、実11migration、空状態検査、未知表/routine/enum/extension-owned table拒否、marker不一致、bootstrap抑止、seed前混入、seed途中失敗rollback、初回seed、同PR再build時の既存値保持、ローカルseed再実行を**23/23成功**で確認。Neon接続や複数接続のロック競合は検証していない。再現スクリプトは `scripts/verify-preview-database-safety.mjs`。repo依存にはPGliteを追加していない。
 
-この20件は承認済みNeonテストDBへの実行ではなく、ローカルの一時メモリDBへの実SQL検証。保存先dataDirや実DB接続情報を使わず、setupのconnectをPGliteへ差し替え、終了時にdb.closeする。永続DBデータは残らず、/tmpに残るのは依存package・cache・検証ソースだけ。Neon上のmigration、seed、削除は未実施。
+この23件は承認済みNeonテストDBへの実行ではなく、ローカルの一時メモリDBへの実SQL検証。保存先dataDirや実DB接続情報を使わず、setupのconnectをPGliteへ差し替え、終了時にdb.closeする。永続DBデータは残らず、/tmpに残るのは依存package・cache・検証ソースだけ。Neon上のmigration、seed、削除は未実施。
+
+2人fixtureのローカル補完では、検証済みQA環境のAをサイト管理者、Bを一般利用者として登録し、既存のダミーアドレスを使う。QAの再ログインは保存済み状態を照合するだけで、無効化や権限を修復しない。従来のローカル用fixtureは両者非管理者のまま。`npm run lint`、`npm test`（**439成功・失敗0・skip0**）、`npx tsc --noEmit --incremental false`、`npm run build`、`git diff --check` が成功した。クラウドの接続情報を外して検証し、push・Preview生成・Neonへの書き込みは行っていない。このローカル補完は、既存親DBの承認済み変更やNativeの親選択・実環境検証の完了を意味しない。
 
 ```bash
 npm install --prefix /tmp/cake-db-safety --no-save --no-package-lock --ignore-scripts @electric-sql/pglite@0.5.8

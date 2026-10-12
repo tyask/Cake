@@ -166,13 +166,13 @@ AUTH_MODE=test
 
 ログイン画面で`テストユーザーA`または`テストユーザーB`を選べます。どちらも通常のAuth.jsセッションを発行するため、通常ブラウザとシークレットウィンドウを使って、招待や共有ワークスペースを二人の別ユーザーとして確認できます。
 
-テストユーザーは初回ログイン時に自動登録されます。次を実行すると、テストユーザーA・Bに加えて、両方が参加済みの`テスト共有家計`ワークスペースも登録されます。繰り返し実行しても重複しません。
+従来のローカルテストでは初回ログイン時に固定ユーザーを登録します。QAでは空DB検査とseedを先に完了し、ログインは既存ユーザーの照合だけを行います。次のseedは固定A/Bと参加済みの`テスト共有家計`を登録し、同じQA PRの再実行では既存のデータ・名前・利用可否・権限を保持します。
 
 ```bash
 npm run db:seed:test
 ```
 
-固定ユーザーは`test-a@cake.local`と`test-b@cake.local`です。テストユーザーに管理者権限はなく、通常アカウント二人の上限にも含めません。Vercel Productionでは、誤って`AUTH_MODE=test`を設定してもテストログインは無効になります。Preview・ローカル用には、本番と別のNeonプロジェクトにあるタスク専用DBを使用してください。
+固定ユーザーはdummyの`test-a@cake.local`と`test-b@cake.local`です。新QAの初期fixtureは合計2人で、Aをアプリ全体の管理者（`is_admin=true`）と共有家計のOWNER、Bを一般ユーザーとMEMBERにします。管理者判定は有効なQA identityと現在のDB権限を照合し、Aだけ利用者一覧・登録・停止を許可します。Googleログインや実メールは使わず、既存のA/BボタンによるCredentialsログインを使います。従来のローカルfixtureは両方非管理者のままで、固定A/Bは通常アカウント二人の上限に含めません。Vercel Productionでは、誤って`AUTH_MODE=test`を設定してもテストログインは無効になります。Preview・ローカル用には、本番と別のNeonプロジェクトにあるタスク専用DBを使用してください。
 
 ## QA貸出枠（適用前・無効）
 
@@ -184,7 +184,7 @@ npm run db:seed:test
 
 `preflight` はGET以外を拒否するtransportで台帳、project/source policy、repository Variables名、Neon metadata件数の読取・照合結果と不足を報告します。対象PR/current headと指定枠はGET専用の `plan-probe` で追加照合できます。flagをtrueにせず、生成・台帳変更・削除・環境変数更新・DB操作を行いません。実projectのPreview専用REST-only policyに適合した後の生成実証は、同一repositoryのレビュー済み現在head、対象project・PR・枠を `CAKE_QA_PROBE_APPROVALS` のJSON配列へ明示承認し、期限内の手動probeに限定します。同じmainの単一queueを使い、pool/Gitゲート確認/Native確認flagはfalseまたは未設定のまま実証できます。probeのために未実証flagを先にtrueへ変えません。認証scopeは生成・削除の承認とは分けます。
 
-PGliteの実SQL20件はローカルWASMの一時メモリDBでの検証です。承認済みNeon DBを使用せず、実環境の接続情報も読み込んでいません。検証データは永続化せず、Neonのmigration・seedは未実施のままです。[再現用スクリプト](scripts/verify-preview-database-safety.mjs)と [検証報告](docs/qa-pool-verification.md) を参照してください。
+PGliteの実SQL23件はローカルWASMの一時メモリDBでの検証です。承認済みNeon DBを使用せず、実環境の接続情報も読み込んでいません。検証データは永続化せず、Neonのmigration・seedは未実施のままです。[再現用スクリプト](scripts/verify-preview-database-safety.mjs)と [検証報告](docs/qa-pool-verification.md) を参照してください。
 
 ## Codexとの開発フロー
 

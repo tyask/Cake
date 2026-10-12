@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -9,14 +10,9 @@ import { databaseConnectionString, guardPreviewDatabase, previewDatabaseGuardSql
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationDirectory = resolve(here, "../db/migrations");
 
-// This is the exact production bootstrap in the already-applied migration.
-// Keep the migration file immutable and suppress this one INSERT for Preview.
-const PRODUCTION_BOOTSTRAP = `INSERT INTO app_users (id, email, name, is_admin, is_enabled)
-VALUES (gen_random_uuid()::text, 't.yasu417@gmail.com', '管理者', true, true)
-ON CONFLICT (email) DO UPDATE SET
-  is_admin = true,
-  is_enabled = true,
-  updated_at = now();`;
+// Pin the already-applied production statement without duplicating its values.
+// Its complete removal prevents production identity data entering Preview SQL.
+const PRODUCTION_BOOTSTRAP_SHA256 = "e5fdd91acfc3b865f826c615f971743fcb9f2998615f46ef253548cfe3bf8bb9";
 
 export function prepareMigration(name, migration, environment) {
   if (!/^\d+_[a-z0-9_]+\.sql$/.test(name)
@@ -24,13 +20,12 @@ export function prepareMigration(name, migration, environment) {
     throw new Error("マイグレーション名または予約済みSQL区切りが不正です。");
   }
   if (environment.VERCEL_ENV === "preview" && name === "002_user_access.sql") {
-    if (migration.split(PRODUCTION_BOOTSTRAP).length !== 2) {
+    const candidates = [...migration.matchAll(/^[ \t]*INSERT\s+INTO\s+(?:public\.)?app_users\b[\s\S]*?;[ \t]*(?=\r?$)/gmi)];
+    if (candidates.length !== 1
+      || createHash("sha256").update(candidates[0][0]).digest("hex") !== PRODUCTION_BOOTSTRAP_SHA256) {
       throw new Error("Previewの初期管理者SQLを確認できません。DB更新を停止しました。");
     }
-    return migration.replace(PRODUCTION_BOOTSTRAP, PRODUCTION_BOOTSTRAP.replace(
-      "VALUES (gen_random_uuid()::text, 't.yasu417@gmail.com', '管理者', true, true)",
-      "SELECT gen_random_uuid()::text, 't.yasu417@gmail.com', '管理者', true, true WHERE false",
-    ));
+    return migration.replace(candidates[0][0], "");
   }
   return migration;
 }

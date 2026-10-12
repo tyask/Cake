@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { neon } from "@neondatabase/serverless";
 import { databaseConnectionString, previewDatabaseIdentity, previewDatabaseGuardSql, type DatabaseQueryExecutor } from "../lib/database-environment";
-import { TEST_USERS } from "../lib/test-users";
+import { activeTestUsers } from "../lib/test-fixture-context";
 import { formatSeedError } from "./seed-error";
 
 // @next/env marks its CommonJS exports as __esModule without a default export.
@@ -23,7 +23,8 @@ function literal(value: string): string {
 export function testSeedSql(environment: SeedEnvironment): string {
   if (environment.VERCEL_ENV === "production") throw new Error("Productionではテストデータを登録できません。");
   const identity = previewDatabaseIdentity(environment);
-  const [owner, member] = TEST_USERS;
+  const users = activeTestUsers(environment);
+  const [owner, member] = users;
   const workspace = literal(TEST_SHARED_WORKSPACE.id);
   const samples = `
     IF EXISTS (
@@ -35,8 +36,8 @@ export function testSeedSql(environment: SeedEnvironment): string {
     ) THEN
       RAISE EXCEPTION 'Cake test fixture identity mismatch';
     END IF;
-    ${TEST_USERS.map((user) => `INSERT INTO app_users (id, email, name, image_url, is_admin, is_enabled)
-      VALUES (${literal(user.id)}, ${literal(user.email)}, ${literal(user.name)}, NULL, false, true)
+    ${users.map((user) => `INSERT INTO app_users (id, email, name, image_url, is_admin, is_enabled)
+      VALUES (${literal(user.id)}, ${literal(user.email)}, ${literal(user.name)}, NULL, ${identity && "isAdmin" in user && user.isAdmin === true ? "true" : "false"}, true)
       ON CONFLICT (id) DO NOTHING;`).join("\n")}
     INSERT INTO workspaces (id, name, type, owner_user_id)
       VALUES (${workspace}::uuid, ${literal(TEST_SHARED_WORKSPACE.name)}, 'SHARED', ${literal(owner.id)})
@@ -96,7 +97,7 @@ async function main(): Promise<void> {
     testSeedSql(process.env);
     stage = "DB接続の初期化";
     await seedTestUsers(process.env);
-    console.log(`${TEST_USERS.length}人の固定テストユーザーと共有ワークスペースを確認しました。既存のQAデータは保持します。`);
+    console.log(`${activeTestUsers(process.env).length}人の固定テストユーザーと共有ワークスペースを確認しました。既存のQAデータは保持します。`);
   } catch (error) {
     console.error(stage === "DB設定の確認" && error instanceof Error ? error.message : formatSeedError(stage, error));
     process.exitCode = 1;

@@ -10,7 +10,7 @@
 
 実環境では、全既存PRを含むGit自動Preview停止、REST `gitSource` によるNative branching、候補aliasの割当、Actions `queue: max`、最後のdeployment削除後のbranch/endpoint消失をまだ検証していない。生成前ゲートの公式候補はDeployment PoliciesのPreview専用REST-only設定。実projectの読取で適合するpolicyを確認できておらず、team GETも403のためPro/EnterpriseのplanとOwnerによる設定適用条件を確認できない。現在は実証開始のブロッカーであり、設定名やローカルテストだけで適用済みと扱わない。
 
-PGliteの実SQL20ケースは承認済みNeon DBを使わず、ローカルWASMの一時メモリDBで実行した。保存先を指定せず、終了時にDBを閉じるため検証データは永続化しない。残る一時ファイルはエンジン・npmキャッシュ・検証ソースだけで、Neonのmigration・seed・データ変更は未実施。詳細は下記「ローカルSQL検証」と検証報告を参照する。
+PGliteの実SQL23ケースは承認済みNeon DBを使わず、ローカルWASMの一時メモリDBで実行した。保存先を指定せず、終了時にDBを閉じるため検証データは永続化しない。残る一時ファイルはエンジン・npmキャッシュ・検証ソースだけで、Neonのmigration・seed・データ変更は未実施。詳細は下記「ローカルSQL検証」と検証報告を参照する。
 
 ## URLと貸出数
 
@@ -105,7 +105,7 @@ NeonのPreview actionと `Resource must be active before deployment` が必要�
 
 新leaseは新feature枝由来のDBを使う。Native親から引き継いだ業務データ、未知表、既存schema等をDB guardが検出したらfail closedで停止する。設定確認だけをNative親の空証明にせず、migration前に実DBの空状態を確認する。確認失敗時に行を削除して続行しない。
 
-初回空確認とPR/feature枝/lease/endpoint identity登録、seed前混入検査、固定サンプルとseed済み記録はtransactionで扱う。新DBへ未適用migrationと固定テストユーザー・共有ワークスペースを登録する。同PR更新はidentityを照合し、未適用migrationだけを適用して、既存サンプルとQAで入力・編集したデータを保持する。SHA更新だけで返却・新leaseへ切り替えない。
+初回空確認とPR/feature枝/lease/endpoint identity登録、seed前混入検査、固定サンプルとseed済み記録はtransactionで扱う。新DBへ未適用migrationと固定テストユーザー・共有ワークスペースを登録する。固定fixtureはdummyのA/Bだけの合計2人で、Aはサイト管理者・共有OWNER、Bは一般・MEMBERとする。Previewのmigration準備では既知のProduction初期管理者INSERT全体を除き、第三ユーザーや実メールを混入させない。適用済みmigration原文とProduction処理は変更しない。同PR更新はidentityを照合し、未適用migrationだけを適用して、既存サンプルとQAで入力・編集したデータを保持する。SHA更新だけで返却・新leaseへ切り替えない。
 
 ビルド、runtime、`db:setup`、`db:seed:test` に同じ接続・identity確認を適用する。pooled/unpooledの同一endpointも比較し、専用接続なし、host不明、本番host一致、別PR/別lease/別endpointならDB操作前に停止する。DBのDROP/TRUNCATE/resetや既存schema消去は自動実行しない。空DBに戻すためschema消去が必要なら、対象と影響を確認して別途明示承認を得る。
 
@@ -141,7 +141,7 @@ Preview完了後、Deployment固有URLでPC/スマートフォンの画面とAPI
 
 ## ローカルSQL検証
 
-`scripts/verify-preview-database-safety.mjs` は任意に導入したPGlite 0.5.8で全11migrationと20ケースを実行する補助スクリプト。`dataDir`を指定しない[一時メモリDB](https://pglite.dev/docs/filesystems)を使い、`finally`で閉じる。実環境の本番・`CAKE_TEST_DATABASE_URL`を読み込まず、setupの接続先はローカルDBへ差し替え、seedは生成したSQLを同じDBへ実行する。DELETE/DROPもこの一時DB内の検証fixtureに限る。
+`scripts/verify-preview-database-safety.mjs` は任意に導入したPGlite 0.5.8で全11migrationと23ケースを実行する補助スクリプト。`dataDir`を指定しない[一時メモリDB](https://pglite.dev/docs/filesystems)を使い、`finally`で閉じる。実環境の本番・`CAKE_TEST_DATABASE_URL`を読み込まず、setupの接続先はローカルDBへ差し替え、seedは生成したSQLを同じDBへ実行する。DELETE/DROPもこの一時DB内の検証fixtureに限る。
 
 この成功は承認済みNeonテストDBでの実測ではない。Neon上のmigration/seed、Native作成/保持/cleanup、複数接続の競合は未実施のまま。一時ディレクトリに残るエンジン・npmキャッシュ・検証ソースは実証DBの保存データではない。再現コマンドと検証結果は [検証報告](qa-pool-verification.md) を参照する。
 

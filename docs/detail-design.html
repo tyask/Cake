@@ -400,7 +400,7 @@
           <h2>5. 認証・セッション詳細設計</h2>
           <div class="grid-2">
             <div class="card"><h3>Googleモード</h3><ul><li>テスト認証が無効なときGoogle Providerを登録。</li><li>Googleの確認済みメールとProviderのメールが一致し、<code>app_users</code>に有効な通常ユーザーとして事前登録されていることが必要。</li><li>メールは前後空白を除去して小文字化。別名メールの統合は行わない。</li><li>GoogleのSubjectではなく登録済みの内部IDをJWT <code>sub</code>に保存。</li></ul></div>
-            <div class="card"><h3>テストモード</h3><ul><li><code>AUTH_MODE=test</code>かつ<code>VERCEL_ENV !== production</code>。</li><li>Credentials Provider <code>test-login</code>を登録し、固定のA/Bキーを解決。</li><li>固定IDとメールの組合せだけを自動登録/有効化。保存済みの表示名は維持。</li><li>常に非管理者。通常アカウント二人の上限から除外。Productionでは強制無効。</li></ul></div>
+            <div class="card"><h3>テストモード</h3><ul><li><code>AUTH_MODE=test</code>かつ<code>VERCEL_ENV !== production</code>。</li><li>Credentials Provider <code>test-login</code>を登録し、固定のA/Bキーを解決。</li><li>固定IDとdummyメールを照合。QAはseed済みの有効状態・役割をSELECTで確認し、自動登録/再有効化/権限修復をしない。保存済みの表示名は維持。</li><li>新QAは固定2人だけでAがサイト管理者・共有OWNER、Bが一般・MEMBER。現在のDB権限とQA identityを照合し、Aだけ管理操作を許可。従来ローカルは非管理者。固定A/Bは人数上限から除外し、Productionでは強制無効。</li></ul></div>
           </div>
           <h3>ログインと現在ユーザー</h3>
           <ol>
@@ -451,7 +451,7 @@
           <div class="table-wrap"><table>
             <thead><tr><th>Method</th><th>入力・処理</th></tr></thead>
             <tbody>
-              <tr><td>GET</td><td>管理者の利用者一覧。固定テストID/メールのA・Bを除外し、管理者・有効状態・作成順で返す。</td></tr>
+              <tr><td>GET</td><td>管理者の利用者一覧。通常管理者には固定A/Bを除外し、照合済みQA管理者Aには固定2人も表示する。管理者・有効状態・作成順で返す。</td></tr>
               <tr><td>POST</td><td>strict JSON <code>{ email, name? }</code>。Email正規化、name任意1〜120文字。通常ユーザーを新規登録/停止済み再有効化し一覧を返す。</td></tr>
               <tr><td>DELETE</td><td>strict JSON <code>{ userId }</code>（1〜200文字）。有効な非管理者だけを停止して一覧を返す。</td></tr>
             </tbody>
@@ -744,7 +744,7 @@ BootstrapData extends BootstrapMetadata
             <li>workspace更新は招待承認を除き所属を確認。actorは同じworkspaceの参加者であることを追加検証。</li>
             <li>招待は本人のログインメールと宛先の一致を確認し、平文tokenは保存せずSHA-256を保存する。招待承認だけでは未登録Googleユーザーの利用許可を与えない。</li>
             <li>所属者はOWNER/MEMBERによらず名称・招待・割合・ルール・明細・清算・workspace削除を操作できる。削除は名称一致と確認ダイアログを使い、再認証は行わない。</li>
-            <li>利用者管理はテストユーザーを除く有効管理者のみ。管理者の停止は拒否し、停止済み通常ユーザーの再登録は既存内部IDとデータを保持。</li>
+            <li>利用者管理は現在のDBで有効な管理者のみ。固定テストではQA identityを照合したAだけ許可する。管理者の停止は拒否し、停止済み通常ユーザーの再登録は既存内部IDとデータを保持。</li>
           </ul>
         </section>
 
@@ -777,7 +777,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td><code>npm test</code></td><td><code>tsx --test tests/*.test.ts</code>。</td></tr>
               <tr><td><code>npm run lint</code> / <code>npm run build</code></td><td>ESLintとNext.js Production build・型/ルート検証。</td></tr>
               <tr><td><code>npm run db:setup</code></td><td>未適用番号付きSQLと適用履歴をatomicに追加。</td></tr>
-              <tr><td><code>npm run db:seed:test</code></td><td>固定テストユーザーA/Bを非管理者・有効として登録し、共有家計と所属を準備。QAでは新PRの空DB確認後に初回だけ固定サンプルを登録し、同PRの操作データを維持する。</td></tr>
+              <tr><td><code>npm run db:seed:test</code></td><td>従来ローカルはA/Bを非管理者として登録する。新QAはdummyのAをサイト管理者・共有OWNER、Bを一般・MEMBERとして合計2人だけ登録する。QAでは新PRの空DB確認後に初回だけ固定サンプルを登録し、同PRの操作データを維持する。</td></tr>
               <tr><td><code>npm run build:vercel</code></td><td>Previewは必須環境変数・DB接続前guard確認 → DB内の所有権/初回空状態確認 → db:setup → テスト認証時db:seed:test → build。Productionは必須環境変数確認 → build → db:setup。いずれも失敗時に公開停止。Development/ローカルはbuildのみ。</td></tr>
               <tr><td><code>npm run deploy:preview</code></td><td>scripts/task-preview.tsでクリーンなcodex/ブランチとHEADを扱い、共通checkerで生成前ゲートとHEADのmain-only停止設定、pool有効化、先行main向けPRを確認してpushし、現在leaseに一致するwriterのREADY台帳記録からDeployment固有URLを記録。有効化前の移行設定PRは未検証事項を明記する。</td></tr>
               <tr><td><code>npm run task:pr</code></td><td>draft入口は共通checkerで<code>CAKE_QA_GIT_GATE_CONFIRMED=true</code>とHEAD内<code>**: false / main: true</code>を確認し、必要時だけpushして未Previewのmain向けdraftを作成・更新する。QA pool運用では貸出前にPRを確定し、配置後の報告は現在head・lease・Preview記録と照合する。移行設定の未検証事項を隠さず、マージはしない。引数はREADMEを参照。</td></tr>
@@ -809,7 +809,7 @@ BootstrapData extends BootstrapMetadata
           <p>配置APIとalias割当は<a href="https://vercel.com/docs/rest-api/deployments/create-a-new-deployment">Vercel公式create deployment</a>・<a href="https://vercel.com/docs/rest-api/aliases/assign-an-alias">assign alias</a>、Native DBは<a href="https://neon.com/docs/guides/vercel-managed-integration">Neon公式Vercel managed integration</a>を参照。同feature枝の最後のdeployment削除に伴うNative branch cleanupは<a href="https://neon.com/docs/guides/vercel-branch-cleanup">Neon公式cleanup</a>に従い、REST配置・削除を含む実環境でbranchとendpointの不在まで確認する。</p>
           <div class="warning">QA poolは既定無効。GET専用preflightは確認flagや有効化flagを必要とせず、不足認証・設定・未実証事項を報告する。公式候補は<a href="https://vercel.com/docs/deployments/deployment-policy">Deployment Policies</a>のproject overrideでPreviewだけREST API sourceを許可する方式（Pro/Enterprise・Owner適用条件）。<a href="https://raw.githubusercontent.com/vercel/sdk/main/docs/models/getprojectdeploymentpolicy.md">GET policy model</a>のnull/省略はteam継承であり明示overrideの証拠にしない。現在は実policyを確認できず、team GET403でplan/Owner条件も不明のためprobeを含む生成はblocked。適合policy確認後はpool/Gitゲート確認/Native確認flagをfalseまたは未設定のまま、期限付きで明示承認した手動probeで実証する。RESTのsource分類とNativeの生成前阻止、alias、queue、cleanupはlive未実証。新secret・追加権限・network設定・Productionのremote変更は今回未許可。認証scope・生成承認・削除承認・cleanup実証結果を分ける。</div>
           <p>消失確認は資源削除の確認であり、開始済みFunction/transactionの即停止を保証しない。現writerにはcancel APIと実処理の監視・終了確認がなく、live停止挙動も未実証。非秘密guard値をcreate requestのenv/build.envで渡す案は、<a href="https://raw.githubusercontent.com/vercel/vercel/main/packages/client/src/types.ts">公式clientのDeploymentOptions</a>と<a href="https://raw.githubusercontent.com/vercel/vercel/main/packages/client/src/deploy.ts">POST実装</a>に根拠がある。ただし公開REST schemaにはfieldの記載がなく、clientはfiles付与の経路でgitSourceを定義していない。writerのfilesなしgitSource併用・build/runtime注入・Native動作は推論とlive未検証を区別する。feature枝・project/branch環境変数はremote更新しない。</p>
-          <p>PGliteの実SQL20ケースはローカルWASMの一時メモリDBで全11migrationとguard/seedを実行したもの。dataDirやdump保存は指定せずfinallyでDBを閉じ、実証データは永続化しない。一時ファイルはエンジン・npmキャッシュ・検証ソースのみ。実環境の接続情報や承認済みNeon DBは使わず、Neonのmigration/seedと複数接続競合は未実施。検証SQLのDELETE/DROPはその一時DB内に限定する。</p>
+          <p>PGliteの実SQL23ケースはローカルWASMの一時メモリDBで全11migrationとguard/seedを実行したもの。dataDirやdump保存は指定せずfinallyでDBを閉じ、実証データは永続化しない。一時ファイルはエンジン・npmキャッシュ・検証ソースのみ。実環境の接続情報や承認済みNeon DBは使わず、Neonのmigration/seedと複数接続競合は未実施。検証SQLのDELETE/DROPはその一時DB内に限定する。</p>
           <h3>DB環境と公開順序</h3>
           <p><code>vercel.json</code>はbuildCommandにbuild:vercel、regionにsin1を指定する。Vercel MarketplaceのNeonリソース<code>cake-preview</code>は本番と別のNeonプロジェクトを使い、Previewだけへ接続する。環境変数は<code>CAKE_TEST_</code>で始め、貸出先feature枝のNative Preview BranchingでDBをビルドとAPIに共用する。貸出前の自動Git PreviewとDB生成を防ぐ設定は、設定を含まない古いPR、既存Preview、手動経路への効果も読取確認・実検証してから適用する。</p>
           <p>Previewは<code>CAKE_TEST_DATABASE_URL</code>が未設定なら停止し、通常の<code>DATABASE_URL</code>を代用しない。Productionはテストデータを登録しない。アプリビルド成功後に本番DBを更新し、更新失敗時には公開しない。DBは自動で巻き戻らないため、公開中の旧版との互換性を保ち、列・テーブルの削除や名前変更を段階的に行う。通常のリモートビルドが正規経路で、手動Productionデプロイは明示依頼時だけ行う。</p>

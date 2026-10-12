@@ -535,7 +535,7 @@
           <p>新PRのDBは空状態を検査してからmigrationと固定サンプルを登録する。継承schema・データなどの混入は停止し、自動resetを行わない。通常運用の有効化後は、現在PR head・lease・明示承認された完全SHAに一致するREADYだけが候補aliasを更新できる。probeの成功から確認flagや通常運用を自動有効化しない。</p>
           <p>返却前の<code>plan-release</code>はGET専用で、project・PR・slot・lease・head SHA・全記録deployment IDの昇順配列・alias hostname（probeはnull）・DB identityまたはnullを含むmanifestを返すだけとする。承認時に期限を添え、全項目が完全一致する削除承認を得てから<code>held → deleting → free</code>へ進む。intent/orphanと全記録IDの所有先を検証し、承認対象だけ削除する。Native branchと全endpointの消失後だけfreeにし、失敗・不明・遅延はdeletingで保持する。cancel APIとFunction/transaction監視は未実装で、資源消失を即停止保証にしない。詳細は<a href="qa-pool.md">QA貸出運用</a>を参照。</p>
           <div class="warning">QA poolは既定無効。公式候補は<a href="https://vercel.com/docs/deployments/deployment-policy">Deployment Policies</a>のproject overrideでPreviewだけREST API sourceを許可する方式（Pro/Enterprise・Owner適用条件）。実projectで適合policyを読取確認できず、team GET403でplan/Owner条件も不明のため現時点のprobeを含む生成はblocked。Git source拒否とREST Nativeのlive動作は未実証で、全source経路の全面停止を保証しない。alias、queue、cleanupも未実証で<code>NEON_API_KEY</code>がない。新secret・追加権限・network設定・Productionのremote変更は今回未許可。限定生成承認と削除ID承認を分け、包括booleanで削除を許可しない。</div>
-          <p>PGliteの実SQL20ケースはローカルWASMの一時メモリDBで実施し、検証データは永続化しない。承認済みNeon DBや実環境の接続情報は使用せず、Neon上のmigration/seedと複数接続競合は未実施。検証SQLのDELETE/DROPはその一時DB内だけに限る。</p>
+          <p>PGliteの実SQL23ケースはローカルWASMの一時メモリDBで実施し、検証データは永続化しない。承認済みNeon DBや実環境の接続情報は使用せず、Neon上のmigration/seedと複数接続競合は未実施。検証SQLのDELETE/DROPはその一時DB内だけに限る。</p>
           <p>設計合意後、<code>npm run task:start -- &lt;タスク名&gt;</code>で最新の<code>origin/main</code>から<code>codex/&lt;タスク名&gt;</code>と専用worktreeを作成する。元の未コミット変更は保持し、環境ファイルや依存関係のコピーは行わない。開発・lint・test・buildの完了後にコミットし、生成前ゲートを確認して<code>task:pr --draft</code>で先にmain向けPRを作る。QA poolの承認済み有効化後、<code>npm run deploy:preview</code>が同PR・同lease・現在HEADの台帳記録を読む。</p>
           <p>QA poolを有効化した運用では、main向けPRの貸出を確定してからwriterがfeature枝の完全SHAをPreviewへ配置する。QA poolの未有効化中は、移行設定PRの完了条件に従来の自動Preview成功を要求せず、未検証事項を記載する。Previewのビルドと実行時は<code>CAKE_TEST_DATABASE_URL</code>を必須にし、通常の<code>DATABASE_URL</code>を代用しない。DB接続前のlease・host照合とDB内の空状態/所有権guardに成功した後、migration、初回固定サンプル登録、アプリビルドの順に実行する。</p>
           <p>検証後、結果とPreview URLを<code>main</code>向けPRへ記録する。必須CIが成功し、ユーザーがレビューして手動でマージした後、Productionでアプリビルド、本番DB更新の順に実行し、成功時だけ公開する。DB更新は自動で巻き戻らず、公開中の旧版と互換性を保つ。手動のProductionデプロイは明示依頼時だけ行う。具体的な環境設定と操作はREADME、作業規則は<code>AGENTS.md</code>に従う。</p>
@@ -800,7 +800,7 @@
               <tr><td>ルール編集・並べ替え・名称変更・削除</td><td>可</td><td>可</td><td>不可</td></tr>
             </tbody>
           </table></div>
-          <p>明細の金額・割合等の編集と削除は未清算のみ。メモは清算状態にかかわらず更新できる。利用者の登録・停止はワークスペースの所有者とは独立した管理者専用操作であり、通常メンバーやテストユーザーに権限を付与しない。</p>
+          <p>明細の金額・割合等の編集と削除は未清算のみ。メモは清算状態にかかわらず更新できる。利用者の登録・停止はワークスペースの所有者とは独立した管理者専用操作であり、通常メンバーには権限を付与しない。新QA固定fixtureでは有効なQA identityとDB権限を確認したAだけサイト管理者として扱い、Bと従来ローカルfixtureは非管理者とする。</p>
           <h3>操作記録</h3>
           <p>明細は作成者・更新者・作成日時・更新日時、ワークスペースは所有者・作成日時・更新日時、ルールは作成者・作成日時を保持する。清算とCSV取込は専用履歴に完了者／取込者と日時・計算結果／登録件数を残す。汎用の全操作履歴や各項目の変更前後履歴は持たない。</p>
         </section>
