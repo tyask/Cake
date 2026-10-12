@@ -47,6 +47,6 @@ test("実際の@next/envを使い、ローカルenvファイルの読み込み�
 test("Vercelの環境変数が渡された実起動でも環境読み込みのTypeErrorを起こさない", () => {
   // Injected variables retain precedence over .env.local, as on the build host.
   assertEnvironmentLoaded(runSeed("DATABASE_URL=\n", {
-    VERCEL: "1", VERCEL_ENV: "preview", AUTH_MODE: "test", DATABASE_URL: "isolated-invalid-url",
+    VERCEL: "1", VERCEL_ENV: "preview", AUTH_MODE: "test", DATABASE_URL: "production-url-must-not-be-used", CAKE_TEST_DATABASE_URL: "isolated-invalid-url",
   }));
 });

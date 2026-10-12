@@ -1,6 +1,22 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build:vercel",
-  "regions": ["sin1"],
-  "crons": [{ "path": "/api/cron/recurring-payments", "schedule": "0 0 * * *" }]
+  "regions": [
+    "sin1"
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/recurring-payments",
+      "schedule": "0 0 * * *"
+    }
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "**": false,
+      "main": true,
+      "qa1": true,
+      "qa2": true,
+      "qa3": true
+    }
+  }
 }

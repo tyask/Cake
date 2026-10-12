@@ -528,6 +528,7 @@
           <p>初回表示、ワークスペース切替、ホーム・取引明細・清算への移動は<code>full</code>で明細・清算・履歴まで取得する。取込・設定への移動と保存後は<code>metadata</code>でユーザー、ワークスペース一覧、招待、選択先、参加者、ルールを取得する。同じワークスペースでは取得済みの明細・清算・履歴を保持し、選択先が変われば全データを再取得する。</p>
           <p>通常のログイン済み<code>GET /api/app</code>は利用可否確認と画面用の集約取得を各1 SQLで行い、<code>full</code>・<code>metadata</code>ともに2 SQL・2回のNeon往復となる。初めてのワークスペース作成などでは追加処理がある。読込ではプロフィールをDBへ書き戻さない。</p>
           <h3>開発・Preview・Productionの配置</h3>
+          <p>固定QA移行の設定案ではGit枝qa1/qa2/qa3と専用Neon DBを再利用する。自動デプロイは設定を含む枝のmainと固定枠だけを許可し、確認済みendpointとの照合をDB操作前に行う。貸出台帳の保存方式は未決定で、状態held/drainingは使用中。停止確認・静的待機deployment・DB保持を確認してから返却する。クラウド未適用であり、従来フローからの移行条件と詳細は<a href="qa-pool.md">固定QA運用</a>を参照。</p>
           <p>設計合意後、<code>npm run task:start -- &lt;タスク名&gt;</code>で最新の<code>origin/main</code>から<code>codex/&lt;タスク名&gt;</code>と専用worktreeを作成する。元の未コミット変更は保持し、環境ファイルや依存関係のコピーは行わない。開発・lint・test・buildの完了後にコミットし、<code>npm run deploy:preview</code>でブランチをpushする。</p>
           <p>Git連携で作成されたPreviewのコミットがHEADと一致し、READYになったことを確認してDeployment固有のURLで画面・APIを検証する。テストDBは本番とは別のNeonプロジェクトからGitブランチごとに作成する。Previewのビルドと実行時は<code>CAKE_TEST_DATABASE_URL</code>を必須にし、通常の<code>DATABASE_URL</code>を代用しない。ビルドではマイグレーション、テスト認証時のデータ登録、アプリビルドの順に実行する。</p>
           <p>検証後、結果とPreview URLを含む<code>main</code>向けPRを作成する。必須CIが成功し、ユーザーがレビューして手動でマージした後、Productionでアプリビルド、本番DB更新の順に実行し、成功時だけ公開する。DB更新は自動で巻き戻らず、公開中の旧版と互換性を保つ。手動のProductionデプロイは明示依頼時だけ行う。具体的な環境設定と操作はREADME、作業規則は<code>AGENTS.md</code>に従う。</p>

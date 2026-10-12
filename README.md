@@ -174,6 +174,10 @@ npm run db:seed:test
 
 固定ユーザーは`test-a@cake.local`と`test-b@cake.local`です。テストユーザーに管理者権限はなく、通常アカウント二人の上限にも含めません。Vercel Productionでは、誤って`AUTH_MODE=test`を設定してもテストログインは無効になります。Preview・ローカル用には、本番と別のNeonプロジェクトにあるタスク専用DBを使用してください。
 
+## 固定QA枠（設定PRの適用前）
+
+検証枠は `qa1` / `qa2` / `qa3`。貸出台帳の保存方式は検討中で、管理ブランチや管理DBは作成していません。予約・DB照合・旧処理停止・retention確認・URLの命名と台帳の選択肢は [固定QA運用](docs/qa-pool.md) に記載しています。実URL・DB名は未確認で、クラウドには適用していません。移行後は通常のcodex枝Previewを停止するため、以下の従来 `deploy:preview` / `task:pr` 手順をそのまま併用しません。
+
 ## Codexとの開発フロー
 
 設計を合意してから、タスクごとのブランチ・worktree・テストDBで開発します。元の作業フォルダにある未コミット変更はそのまま保持します。

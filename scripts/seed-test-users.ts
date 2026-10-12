@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { neon } from "@neondatabase/serverless";
+import { databaseConnectionString } from "../lib/database-environment";
 import { TEST_USERS } from "../lib/test-users";
 import { formatSeedError } from "./seed-error";
 
@@ -17,9 +18,11 @@ let stage = "環境設定の読み込み";
 async function main() {
   loadEnvConfig(process.cwd());
 
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    console.error("DATABASE_URL を設定してください。");
+  let connectionString: string;
+  try {
+    connectionString = databaseConnectionString(process.env);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "DB設定を確認してください。");
     process.exit(1);
   }
 

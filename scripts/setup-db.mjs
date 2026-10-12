@@ -4,11 +4,15 @@ import { dirname, resolve } from "node:path";
 import nextEnv from "@next/env";
 import { neon } from "@neondatabase/serverless";
 
+import { databaseConnectionString } from "../lib/database-connection.mjs";
+
 nextEnv.loadEnvConfig(process.cwd());
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  console.error("DATABASE_URL を設定してください。");
+let connectionString;
+try {
+  connectionString = databaseConnectionString(process.env);
+} catch (error) {
+  console.error(error.message);
   process.exit(1);
 }
 
