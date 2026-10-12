@@ -10,7 +10,9 @@
 
 実環境では、全既存PRを含むGit自動Preview停止、REST `gitSource` によるNative branching、候補aliasの割当、Actions `queue: max`、最後のdeployment削除後のbranch/endpoint消失をまだ検証していない。生成前ゲートの公式候補はDeployment PoliciesのPreview専用REST-only設定。実projectの読取で適合するpolicyを確認できておらず、team GETも403のためPro/EnterpriseのplanとOwnerによる設定適用条件を確認できない。現在は実証開始のブロッカーであり、設定名やローカルテストだけで適用済みと扱わない。
 
-PGliteの実SQL23ケースは承認済みNeon DBを使わず、ローカルWASMの一時メモリDBで実行した。保存先を指定せず、終了時にDBを閉じるため検証データは永続化しない。残る一時ファイルはエンジン・npmキャッシュ・検証ソースだけで、Neonのmigration・seed・データ変更は未実施。詳細は下記「ローカルSQL検証」と検証報告を参照する。
+PGliteの実SQL検証は承認済みNeon DBを使わず、ローカルWASMの一時メモリDBで実行する。保存先を指定せず、終了時にDBを閉じるため検証データは永続化しない。残る一時ファイルはエンジン・npmキャッシュ・検証ソースだけで、この検証からNeonのmigration・seed・データ変更は行わない。詳細は下記「ローカルSQL検証」と検証報告を参照する。
+
+別途明示承認されたQA親DBへの限定変更は、2026-10-12 13:04:30 UTCにproject `misty-meadow-88903426` / branch `br-lively-frog-b3y2mauu` / endpoint `ep-autumn-pine-b3nii81c`のQA mainだけで実行した。Aの管理者化1件と第三管理者の削除1件だけをcommitし、再読取でユーザー二人（A管理者/B一般）、共有家計一件、所属二件、migration台帳11件、guard一件、業務7表すべて空、および他の行・schemaの保持を確認した。この確認はNative親選択、新PRのbranch生成・受入れ、ログインや通常運用の実証完了を意味しない。追加のDB書込みや他の資源変更は許可されていない。
 
 ## URLと貸出数
 
@@ -57,7 +59,7 @@ GitHub Deployment作成は完全SHAを `ref` に指定し、`auto_merge: false`�
 | `CAKE_QA_POOL_ENABLED` | 通常運用の有効化。生成前ゲートとNativeの実証が完了した後に明示承認でtrueにする |
 | `CAKE_QA_GIT_GATE_CONFIRMED` | Git source拒否を含む生成前ゲートのlive確認結果。通常運用はこのflagと実projectのREST-only policy双方を確認する。限定probeのために先にtrueへ変更しない |
 | `CAKE_QA_NATIVE_CONFIRMED` | REST Git deploymentのNative動作を確認した後の通常運用条件。初回実証のために先にtrueへ変更しない |
-| `CAKE_QA_PARENT_BRANCH_ID` | 読取確認した空のNative親branch ID。DB guardでも継承schema/データの混入を検査 |
+| `CAKE_QA_PARENT_BRANCH_ID` | 読取確認した承認済みQA初期fixtureのNative親branch ID。実際の子DBでも初回fixtureを厳密照合する。Native親選択の実証完了を設定値だけで保証しない |
 | `CAKE_QA_APPROVED_HEADS` | 通常運用のPR番号→レビュー済み完全head SHAのJSON object。限定probeの承認配列とは別に扱う |
 | `CAKE_QA_PROBE_APPROVALS` | repository variableのJSON配列。各要素は `projectId` / `pr` / `sha` / `slot` / `expiresAt` を持ち、現在head・対象project・枠が一致し、期限内の限定probe承認だけを使う |
 | `CAKE_QA_DELETE_APPROVALS` | JSON配列。GET専用計画で得たproject・PR・枠・lease・完全head SHA・全deployment ID・alias・DB identity・期限に完全一致する削除承認だけを使う |
@@ -68,7 +70,7 @@ GitHub Deployment作成は完全SHAを `ref` に指定し、`auto_merge: false`�
 
 ## GET専用preflightと限定probe
 
-`preflight` は `CAKE_QA_POOL_ENABLED` や確認flagをtrueにせず実行できる読取入口。既存認証でVercel project/link/source policy、GitHub台帳とrepository Variables名、Neon projectとbranch/endpoint件数を確認し、各読取・照合の成否と不足するVariable名を報告する。GET以外を拒否するtransportを使い、台帳snapshot、deployment、alias、環境変数、DBデータを作成・更新・削除しない。Variableの値やAPI全文は出力せず、読取成功だけで通常運用やNativeを確認済みに変更しない。親DBの空状態や対象PRの実配置をこのmetadata読取で証明したとは扱わない。
+`preflight` は `CAKE_QA_POOL_ENABLED` や確認flagをtrueにせず実行できる読取入口。既存認証でVercel project/link/source policy、GitHub台帳とrepository Variables名、Neon projectとbranch/endpoint件数を確認し、各読取・照合の成否と不足するVariable名を報告する。GET以外を拒否するtransportを使い、台帳snapshot、deployment、alias、環境変数、DBデータを作成・更新・削除しない。Variableの値やAPI全文は出力せず、読取成功だけで通常運用やNativeを確認済みに変更しない。親DBのfixture、Nativeの親選択や対象PRの実配置をこのmetadata読取で証明したとは扱わない。
 
 `plan-probe` もGET専用。対象PR番号・レビュー対象の完全SHA・希望slotを指定し、同一repositoryのOPEN PR/current headと枠の状態を照合する。生成予定のproject・PR・feature枝・SHA・slot、最大追加deployment数、alias変更なし、別途削除承認が必要であることと読取のブロッカーを計画として返す。計画が出ても生成承認やNative実証完了を意味しない。
 
@@ -82,7 +84,7 @@ QA_ACTION=plan-release QA_PR_NUMBER="$qa_pr" QA_LEASE_ID="$qa_lease" node --impo
 
 生成を伴う初回実証は `probe` を明示した手動実行に限る。信頼済みmainのコードと通常writerと同じqueueを使い、同一repositoryのOPEN PR、レビュー済みの現在完全head SHA、指定project・slotが `CAKE_QA_PROBE_APPROVALS` の1要素と一致し、`expiresAt`が現在より後であることを生成直前に再確認する。実projectにPreview専用REST-only policyがない場合はprobeも開始せず、ブロッカーを報告する。policyに適合する限定probeはpool/Gitゲート確認/Native確認flagをfalseまたは未設定のまま実施できる。通常生成は実policyに加えて3つのflagがtrueであることを必要とする。
 
-probeはclaimとintentを先に保存し、初回host未確認ならDB接続前に停止するdeploymentを作る。そのIDを保持してNative所属をGETで照合し、必要な次の手動probeで同lease・同feature枝のapplication検証を進める。固定aliasは自動更新せず、Deployment固有URLと完全SHA、Native identity、build/runtimeへのguard注入、空DB確認、migration/seedの結果を実証記録へ残す。同PRへの追加pushは新headのレビューと期限付きprobe承認を更新し、同lease・同DBを維持する。
+probeはclaimとintentを先に保存し、初回host未確認ならDB接続前に停止するdeploymentを作る。そのIDを保持してNative所属をGETで照合し、必要な次の手動probeで同lease・同feature枝のapplication検証を進める。固定aliasは自動更新せず、Deployment固有URLと完全SHA、Native identityと親選択、build/runtimeへのguard注入、初回DB受入条件の照合、migration/seedの結果を実証記録へ残す。同PRへの追加pushは新headのレビューと期限付きprobe承認を更新し、同lease・同DBを維持する。
 
 probe承認は台帳・Previewの限定生成を許すもので、削除や新しい資格情報の登録を許すものではない。実証後の返却は別のGET専用計画と削除承認を使う。実証で成功した場合も、flagを自動変更したり通常運用へ切り替えたりしない。
 
@@ -97,17 +99,26 @@ probe承認は台帳・Previewの限定生成を許すもので、削除や新�
 3. 初回はNative hostが未確認なので、QA guardがDBクライアント作成前に停止する。このdeploymentはNative生成を開始するもので、成功Previewや検証済みアプリとは扱わない。DB保持用parkingは配置しない。
 4. Neon APIで `misty-meadow-88903426` の対応feature枝・parent・branch ID・endpoint ID・実hostを確認する。Productionとの分離をhost比較だけで断定せず、project所属と親DBも確認する。前leaseのbranch ID、endpoint ID、hostの再利用を拒否する。
 5. 確認済みidentityをsnapshotへ保存し、同feature枝・同leaseの次deploymentへPR/枝/lease/slot/完全SHA、専用DB host、本番DB hostの非秘密guard情報を渡す。Native供給の `CAKE_TEST_DATABASE_URL` を使い、Productionの `DATABASE_URL` へfallbackしない。
-6. DB guardで新DBの空状態とidentityを確認してからmigrationと固定サンプルseedを行う。READY後にVercel GETの `withGitRepoInfo=true` でref/SHAを確認する。通常運用では同lease・current headを再読取してaliasを付ける。probeは固有URLで結果を記録し、aliasを自動更新しない。旧headの成功で現在headのaliasを更新しない。
+6. lease markerのないDBはDB guardで空DBまたは承認済みQA初期fixtureとの厳密一致を確認してidentityを登録する。空DBではmigrationと固定サンプルseedを行い、fixture一致時はseed済みとして使用する。受入後はレビュー済みの未適用migrationだけを適用する。READY後にVercel GETの `withGitRepoInfo=true` でref/SHAを確認する。通常運用では同lease・current headを再読取してaliasを付ける。probeは固有URLで結果を記録し、aliasを自動更新しない。旧headの成功で現在headのaliasを更新しない。
 
 NeonのPreview actionと `Resource must be active before deployment` が必要。接続変数はdeployment時に注入され、projectの通常env一覧だけで取得できるとは限らない。Vercel owner向けGET応答は環境変数を含み得るため、全文をログへ出さず必要な非秘密fieldだけを記録する。
 
 ## DB初期化と同PR更新
 
-新leaseは新feature枝由来のDBを使う。Native親から引き継いだ業務データ、未知表、既存schema等をDB guardが検出したらfail closedで停止する。設定確認だけをNative親の空証明にせず、migration前に実DBの空状態を確認する。確認失敗時に行を削除して続行しない。
+新leaseは新feature枝由来のDBを使う。新PRのNative親は承認済みQA初期fixtureを持つ設計とし、lease markerがない初回だけ実DBを厳密照合する。従来の空DBからの初期化も維持する。親の設定値やmetadata読取だけでは、Nativeがその親を選ぶことや子DBのfixture一致を証明できない。親選択と新PRでの継承はlive未実証のまま。
 
-初回空確認とPR/feature枝/lease/endpoint identity登録、seed前混入検査、固定サンプルとseed済み記録はtransactionで扱う。新DBへ未適用migrationと固定テストユーザー・共有ワークスペースを登録する。固定fixtureはdummyのA/Bだけの合計2人で、Aはサイト管理者・共有OWNER、Bは一般・MEMBERとする。Previewのmigration準備では既知のProduction初期管理者INSERT全体を除き、第三ユーザーや実メールを混入させない。適用済みmigration原文とProduction処理は変更しない。同PR更新はidentityを照合し、未適用migrationだけを適用して、既存サンプルとQAで入力・編集したデータを保持する。SHA更新だけで返却・新leaseへ切り替えない。
+承認済みQA初期fixtureの受入条件は次の全項目の一致とする。件数だけの照合や既知名だけのallowlistでは受け入れない。
 
-ビルド、runtime、`db:setup`、`db:seed:test` に同じ接続・identity確認を適用する。pooled/unpooledの同一endpointも比較し、専用接続なし、host不明、本番host一致、別PR/別lease/別endpointならDB操作前に停止する。DBのDROP/TRUNCATE/resetや既存schema消去は自動実行しない。空DBに戻すためschema消去が必要なら、対象と影響を確認して別途明示承認を得る。
+- `schema_migrations`は001〜011の既知ファイル名11件だけを持ち、schema・表/列/制約・index・trigger・routine・型はその適用結果の既知定義に一致する。extensionは既知の`pgcrypto` 1.4を照合し、余分なschemaやobjectを許可しない。
+- `app_users`は`test-user-a` / `test-a@cake.local` / `テストユーザーA`と、`test-user-b` / `test-b@cake.local` / `テストユーザーB`の二人だけ。両者の`image_url`はNULL、`is_enabled=true`で、Aだけ`is_admin=true`、Bはfalseとする。
+- `workspaces`は`00000000-0000-4000-8000-000000000001` / `テスト共有家計` / `SHARED` / owner `test-user-a`の一件だけ。`workspace_members`はその家計のA OWNER・B MEMBERの二件だけで、weightは両者1とする。
+- `app_user_access_guard`はsingleton一件、revision 4だけを持つ。`invitations`、`import_batches`、`transactions`、`default_rules`、`settlements`、`settlement_transactions`、`recurring_payments`の業務7表はすべて空とする。
+
+初回照合とPR/feature枝/lease/endpoint identity登録は同じtransactionで扱う。fixture一致時だけ`cake_preview_database_identity.seeded_at`を非NULLとして登録し、fixture SQLの再実行や権限・名前・利用可否の修復は行わない。空DBではidentity登録後に未適用migrationを適用し、seed前混入検査、固定二人・共有家計の登録とseed済み記録をtransactionで行う。Previewのmigration準備では既知のProduction初期管理者INSERT全体を除き、第三ユーザーや実メールを混入させない。適用済みmigration原文とProduction処理、従来ローカルの両者非管理者fixtureは変更しない。
+
+11migrationは承認済み初期baseの検証基準であり、後続migrationを禁止する上限ではない。初回受入後と同PR更新ではレビュー済みの未適用migrationを適用できる。marker登録済みの同PRではidentityを照合し、初期fixtureの完全一致は再検査せず、既存サンプルとQAで入力・編集したデータ・名前・権限・停止状態を保持する。SHA更新だけで返却・新leaseへ切り替えない。公開済み旧版のテストログインはAを非管理者へ戻し得るため、新コードの公開・ログイン確認前に管理者ログイン完了とは扱わない。
+
+ビルド、runtime、`db:setup`、`db:seed:test` に同じ接続・identity確認を適用する。pooled/unpooledの同一endpointも比較し、専用接続なし、host不明、本番host一致、別PR/別lease/別endpointならDB操作前に停止する。fixtureの不一致や既知001〜011のsource/schemaと検証基準のずれはfail closedで停止する。検証定義や親の変更はレビュー・明示承認を必要とし、DBのDROP/TRUNCATE/reset、既存schema消去やfixtureの自動修復で続行しない。
 
 ## releaseと失敗回復
 
@@ -137,11 +148,11 @@ npm run deploy:preview
 
 Preview完了後、Deployment固有URLでPC/スマートフォンの画面とAPIを確認し、完全SHA、lease、deployment ID、Neon project/branch/endpoint、migration/seed結果を報告する。固定aliasだけで検証コミットを判定しない。再変更後は再commit・再deployment・再検証する。検証済みPR本文更新は `task:pr` の通常経路を使い、draftからの公開・mergeはユーザーが判断する。
 
-ローカルではlint、test、build、TypeScriptと、同時claim、旧lease拒否、snapshot分岐、重複request、応答喪失、stale head、alias不一致、orphan、全ページ読取、delete失敗保持、旧DB再利用拒否、同PRデータ保持、新PR混入停止の回帰を確認する。実SQLの空判定・transaction/lockとcloud lifecycleは別途実測する。現在は必要な承認・認証・ゲート確認がないため有効化しない。
+ローカルではlint、test、build、TypeScriptと、同時claim、旧lease拒否、snapshot分岐、重複request、応答喪失、stale head、alias不一致、orphan、全ページ読取、delete失敗保持、旧DB再利用拒否、同PRデータ保持、新PR混入停止の回帰を確認する。実SQLの空DB/承認済みfixture判定・transaction/lockとcloud lifecycleは別途実測する。現在は必要な承認・認証・ゲート確認がないため有効化しない。
 
 ## ローカルSQL検証
 
-`scripts/verify-preview-database-safety.mjs` は任意に導入したPGlite 0.5.8で全11migrationと23ケースを実行する補助スクリプト。`dataDir`を指定しない[一時メモリDB](https://pglite.dev/docs/filesystems)を使い、`finally`で閉じる。実環境の本番・`CAKE_TEST_DATABASE_URL`を読み込まず、setupの接続先はローカルDBへ差し替え、seedは生成したSQLを同じDBへ実行する。DELETE/DROPもこの一時DB内の検証fixtureに限る。
+`scripts/verify-preview-database-safety.mjs` は任意に導入したPGlite 0.5.8で現行11migrationと初回base照合・guard/seedの実SQLを実行する補助スクリプト。`dataDir`を指定しない[一時メモリDB](https://pglite.dev/docs/filesystems)を使い、`finally`で閉じる。実環境の本番・`CAKE_TEST_DATABASE_URL`を読み込まず、setupの接続先はローカルDBへ差し替え、seedは生成したSQLを同じDBへ実行する。DELETE/DROPもこの一時DB内の検証fixtureに限る。
 
 この成功は承認済みNeonテストDBでの実測ではない。Neon上のmigration/seed、Native作成/保持/cleanup、複数接続の競合は未実施のまま。一時ディレクトリに残るエンジン・npmキャッシュ・検証ソースは実証DBの保存データではない。再現コマンドと検証結果は [検証報告](qa-pool-verification.md) を参照する。
 

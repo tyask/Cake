@@ -6,6 +6,7 @@ import nextEnv from "@next/env";
 import { neon } from "@neondatabase/serverless";
 
 import { databaseConnectionString, guardPreviewDatabase, previewDatabaseGuardSql } from "../lib/database-connection.mjs";
+import { assertPreviewFixtureMigrationSources } from "../lib/preview-fixture-base.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationDirectory = resolve(here, "../db/migrations");
@@ -36,9 +37,13 @@ export async function setupDatabase(environment, options = {}) {
   const directory = options.migrationDirectory ?? migrationDirectory;
   const names = (await readdir(directory)).filter((name) => /^\d+_[a-z0-9_]+\.sql$/.test(name)).sort();
   const migrations = [];
+  const sources = [];
   for (const name of names) {
-    migrations.push({ name, sql: prepareMigration(name, await readFile(resolve(directory, name), "utf8"), environment) });
+    const source = await readFile(resolve(directory, name), "utf8");
+    migrations.push({ name, sql: prepareMigration(name, source, environment) });
+    sources.push({ name, sql: source });
   }
+  if (environment.VERCEL_ENV === "preview") assertPreviewFixtureMigrationSources(sources);
   const sql = (options.connect ?? neon)(connectionString);
   const identity = await guardPreviewDatabase(sql, environment, true);
   const statement = (body) => identity ? previewDatabaseGuardSql(identity, false, body)
@@ -72,7 +77,7 @@ async function main() {
     console.log("Cakeのデータベースへ未適用のマイグレーションを適用しました。");
   } catch (error) {
     // Never print raw Neon errors, which can contain credentials or row data.
-    console.error(error instanceof Error && /^(CAKE_TEST_DATABASE_URL|DATABASE_URL|QA貸出|Preview DB|Previewの初期管理者SQL|マイグレーション名)/.test(error.message)
+    console.error(error instanceof Error && /^(CAKE_TEST_DATABASE_URL|DATABASE_URL|QA貸出|Preview DB|Previewの初期管理者SQL|Previewの承認済み|マイグレーション名)/.test(error.message)
       ? error.message : "DB更新に失敗しました。接続情報・DBエラー本文は表示しません。");
     process.exitCode = 1;
   }

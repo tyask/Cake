@@ -23,6 +23,18 @@ PGlite 0.5.8で、実11migration、空状態検査、未知表/routine/enum/exte
 
 2人fixtureのローカル補完では、検証済みQA環境のAをサイト管理者、Bを一般利用者として登録し、既存のダミーアドレスを使う。QAの再ログインは保存済み状態を照合するだけで、無効化や権限を修復しない。従来のローカル用fixtureは両者非管理者のまま。`npm run lint`、`npm test`（**439成功・失敗0・skip0**）、`npx tsc --noEmit --incremental false`、`npm run build`、`git diff --check` が成功した。クラウドの接続情報を外して検証し、push・Preview生成・Neonへの書き込みは行っていない。このローカル補完は、既存親DBの承認済み変更やNativeの親選択・実環境検証の完了を意味しない。
 
+### 承認済みfixture baseへのローカル対応
+
+上記fixture/loginの成果をlocal commit `3046536` に保存した後、初回の受入を「空DB、または承認済み2人fixture」に変更した。アプリschemaとextensionの正規catalog fingerprint、元の11migrationのsource hashと適用履歴、A管理者/B一般のダミーidentity・名前・有効状態、固定共有workspaceとOWNER/MEMBER各weight 1、guard singleton/revision 4、業務7表の0件を照合する。未知schema・改変・混入は修復せず停止する。承認fixtureの検査とseeded marker登録は同じtransaction。既存markerの同PRは初期値を再検査・再登録せず、プロフィール・降格・無効化・家計データを保持する。レビュー済み追加migrationは従来どおり適用できる。Productionのmigration原文・認証と従来local fixtureは維持した。
+
+最終ローカル検証は `npm run lint`、`npm test`（**449成功・失敗0・skip0**）、`npx tsc --noEmit --incremental false`、`npm run build`、`git diff --check` 成功。`CAKE_LOCAL_PGLITE_MODULE` に上記の外部インストール先を指定し、一時メモリDB 4個で**実SQL 67/67成功**を全testsに含めた。正規base受入、行・schema・migration・guardの混入/変更拒否、失敗時rollback、別lease拒否、同PR編集保持、Production bootstrap原文とseed接続前拒否を検証した。クラウド接続情報を外した検証であり、Neonへの追加書込みはない。
+
+2026-10-12 13:18:32 UTC、承認対象QA parentのproject/branch/endpointをread-onlyで確認し、canonical fingerprintと全11カテゴリの件数・hashが一致した。A/Bの初期値・共有workspace・guard revision 4もread-onlyの集計で確認した。実Native childの生成・初回claim・新ログインのlive検証は未実施。別途13:04:30 UTCに対象別承認で完了したQA mainのA管理者化1行/旧管理者削除1行は、今回のローカル検証や追加DB操作と区別する。
+
+remote PR34はdraft/head `4dd1724` のままでCI 2件成功。最新main `37a55b8` のPR35/36診断はfixture/auth/DB guardを変更しておらず、台帳readerも互換。READMEと設計HTML 2件は更新箇所が重なるが、mainのmerge/rebaseは行っていない。今回のlocal headは未pushのため最新head CIは未実施。
+
+PR34の`vercel.json`はfeature枝のGit deploymentを停止する指定（`**: false`、`main: true`）。対象feature枝のdeployment一覧GETは0件。ただし実projectはPreview生成が有効で、REST-only生成前policyとGitゲート確認variableは確認できず、全Native生成経路やincoming HEAD設定の評価順序も未実証。pushでPreview/DBが発生しない保証には使わない。push・新deployment・remote設定・Secret・cleanupは今回禁止のまま。将来の公開には明示的なpush許可と生成前ゲート確認、生成試験には対象計画と別の承認が必要。既存draft PR34のmergeは行わない。
+
 ```bash
 npm install --prefix /tmp/cake-db-safety --no-save --no-package-lock --ignore-scripts @electric-sql/pglite@0.5.8
 node --import tsx scripts/verify-preview-database-safety.mjs --pglite-module /tmp/cake-db-safety/node_modules/@electric-sql/pglite/dist/index.js
