@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HttpQaGateway, type QaTransport } from "./qa-pool-writer";
 import { SLOTS, fullSha, leaseToken, type Slot } from "../lib/qa-pool";
+import { publicQaOutput } from "../lib/qa-output-privacy";
 
 export async function runQaInspection(args: readonly string[] = process.argv.slice(2), environment: Readonly<Record<string, string | undefined>> = process.env, transport?: QaTransport) {
   const values = new Map<string, string>();
@@ -22,7 +23,7 @@ export async function runQaInspection(args: readonly string[] = process.argv.sli
   return reader.inspect({ action: action as "preflight" | "plan-probe" | "plan-release", pr, sha, slot: slot as Slot | undefined, leaseId });
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  void runQaInspection().then((report) => { console.log(JSON.stringify(report, null, 2)); }).catch(() => {
+  void runQaInspection().then((report) => { console.log(JSON.stringify(publicQaOutput(report), null, 2)); }).catch(() => {
     console.error("GET専用検査を完了できません。設定・資源を変更していません。"); process.exitCode = 1;
   });
 }

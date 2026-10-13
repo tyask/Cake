@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { runQaRequest, type AliasTarget, type QaGateTarget, type QaGateway, type QaPullRequest, type RemoteDeployment } from "../lib/qa-pool-service";
+import { runQaRequest, type AliasTarget, type QaGateTarget, type QaGateway, type QaPullRequest, type QaRequest, type RemoteDeployment } from "../lib/qa-pool-service";
 import { HttpQaGateway, runQaWriter, type QaTransport } from "../scripts/qa-pool-writer";
-import { deletePlan, deletionApproval, probeApproval, type DeleteApproval, type DeletePlan, type ProbeApproval } from "../lib/qa-pool-authorization";
+import { aliasApproval, deletePlan, deletionApproval, probeApproval, type AliasApproval, type AliasPlan, type DeleteApproval, type DeletePlan, type ProbeApproval } from "../lib/qa-pool-authorization";
 import {
   nextRecord, QA_ENVIRONMENT, QA_NEON_PROJECT_ID, QA_PROJECT_ID, QA_REPOSITORY, QA_TASK, replayDeployments,
   type DatabaseIdentity, type GithubDeployment, type QaLeaseRecord, type SavedLease, type Slot,
@@ -41,6 +41,7 @@ class MemoryGateway implements QaGateway {
   generationAllowed = true;
   cleanupGateError = false;
   probeApprovals: ProbeApproval[] = [];
+  aliasApprovals: AliasApproval[] = [];
   deleteApprovals: DeleteApproval[] = [];
   createBehavior: "ok" | "lost" | "failed" = "ok";
   createState = "BUILDING";
@@ -59,9 +60,9 @@ class MemoryGateway implements QaGateway {
   onSave?: (saved: SavedLease) => void;
   seed(record: QaLeaseRecord) {
     const id = (this.records.at(-1)?.id ?? 0) + 1;
-    const initial = { ...record, deployments: [], database: undefined, intent: undefined, readyDeploymentId: undefined, aliasSha: undefined };
+    const initial = { ...record, deployments: [], database: undefined, intent: undefined, readyDeploymentId: undefined, aliasSha: undefined, aliasAssignment: undefined };
     this.records.push({ id, task: QA_TASK, environment: QA_ENVIRONMENT, sha: record.headSha, payload: structuredClone(initial) });
-    if (record.deployments.length || record.database || record.intent || record.readyDeploymentId || record.aliasSha) {
+    if (record.deployments.length || record.database || record.intent || record.readyDeploymentId || record.aliasSha || record.aliasAssignment) {
       this.records.push({ id: id + 1, task: QA_TASK, environment: QA_ENVIRONMENT, sha: record.headSha,
         payload: { ...structuredClone(record), sequence: 2, previousRecordId: id } });
     }
@@ -70,7 +71,7 @@ class MemoryGateway implements QaGateway {
     for (const d of record.deployments) this.remotes.set(d.id, remote(record, d.id, "READY", d.phase, d.sha));
   }
   generationEnabled() { return this.generationAllowed; }
-  async assertGate(mode: "create" | "probe" | "cleanup", target?: QaGateTarget) {
+  async assertGate(mode: "create" | "probe" | "cleanup" | "alias", target?: QaGateTarget) {
     this.calls.push(`gate:${mode}`);
     this.gateTargets.push({ mode, target: target && structuredClone(target) });
     if (mode === "cleanup" ? this.cleanupGateError : this.gateError) throw new Error("gate failed");
@@ -80,6 +81,7 @@ class MemoryGateway implements QaGateway {
     }
   }
   probeAuthorization(pr: number, head: string) { return probeApproval(JSON.stringify(this.probeApprovals), pr, head, Date.parse(now)); }
+  aliasApproved(plan: AliasPlan) { return aliasApproval(JSON.stringify(this.aliasApprovals), plan, Date.parse(now)); }
   async pool() { this.poolReads += 1; this.onPool?.(); return replayDeployments(this.records); }
   async save(record: QaLeaseRecord): Promise<SavedLease> {
     this.calls.push(`save:${record.state}`);
@@ -107,6 +109,10 @@ class MemoryGateway implements QaGateway {
   async databaseGone() { this.calls.push("databaseGone"); if (this.databaseError) throw new Error("Neon unavailable"); return this.gone; }
   async alias(slot: Slot) { return structuredClone(this.aliases.get(slot) ?? null); }
   async assignAlias(record: QaLeaseRecord, deployment: RemoteDeployment) { this.calls.push("assignAlias"); this.aliases.set(record.slot, { projectId: QA_PROJECT_ID, deploymentId: deployment.id }); }
+  async assignReadyAlias(record: QaLeaseRecord, deployment: RemoteDeployment, plan: AliasPlan) {
+    assert.ok(this.aliasApproved(plan));
+    this.calls.push("assignReadyAlias"); this.aliases.set(record.slot, { projectId: QA_PROJECT_ID, deploymentId: deployment.id });
+  }
   deletionApproved(plan: DeletePlan) { return this.deletionAllowed && deletionApproval(JSON.stringify(this.deleteApprovals), plan, Date.parse(now)); }
   async deleteAlias(record: QaLeaseRecord, plan: DeletePlan) {
     assert.deepEqual(plan, deletePlan(record)); assert.ok(this.deletionApproved(plan));
@@ -116,7 +122,7 @@ class MemoryGateway implements QaGateway {
     assert.deepEqual(plan, deletePlan(record)); assert.ok(this.deletionApproved(plan)); assert.ok(plan.deploymentIds.includes(deployment.id));
     this.calls.push(`delete:${deployment.id}`); if (this.deleteError) throw new Error("delete failed"); this.remotes.delete(deployment.id);
   }
-  async run(action: "claim" | "refresh" | "release" | "probe" = "refresh", pr?: number, leaseId?: string, requestSha?: string) {
+  async run(action: QaRequest["action"] = "refresh", pr?: number, leaseId?: string, requestSha?: string) {
     let tokens = 1000;
     await runQaRequest(this, { action, pr, leaseId, sha: requestSha }, { now: () => now, token: () => uuid(++tokens), log: (message) => { this.logs.push(message); } });
   }

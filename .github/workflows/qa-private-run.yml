@@ -21,9 +21,16 @@ on:
       slot:
         required: false
         type: string
+      deployment_id:
+        required: false
+        type: string
     secrets:
       # Passed from the existing repository Variable, without registering a new Secret.
       production_database_host:
+        required: false
+      delete_approvals:
+        required: false
+      alias_approvals:
         required: false
       VERCEL_TOKEN:
         required: false
@@ -68,7 +75,8 @@ jobs:
           CAKE_QA_POOL_ENABLED: ${{ vars.CAKE_QA_POOL_ENABLED }}
           CAKE_QA_GIT_GATE_CONFIRMED: ${{ vars.CAKE_QA_GIT_GATE_CONFIRMED }}
           CAKE_QA_NATIVE_CONFIRMED: ${{ vars.CAKE_QA_NATIVE_CONFIRMED }}
-          CAKE_QA_DELETE_APPROVALS: ${{ vars.CAKE_QA_DELETE_APPROVALS }}
+          CAKE_QA_DELETE_APPROVALS: ${{ secrets.delete_approvals }}
+          CAKE_QA_ALIAS_APPROVALS: ${{ secrets.alias_approvals }}
           CAKE_QA_PROBE_APPROVALS: ${{ vars.CAKE_QA_PROBE_APPROVALS }}
           CAKE_QA_PRODUCTION_DATABASE_HOST: ${{ secrets.production_database_host }}
           CAKE_QA_PARENT_BRANCH_ID: ${{ vars.CAKE_QA_PARENT_BRANCH_ID }}
@@ -78,6 +86,7 @@ jobs:
           QA_LEASE_ID: ${{ inputs.lease_id }}
           QA_SOURCE_SHA: ${{ inputs.source_sha }}
           QA_SLOT: ${{ inputs.slot }}
+          QA_DEPLOYMENT_ID: ${{ inputs.deployment_id }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
   diagnostics:

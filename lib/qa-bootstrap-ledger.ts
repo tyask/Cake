@@ -8,6 +8,7 @@ export const QA_NEON_PROJECT_ID = "misty-meadow-88903426";
 export const QA_REPOSITORY = "tyask/Cake";
 export type DatabaseIdentity = { projectId: typeof QA_NEON_PROJECT_ID; branchId: string; endpointId: string; host: string };
 export type QaDeployment = { id: string; sha: string; url?: string; phase: "provisioning" | "application" };
+export type QaAliasAssignment = { alias: string; deploymentId: string; sha: string; state: "pending" | "assigned" };
 export type QaLeaseRecord = {
   protocol: "cake-qa/v1"; slot: Slot; leaseId: string; pr: number; branch: string; headSha: string;
   state: "held" | "deleting" | "free"; createdAt: string; updatedAt: string;
@@ -15,6 +16,7 @@ export type QaLeaseRecord = {
   sequence: number; previousRecordId: number | null; deployments: QaDeployment[];
   database?: DatabaseIdentity; retiredDatabases: DatabaseIdentity[];
   readyDeploymentId?: string; aliasSha?: string;
+  aliasAssignment?: QaAliasAssignment;
   intent?: { sha: string; phase: QaDeployment["phase"]; attemptId: string; startedAt: string };
 };
 export type GithubDeployment = { id: number; task: string; environment: string; sha: string; payload: unknown };
@@ -50,7 +52,7 @@ export function parseLeaseRecord(input: unknown): QaLeaseRecord {
     || !Array.isArray(value.deployments) || !Array.isArray(value.retiredDatabases)
     || value.retiredDatabases.some((db) => !validDatabase(db))
     || (value.database !== undefined && !validDatabase(value.database))) throw new Error("QA貸出payloadが不正です。");
-  const allowed = new Set(["protocol", "slot", "leaseId", "pr", "branch", "headSha", "state", "purpose", "createdAt", "updatedAt", "sequence", "previousRecordId", "deployments", "database", "retiredDatabases", "readyDeploymentId", "aliasSha", "intent"]);
+  const allowed = new Set(["protocol", "slot", "leaseId", "pr", "branch", "headSha", "state", "purpose", "createdAt", "updatedAt", "sequence", "previousRecordId", "deployments", "database", "retiredDatabases", "readyDeploymentId", "aliasSha", "aliasAssignment", "intent"]);
   if (value.purpose !== undefined && value.purpose !== "probe" || value.purpose === "probe" && value.aliasSha !== undefined) throw new Error("限定probeの用途またはalias記録が不正です。");
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error("QA貸出payloadに未知の情報があります。");
   const ids = new Set<string>();
@@ -67,6 +69,18 @@ export function parseLeaseRecord(input: unknown): QaLeaseRecord {
   if (value.readyDeploymentId !== undefined && (!deploymentId(value.readyDeploymentId) || !value.deployments.some((d) => d.id === value.readyDeploymentId && d.phase === "application"))) throw new Error("QA READY記録が不正です。");
   if (value.aliasSha !== undefined && (!fullSha(value.aliasSha) || !value.readyDeploymentId || !value.database)) throw new Error("QA alias記録が不正です。");
   if (value.aliasSha !== undefined && (value.aliasSha !== value.headSha || !value.deployments.some((d) => d.id === value.readyDeploymentId && d.sha === value.aliasSha))) throw new Error("QA aliasの最新SHAが一致しません。");
+  if (value.aliasAssignment !== undefined) {
+    const assignment = value.aliasAssignment;
+    if (value.purpose !== "probe" || !value.database || value.intent || !object(assignment)
+      || Object.keys(assignment).some((key) => !["alias", "deploymentId", "sha", "state"].includes(key))
+      || assignment.alias !== qaAlias(value.slot as Slot) || !deploymentId(assignment.deploymentId) || !fullSha(assignment.sha)
+      || !["pending", "assigned"].includes(String(assignment.state))
+      || !value.deployments.some((d) => d.id === assignment.deploymentId && d.sha === assignment.sha && d.phase === "application")
+      || (value.state === "free" && assignment.state !== "assigned")
+      || (value.state === "held" && (value.readyDeploymentId !== assignment.deploymentId || value.headSha !== assignment.sha))) {
+      throw new Error("限定aliasの対象記録が不正です。");
+    }
+  }
   if (value.state !== "held" && (value.readyDeploymentId !== undefined || value.aliasSha !== undefined)
     || value.state === "free" && value.intent !== undefined) throw new Error("返却中・返却済みのREADYまたはintent記録が不正です。");
   // Canonicalize optional undefined fields exactly as the immutable JSON API does.
@@ -76,13 +90,22 @@ function validateTransition(previous: QaLeaseRecord, next: QaLeaseRecord): void 
   if (previous.slot !== next.slot) throw new Error("貸出枠を変更できません。");
   if (previous.state === "free") {
     if (next.state !== "held" || next.leaseId === previous.leaseId || next.branch === previous.branch
-      || next.database || next.deployments.length || next.intent) throw new Error("新貸出には新しいPR枝とleaseが必要です。");
+      || next.database || next.deployments.length || next.intent || next.aliasAssignment) throw new Error("新貸出には新しいPR枝とleaseが必要です。");
   } else {
     if (previous.purpose !== next.purpose) throw new Error("貸出の用途を途中で変更できません。");
     if (next.leaseId !== previous.leaseId || next.pr !== previous.pr || next.branch !== previous.branch || next.createdAt !== previous.createdAt) throw new Error("古いleaseまたは別の所有者の更新を拒否しました。");
     if (previous.state === "deleting" && next.state === "held" || previous.state === "held" && next.state === "free") throw new Error("QA返却の状態遷移が不正です。");
     if (previous.state === "deleting" && next.headSha !== previous.headSha) throw new Error("削除中のhead SHAを変更できません。");
     if (previous.database && !sameDatabase(previous.database, next.database)) throw new Error("使用中のNative DB識別子が変わりました。");
+    if (previous.aliasAssignment) {
+      const before = previous.aliasAssignment, after = next.aliasAssignment;
+      if (!after || before.alias !== after.alias || before.deploymentId !== after.deploymentId || before.sha !== after.sha
+        || before.state === "assigned" && after.state !== "assigned") throw new Error("限定aliasの対象・確認記録を変更できません。");
+    } else if (next.aliasAssignment && (previous.state !== "held" || next.state !== "held"
+      || previous.purpose !== "probe" || next.aliasAssignment.state !== "pending"
+      || previous.readyDeploymentId !== next.aliasAssignment.deploymentId || previous.headSha !== next.aliasAssignment.sha)) {
+      throw new Error("限定aliasは使用中probeの確認済みREADYから開始してください。");
+    }
     for (const deployment of previous.deployments) {
       if (!next.deployments.some((d) => d.id === deployment.id && d.sha === deployment.sha && d.phase === deployment.phase)) throw new Error("QA deployment削除対象の記録が失われました。");
     }
@@ -108,7 +131,7 @@ export function replayDeployments(records: readonly GithubDeployment[]): Pool {
     const previous = pool[next.slot];
     if (next.previousRecordId !== (previous?.id ?? null) || next.sequence !== (previous?.payload.sequence ?? 0) + 1) throw new Error("QA台帳の更新系列が分岐しています。枠は解放しません。");
     if (previous) validateTransition(previous.payload, next);
-    else if (next.state !== "held" || next.database || next.deployments.length || next.intent || next.readyDeploymentId || next.aliasSha) throw new Error("QA初回貸出が不正です。");
+    else if (next.state !== "held" || next.database || next.deployments.length || next.intent || next.readyDeploymentId || next.aliasSha || next.aliasAssignment) throw new Error("QA初回貸出が不正です。");
     const owner = JSON.stringify([next.slot, next.pr, next.branch]);
     if (leaseOwners.has(next.leaseId) && (leaseOwners.get(next.leaseId) !== owner || previous?.payload.state === "free")) throw new Error("貸出tokenが別の所有者または返却済み貸出に再利用されています。");
     leaseOwners.set(next.leaseId, owner);

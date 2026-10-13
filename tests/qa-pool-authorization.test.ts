@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  deletePlan, deletionApproval, probeApproval,
-  type DeleteApproval, type DeletePlan, type ProbeApproval,
+  aliasPlan, aliasApproval, deletePlan, deletionApproval, probeApproval,
+  type AliasApproval, type AliasPlan, type DeleteApproval, type DeletePlan, type ProbeApproval,
 } from "../lib/qa-pool-authorization";
 import {
   nextRecord, parseLeaseRecord, qaAlias, QA_NEON_PROJECT_ID, QA_PROJECT_ID,
@@ -36,6 +36,178 @@ function plan(): DeletePlan { return deletePlan(lease()); }
 function approval(target = plan()): DeleteApproval {
   return { ...structuredClone(target), expiresAt };
 }
+function aliasRecord(): QaLeaseRecord {
+  return { ...lease(), purpose: "probe", readyDeploymentId: "dpl_application" };
+}
+function aliasTarget(): AliasPlan { return aliasPlan(aliasRecord(), "dpl_application"); }
+function aliasApproved(target = aliasTarget()): AliasApproval {
+  return { ...structuredClone(target), expiresAt };
+}
+
+test("alias専用manifestは既存READY記録の現在HEADとDBを固定し、入力を変更しない", () => {
+  const record = aliasRecord(), before = structuredClone(record);
+  const target = aliasPlan(record, "dpl_application");
+  assert.deepEqual(target, {
+    projectId: QA_PROJECT_ID, pr: 42, headSha: sha, slot: "qa2", leaseId,
+    deploymentId: "dpl_application", database, alias: qaAlias("qa2"),
+  });
+  assert.deepEqual(record, before);
+  assert.notEqual(target.database, record.database);
+  target.database.branchId = "br-another";
+  assert.deepEqual(record, before);
+});
+
+test("alias専用manifestは外部ID・provisioning・旧HEAD・READY未記録・DB欠落・返却中を拒否する", () => {
+  const record = aliasRecord();
+  for (const id of ["dpl_unrecorded", "dpl_provisioning", "*"]) {
+    assert.throws(() => aliasPlan(record, id));
+  }
+  for (const changes of [
+    { headSha: otherSha }, { readyDeploymentId: undefined }, { database: undefined },
+    { state: "deleting" as const, readyDeploymentId: undefined },
+    { state: "free" as const, readyDeploymentId: undefined },
+    { database: { ...database, host: "ep-mismatch.fake.aws.neon.tech" } },
+    { deployments: [...record.deployments, record.deployments[1]] },
+  ]) {
+    assert.throws(() => aliasPlan({ ...record, ...changes }, "dpl_application"));
+  }
+});
+
+test("alias承認は対象全体を照合し、再試行とJSON key順の違いを許容する", () => {
+  const target = aliasTarget();
+  const reordered = {
+    expiresAt, alias: target.alias, database: {
+      host: database.host, endpointId: database.endpointId, branchId: database.branchId, projectId: database.projectId,
+    },
+    deploymentId: target.deploymentId, leaseId, slot: "qa2", headSha: sha, pr: 42, projectId: QA_PROJECT_ID,
+  };
+  const unrelated = { ...aliasApproved(), pr: 43, headSha: otherSha };
+  const settings = json([unrelated, reordered]);
+  assert.equal(aliasApproval(settings, target, now), true);
+  assert.equal(aliasApproval(settings, target, now + 1), true);
+  assert.deepEqual(target, aliasTarget());
+});
+
+test("alias承認はproject・PR・完全HEAD・slot・lease・deployment・hostnameの全項目を固定する", () => {
+  const target = aliasTarget();
+  const changes = [
+    { projectId: "prj_other" }, { pr: 43 }, { headSha: otherSha },
+    { slot: "qa1", alias: qaAlias("qa1") },
+    { leaseId: "00000000-0000-4000-8000-000000000043" },
+    { deploymentId: "dpl_other" }, { alias: qaAlias("qa1") }, { alias: "*" },
+  ];
+  for (const [index, change] of changes.entries()) {
+    assert.equal(aliasApproval(json([{ ...aliasApproved(target), ...change }]), target, now), false, `identity ${index}`);
+  }
+});
+
+test("alias承認はNative DBのproject・branch・endpoint・hostと構造を厳密照合する", () => {
+  const target = aliasTarget();
+  const invalid: unknown[] = [
+    null, {}, [], { ...database, projectId: "other-neon-project" },
+    { ...database, branchId: "br-other" },
+    { ...database, endpointId: "ep-other", host: "ep-other.fake.aws.neon.tech" },
+    { ...database, host: "ep-native.other.aws.neon.tech" },
+    { ...database, host: "ep-mismatch.fake.aws.neon.tech" },
+    { ...database, extra: true },
+  ];
+  for (const field of Object.keys(database)) {
+    const partial: Record<string, unknown> = { ...database };
+    delete partial[field];
+    invalid.push(partial);
+  }
+  for (const [index, value] of invalid.entries()) {
+    assert.equal(aliasApproval(json([{ ...aliasApproved(target), database: value }]), target, now), false, `database ${index}`);
+  }
+});
+
+test("alias承認は未設定・JSON配列以外・包括boolean・必須項目欠落・不正型を拒否する", () => {
+  const target = aliasTarget();
+  for (const settings of [undefined, "", "  ", "[]", "true", "false", "null", "{}", "{", json(aliasApproved())]) {
+    assert.equal(aliasApproval(settings, target, now), false);
+  }
+  for (const field of Object.keys(aliasApproved())) {
+    const partial: Record<string, unknown> = { ...aliasApproved() };
+    delete partial[field];
+    assert.equal(aliasApproval(json([partial]), target, now), false, field);
+  }
+  for (const value of [
+    null, [], true, { ...aliasApproved(), unknown: true },
+    { ...aliasApproved(), pr: "42" }, { ...aliasApproved(), pr: 0 }, { ...aliasApproved(), pr: 42.5 },
+    { ...aliasApproved(), headSha: sha.slice(0, 7) }, { ...aliasApproved(), headSha: sha.toUpperCase() },
+    { ...aliasApproved(), slot: "qa4" }, { ...aliasApproved(), leaseId: "*" },
+    { ...aliasApproved(), deploymentId: "*" }, { ...aliasApproved(), expiresAt: 42 },
+  ]) {
+    assert.equal(aliasApproval(json([value]), target, now), false);
+  }
+});
+
+test("一致承認の前後にある無関係または期限切れの不正alias承認も配列全体を拒否する", () => {
+  const target = aliasTarget(), valid = aliasApproved(target);
+  for (const malformed of [
+    { ...valid, pr: 43, unknown: true }, { ...valid, pr: 43, database: {} },
+    { ...valid, pr: 43, expiresAt: "not-a-time" },
+    { ...valid, pr: 43, expiresAt: new Date(now).toISOString(), unknown: true },
+  ]) {
+    assert.equal(aliasApproval(json([valid, malformed]), target, now), false);
+    assert.equal(aliasApproval(json([malformed, valid]), target, now), false);
+  }
+});
+
+test("alias承認は期限切れ・期限同時刻・不正時刻と同一対象の重複を拒否する", () => {
+  const target = aliasTarget(), valid = aliasApproved(target);
+  for (const deadline of ["not-a-time", new Date(now).toISOString(), "2026-10-12T00:59:59.999Z"]) {
+    assert.equal(aliasApproval(json([{ ...valid, expiresAt: deadline }]), target, now), false);
+  }
+  for (const current of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    assert.equal(aliasApproval(json([valid]), target, current), false);
+  }
+  assert.equal(aliasApproval(json([valid]), target, Date.parse(expiresAt)), false);
+  for (const duplicate of [
+    valid, { ...valid, expiresAt: "2026-10-12T03:00:00.000Z" },
+    { ...valid, expiresAt: new Date(now).toISOString() },
+  ]) {
+    assert.equal(aliasApproval(json([valid, duplicate]), target, now), false);
+  }
+});
+
+test("型を迂回した不正alias manifestや別種承認でも割当は許可されない", () => {
+  const target = aliasTarget();
+  const invalid: unknown[] = [
+    null, [], { ...target, unknown: true }, { ...target, projectId: "prj_other" },
+    { ...target, pr: 0 }, { ...target, slot: "qa4" }, { ...target, leaseId: "*" },
+    { ...target, headSha: sha.slice(0, 7) }, { ...target, deploymentId: "*" },
+    { ...target, alias: qaAlias("qa1") }, { ...target, database: null },
+    { ...target, database: { ...database, host: "ep-mismatch.fake.aws.neon.tech" } },
+  ];
+  for (const field of Object.keys(target)) {
+    const partial: Record<string, unknown> = { ...target };
+    delete partial[field];
+    invalid.push(partial);
+  }
+  for (const value of invalid) {
+    assert.equal(aliasApproval(json([aliasApproved()]), value as AliasPlan, now), false);
+  }
+  assert.equal(aliasApproval(json([probe()]), target, now), false);
+  assert.equal(aliasApproval(json([approval()]), target, now), false);
+  assert.equal(deletionApproval(json([aliasApproved()]), plan(), now), false);
+});
+
+test("probeに明示記録したpending・assigned aliasは削除manifestへ残り、旧null承認を拒否する", () => {
+  const record = aliasRecord(), unassigned = deletePlan(record);
+  assert.equal(unassigned.alias, null);
+  for (const state of ["pending", "assigned"] as const) {
+    const tracked = { ...record, aliasAssignment: { alias: qaAlias("qa2"), deploymentId: "dpl_application", sha, state } };
+    const target = deletePlan(tracked);
+    assert.deepEqual(target, { ...unassigned, alias: qaAlias("qa2") });
+    assert.equal(deletionApproval(json([approval(unassigned)]), target, now), false);
+    assert.equal(deletionApproval(json([approval(target)]), target, now), true);
+    assert.deepEqual(deletePlan({ ...tracked, headSha: otherSha, readyDeploymentId: undefined, state: "deleting" }), {
+      ...target, headSha: otherSha,
+    });
+    assert.deepEqual(deletePlan({ ...tracked, state: "free", readyDeploymentId: undefined }), target);
+  }
+});
 
 test("限定probeは承認済みPR・完全SHA・固定slotを返し、同じ承認で再試行できる", () => {
   const approved = probe(), settings = json([approved]);
