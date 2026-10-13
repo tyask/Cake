@@ -10,32 +10,45 @@ import {
 } from "../lib/qa-pool";
 import { runQaRequest, type QaGateTarget, type QaGateway, type QaPullRequest, type QaRequest, type RemoteDeployment } from "../lib/qa-pool-service";
 import { decodeGitConfigFile, type GitConfigEvidence } from "../lib/qa-pool-gate";
-import { aliasApproval, aliasPlan, deletionApproval, deletePlan, probeApproval, type AliasPlan, type DeletePlan } from "../lib/qa-pool-authorization";
+import { aliasApproval, aliasPlan, deletionApproval, deletePlan, diagnoseDeletionApproval, probeApproval,
+  type AliasPlan, type DeletePlan, type DeletionApprovalDiagnosis } from "../lib/qa-pool-authorization";
 import { maskQaHosts, publicQaOutput } from "../lib/qa-output-privacy";
+import { contextualQaFailure, QaDiagnosticFailure, qaDiagnosticFields, qaFailureAnnotation, type QaDiagnosticFields } from "../lib/qa-diagnostics";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type JsonObject = Record<string, unknown>;
 type ApiResult = { status: number; data: unknown };
 export type QaTransport = (method: string, url: string, token: string, body?: unknown) => Promise<ApiResult>;
 const object = (value: unknown): JsonObject => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("APIの応答形式を確認できません。");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new QaDiagnosticFailure({ reason: "INVALID_RESPONSE" });
   return value as JsonObject;
 };
 const array = (value: unknown): unknown[] => {
-  if (!Array.isArray(value)) throw new Error("API一覧の応答形式を確認できません。");
+  if (!Array.isArray(value)) throw new QaDiagnosticFailure({ reason: "INVALID_RESPONSE" });
   return value;
 };
 const str = (value: unknown): string => {
-  if (typeof value !== "string" || !value) throw new Error("API識別子を確認できません。");
+  if (typeof value !== "string" || !value) throw new QaDiagnosticFailure({ reason: "INVALID_RESPONSE" });
   return value;
 };
 const safeNumber = (value: unknown): number => {
-  if (!Number.isSafeInteger(value) || Number(value) < 1) throw new Error("API番号を確認できません。");
+  if (!Number.isSafeInteger(value) || Number(value) < 1) throw new QaDiagnosticFailure({ reason: "INVALID_RESPONSE" });
   return Number(value);
 };
 const publicDatabase = (database: DatabaseIdentity | undefined) => database ? {
   projectId: database.projectId, branchId: database.branchId, endpointId: database.endpointId,
 } : null;
+const apiDiagnosticContext = (provider: "github" | "vercel" | "neon", path: string, method: string): Partial<QaDiagnosticFields> => {
+  const stage: QaDiagnosticFields["stage"] = provider === "github"
+    ? path.includes("/deployments") ? method === "POST" ? "SAVE_LEDGER" : "READ_LEDGER"
+      : /\/pulls(?:\/|\?|$)/.test(path) ? "READ_PR" : path.includes("/actions/variables") ? "READ_VARIABLES" : "READ_GIT"
+    : provider === "neon" ? "READ_DATABASE"
+      : path.includes("/aliases") ? method === "DELETE" ? "DELETE_ALIAS" : method === "POST" ? "ASSIGN_ALIAS" : "READ_ALIAS"
+        : path.includes("/deployments") ? method === "DELETE" ? "DELETE_DEPLOYMENT" : method === "POST" ? "CREATE_DEPLOYMENT"
+          : path.startsWith("/v7/deployments?") ? "READ_DEPLOYMENTS" : "READ_DEPLOYMENT" : "READ_PROJECT";
+  return { stage, provider: provider === "github" ? "GITHUB" : provider === "vercel" ? "VERCEL" : "NEON",
+    method: ["GET", "POST", "PATCH", "DELETE"].includes(method) ? method as QaDiagnosticFields["method"] : "UNKNOWN" };
+};
 const transport: QaTransport = async (method, url, token, body) => {
   try {
     const response = await fetch(url, {
@@ -54,17 +67,18 @@ export class HttpQaGateway implements QaGateway {
     maskQaHosts([env.CAKE_QA_PRODUCTION_DATABASE_HOST, env.CAKE_QA_DELETE_APPROVALS, env.CAKE_QA_ALIAS_APPROVALS], env);
   }
   private async api(provider: "github" | "vercel" | "neon", path: string, method = "GET", body?: unknown, missing = false): Promise<unknown> {
-    if (this.access === "read" && method !== "GET") throw new Error("GET専用検査から変更APIは呼び出せません。");
+    const diagnostic = apiDiagnosticContext(provider, path, method);
+    if (this.access === "read" && method !== "GET") throw new QaDiagnosticFailure({ ...diagnostic, reason: "METHOD_NOT_ALLOWED" });
     const base = { github: "https://api.github.com", vercel: "https://api.vercel.com", neon: "https://console.neon.tech/api/v2" }[provider];
     const token = this.env[{ github: "GITHUB_TOKEN", vercel: "VERCEL_TOKEN", neon: "NEON_API_KEY" }[provider]];
-    if (!token) throw new Error(`${provider} API認証がありません。`);
+    if (!token) throw new QaDiagnosticFailure({ ...diagnostic, reason: "AUTH_MISSING" });
     const suffix = provider === "vercel" ? `${path.includes("?") ? "&" : "?"}slug=fumin1` : "";
     const response = await this.request(method, base + path + suffix, token, body).catch(() => {
-      throw new Error("外部APIの応答を確認できません。記録を保持します。");
+      throw new QaDiagnosticFailure({ ...diagnostic, reason: "TRANSPORT_ERROR" });
     });
     maskQaHosts(response.data, this.env);
     if (missing && response.status === 404) return null;
-    if (response.status < 200 || response.status > 299) throw new Error(`${provider} API ${response.status}。確認不能のため処理を停止します。`);
+    if (response.status < 200 || response.status > 299) throw new QaDiagnosticFailure({ ...diagnostic, status: response.status, reason: "HTTP_ERROR" });
     return response.data;
   }
   private async ledgerRecords(): Promise<GithubDeployment[]> {
@@ -130,7 +144,10 @@ export class HttpQaGateway implements QaGateway {
     }
   }
   generationEnabled() { return this.env.CAKE_QA_POOL_ENABLED === "true"; }
-  probeAuthorization(pr: number, sha: string) { return probeApproval(this.env.CAKE_QA_PROBE_APPROVALS, pr, sha); }
+  probeAuthorization(pr: number, sha: string) {
+    try { return probeApproval(this.env.CAKE_QA_PROBE_APPROVALS, pr, sha); }
+    catch { throw new QaDiagnosticFailure({ stage: "PROBE_APPROVAL", provider: "NONE", method: "NONE", reason: "VALIDATION_ERROR" }); }
+  }
   private assertProject(value: unknown): JsonObject {
     const project = object(value), link = object(project.link);
     if (project.id !== QA_PROJECT_ID || project.name !== "cake" || project.accountId !== "team_D1Mcx2TdFWPKcypfu8KzNMub"
@@ -276,10 +293,14 @@ export class HttpQaGateway implements QaGateway {
     return branch === null && endpoint === null;
   }
   async alias(slot: QaLeaseRecord["slot"]) {
-    const value = await this.api("vercel", `/v4/aliases/${qaAlias(slot)}`, "GET", undefined, true);
-    if (value === null) return null;
-    const alias = object(value);
-    return { projectId: str(alias.projectId), deploymentId: str(alias.deploymentId ?? object(alias.deployment).id) };
+    try {
+      const value = await this.api("vercel", `/v4/aliases/${qaAlias(slot)}`, "GET", undefined, true);
+      if (value === null) return null;
+      const alias = object(value);
+      return { projectId: str(alias.projectId), deploymentId: str(alias.deploymentId ?? object(alias.deployment).id) };
+    } catch (error) {
+      throw contextualQaFailure(error, { stage: "READ_ALIAS", provider: "VERCEL", method: "GET" });
+    }
   }
   async assignAlias(record: QaLeaseRecord, deployment: RemoteDeployment) {
     if (record.purpose === "probe") throw new Error("限定probeは固定aliasを変更できません。");
@@ -320,26 +341,38 @@ export class HttpQaGateway implements QaGateway {
     }
     await this.api("vercel", `/v2/deployments/${deployment.id}/aliases`, "POST", { alias: plan.alias });
   }
-  deletionApproved(plan: DeletePlan) { return deletionApproval(this.env.CAKE_QA_DELETE_APPROVALS, plan); }
+  deletionApproved(plan: DeletePlan) {
+    const now = Date.now();
+    try { return deletionApproval(this.env.CAKE_QA_DELETE_APPROVALS, plan, now); }
+    catch { throw new QaDiagnosticFailure({ stage: "APPROVAL_VALIDATE", provider: "NONE", method: "NONE", reason: "VALIDATION_ERROR" }); }
+  }
   async deleteAlias(record: QaLeaseRecord, plan: DeletePlan) {
-    if (this.access !== "write") throw new Error("GET専用検査からaliasを削除できません。");
-    if (!this.deletionApproved(plan) || record.state !== "deleting" || !plan.alias
-      || record.purpose === "probe" && !record.aliasAssignment
-      || !isDeepStrictEqual(deletePlan(record), plan)) throw new Error("正確なresource IDへの削除承認がありません。");
-    const alias = await this.alias(record.slot);
-    const latest = (await this.pool())[record.slot];
-    if (!latest || !isDeepStrictEqual(latest.payload, record) || !this.deletionApproved(plan)) throw new Error("alias削除直前に貸出世代または承認が変わりました。");
-    if (!alias) return;
-    if (alias.projectId !== QA_PROJECT_ID || (record.aliasAssignment
-      ? alias.deploymentId !== record.aliasAssignment.deploymentId
-      : !record.deployments.some((d) => d.id === alias.deploymentId))) throw new Error("固定aliasが別の割当を指しています。削除しません。");
-    await this.api("vercel", `/v2/aliases/${plan.alias}`, "DELETE");
+    try {
+      if (this.access !== "write") throw new QaDiagnosticFailure({ reason: "METHOD_NOT_ALLOWED" });
+      if (!this.deletionApproved(plan) || record.state !== "deleting" || !plan.alias
+        || record.purpose === "probe" && !record.aliasAssignment
+        || !isDeepStrictEqual(deletePlan(record), plan)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      const alias = await this.alias(record.slot);
+      const latest = (await this.pool())[record.slot];
+      if (!latest || !isDeepStrictEqual(latest.payload, record) || !this.deletionApproved(plan)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      if (!alias) return;
+      if (alias.projectId !== QA_PROJECT_ID || (record.aliasAssignment
+        ? alias.deploymentId !== record.aliasAssignment.deploymentId
+        : !record.deployments.some((d) => d.id === alias.deploymentId))) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      await this.api("vercel", `/v2/aliases/${plan.alias}`, "DELETE");
+    } catch (error) {
+      throw contextualQaFailure(error, { stage: "DELETE_ALIAS", provider: "VERCEL", method: "DELETE" });
+    }
   }
   async deleteDeployment(record: QaLeaseRecord, deployment: RemoteDeployment, plan: DeletePlan) {
-    if (!this.deletionApproved(plan) || record.state !== "deleting" || !isDeepStrictEqual(deletePlan(record), plan)
-      || !plan.deploymentIds.includes(deployment.id) || deployment.leaseId !== record.leaseId || deployment.projectId !== QA_PROJECT_ID) throw new Error("正確なresource IDへの削除承認がありません。");
-    const value = object(await this.api("vercel", `/v13/deployments/${deployment.id}`, "DELETE"));
-    if (value.state !== "DELETED") throw new Error("deployment削除応答を確認できません。");
+    try {
+      if (!this.deletionApproved(plan) || record.state !== "deleting" || !isDeepStrictEqual(deletePlan(record), plan)
+        || !plan.deploymentIds.includes(deployment.id) || deployment.leaseId !== record.leaseId || deployment.projectId !== QA_PROJECT_ID) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      const value = object(await this.api("vercel", `/v13/deployments/${deployment.id}`, "DELETE"));
+      if (value.state !== "DELETED") throw new QaDiagnosticFailure({ reason: "INVALID_RESPONSE" });
+    } catch (error) {
+      throw contextualQaFailure(error, { stage: "DELETE_DEPLOYMENT", provider: "VERCEL", method: "DELETE" });
+    }
   }
 
   /** All outputs are curated metadata; remote bodies and environment values stay private. */
@@ -348,13 +381,14 @@ export class HttpQaGateway implements QaGateway {
     if (options.action === "plan-probe" && (!Number.isSafeInteger(options.pr) || Number(options.pr) < 1
       || !fullSha(options.sha) || !options.slot || !["qa1", "qa2", "qa3"].includes(options.slot))) throw new Error("限定probe計画にはOPEN PRの最新完全SHAと指定枠が必要です。");
     if (options.action === "plan-release" && (!Number.isSafeInteger(options.pr) || Number(options.pr) < 1 || !leaseToken(options.leaseId))) throw new Error("削除計画には現在のPRとlease IDが必要です。");
-    const checks: { name: string; ok: boolean; detail: string }[] = [];
+    const approvalNow = Date.now();
+    const checks: { name: string; ok: boolean; detail: string; failure?: QaDiagnosticFields }[] = [];
     const check = async <T>(name: string, read: () => Promise<T>): Promise<T | undefined> => {
       try { const value = await read(); checks.push({ name, ok: true, detail: "読取・照合成功" }); return value; }
       catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        const status = /API (\d{3})/.exec(message)?.[1];
-        checks.push({ name, ok: false, detail: status ? `読取API ${status}。未確認として保持。` : "認証・設定・識別情報が不足または不一致。未確認として保持。" });
+        const failure = qaDiagnosticFields(error);
+        checks.push({ name, ok: false, detail: failure.status !== null ? `読取API ${failure.status}。未確認として保持。`
+          : "認証・設定・識別情報が不足または不一致。未確認として保持。", failure });
         return undefined;
       }
     };
@@ -431,6 +465,8 @@ export class HttpQaGateway implements QaGateway {
         headSha: saved.payload.headSha, deploymentIds: saved.payload.deployments.map((d) => d.id), database: publicDatabase(saved.payload.database),
       } : null])) : null,
       plan: null as unknown,
+      deleteApproval: options.action === "plan-release"
+        ? diagnoseDeletionApproval(this.env.CAKE_QA_DELETE_APPROVALS, undefined, approvalNow) : undefined as DeletionApprovalDiagnosis | undefined,
     };
     if (options.action === "preflight") return summary;
     if (!options.pr || !Number.isSafeInteger(options.pr)) throw new Error("計画には対象PR番号が必要です。");
@@ -479,6 +515,7 @@ export class HttpQaGateway implements QaGateway {
         : !record.deployments.some((d) => d.id === alias.deploymentId)))) throw new Error("aliasは別貸出です。");
       return deletePlan(record);
     });
+    summary.deleteApproval = diagnoseDeletionApproval(this.env.CAKE_QA_DELETE_APPROVALS, planned, approvalNow);
     summary.plan = planned ? { ...planned, database: publicDatabase(planned.database ?? undefined),
       approvalManifestRequiresPrivateHost: Boolean(planned.database),
       databaseDataLossRequiresApproval: Boolean(planned.database),
@@ -510,5 +547,9 @@ export async function runQaWriter(env: Environment = process.env, request?: QaRe
   await runQaRequest(gateway ?? new HttpQaGateway(env, apiTransport, "write"), request, { token: randomUUID });
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  void runQaWriter().catch(() => { console.error("QA writerが確認不能で停止しました。枠・削除対象記録を保持します。"); process.exitCode = 1; });
+  void runQaWriter().catch((error) => {
+    console.error("QA writerが確認不能で停止しました。枠・削除対象記録を保持します。");
+    console.error(qaFailureAnnotation(error));
+    process.exitCode = 1;
+  });
 }

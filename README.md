@@ -383,6 +383,8 @@ npx vercel list --prod
 
 返却前の `plan-release` はGET専用で、状態変更・生成・削除を行いません。project/PR/slot/lease/head SHA、全記録deployment ID、alias、hostを除いたDB識別情報を表示します。削除承認は別のprivateな入力で完全DB identityと期限を照合します。probeのaliasは未記録ならnull、記録があれば候補名を保持し、途中でaliasやIDが消失しても対象集合を縮めません。`pending` が未確認ならcleanupを停止し、`assigned` のalias GETがnullなら他の消失確認を続けます。全Vercel資源とNative branch/endpointの消失後だけfreeにします。
 
+同じPreview Environmentで実行する `plan-release` は、実効削除承認を内部の完全計画と比較し、`deleteApproval` の `valid` / `matches` / `expiry` / `decision` / 固定 `reason` を表示します。承認全文・entry・host・期限原値は表示せず、追加のVariables API呼出しも行いません。失敗は固定 `stage` / `provider` / `method` / `reason` とHTTP `status`だけで分類し、未知の例外は `UNKNOWN`。既存の承認条件・削除直前の確認は維持します。診断結果は後の削除の事前許可ではありません。詳細は [削除承認のGET診断](docs/qa-pool.md#削除承認のget診断と失敗分類) を参照してください。
+
 返却はPR close/mergeまたは承認済みworkflow入口から同leaseのwriterへ依頼します。writerは `deleting` を保存し、intent/orphanと全記録IDの所有先をまず検証してから、期限内の完全一致した対象だけをDELETEします。包括booleanでは削除しません。cancel APIと実行中Function/transactionの監視は現writerに未実装で、cancelや即停止を保証しません。aliasの除去だけではDeployment固有URLのAPIを止めたことになりません。
 
 最後の関連Vercel deployment削除でNative cleanupが発火します。Neon APIでbranchと全endpointの消失を確認した後だけ `free` にします。403、timeout、delete失敗や曖昧な残存は `deleting` のまま保持し、次leaseによる旧DBの再利用を拒否します。DB保持用parkingは残しません。[Neon cleanup公式仕様](https://neon.com/docs/guides/vercel-branch-cleanup)

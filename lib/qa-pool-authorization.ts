@@ -11,6 +11,14 @@ export type DeletePlan = {
   deploymentIds: string[]; alias: string | null; database: DatabaseIdentity | null;
 };
 export type DeleteApproval = DeletePlan & { expiresAt: string };
+export type DeletionApprovalExpiry = "ACTIVE" | "EXPIRED" | "INVALID" | "NO_MATCH" | "UNCONFIRMED";
+export type DeletionApprovalDecision = "ALLOWED" | "DENIED" | "VALIDATION_ERROR" | "UNCONFIRMED";
+export type DeletionApprovalDiagnosticReason = "ACTIVE_APPROVAL" | "NO_TARGET_MATCH" | "EXPIRED_APPROVAL" | "INVALID_EXPIRY"
+  | "INVALID_JSON" | "NOT_ARRAY" | "PLAN_UNCONFIRMED" | "PLAN_INVALID" | "CLOCK_UNCONFIRMED" | "VALIDATION_ERROR";
+export type DeletionApprovalDiagnosis = {
+  valid: boolean; matches: boolean | null; expiry: DeletionApprovalExpiry;
+  decision: DeletionApprovalDecision; reason: DeletionApprovalDiagnosticReason;
+};
 export function deletePlan(record: QaLeaseRecord): DeletePlan {
   return { projectId: QA_PROJECT_ID, pr: record.pr, slot: record.slot, leaseId: record.leaseId, headSha: record.headSha,
     deploymentIds: record.deployments.map((d) => d.id).sort(), alias: record.purpose === "probe" ? record.aliasAssignment?.alias ?? null : qaAlias(record.slot), database: record.database ?? null };
@@ -95,4 +103,51 @@ export function deletionApproval(text: string | undefined, plan: DeletePlan, now
     if (value.alias !== plan.alias) return false;
     return plan.database === null ? value.database === null : validDatabase(value.database) && sameDatabase(value.database, plan.database);
   });
+}
+
+const confirmedDeletionPlan = (plan: unknown): plan is DeletePlan => object(plan)
+  && leaseToken(plan.leaseId) && fullSha(plan.headSha) && plan.projectId === QA_PROJECT_ID
+  && integer(plan.pr) && SLOTS.includes(plan.slot as Slot) && Array.isArray(plan.deploymentIds)
+  && !plan.deploymentIds.some((id) => !/^dpl_[a-zA-Z0-9_-]+$/.test(id))
+  && new Set(plan.deploymentIds).size === plan.deploymentIds.length
+  && (plan.alias === null || plan.alias === qaAlias(plan.slot as Slot))
+  && (plan.database === null || validDatabase(plan.database))
+  && (plan.deploymentIds.length === 0 || Boolean(plan.database));
+
+/** The operational target predicate, excluding only the expiry check. */
+const matchesDeletionTarget = (value: unknown, plan: DeletePlan, ids: string[]): value is Record<string, unknown> => {
+  if (!object(value) || Object.keys(value).some((key) => !["projectId", "pr", "slot", "leaseId", "headSha", "deploymentIds", "alias", "database", "expiresAt"].includes(key))) return false;
+  if (value.projectId !== plan.projectId || value.pr !== plan.pr || value.slot !== plan.slot || value.leaseId !== plan.leaseId
+    || value.headSha !== plan.headSha || !Array.isArray(value.deploymentIds)
+    || value.deploymentIds.some((id) => typeof id !== "string") || new Set(value.deploymentIds).size !== value.deploymentIds.length
+    || JSON.stringify([...value.deploymentIds].sort()) !== JSON.stringify(ids)) return false;
+  if (value.alias !== plan.alias) return false;
+  return plan.database === null ? value.database === null : validDatabase(value.database) && sameDatabase(value.database, plan.database);
+};
+
+/** A pure, non-sensitive report. It never changes the operational validator's some/throw policy. */
+export function diagnoseDeletionApproval(text: string | undefined, plan: DeletePlan | undefined, now = Date.now()): DeletionApprovalDiagnosis {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text?.trim() || "[]"); }
+  catch { return { valid: false, matches: null, expiry: "UNCONFIRMED", decision: "VALIDATION_ERROR", reason: "INVALID_JSON" }; }
+  if (!Array.isArray(parsed)) return { valid: false, matches: null, expiry: "UNCONFIRMED", decision: "VALIDATION_ERROR", reason: "NOT_ARRAY" };
+  const unconfirmed = (reason: DeletionApprovalDiagnosticReason): DeletionApprovalDiagnosis => ({
+    valid: true, matches: null, expiry: "UNCONFIRMED", decision: "UNCONFIRMED", reason,
+  });
+  if (plan === undefined) return unconfirmed("PLAN_UNCONFIRMED");
+  try { if (!confirmedDeletionPlan(plan)) return unconfirmed("PLAN_INVALID"); }
+  catch { return unconfirmed("PLAN_INVALID"); }
+  if (!Number.isFinite(now)) return unconfirmed("CLOCK_UNCONFIRMED");
+  const ids = [...plan.deploymentIds].sort();
+  const matching = parsed.filter((value): value is Record<string, unknown> => matchesDeletionTarget(value, plan, ids));
+  const deadlines = matching.map((value) => typeof value.expiresAt === "string" ? Date.parse(value.expiresAt) : Number.NaN);
+  const expiry: DeletionApprovalExpiry = !matching.length ? "NO_MATCH"
+    : deadlines.some((deadline) => Number.isFinite(deadline) && deadline > now) ? "ACTIVE"
+    : deadlines.some((deadline) => !Number.isFinite(deadline)) ? "INVALID" : "EXPIRED";
+  let allowed: boolean;
+  try { allowed = deletionApproval(text, plan, now); }
+  catch { return { valid: true, matches: matching.length > 0, expiry, decision: "VALIDATION_ERROR", reason: "VALIDATION_ERROR" }; }
+  const reason: DeletionApprovalDiagnosticReason = expiry === "ACTIVE" ? "ACTIVE_APPROVAL"
+    : expiry === "INVALID" ? "INVALID_EXPIRY" : expiry === "EXPIRED" ? "EXPIRED_APPROVAL" : "NO_TARGET_MATCH";
+  return { valid: true, matches: matching.length > 0, expiry, decision: allowed ? "ALLOWED" : "DENIED", reason };
 }
