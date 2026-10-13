@@ -66,11 +66,17 @@ class Fixture {
       id: this.identity.endpointId, project_id: QA_NEON_PROJECT_ID, branch_id: this.identity.branchId, type: "read_write", host: this.identity.host }] } };
     if (method === "GET" && path === "/v13/deployments/dpl_test") return { status: 200, data: structuredClone(this.remote) };
     if (method === "GET" && path === "/v7/deployments") return { status: 200, data: { deployments: [structuredClone(this.remote)], pagination: { next: null } } };
-    if (method === "GET" && path === `/v4/aliases/${qaAlias("qa1")}`) return { status: this.assigned ? 200 : 404, data: this.assigned };
+    if (method === "GET" && [qaAlias("qa1"), "alias_ready_fixture"].some((identifier) => path === `/v4/aliases/${identifier}`)) {
+      return { status: this.assigned ? 200 : 404,
+        data: this.assigned ? { ...this.assigned, uid: "alias_ready_fixture", alias: qaAlias("qa1") } : null };
+    }
     if (method === "POST" && path === "/v2/deployments/dpl_test/aliases") {
       this.assigned = { projectId: QA_PROJECT_ID, deploymentId: "dpl_test" }; return { status: 200, data: this.assigned };
     }
-    if (method === "DELETE" && path === `/v2/aliases/${qaAlias("qa1")}`) { this.assigned = null; return { status: 200, data: {} }; }
+    if (method === "DELETE" && path === "/v2/aliases/alias_ready_fixture") {
+      assert.equal(url.searchParams.get("teamId"), "team_D1Mcx2TdFWPKcypfu8KzNMub");
+      this.assigned = null; return { status: 200, data: { status: "SUCCESS" } };
+    }
     assert.fail(`unexpected test transport: ${method} ${path}`);
   };
   gateway() { return new HttpQaGateway(this.env, this.request, "write"); }

@@ -387,7 +387,11 @@ npx vercel list --prod
 
 返却はPR close/mergeまたは承認済みworkflow入口から同leaseのwriterへ依頼します。writerは `deleting` を保存し、intent/orphanと全記録IDの所有先をまず検証してから、期限内の完全一致した対象だけをDELETEします。包括booleanでは削除しません。cancel APIと実行中Function/transactionの監視は現writerに未実装で、cancelや即停止を保証しません。aliasの除去だけではDeployment固有URLのAPIを止めたことになりません。
 
+alias削除は、候補名のGETからUIDを解決し、正確な名前・project・deploymentと検証済みprojectの `accountId` によるteam所属を照合して、UIDと `teamId` を指定する修正案です。削除専用APIには `slug` を同時送信せず、UIDの再GETと削除直前の名前・lease・承認期限・完全DB identityの照合を保ちます。GETの404は正しいscopeでの不在確認に限って扱い、DELETEの404や成功後GETの残存は削除完了とせず `deleting` を保持します。成功後は同じ実行内でUIDと名前の双方を再GETします。UIDは台帳に保存しないため、不明結果から別runで名前の不在を確認しても旧UIDの独立消失確認とは扱いません。外部callerとの完全排他も保証しません。実機でのhostname指定DELETEの404原因は未特定で、UID方式も実地未検証です。[UID削除と再開条件](docs/qa-pool.md#alias-uidを使う削除)を参照してください。
+
 最後の関連Vercel deployment削除でNative cleanupが発火します。Neon APIでbranchと全endpointの消失を確認した後だけ `free` にします。403、timeout、delete失敗や曖昧な残存は `deleting` のまま保持し、次leaseによる旧DBの再利用を拒否します。DB保持用parkingは残しません。[Neon cleanup公式仕様](https://neon.com/docs/guides/vercel-branch-cleanup)
+
+mainへのmergeは自動Production buildと既存の `db:setup` を起動し得ます。また削除承認Variableが非空なら、poolが無効でも既存scheduleがcleanupを進め得ます。削除承認Variableは今回ユーザーから削除済みと報告されていますが、mergeや再登録の前には実効設定と実行中・待機中のworkflowを確認します。確認不能なら停止し、従前の期限を延長しません。再登録・cleanupには具体的な新期限を含む別承認が必要です。承認後はmainのGET専用 `plan-release` で全対象と `ALLOWED` を確認して、閉じた対象PRの同じleaseへの `release` を1回だけ依頼する手順とし、失敗時は固定stage/statusを記録して停止します。既存scheduleがあるためGET先行や手動1回だけの実行は、この修正だけでは保証できません。今回merge・設定変更・cleanup再実行・生成は行いません。[導入と再開の条件](docs/qa-pool.md#今回の修正後に再開する条件)を参照してください。
 
 台帳外の手動削除、Productionや他PRの削除、直接Neon branch削除は行いません。認証scope、Native/cleanupの実証結果、対象ID集合の削除承認は別々に確認し、不足する場合は返却未完として報告します。資源消失は開始済みFunction/transactionの即停止保証ではなく、その実挙動はlive検証未実施です。
 

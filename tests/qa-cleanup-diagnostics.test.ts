@@ -9,6 +9,7 @@ import { nextRecord, QA_ENVIRONMENT, QA_NEON_PROJECT_ID, QA_PROJECT_ID, QA_REPOS
   type DatabaseIdentity, type GithubDeployment, type QaLeaseRecord } from "../lib/qa-pool";
 
 const sha = "a".repeat(40), leaseId = "00000000-0000-4000-8000-000000000037";
+const aliasUid = "alias_fixture";
 const host = "ep-diagnostics.us-east-1.aws.neon.tech";
 const privateSentinel = "DO_NOT_PRINT_PROVIDER_PAYLOAD";
 const database: DatabaseIdentity = { projectId: QA_NEON_PROJECT_ID, branchId: "br-diagnostics", endpointId: "ep-diagnostics", host };
@@ -69,8 +70,8 @@ function fixture() {
         default: false, protected: false, created_at: timestamp }], pagination: { next: null } } };
     if (path === `/projects/${QA_NEON_PROJECT_ID}/endpoints`) return { status: 200, data: { endpoints: [
       { id: database.endpointId, project_id: QA_NEON_PROJECT_ID, branch_id: database.branchId, type: "read_write", host }] } };
-    if (path.startsWith("/v4/aliases/")) return path.endsWith(qaAlias("qa1"))
-      ? { status: 200, data: { projectId: QA_PROJECT_ID, deploymentId: "dpl_application" } }
+    if (path.startsWith("/v4/aliases/")) return [qaAlias("qa1"), aliasUid].some((id) => path === `/v4/aliases/${id}`)
+      ? { status: 200, data: { uid: aliasUid, alias: qaAlias("qa1"), projectId: QA_PROJECT_ID, deploymentId: "dpl_application" } }
       : { status: 404, data: { message: privateSentinel } };
     const remote = (id: string) => ({ id, projectId: QA_PROJECT_ID, target: "preview", state: "READY",
       gitSource: { ref: record.branch, sha }, meta: { githubCommitRef: record.branch, githubCommitSha: sha,
@@ -123,7 +124,16 @@ test("DELETE_ALIASの403・transport failureを固定annotationへ変換する",
   for (const failure of ["http", "transport"] as const) {
     const f = fixture(); let deleteCalls = 0;
     const mock: QaTransport = async (method, url, token, body) => {
+      const address = new URL(url);
+      if (method === "GET" && address.pathname.startsWith("/v4/aliases/")) {
+        assert.equal(address.searchParams.get("teamId"), "team_D1Mcx2TdFWPKcypfu8KzNMub");
+        assert.equal(address.searchParams.has("slug"), false);
+      }
       if (method !== "DELETE") return f.request(method, url, token, body);
+      assert.equal(address.pathname, `/v2/aliases/${aliasUid}`);
+      assert.equal(address.searchParams.get("teamId"), "team_D1Mcx2TdFWPKcypfu8KzNMub");
+      assert.equal(address.searchParams.has("slug"), false);
+      assert.equal(body, undefined);
       deleteCalls++;
       if (failure === "transport") throw new Error(`${privateSentinel} ${host}`);
       return { status: 403, data: { error: { message: privateSentinel, host } } };
