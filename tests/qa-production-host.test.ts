@@ -53,6 +53,25 @@ test("secretを本番比較guardの同じ環境名へ渡し、runtime権限追�
   assert.match(diagnostics, /permissions:\n  contents: read\n  pull-requests: read\n  deployments: read/);
 });
 
+test("hostを含む削除・alias承認JSONはstep開始前にworkflow-call secretへ渡す", () => {
+  for (const [variableName, secretName] of [["CAKE_QA_DELETE_APPROVALS", "delete_approvals"], ["CAKE_QA_ALIAS_APPROVALS", "alias_approvals"]]) {
+    assert.match(runner, new RegExp(`      ${secretName}:\\n        required: false`));
+    assert.match(job(runner, "pool"), new RegExp(`${variableName}: \\$\\{\\{ secrets\\.${secretName} \\}\\}`));
+    assert.doesNotMatch(runner, new RegExp(`vars\\.${variableName}`));
+    for (const name of ["inspect", "writer"]) {
+      const caller = job(pool, name);
+      const secretBlock = caller.slice(caller.indexOf("    secrets:"));
+      assert.match(secretBlock, new RegExp(`      ${secretName}: \\$\\{\\{ vars\\.${variableName} \\}\\}`));
+      assert.doesNotMatch(caller.slice(0, caller.indexOf("    secrets:")), new RegExp(`(?:with|env|run):[^\\n]*${variableName}`));
+    }
+    for (const name of readdirSync(new URL("../.github/workflows/", import.meta.url)).filter((v) => /\\.ya?ml$/.test(v))) {
+      for (const line of readWorkflow(name).split("\n").filter((v) => v.includes(`vars.${variableName}`) && !v.includes("github.event_name == 'schedule'"))) {
+        assert.equal(line, `      ${secretName}: \$\{\{ vars.${variableName} \}\}`);
+      }
+    }
+  }
+});
+
 test("単一writer queueとtrusted main、診断のGET専用経路を維持する", () => {
   assert.match(pool, /types: \[opened, synchronize, reopened, closed\]/);
   assert.match(pool, /contains\(fromJSON\('\["preflight","plan-probe","plan-release"\]'\), inputs\.action\)/);

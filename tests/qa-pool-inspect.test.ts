@@ -120,7 +120,18 @@ function checked(report: Report, name: string) {
 }
 function assertPrivate(report: unknown) {
   const output = JSON.stringify(report);
-  for (const value of secrets) assert.equal(output.includes(value), false, "inspection must curate secrets from output");
+  for (const value of [...secrets, database.host, environment().CAKE_QA_PRODUCTION_DATABASE_HOST]) {
+    assert.equal(output.includes(value), false, "inspection must curate hosts and secrets from output");
+  }
+}
+function assertPublicPlan(plan: unknown, record: QaLeaseRecord) {
+  const exact = deletePlan(record);
+  assert.deepEqual(plan, { ...exact, database: exact.database ? {
+    projectId: exact.database.projectId, branchId: exact.database.branchId, endpointId: exact.database.endpointId,
+  } : null, approvalManifestRequiresPrivateHost: Boolean(exact.database),
+  databaseDataLossRequiresApproval: Boolean(exact.database),
+  dataLossNotice: exact.database ? "削除するとQA DBと入力データを失います。deploymentの復元はDBの復旧を保証しません。" : null });
+  assertPrivate(plan);
 }
 
 test("disabled・未承認でもpreflightは読取を実施し、環境flag・資源を変更しない", async () => {
@@ -192,7 +203,7 @@ test("生成設定が欠落していてもplan-releaseはGitの読取なしで�
   f.responses.set(`/repos/${QA_REPOSITORY}/branches/main`, { status: 403, data: { message: secrets[3] } });
   f.responses.set(`/repos/${QA_REPOSITORY}/contents/vercel.json`, { status: 404, data: null });
   const report = await f.reader().inspect({ action: "plan-release", pr: 42, leaseId });
-  assert.deepEqual(report.plan, deletePlan(record));
+  assertPublicPlan(report.plan, record);
   assert.equal(f.calls.some((call) => call.path.endsWith("/branches/main") || call.path.endsWith("/contents/vercel.json")), false);
   f.assertReadOnly(); assertPrivate(report);
 });
@@ -329,7 +340,7 @@ test("plan-releaseは全記録IDとDB・aliasを照合し、削除承認なし�
   const f = new ReadFixture(), record = application(); f.setRecord(record);
   const before = structuredClone(f.records);
   const report = await f.reader().inspect({ action: "plan-release", pr: 42, leaseId });
-  assert.deepEqual(report.plan, deletePlan(record));
+  assertPublicPlan(report.plan, record);
   assert.equal(checked(report, "Exact deletion resources").ok, true);
   for (const d of record.deployments) assert.ok(f.calls.some((call) => call.path === `/v13/deployments/${d.id}`));
   assert.deepEqual(f.records, before);
@@ -358,7 +369,7 @@ test("既に404の記録IDもmanifestに保持し、ID GET403は消失扱いし�
     const f = new ReadFixture(), record = application(); f.setRecord(record);
     f.responses.set("/v13/deployments/dpl_provisioning", { status, data: { message: secrets[3] } });
     const report = await f.reader().inspect({ action: "plan-release", pr: 42, leaseId });
-    if (status === 404) assert.deepEqual(report.plan, deletePlan(record));
+    if (status === 404) assertPublicPlan(report.plan, record);
     else { assert.equal(report.plan, null); assert.match(checked(report, "Exact deletion resources").detail, /403/); }
     f.assertReadOnly(); assertPrivate(report);
   }
@@ -406,7 +417,7 @@ test("消失済みDBはbranch・endpoint両IDの404で確認し、403ではmanif
     f.responses.set(`/projects/${QA_NEON_PROJECT_ID}/branches/${database.branchId}`, { status: 404, data: { message: secrets[3] } });
     f.responses.set(`/projects/${QA_NEON_PROJECT_ID}/endpoints/${database.endpointId}`, { status, data: { message: secrets[3] } });
     const report = await f.reader().inspect({ action: "plan-release", pr: 42, leaseId });
-    if (status === 404) assert.deepEqual(report.plan, deletePlan(record));
+    if (status === 404) assertPublicPlan(report.plan, record);
     else { assert.equal(report.plan, null); assert.match(checked(report, "Exact deletion resources").detail, /403/); }
     for (const id of [database.branchId, database.endpointId]) assert.ok(f.calls.some((call) => call.path.endsWith(`/${id}`)));
     f.assertReadOnly(); assertPrivate(report);
@@ -416,7 +427,7 @@ test("消失済みDBはbranch・endpoint両IDの404で確認し、403ではmanif
 test("probe返却manifestはalias nullで、aliasの追加照合・変更をしない", async () => {
   const f = new ReadFixture(), record = { ...application(), purpose: "probe" as const }; f.setRecord(record);
   const report = await f.reader().inspect({ action: "plan-release", pr: 42, leaseId });
-  assert.deepEqual(report.plan, deletePlan(record));
+  assertPublicPlan(report.plan, record);
   assert.equal((report.plan as { alias: unknown }).alias, null);
   assert.equal(f.calls.filter((call) => call.path === `/v4/aliases/${qaAlias("qa2")}`).length, 1);
   f.assertReadOnly();

@@ -160,7 +160,9 @@ function checked(report: Report, name: string) {
 }
 function assertPrivate(value: unknown) {
   const output = JSON.stringify(value);
-  for (const secret of secrets) assert.equal(output.includes(secret), false, "reports must curate secrets from output");
+  for (const secret of [...secrets, database.host, environment().CAKE_QA_PRODUCTION_DATABASE_HOST]) {
+    assert.equal(output.includes(secret), false, "reports must curate secrets and hosts from output");
+  }
 }
 function assertDisabled(report: Report) {
   assert.equal(report.readOnly, true);
@@ -179,8 +181,11 @@ function assertReleasePlan(report: Report, record: QaLeaseRecord) {
   assert.equal(plan.slot, record.slot);
   assert.equal(plan.leaseId, record.leaseId);
   assert.deepEqual(plan.deploymentIds, record.deployments.map((deployment) => deployment.id).sort());
-  assert.equal(plan.alias, record.purpose === "probe" ? null : qaAlias(record.slot));
-  assert.deepEqual(plan.database, record.database);
+  assert.equal(plan.alias, record.purpose === "probe" ? record.aliasAssignment?.alias ?? null : qaAlias(record.slot));
+  assert.deepEqual(plan.database, { projectId: record.database!.projectId, branchId: record.database!.branchId, endpointId: record.database!.endpointId });
+  assert.equal(plan.approvalManifestRequiresPrivateHost, true);
+  assert.equal(plan.databaseDataLossRequiresApproval, true);
+  assert.match(plan.dataLossNotice, /QA DBと入力データ.*失います/);
   assertDisabled(report); assertPrivate(report);
 }
 
@@ -793,7 +798,7 @@ test("不正payload・系列分岐・台帳SHA不一致を空台帳と扱わな�
   }
 });
 
-test("plan-releaseは全記録deployment ID・DB・aliasを照合したexact manifestだけを返す", async () => {
+test("plan-releaseは全記録deployment ID・DB・aliasを厳密照合しhost無しの承認レビューを返す", async () => {
   const fixture = new ReadFixture(), record = application(); fixture.setRecord(record);
   const before = structuredClone(fixture.records);
   const report = await fixture.reader().inspect({ action: "plan-release", pr: 42, leaseId });
@@ -801,7 +806,33 @@ test("plan-releaseは全記録deployment ID・DB・aliasを照合したexact man
   assertReleasePlan(report, record);
   for (const deployment of record.deployments) assert.ok(fixture.calls.some((call) => call.path === `/v13/deployments/${deployment.id}`));
   assert.deepEqual(fixture.records, before);
+  assert.deepEqual(report.slots?.qa2?.database, {
+    projectId: database.projectId, branchId: database.branchId, endpointId: database.endpointId,
+  });
   fixture.assertReadOnly();
+});
+
+test("local GET診断はhostを返さず、Actionsはledger/Neon読取時にhostをmaskする", async () => {
+  for (const actions of [false, true]) {
+    const fixture = new ReadFixture(); fixture.setRecord(application());
+    if (actions) fixture.env.GITHUB_ACTIONS = "true";
+    const commands: string[] = [], previous = console.log;
+    let report: Report;
+    try {
+      console.log = (message: string) => { commands.push(message); };
+      report = await runQaBootstrap(["--action", "plan-release", "--pr", "42", "--lease-id", leaseId], fixture.env, fixture.request);
+    } finally { console.log = previous; }
+    assertReleasePlan(report!, fixture.record!);
+    if (actions) {
+      assert.ok(commands.includes(`::add-mask::${database.host}`));
+      assert.ok(commands.includes(`::add-mask::${database.host.replace("ep-native.", "ep-native-pooler.")}`));
+      for (const command of commands) {
+        assert.match(command, /^::add-mask::ep-[a-z0-9-]+\.[a-z0-9.-]+\.neon\.tech$/);
+        for (const secret of secrets) assert.ok(!command.includes(secret));
+      }
+    } else assert.deepEqual(commands, []);
+    fixture.assertReadOnly();
+  }
 });
 
 test("更新済み・closed PRのreleaseは台帳SHAに固定し、明示SHAも台帳との一致を要求する", async () => {
@@ -934,6 +965,47 @@ test("probeのrelease manifestはalias nullで、固定aliasを資源に含め�
   const report = await fixture.reader().inspect({ action: "plan-release", pr: 42, leaseId });
   assertReleasePlan(report, record);
   fixture.assertReadOnly();
+});
+
+function aliasFixture(state: "pending" | "assigned") {
+  const fixture = new ReadFixture();
+  const ready = { ...application(), purpose: "probe" as const, readyDeploymentId: "dpl_application" };
+  fixture.setRecord(ready);
+  const pending = { ...ready, sequence: 3, previousRecordId: 2,
+    aliasAssignment: { alias: qaAlias(ready.slot), deploymentId: "dpl_application", sha, state: "pending" as const } };
+  fixture.records.push({ id: 3, task: QA_TASK, environment: QA_ENVIRONMENT, sha, payload: pending });
+  fixture.record = pending;
+  if (state === "assigned") {
+    const assigned = { ...pending, sequence: 4, previousRecordId: 3, aliasAssignment: { ...pending.aliasAssignment, state: "assigned" as const } };
+    fixture.records.push({ id: 4, task: QA_TASK, environment: QA_ENVIRONMENT, sha, payload: assigned });
+    fixture.record = assigned;
+  }
+  return fixture;
+}
+
+test("承認されたprobe aliasを削除レビューへ含め、旧alias nullへ縮めない", async () => {
+  for (const present of [true, false]) {
+    const fixture = aliasFixture("assigned");
+    fixture.responses.set(`/v4/aliases/${qaAlias("qa2")}`, present
+      ? { status: 200, data: { projectId: QA_PROJECT_ID, deploymentId: "dpl_application" } }
+      : { status: 404, data: { message: secrets[3] } });
+    const report = await fixture.reader().inspect({ action: "plan-release", pr: 42, leaseId });
+    assertReleasePlan(report, fixture.record!);
+    assert.equal(report.plan?.action === "plan-release" && report.plan.alias, qaAlias("qa2"));
+    fixture.assertReadOnly();
+  }
+});
+
+test("pending aliasのGET nullは削除レビューを確定せず、別deploymentへの割当も拒否する", async () => {
+  for (const response of [{ status: 404, data: { message: secrets[3] } },
+    { status: 200, data: { projectId: QA_PROJECT_ID, deploymentId: "dpl_provisioning" } }]) {
+    const fixture = aliasFixture("pending");
+    fixture.responses.set(`/v4/aliases/${qaAlias("qa2")}`, response);
+    const report = await fixture.reader().inspect({ action: "plan-release", pr: 42, leaseId });
+    assert.equal(report.plan, null);
+    assert.equal(checked(report, "Exact release resources").reason.code, response.status === 404 ? "unresolved-alias-intent" : "identity-mismatch");
+    assertPrivate(report); fixture.assertReadOnly();
+  }
 });
 
 test("一覧でphaseが異なる記録は個別GET404でも消失扱いしない", async () => {

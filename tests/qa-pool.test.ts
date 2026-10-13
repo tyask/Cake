@@ -5,6 +5,7 @@ import {
   claimRecord, nextRecord, parseLeaseRecord, replayDeployments, QA_ENVIRONMENT, QA_TASK, QA_NEON_PROJECT_ID,
   type QaLeaseRecord, type GithubDeployment, type SavedLease, type Pool,
 } from "../lib/qa-pool";
+import { parseLeaseRecord as parseReadOnlyLease, replayDeployments as replayReadOnlyLedger } from "../lib/qa-bootstrap-ledger";
 
 const sha = "a".repeat(40);
 const now = "2026-10-12T00:00:00Z";
@@ -86,6 +87,35 @@ test("all failed and successful deployment IDs survive snapshots for complete cl
   const withIds = { id: 2, payload: nextRecord(first, { database: db, deployments }, now) };
   assert.throws(() => nextRecord(withIds, { deployments: deployments.slice(1) }, now), /削除対象/);
   assert.equal(nextRecord(withIds, { state: "deleting" }, now).deployments.length, 2);
+});
+
+test("probe alias assignment is append-only, bound to its recorded READY target, and understood by the readonly decoder", () => {
+  const first: SavedLease = { id: 1, payload: { ...lease(), purpose: "probe" } };
+  const ready: SavedLease = { id: 2, payload: nextRecord(first, { database: db, deployments: [
+    { id: "dpl_failed", sha, phase: "provisioning" }, { id: "dpl_ready", sha, phase: "application" },
+  ], readyDeploymentId: "dpl_ready" }, now) };
+  const assignment = { alias: "cake-qa1-fumin.vercel.app", deploymentId: "dpl_ready", sha, state: "pending" as const };
+  const pending: SavedLease = { id: 3, payload: nextRecord(ready, { aliasAssignment: assignment }, now) };
+  const assigned: SavedLease = { id: 4, payload: nextRecord(pending, { aliasAssignment: { ...assignment, state: "assigned" } }, now) };
+  const history = [first, ready, pending, assigned].map((s) => entry(s.id, s.payload));
+  assert.deepEqual(replayReadOnlyLedger(history), replayDeployments(history));
+  assert.deepEqual(parseReadOnlyLease(JSON.stringify(assigned.payload)), assigned.payload);
+  assert.equal(assigned.payload.purpose, "probe"); assert.equal(assigned.payload.aliasSha, undefined);
+  for (const change of [
+    { aliasAssignment: undefined }, { aliasAssignment: { ...assignment, deploymentId: "dpl_failed" } },
+    { aliasAssignment: { ...assignment, alias: "cake-qa2-fumin.vercel.app" } },
+    { aliasAssignment: assignment }, { headSha: "b".repeat(40), readyDeploymentId: undefined },
+  ]) {
+    assert.throws(() => nextRecord(assigned, change, now));
+    const malformed = { ...assigned.payload, ...change, sequence: 5, previousRecordId: 4 };
+    assert.throws(() => replayReadOnlyLedger([...history, entry(5, malformed)]));
+  }
+  assert.throws(() => nextRecord(ready, { aliasAssignment: { ...assignment, state: "assigned" } }, now), /開始/);
+  const deleting: SavedLease = { id: 5, payload: nextRecord(assigned, { state: "deleting", readyDeploymentId: undefined }, now) };
+  const free = nextRecord(deleting, { state: "free", retiredDatabases: [db] }, now);
+  assert.deepEqual(free.aliasAssignment, assigned.payload.aliasAssignment);
+  assert.deepEqual(parseReadOnlyLease(free), free);
+  assert.throws(() => parseLeaseRecord({ ...ready.payload, purpose: undefined, aliasAssignment: assignment }), /限定alias/);
 });
 
 test("lease tokens and deployment IDs have a single owner across the entire history", () => {

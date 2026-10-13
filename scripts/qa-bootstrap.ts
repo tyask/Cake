@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReadOnlyQaBootstrap, validateQaBootstrapOptions, type QaBootstrapOptions, type QaBootstrapTransport } from "../lib/qa-bootstrap";
 import { type Slot } from "../lib/qa-bootstrap-ledger";
+import { publicQaOutput } from "../lib/qa-output-privacy";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
@@ -26,7 +27,7 @@ export async function runQaBootstrap(args: readonly string[] = process.argv.slic
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  runQaBootstrap().then((report) => console.log(JSON.stringify(report, null, 2))).catch(() => {
+  runQaBootstrap().then((report) => console.log(JSON.stringify(publicQaOutput(report), null, 2))).catch(() => {
     // Arguments, remote errors and environment values are never echoed.
     console.error("QA bootstrapの入力または読取を確認できません。変更は実行していません。");
     process.exitCode = 1;

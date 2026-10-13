@@ -32,3 +32,13 @@ test("mainのdispatch commitをcheckoutし、入力をshellへ補間しない", 
   assert.match(workflow, /source_sha: \$\{\{ inputs\.source_sha \}\}/);
   assert.match(inspection, /QA_BOOTSTRAP_SOURCE_SHA: \$\{\{ inputs\.source_sha \}\}/);
 });
+
+test("diagnosticsのJSON出力はpublic projectionを通し、API本文は直接出力しない", () => {
+  const script = readFileSync(new URL("../scripts/qa-bootstrap.ts", import.meta.url), "utf8");
+  const reader = readFileSync(new URL("../lib/qa-bootstrap.ts", import.meta.url), "utf8");
+  assert.match(script, /console\.log\(JSON\.stringify\(publicQaOutput\(report\)/);
+  assert.match(reader, /maskQaHosts\(response\.data, this\.env\)/);
+  assert.doesNotMatch(reader, /console\.(?:log|error|warn)/);
+  assert.match(reader, /database: Omit<DatabaseIdentity, "host">/);
+  assert.match(reader, /approvalManifestRequiresPrivateHost: true/);
+});

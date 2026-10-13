@@ -1,6 +1,11 @@
-import { QA_PROJECT_ID, SLOTS, fullSha, leaseToken, sameDatabase, validDatabase, qaAlias, type QaLeaseRecord, type DatabaseIdentity, type Slot } from "./qa-pool";
+import { QA_PROJECT_ID, SLOTS, fullSha, leaseToken, parseLeaseRecord, sameDatabase, validDatabase, qaAlias, type QaLeaseRecord, type DatabaseIdentity, type Slot } from "./qa-pool";
 
 export type ProbeApproval = { projectId: typeof QA_PROJECT_ID; pr: number; sha: string; slot: Slot; expiresAt: string };
+export type AliasPlan = {
+  projectId: typeof QA_PROJECT_ID; pr: number; headSha: string; slot: Slot; leaseId: string;
+  deploymentId: string; database: DatabaseIdentity; alias: string;
+};
+export type AliasApproval = AliasPlan & { expiresAt: string };
 export type DeletePlan = {
   projectId: typeof QA_PROJECT_ID; pr: number; slot: Slot; leaseId: string; headSha: string;
   deploymentIds: string[]; alias: string | null; database: DatabaseIdentity | null;
@@ -8,7 +13,7 @@ export type DeletePlan = {
 export type DeleteApproval = DeletePlan & { expiresAt: string };
 export function deletePlan(record: QaLeaseRecord): DeletePlan {
   return { projectId: QA_PROJECT_ID, pr: record.pr, slot: record.slot, leaseId: record.leaseId, headSha: record.headSha,
-    deploymentIds: record.deployments.map((d) => d.id).sort(), alias: record.purpose === "probe" ? null : qaAlias(record.slot), database: record.database ?? null };
+    deploymentIds: record.deployments.map((d) => d.id).sort(), alias: record.purpose === "probe" ? record.aliasAssignment?.alias ?? null : qaAlias(record.slot), database: record.database ?? null };
 }
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const integer = (value: unknown) => Number.isSafeInteger(value) && Number(value) > 0;
@@ -20,6 +25,44 @@ const list = (text: string | undefined): unknown[] => {
     return values;
   } catch { throw new Error("QA承認設定はJSON配列で指定してください。"); }
 };
+const aliasPlanKeys = ["projectId", "pr", "headSha", "slot", "leaseId", "deploymentId", "database", "alias"] as const;
+const aliasApprovalKeys = [...aliasPlanKeys, "expiresAt"] as const;
+const exactKeys = (value: Record<string, unknown>, keys: readonly string[]) => Object.keys(value).length === keys.length
+  && Object.keys(value).every((key) => keys.includes(key));
+const validAliasTarget = (value: Record<string, unknown>): boolean => value.projectId === QA_PROJECT_ID
+  && integer(value.pr) && fullSha(value.headSha) && SLOTS.includes(value.slot as Slot) && leaseToken(value.leaseId)
+  && typeof value.deploymentId === "string" && /^dpl_[a-zA-Z0-9_-]+$/.test(value.deploymentId)
+  && validDatabase(value.database) && value.alias === qaAlias(value.slot as Slot);
+
+/** Alias-only plans never select or create a deployment. The caller verifies live READY and ownership. */
+export function aliasPlan(record: QaLeaseRecord, deploymentId: string): AliasPlan {
+  const current = parseLeaseRecord(record);
+  if (current.state !== "held" || !current.database || current.readyDeploymentId !== deploymentId
+    || !current.deployments.some((deployment) => deployment.id === deploymentId
+      && deployment.phase === "application" && deployment.sha === current.headSha)) {
+    throw new Error("alias対象は現在HEADのREADY記録とNative DBを持つ使用中の貸出に限ります。");
+  }
+  return { projectId: QA_PROJECT_ID, pr: current.pr, headSha: current.headSha, slot: current.slot,
+    leaseId: current.leaseId, deploymentId, database: { ...current.database }, alias: qaAlias(current.slot) };
+}
+
+/** Validate the whole array before accepting one exact target; malformed unrelated entries fail closed. */
+export function aliasApproval(text: string | undefined, plan: AliasPlan, now = Date.now()): boolean {
+  if (!Number.isFinite(now) || !object(plan) || !exactKeys(plan, aliasPlanKeys) || !validAliasTarget(plan)) return false;
+  let values: unknown[];
+  try { values = list(text); } catch { return false; }
+  let matching: AliasApproval | undefined;
+  for (const value of values) {
+    if (!object(value) || !exactKeys(value, aliasApprovalKeys) || !validAliasTarget(value)
+      || typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt))) return false;
+    if (value.projectId !== plan.projectId || value.pr !== plan.pr || value.headSha !== plan.headSha
+      || value.slot !== plan.slot || value.leaseId !== plan.leaseId || value.deploymentId !== plan.deploymentId
+      || value.alias !== plan.alias || !sameDatabase(value.database as DatabaseIdentity, plan.database)) continue;
+    if (matching) return false;
+    matching = value as AliasApproval;
+  }
+  return matching !== undefined && active(matching.expiresAt, now);
+}
 
 /** A probe may create only the reviewed PR/SHA in the explicitly named free slot. */
 export function probeApproval(text: string | undefined, pr: number, sha: string, now = Date.now()): ProbeApproval | null {

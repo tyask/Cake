@@ -10,7 +10,8 @@ import {
 } from "../lib/qa-pool";
 import { runQaRequest, type QaGateTarget, type QaGateway, type QaPullRequest, type QaRequest, type RemoteDeployment } from "../lib/qa-pool-service";
 import { decodeGitConfigFile, type GitConfigEvidence } from "../lib/qa-pool-gate";
-import { deletionApproval, deletePlan, probeApproval, type DeletePlan } from "../lib/qa-pool-authorization";
+import { aliasApproval, aliasPlan, deletionApproval, deletePlan, probeApproval, type AliasPlan, type DeletePlan } from "../lib/qa-pool-authorization";
+import { maskQaHosts, publicQaOutput } from "../lib/qa-output-privacy";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type JsonObject = Record<string, unknown>;
@@ -32,6 +33,9 @@ const safeNumber = (value: unknown): number => {
   if (!Number.isSafeInteger(value) || Number(value) < 1) throw new Error("API番号を確認できません。");
   return Number(value);
 };
+const publicDatabase = (database: DatabaseIdentity | undefined) => database ? {
+  projectId: database.projectId, branchId: database.branchId, endpointId: database.endpointId,
+} : null;
 const transport: QaTransport = async (method, url, token, body) => {
   try {
     const response = await fetch(url, {
@@ -46,14 +50,19 @@ const transport: QaTransport = async (method, url, token, body) => {
 
 export class HttpQaGateway implements QaGateway {
   private repoId = 0;
-  constructor(private readonly env: Environment, private readonly request: QaTransport = transport, private readonly access: "read" | "write" = "read") {}
+  constructor(private readonly env: Environment, private readonly request: QaTransport = transport, private readonly access: "read" | "write" = "read") {
+    maskQaHosts([env.CAKE_QA_PRODUCTION_DATABASE_HOST, env.CAKE_QA_DELETE_APPROVALS, env.CAKE_QA_ALIAS_APPROVALS], env);
+  }
   private async api(provider: "github" | "vercel" | "neon", path: string, method = "GET", body?: unknown, missing = false): Promise<unknown> {
     if (this.access === "read" && method !== "GET") throw new Error("GET専用検査から変更APIは呼び出せません。");
     const base = { github: "https://api.github.com", vercel: "https://api.vercel.com", neon: "https://console.neon.tech/api/v2" }[provider];
     const token = this.env[{ github: "GITHUB_TOKEN", vercel: "VERCEL_TOKEN", neon: "NEON_API_KEY" }[provider]];
     if (!token) throw new Error(`${provider} API認証がありません。`);
     const suffix = provider === "vercel" ? `${path.includes("?") ? "&" : "?"}slug=fumin1` : "";
-    const response = await this.request(method, base + path + suffix, token, body);
+    const response = await this.request(method, base + path + suffix, token, body).catch(() => {
+      throw new Error("外部APIの応答を確認できません。記録を保持します。");
+    });
+    maskQaHosts(response.data, this.env);
     if (missing && response.status === 404) return null;
     if (response.status < 200 || response.status > 299) throw new Error(`${provider} API ${response.status}。確認不能のため処理を停止します。`);
     return response.data;
@@ -91,7 +100,12 @@ export class HttpQaGateway implements QaGateway {
     return { id, payload: record };
   }
   private approved(number: number, sha: string): boolean {
-    try { return object(JSON.parse(this.env.CAKE_QA_APPROVED_HEADS ?? "{}"))[String(number)] === sha; }
+    try {
+      const heads = object(JSON.parse(this.env.CAKE_QA_APPROVED_HEADS?.trim() || "{}"));
+      if (Object.entries(heads).some(([pr, approvedSha]) => !/^[1-9][0-9]*$/.test(pr)
+        || !Number.isSafeInteger(Number(pr)) || !fullSha(approvedSha))) throw new Error();
+      return fullSha(sha) && Object.hasOwn(heads, String(number)) && heads[String(number)] === sha;
+    }
     catch { throw new Error("確認済みPR SHA設定が不正です。"); }
   }
   async pullRequest(number: number): Promise<QaPullRequest> {
@@ -141,7 +155,7 @@ export class HttpQaGateway implements QaGateway {
       || pr.branch !== target.branch || pr.sha !== target.sha) throw new Error("生成対象PRの現在OPEN headが一致しません。");
     return pr;
   }
-  async assertGate(mode: "create" | "probe" | "cleanup" = "create", target?: QaGateTarget): Promise<void> {
+  async assertGate(mode: "create" | "probe" | "cleanup" | "alias" = "create", target?: QaGateTarget): Promise<void> {
     for (const key of mode === "create" ? ["CAKE_QA_POOL_ENABLED", "CAKE_QA_GIT_GATE_CONFIRMED", "CAKE_QA_NATIVE_CONFIRMED"] : []) {
       if (this.env[key] !== "true") throw new Error(`${key} の確認設定がありません。生成・削除を開始しません。`);
     }
@@ -271,11 +285,55 @@ export class HttpQaGateway implements QaGateway {
     if (record.purpose === "probe") throw new Error("限定probeは固定aliasを変更できません。");
     await this.api("vercel", `/v2/deployments/${deployment.id}/aliases`, "POST", { alias: qaAlias(record.slot) });
   }
+  aliasApproved(plan: AliasPlan) { return aliasApproval(this.env.CAKE_QA_ALIAS_APPROVALS, plan); }
+  async assignReadyAlias(record: QaLeaseRecord, deployment: RemoteDeployment, plan: AliasPlan) {
+    if (this.access !== "write") throw new Error("GET専用検査からaliasを変更できません。");
+    // Only a saved pending receipt permits this POST. An unknown POST is never retried here.
+    if (record.purpose !== "probe" || record.state !== "held" || record.intent || !record.database
+      || record.readyDeploymentId !== deployment.id || record.headSha !== deployment.sha
+      || record.aliasAssignment?.state !== "pending" || record.aliasAssignment.deploymentId !== deployment.id
+      || record.aliasAssignment.alias !== plan.alias || record.aliasAssignment.sha !== plan.headSha
+      || !isDeepStrictEqual(aliasPlan(record, deployment.id), plan) || !this.aliasApproved(plan)) {
+      throw new Error("保存済みREADY・貸出・限定alias承認が一致しません。");
+    }
+    await this.assertGate("alias", { pr: record.pr, branch: record.branch, sha: record.headSha });
+    const ready = await this.deployment(deployment.id);
+    if (!ready || ready.id !== deployment.id || ready.state !== "READY" || ready.phase !== "application" || ready.projectId !== QA_PROJECT_ID
+      || !(ready.target === null || ready.target === "preview") || ready.pr !== record.pr || ready.branch !== record.branch
+      || ready.sha !== record.headSha || ready.leaseId !== record.leaseId
+      || !record.deployments.some((d) => d.id === ready.id && d.sha === ready.sha && d.phase === "application")) {
+      throw new Error("alias直前のREADY deployment所属が一致しません。");
+    }
+    const database = await this.database(record);
+    if (!database || !sameDatabase(database, record.database) || !sameDatabase(database, plan.database)) {
+      throw new Error("alias直前のNative DB識別子が一致しません。");
+    }
+    await this.currentTarget({ pr: record.pr, branch: record.branch, sha: record.headSha });
+    const assigned = await this.alias(record.slot);
+    const latest = (await this.pool())[record.slot];
+    if (!latest || !isDeepStrictEqual(latest.payload, record) || !this.aliasApproved(plan)) {
+      throw new Error("alias直前に貸出世代または承認が変わりました。");
+    }
+    if (assigned) {
+      if (assigned.projectId === QA_PROJECT_ID && assigned.deploymentId === deployment.id) return;
+      throw new Error("alias直前に別の割当を検出しました。上書きしません。");
+    }
+    await this.api("vercel", `/v2/deployments/${deployment.id}/aliases`, "POST", { alias: plan.alias });
+  }
   deletionApproved(plan: DeletePlan) { return deletionApproval(this.env.CAKE_QA_DELETE_APPROVALS, plan); }
   async deleteAlias(record: QaLeaseRecord, plan: DeletePlan) {
-    if (!this.deletionApproved(plan) || record.state !== "deleting" || record.purpose === "probe"
+    if (this.access !== "write") throw new Error("GET専用検査からaliasを削除できません。");
+    if (!this.deletionApproved(plan) || record.state !== "deleting" || !plan.alias
+      || record.purpose === "probe" && !record.aliasAssignment
       || !isDeepStrictEqual(deletePlan(record), plan)) throw new Error("正確なresource IDへの削除承認がありません。");
-    await this.api("vercel", `/v2/aliases/${qaAlias(record.slot)}`, "DELETE");
+    const alias = await this.alias(record.slot);
+    const latest = (await this.pool())[record.slot];
+    if (!latest || !isDeepStrictEqual(latest.payload, record) || !this.deletionApproved(plan)) throw new Error("alias削除直前に貸出世代または承認が変わりました。");
+    if (!alias) return;
+    if (alias.projectId !== QA_PROJECT_ID || (record.aliasAssignment
+      ? alias.deploymentId !== record.aliasAssignment.deploymentId
+      : !record.deployments.some((d) => d.id === alias.deploymentId))) throw new Error("固定aliasが別の割当を指しています。削除しません。");
+    await this.api("vercel", `/v2/aliases/${plan.alias}`, "DELETE");
   }
   async deleteDeployment(record: QaLeaseRecord, deployment: RemoteDeployment, plan: DeletePlan) {
     if (!this.deletionApproved(plan) || record.state !== "deleting" || !isDeepStrictEqual(deletePlan(record), plan)
@@ -370,7 +428,7 @@ export class HttpQaGateway implements QaGateway {
       parent: parent ?? null, aliases,
       slots: pool ? Object.fromEntries(Object.entries(pool).map(([slot, saved]) => [slot, saved ? {
         state: saved.payload.state, purpose: saved.payload.purpose ?? "normal", pr: saved.payload.pr, leaseId: saved.payload.leaseId,
-        headSha: saved.payload.headSha, deploymentIds: saved.payload.deployments.map((d) => d.id), database: saved.payload.database ?? null,
+        headSha: saved.payload.headSha, deploymentIds: saved.payload.deployments.map((d) => d.id), database: publicDatabase(saved.payload.database),
       } : null])) : null,
       plan: null as unknown,
     };
@@ -414,11 +472,18 @@ export class HttpQaGateway implements QaGateway {
         const actual = await this.database(record, "cleanup");
         if (actual ? !sameDatabase(actual, record.database) : !(await this.databaseGone(record.database))) throw new Error("DB識別子の再読取が不一致です。");
       }
-      const alias = record.purpose === "probe" ? null : await this.alias(record.slot);
-      if (alias && (alias.projectId !== QA_PROJECT_ID || !record.deployments.some((d) => d.id === alias.deploymentId))) throw new Error("aliasは別貸出です。");
+      const alias = deletePlan(record).alias ? await this.alias(record.slot) : null;
+      if (record.aliasAssignment?.state === "pending" && !alias) throw new Error("alias割当応答が未確認です。削除計画を保留します。");
+      if (alias && (alias.projectId !== QA_PROJECT_ID || (record.aliasAssignment
+        ? alias.deploymentId !== record.aliasAssignment.deploymentId
+        : !record.deployments.some((d) => d.id === alias.deploymentId)))) throw new Error("aliasは別貸出です。");
       return deletePlan(record);
     });
-    summary.plan = planned ?? null;
+    summary.plan = planned ? { ...planned, database: publicDatabase(planned.database ?? undefined),
+      approvalManifestRequiresPrivateHost: Boolean(planned.database),
+      databaseDataLossRequiresApproval: Boolean(planned.database),
+      dataLossNotice: planned.database ? "削除するとQA DBと入力データを失います。deploymentの復元はDBの復旧を保証しません。" : null,
+    } : null;
     return summary;
   }
 }
@@ -426,17 +491,19 @@ export class HttpQaGateway implements QaGateway {
 export async function runQaWriter(env: Environment = process.env, request?: QaRequest, gateway?: QaGateway, apiTransport: QaTransport = transport): Promise<void> {
   if (!request) {
     const event = env.EVENT_PATH ? object(JSON.parse(await readFile(env.EVENT_PATH, "utf8"))) : {};
-    const action = env.QA_ACTION?.trim() || (env.EVENT_NAME === "schedule" || env.EVENT_NAME === "pull_request_target" && event.action === "closed" ? "refresh" : "claim");
+    const action = env.QA_ACTION?.trim() || (env.EVENT_NAME === "pull_request_target" && event.action === "closed"
+      ? "close" : env.EVENT_NAME === "schedule" ? "refresh" : "claim");
     if (["preflight", "plan-probe", "plan-release"].includes(action)) {
       const reader = new HttpQaGateway({ ...env, GITHUB_TOKEN: env.GITHUB_TOKEN ?? env.GH_TOKEN }, apiTransport);
       const report = await reader.inspect({ action: action as "preflight" | "plan-probe" | "plan-release",
         pr: env.QA_PR_NUMBER ? safeNumber(Number(env.QA_PR_NUMBER)) : undefined, sha: env.QA_SOURCE_SHA,
         slot: env.QA_SLOT as QaLeaseRecord["slot"] | undefined, leaseId: env.QA_LEASE_ID });
-      console.log(JSON.stringify(report, null, 2)); return;
+      console.log(JSON.stringify(publicQaOutput(report, env), null, 2)); return;
     }
-    if (!["claim", "release", "refresh", "probe"].includes(action)) throw new Error("QA操作が不正です。");
+    if (!["claim", "release", "refresh", "probe", "alias-only", "close"].includes(action)) throw new Error("QA操作が不正です。");
     const pr = env.QA_PR_NUMBER ? safeNumber(Number(env.QA_PR_NUMBER)) : event.number ? safeNumber(event.number) : undefined;
-    request = { action: action as QaRequest["action"], pr, leaseId: env.QA_LEASE_ID, sha: env.QA_SOURCE_SHA };
+    request = { action: action as QaRequest["action"], pr, leaseId: env.QA_LEASE_ID, sha: env.QA_SOURCE_SHA,
+      slot: env.QA_SLOT as QaLeaseRecord["slot"] | undefined, deploymentId: env.QA_DEPLOYMENT_ID };
   }
   // Mutations must run in the single reviewed Actions writer, never from a local CLI.
   if (env.GITHUB_ACTIONS !== "true" || env.GITHUB_REPOSITORY !== QA_REPOSITORY || env.GITHUB_REF !== "refs/heads/main") throw new Error("信頼済みmainの単一Actions writerから実行してください。");

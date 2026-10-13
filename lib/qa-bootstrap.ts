@@ -4,6 +4,8 @@ import {
   type DatabaseIdentity, type GithubDeployment, type Pool, type QaLeaseRecord, type Slot,
 } from "./qa-bootstrap-ledger";
 import { decodeGitConfigFile, type GitConfigEvidence } from "./qa-pool-gate";
+import { deletePlan } from "./qa-pool-authorization";
+import { maskQaHosts, publicQaOutput } from "./qa-output-privacy";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type JsonObject = Record<string, unknown>;
@@ -39,7 +41,8 @@ export type ProbePlan = {
 export type ReleasePlan = {
   action: "plan-release"; executionEnabled: false; projectId: typeof QA_PROJECT_ID; neonProjectId: typeof QA_NEON_PROJECT_ID;
   pr: number; branch: string; slot: Slot; leaseId: string; headSha: string; deploymentIds: string[];
-  alias: string | null; database: DatabaseIdentity;
+  alias: string | null; database: Omit<DatabaseIdentity, "host">;
+  approvalManifestRequiresPrivateHost: true; databaseDataLossRequiresApproval: true; dataLossNotice: string;
 };
 export type QaBootstrapReport = {
   action: QaBootstrapOptions["action"]; readOnly: true; executionEnabled: false;
@@ -57,7 +60,7 @@ export type QaBootstrapReport = {
   gitConfiguration: { scope: "repository-git-trigger-configuration"; backendForcedDeploymentPreventionProven: false;
     main: GitConfigurationProof | null; target: (GitConfigurationProof & { pr: number }) | null };
   aliases: Record<Slot, Alias | null | "unconfirmed">;
-  slots: Record<Slot, { state: QaLeaseRecord["state"]; purpose: "probe" | "normal"; pr: number; leaseId: string; headSha: string; deploymentIds: string[]; database: DatabaseIdentity | null } | null> | null;
+  slots: Record<Slot, { state: QaLeaseRecord["state"]; purpose: "probe" | "normal"; pr: number; leaseId: string; headSha: string; deploymentIds: string[]; database: Omit<DatabaseIdentity, "host"> | null } | null> | null;
   plan: ProbePlan | ReleasePlan | null;
 };
 
@@ -175,6 +178,7 @@ export class ReadOnlyQaBootstrap {
     let response: { status: number; data: unknown };
     try { response = await this.request("GET", BASES[provider] + path + suffix, token); }
     catch { throw new ReadFailure({ code: "transport-unconfirmed", provider }); }
+    maskQaHosts(response.data, this.env);
     if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599) throw new ReadFailure({ code: "invalid-response", provider });
     if (response.status === 404 && notFound) return null;
     if (response.status < 200 || response.status > 299) {
@@ -347,11 +351,17 @@ export class ReadOnlyQaBootstrap {
       const e = await this.api("neon", `/projects/${QA_NEON_PROJECT_ID}/endpoints/${identity.endpointId}`, "GET", "exact-resource");
       if (b !== null || e !== null) fail("native-identity-unconfirmed");
     }
-    const alias = record.purpose === "probe" ? null : await this.aliases(record.slot);
-    if (alias && !record.deployments.some((d) => d.id === alias.deploymentId)) fail("identity-mismatch");
+    const manifest = deletePlan(record);
+    const alias = manifest.alias === null ? null : await this.aliases(record.slot);
+    if (alias && (!record.deployments.some((d) => d.id === alias.deploymentId)
+      || record.aliasAssignment && alias.deploymentId !== record.aliasAssignment.deploymentId)) fail("identity-mismatch");
+    if (record.aliasAssignment?.state === "pending" && !alias) fail("unresolved-alias-intent");
     return { action: "plan-release", executionEnabled: false, projectId: QA_PROJECT_ID, neonProjectId: QA_NEON_PROJECT_ID,
       pr: record.pr, branch: record.branch, slot: record.slot, leaseId: record.leaseId, headSha: record.headSha,
-      deploymentIds: record.deployments.map((d) => d.id).sort(), alias: record.purpose === "probe" ? null : qaAlias(record.slot), database: { ...identity } };
+      deploymentIds: manifest.deploymentIds, alias: manifest.alias,
+      database: { projectId: identity.projectId, branchId: identity.branchId, endpointId: identity.endpointId },
+      approvalManifestRequiresPrivateHost: true, databaseDataLossRequiresApproval: true,
+      dataLossNotice: "削除するとQA DBと入力データを失います。deploymentの復元はDBの復旧を保証しません。" };
   }
 
   async inspect(options: QaBootstrapOptions): Promise<QaBootstrapReport> {
@@ -432,7 +442,9 @@ export class ReadOnlyQaBootstrap {
       slots: pool ? Object.fromEntries(SLOTS.map((slot) => {
         const saved = pool[slot];
         return [slot, saved ? { state: saved.payload.state, purpose: saved.payload.purpose ?? "normal", pr: saved.payload.pr,
-          leaseId: saved.payload.leaseId, headSha: saved.payload.headSha, deploymentIds: saved.payload.deployments.map((d) => d.id).sort(), database: saved.payload.database ?? null } : null];
+          leaseId: saved.payload.leaseId, headSha: saved.payload.headSha, deploymentIds: saved.payload.deployments.map((d) => d.id).sort(),
+          database: saved.payload.database ? { projectId: saved.payload.database.projectId,
+            branchId: saved.payload.database.branchId, endpointId: saved.payload.database.endpointId } : null } : null];
       })) as QaBootstrapReport["slots"] : null, plan: null,
     };
     const prerequisite = (name: string, confirmed: boolean, requirement: string) => report.prerequisites.push({ name, confirmed, requirement });
@@ -447,7 +459,7 @@ export class ReadOnlyQaBootstrap {
     prerequisite("Native cleanup behavior", false, "separate live verification of branch and endpoint cleanup");
     prerequisite("Reviewed authorization", false, "separate reviewed authorization before any future mutation");
     prerequisite("Mutating implementation", false, "this bootstrap has no mutating operation");
-    if (options.action === "preflight") return report;
+    if (options.action === "preflight") return publicQaOutput(report, this.env) as QaBootstrapReport;
     if (options.action === "plan-probe") {
       report.plan = await check("Probe prerequisites", async () => {
         if (!pr || !pool) fail("prerequisite-unconfirmed");
@@ -462,7 +474,7 @@ export class ReadOnlyQaBootstrap {
           pr: pr.number, branch: pr.branch, sha: pr.sha, headSha: pr.sha, slot: options.slot!, maximumNewDeployments: current?.payload.database ? 1 : 2,
           fixedAliasChanges: false as const, deletionRequiresSeparateExactResourceApproval: true as const };
       }) ?? null;
-      return report;
+      return publicQaOutput(report, this.env) as QaBootstrapReport;
     }
     report.plan = await check("Exact release resources", async () => {
       if (!project || !pool || !resources || !pr) fail("prerequisite-unconfirmed");
@@ -473,6 +485,6 @@ export class ReadOnlyQaBootstrap {
       if (options.sha && options.sha !== saved.payload.headSha) fail("stale-sha");
       return this.releaseResources(saved.payload, resources);
     }) ?? null;
-    return report;
+    return publicQaOutput(report, this.env) as QaBootstrapReport;
   }
 }

@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
-  claimRecord, fullSha, featureBranch, nextRecord, sameDatabase, QA_PROJECT_ID, QA_REPOSITORY, SLOTS,
+  claimRecord, fullSha, featureBranch, leaseToken, nextRecord, sameDatabase, QA_PROJECT_ID, QA_REPOSITORY, SLOTS,
   type Pool, type SavedLease, type QaLeaseRecord, type DatabaseIdentity, type QaDeployment,
 } from "./qa-pool";
-import { deletePlan, type DeletePlan, type ProbeApproval } from "./qa-pool-authorization";
+import { aliasPlan, deletePlan, type AliasPlan, type DeletePlan, type ProbeApproval } from "./qa-pool-authorization";
 
 export type QaPullRequest = { number: number; state: "open" | "closed"; branch: string; sha: string; repository: string; base: string; approved: boolean };
 export type RemoteDeployment = {
@@ -18,8 +18,9 @@ export interface QaGateway {
   pullRequest(pr: number): Promise<QaPullRequest>;
   openPullRequests(): Promise<QaPullRequest[]>;
   generationEnabled(): boolean;
-  assertGate(mode: "create" | "probe" | "cleanup", target?: QaGateTarget): Promise<void>;
+  assertGate(mode: "create" | "probe" | "cleanup" | "alias", target?: QaGateTarget): Promise<void>;
   probeAuthorization(pr: number, sha: string): ProbeApproval | null;
+  aliasApproved(plan: AliasPlan): boolean;
   deployments(record: QaLeaseRecord): Promise<RemoteDeployment[]>;
   deployment(id: string): Promise<RemoteDeployment | null>;
   create(record: QaLeaseRecord): Promise<RemoteDeployment>;
@@ -27,11 +28,13 @@ export interface QaGateway {
   databaseGone(identity: DatabaseIdentity): Promise<boolean>;
   alias(slot: QaLeaseRecord["slot"]): Promise<AliasTarget | null>;
   assignAlias(record: QaLeaseRecord, deployment: RemoteDeployment): Promise<void>;
+  assignReadyAlias(record: QaLeaseRecord, deployment: RemoteDeployment, plan: AliasPlan): Promise<void>;
   deleteAlias(record: QaLeaseRecord, plan: DeletePlan): Promise<void>;
   deleteDeployment(record: QaLeaseRecord, deployment: RemoteDeployment, plan: DeletePlan): Promise<void>;
   deletionApproved(plan: DeletePlan): boolean;
 }
-export type QaRequest = { action: "claim" | "refresh" | "release" | "probe"; pr?: number; leaseId?: string; sha?: string };
+export type QaRequest = { action: "claim" | "refresh" | "release" | "probe" | "alias-only" | "close";
+  pr?: number; leaseId?: string; sha?: string; slot?: QaLeaseRecord["slot"]; deploymentId?: string };
 const terminal = (state: string) => ["READY", "ERROR", "CANCELED", "BLOCKED"].includes(state);
 
 /** One bounded reconciliation pass; never waits for a build or Native cleanup. */
@@ -70,11 +73,12 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
     }
     return saved;
   };
-  const reconcile = async (initial: SavedLease, mode: "normal" | "probe" | "release" = "normal"): Promise<void> => {
+  const reconcile = async (initial: SavedLease, mode: "normal" | "probe" | "release" | "close" = "normal"): Promise<void> => {
     let saved = initial;
     let record = saved.payload;
     const pr = await gateway.pullRequest(record.pr);
     if (!validPr(pr) || pr.branch !== record.branch) throw new Error("PRのfeature枝を確認できません。貸出を保持します。");
+    if (mode === "close" && pr.state !== "closed") return;
     if (mode === "probe" && (record.state !== "held" || pr.state !== "open")) throw new Error("probeは使用中のOPEN PRだけを進めます。返却は別の操作で行ってください。");
     if ((pr.state === "closed" || mode === "release") && record.state === "held") {
       saved = await save(saved, { state: "deleting", readyDeploymentId: undefined, aliasSha: undefined });
@@ -109,15 +113,23 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
         check(record, deployment);
         deletionTargets.push(deployment);
       }
-      const alias = record.purpose === "probe" ? null : await gateway.alias(record.slot);
+      const trackedAlias = record.aliasAssignment;
+      const alias = record.purpose === "probe" && !trackedAlias ? null : await gateway.alias(record.slot);
       const plan = deletePlan(record);
       const assertDeletionApproval = () => {
         if (!gateway.deletionApproved(plan)) throw new Error("現在のlease・全resource IDに一致する有効な削除承認がありません。");
       };
       if (alias) {
-        if (alias.projectId !== QA_PROJECT_ID || !record.deployments.some((d) => d.id === alias.deploymentId)) throw new Error("固定aliasが別の貸出を指しています。削除を拒否します。");
+        if (alias.projectId !== QA_PROJECT_ID || !record.deployments.some((d) => d.id === alias.deploymentId)
+          || trackedAlias && alias.deploymentId !== trackedAlias.deploymentId) throw new Error("固定aliasが別の貸出を指しています。削除を拒否します。");
       }
+      if (trackedAlias?.state === "pending" && !alias) { log(`Cake: ${record.slot} のalias作成応答が未確認です。削除・解放を保留します。`); return; }
       if (!gateway.deletionApproved(plan)) { log(`Cake: ${record.slot} は削除対象manifestの承認待ちです。`); return; }
+      if (trackedAlias?.state === "pending" && alias) {
+        assertDeletionApproval();
+        saved = await save(saved, { aliasAssignment: { ...trackedAlias, state: "assigned" } });
+        record = saved.payload;
+      }
       if (alias) {
         await assertCurrent(saved);
         assertDeletionApproval();
@@ -132,6 +144,7 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
       if ((await gateway.deployments(record)).length) { log(`Cake: ${record.slot} のdeployment削除を待っています。`); return; }
       for (const known of record.deployments) if (await gateway.deployment(known.id)) throw new Error("deployment消失を確認できません。");
       if (record.database && !(await gateway.databaseGone(record.database))) { log(`Cake: ${record.slot} のNative branch/endpoint消失を待っています。`); return; }
+      if ((record.purpose !== "probe" || trackedAlias) && await gateway.alias(record.slot)) throw new Error("返却前の固定alias消失を確認できません。");
       const retiredDatabases = record.database ? [...record.retiredDatabases, record.database] : record.retiredDatabases;
       assertDeletionApproval();
       await save(saved, { state: "free", retiredDatabases });
@@ -141,6 +154,7 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
     const probing = mode === "probe";
     if (record.purpose === "probe" && !probing) { log(`Cake: ${record.slot} のprobeは対象SHAの限定実行でのみ進めます。`); return; }
     if (probing) {
+      if (record.aliasAssignment && request.sha !== record.aliasAssignment.sha) throw new Error("固定alias確認中のprobe対象SHAを変更できません。");
       const approval = gateway.probeAuthorization(record.pr, request.sha!);
       if (record.purpose !== "probe" || !approval || approval.slot !== record.slot
         || pr.state !== "open" || pr.sha !== request.sha) {
@@ -231,6 +245,68 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
     await save(saved, { readyDeploymentId: deployment.id, aliasSha: deployment.sha, deployments: record.deployments.map((d) => d.id === deployment.id ? { ...d, url } : d) });
     log(`Cake: ${record.slot} READY (PR #${record.pr}, ${deployment.sha.slice(0, 7)})`);
   };
+  if (request.action === "alias-only") {
+    if (!Number.isSafeInteger(request.pr) || Number(request.pr) < 1 || !fullSha(request.sha)
+      || !leaseToken(request.leaseId) || !SLOTS.includes(request.slot as QaLeaseRecord["slot"])
+      || typeof request.deploymentId !== "string" || !/^dpl_[a-zA-Z0-9_-]+$/.test(request.deploymentId)) {
+      throw new Error("限定aliasには対象PR・完全SHA・枠・lease・READY deploymentが必要です。");
+    }
+    let saved = pool[request.slot!];
+    if (!saved) throw new Error("限定aliasの既存貸出がありません。新しい貸出は作成しません。");
+    const verify = async (target: SavedLease) => {
+      await assertCurrent(target);
+      const record = target.payload;
+      if (record.state !== "held" || record.purpose !== "probe" || record.pr !== request.pr || record.slot !== request.slot
+        || record.leaseId !== request.leaseId || record.headSha !== request.sha || record.intent
+        || record.readyDeploymentId !== request.deploymentId) throw new Error("限定aliasの現在貸出・SHA・READY対象が一致しません。");
+      const plan = aliasPlan(record, request.deploymentId!);
+      if (!gateway.aliasApproved(plan)) throw new Error("対象lease・READY deployment・DBへの有効なalias承認がありません。");
+      const pr = await gateway.pullRequest(record.pr);
+      if (!validPr(pr) || pr.state !== "open" || pr.branch !== record.branch || pr.sha !== record.headSha) throw new Error("限定aliasのOPEN PR・現在HEADが一致しません。");
+      await gateway.assertGate("alias", gateTarget(pr));
+      const deployment = await gateway.deployment(request.deploymentId!);
+      if (!deployment) throw new Error("限定aliasのREADY deploymentが消失しました。");
+      check(record, deployment);
+      if (deployment.id !== request.deploymentId || deployment.sha !== record.headSha
+        || deployment.phase !== "application" || deployment.state !== "READY") throw new Error("限定aliasには指定ID・現在HEADのREADY applicationだけを使えます。");
+      const database = await gateway.database(record);
+      if (!database || !sameDatabase(database, plan.database)) throw new Error("限定aliasのNative DB識別子が変更・消失しました。");
+      const alias = await gateway.alias(record.slot);
+      if (alias && (alias.projectId !== QA_PROJECT_ID || alias.deploymentId !== deployment.id)) throw new Error("固定aliasは別の対象に割当済みです。上書きしません。");
+      const current = await gateway.pullRequest(record.pr);
+      if (!validPr(current) || current.state !== "open" || current.branch !== record.branch || current.sha !== record.headSha) throw new Error("限定aliasのPR・現在HEADが確認中に変わりました。");
+      await assertCurrent(target);
+      if (!gateway.aliasApproved(plan)) throw new Error("限定alias承認が期限切れまたは変更されました。");
+      return { deployment, plan, alias };
+    };
+    let verified = await verify(saved);
+    const existing = saved.payload.aliasAssignment;
+    if (existing) {
+      if (existing.alias !== verified.plan.alias || existing.deploymentId !== request.deploymentId || existing.sha !== request.sha) throw new Error("限定aliasの保存済み対象を変更できません。");
+      if (!verified.alias) {
+        if (existing.state === "assigned") throw new Error("確認済み固定aliasが消失しました。再割当しません。");
+        log(`Cake: ${saved.payload.slot} のalias作成応答が未確認です。再POSTせず保持します。`); return;
+      }
+      if (existing.state === "assigned") return;
+    } else {
+      saved = await save(saved, { aliasAssignment: { alias: verified.plan.alias, deploymentId: request.deploymentId!, sha: request.sha!, state: "pending" } });
+      verified = await verify(saved);
+      if (!verified.alias) await gateway.assignReadyAlias(saved.payload, verified.deployment, verified.plan);
+    }
+    verified = await verify(saved);
+    if (!verified.alias) throw new Error("固定alias割当を確認できません。pending記録を保持します。");
+    await save(saved, { aliasAssignment: { ...saved.payload.aliasAssignment!, state: "assigned" } });
+    log(`Cake: ${saved.payload.slot} の限定READY alias割当を確認しました。`);
+    return;
+  }
+  if (request.action === "close") {
+    if (!Number.isSafeInteger(request.pr) || Number(request.pr) < 1) throw new Error("close確認には対象PRが必要です。");
+    const saved = Object.values(pool).find((s) => s && s.payload.state !== "free" && s.payload.pr === request.pr);
+    if (!saved) return;
+    if (request.leaseId && request.leaseId !== saved.payload.leaseId) throw new Error("close対象のleaseが一致しません。");
+    await reconcile(saved, "close");
+    return;
+  }
   if (request.action === "release") {
     const saved = Object.values(pool).find((s) => s && s.payload.state !== "free" && s.payload.pr === request.pr);
     if (!saved || !request.leaseId || saved.payload.leaseId !== request.leaseId) throw new Error("手動返却には現在のPRとlease IDが必要です。古い貸出を拒否します。");
