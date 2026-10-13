@@ -93,8 +93,7 @@ test("Hobbyのpolicy未設定でもmainと対象commitのGit停止設定が一�
   assert.equal(f.calls.some((call) => call.path.includes("/teams/") || call.path.includes("deployment-policy")), false);
   const postIndex = f.calls.findIndex((call) => call.method === "POST" && call.path === "/v13/deployments");
   assert.equal(f.calls[postIndex - 1].path, `/repos/${QA_REPOSITORY}/pulls/42`);
-  assert.equal(f.calls[postIndex - 2].path, `/repos/${QA_REPOSITORY}/contents/vercel.json`);
-  assert.equal(f.calls[postIndex - 2].ref, targetSha);
+  assert.equal(f.calls[postIndex - 2].path, `/repos/${QA_REPOSITORY}/deployments`);
 });
 
 test("限定probeは五項目承認とGit設定の証明でflags falseのまま単一枠を取得する", async () => {

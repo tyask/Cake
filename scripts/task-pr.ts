@@ -5,9 +5,10 @@ import { fileURLToPath } from "node:url";
 import {
   CAKE_REPOSITORY, assertTaskGitGate, cleanTaskHead, commandOutput, executeWorkflowCommand, pullRequestUrl,
   readPreviewRecord, readyQaPreview, taskPullRequests, type WorkflowExecutor,
+  type PreviewProviderReader,
 } from "./task-workflow";
 
-type TaskPrOptions = { args?: readonly string[]; cwd?: string; execute?: WorkflowExecutor; log?: (message: string) => void };
+type TaskPrOptions = { args?: readonly string[]; cwd?: string; execute?: WorkflowExecutor; log?: (message: string) => void; provider?: PreviewProviderReader };
 
 function prArguments(args: readonly string[]): { title: string; verificationFile: string; draft: boolean } {
   const values = new Map<string, string>();
@@ -35,7 +36,7 @@ function prArguments(args: readonly string[]): { title: string; verificationFile
 }
 
 export async function runTaskPr({
-  args = [], cwd = process.cwd(), execute = executeWorkflowCommand, log = console.log,
+  args = [], cwd = process.cwd(), execute = executeWorkflowCommand, log = console.log, provider,
 }: TaskPrOptions = {}): Promise<{ url: string; existing: boolean }> {
   const { title, verificationFile, draft } = prArguments(args);
   const head = await cleanTaskHead(cwd, execute);
@@ -73,20 +74,20 @@ export async function runTaskPr({
 
   let evidence: string;
   if (draft) {
-    evidence = `## 固定QA\n\n未検証。QA枠の予約・設定/承認・DB分離・Native連携・生成前ゲート・cleanupの確認と、Deployment固有URLでの画面/API検証が必要です。\n\n- ブランチ: \`${head.branch}\`\n- 対象コミット: \`${head.sha}\`\n`;
+    evidence = `## 固定QA\n\n未検証。QA枠の本人承認・DB分離・Native連携・生成前ゲート・cleanupの確認と、現在HEADを確認した固定QA URLでの画面/API検証が必要です。\n\n- ブランチ: \`${head.branch}\`\n- 対象コミット: \`${head.sha}\`\n`;
   } else {
     const preview = await readPreviewRecord(head.cwd);
     if (preview.branch !== head.branch || preview.sha !== head.sha) {
       throw new Error("Previewを検証したブランチ・コミットと現在のHEADが一致しません。deploy:previewから検証をやり直してください。");
     }
     if (!existing[0] || existing[0].number !== preview.prNumber) throw new Error("検証済み固定QAと同じPRがありません。先に--draftでPRを作成してください。");
-    const current = await readyQaPreview(head, preview.prNumber, execute);
-    if (!current || current.slot !== preview.slot || current.leaseId !== preview.leaseId
+    const current = await readyQaPreview(head, preview.prNumber, execute, provider);
+    if (!current || !current.fixedUrl || current.slot !== preview.slot || current.leaseId !== preview.leaseId
       || current.deploymentId !== preview.deploymentId || current.url !== preview.url
       || (["projectId", "branchId", "endpointId", "host"] as const).some((key) => current.database[key] !== preview.database[key])) {
       throw new Error("固定QAの貸出・Deployment・DBが検証記録と一致しません。deploy:previewから検証をやり直してください。");
     }
-    evidence = `## Preview\n\n- URL: ${preview.url}\n- ブランチ: \`${head.branch}\`\n- 検証コミット: \`${head.sha}\`\n- Deployment: \`${preview.deploymentId}\`\n- QA枠: \`${preview.slot}\` / PR #${preview.prNumber}\n- 貸出ID: \`${preview.leaseId}\`\n- 台帳Deployment: \`${preview.ledgerRecordId}\`\n- DB: 本番から分離したNeon Previewプロジェクト \`${preview.database.projectId}\` / branch \`${preview.database.branchId}\` / endpoint \`${preview.database.endpointId}\`。\n`;
+    evidence = `## Preview\n\n- 固定QA URL: ${current.fixedUrl}\n- 診断用Deployment URL: ${preview.url}\n- ブランチ: \`${head.branch}\`\n- 検証コミット: \`${head.sha}\`\n- Deployment: \`${preview.deploymentId}\`\n- QA枠: \`${preview.slot}\` / PR #${preview.prNumber}\n- 貸出ID: \`${preview.leaseId}\`\n- 台帳Deployment: \`${current.ledgerRecordId}\`\n- DB: 本番から分離したNeon Previewプロジェクト \`${preview.database.projectId}\` / branch \`${preview.database.branchId}\` / endpoint \`${preview.database.endpointId}\`。\n`;
   }
   const body = `## 変更内容\n\n${title}\n\n${evidence}\n## 検証結果\n\n${verification}\n`;
   const directory = await mkdtemp(join(tmpdir(), "cake-task-pr-"));

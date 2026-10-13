@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   claimRecord, fullSha, featureBranch, leaseToken, nextRecord, sameDatabase, QA_PROJECT_ID, QA_REPOSITORY, SLOTS,
-  type Pool, type SavedLease, type QaLeaseRecord, type DatabaseIdentity, type QaDeployment,
+  type Pool, type SavedLease, type QaLeaseRecord, type DatabaseIdentity, type QaDeployment, type Slot,
 } from "./qa-pool";
 import { aliasPlan, deletePlan, type AliasPlan, type DeletePlan, type ProbeApproval } from "./qa-pool-authorization";
 
@@ -18,6 +19,8 @@ export interface QaGateway {
   pullRequest(pr: number): Promise<QaPullRequest>;
   openPullRequests(): Promise<QaPullRequest[]>;
   generationEnabled(): boolean;
+  requestOwnerPlan?(action: "preview" | "cleanup", pr: QaPullRequest, saved?: SavedLease): Promise<void>;
+  claimAuthorization?(pr: QaPullRequest): Promise<{ slot: Slot; leaseId: string } | null>;
   assertGate(mode: "create" | "probe" | "cleanup" | "alias", target?: QaGateTarget): Promise<void>;
   probeAuthorization(pr: number, sha: string): ProbeApproval | null;
   aliasApproved(plan: AliasPlan): boolean;
@@ -31,9 +34,9 @@ export interface QaGateway {
   assignReadyAlias(record: QaLeaseRecord, deployment: RemoteDeployment, plan: AliasPlan): Promise<void>;
   deleteAlias(record: QaLeaseRecord, plan: DeletePlan): Promise<void>;
   deleteDeployment(record: QaLeaseRecord, deployment: RemoteDeployment, plan: DeletePlan): Promise<void>;
-  deletionApproved(plan: DeletePlan): boolean;
+  deletionApproved(plan: DeletePlan): boolean | Promise<boolean>;
 }
-export type QaRequest = { action: "claim" | "refresh" | "release" | "probe" | "alias-only" | "close";
+export type QaRequest = { action: "claim" | "refresh" | "release" | "probe" | "alias-only" | "close" | "request-preview" | "request-release";
   pr?: number; leaseId?: string; sha?: string; slot?: QaLeaseRecord["slot"]; deploymentId?: string };
 const terminal = (state: string) => ["READY", "ERROR", "CANCELED", "BLOCKED"].includes(state);
 
@@ -43,10 +46,15 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
   const token = options.token ?? randomUUID;
   const log = options.log ?? console.log;
   let pool = await gateway.pool();
+  const ownerRequest = request.action === "request-preview" || request.action === "request-release";
   const gateTarget = (pr: QaPullRequest): QaGateTarget => ({ pr: pr.number, branch: pr.branch, sha: pr.sha });
   const assertCurrent = async (saved: SavedLease) => {
     const latest = (await gateway.pool())[saved.payload.slot];
-    if (latest?.id !== saved.id || latest.payload.leaseId !== saved.payload.leaseId || latest.payload.state !== saved.payload.state) throw new Error("貸出世代が変わりました。旧処理を停止します。");
+    if (latest?.id !== saved.id || !isDeepStrictEqual(latest.payload, saved.payload)) throw new Error("貸出世代が変わりました。旧処理を停止します。");
+    if (ownerRequest) {
+      const pr = await gateway.pullRequest(saved.payload.pr);
+      if (!validPr(pr) || pr.number !== request.pr || pr.branch !== saved.payload.branch || pr.state !== "open" || pr.sha !== request.sha) throw new Error("要求対象PRのOPEN状態・完全SHAが変わりました。");
+    }
   };
   const save = async (saved: SavedLease, changes: Partial<QaLeaseRecord>) => {
     // Catch any out-of-protocol writer before every mutation. Actions owns the serialization.
@@ -78,6 +86,7 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
     let record = saved.payload;
     const pr = await gateway.pullRequest(record.pr);
     if (!validPr(pr) || pr.branch !== record.branch) throw new Error("PRのfeature枝を確認できません。貸出を保持します。");
+    if (ownerRequest && (pr.number !== request.pr || pr.state !== "open" || pr.sha !== request.sha)) throw new Error("要求対象PRのOPEN状態・完全SHAが変わりました。");
     if (mode === "close" && pr.state !== "closed") return;
     if (mode === "probe" && (record.state !== "held" || pr.state !== "open")) throw new Error("probeは使用中のOPEN PRだけを進めます。返却は別の操作で行ってください。");
     if ((pr.state === "closed" || mode === "release") && record.state === "held") {
@@ -116,29 +125,33 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
       const trackedAlias = record.aliasAssignment;
       const alias = record.purpose === "probe" && !trackedAlias ? null : await gateway.alias(record.slot);
       const plan = deletePlan(record);
-      const assertDeletionApproval = () => {
-        if (!gateway.deletionApproved(plan)) throw new Error("現在のlease・全resource IDに一致する有効な削除承認がありません。");
+      const assertDeletionApproval = async () => {
+        if (!(await gateway.deletionApproved(plan))) throw new Error("現在のlease・全resource IDに一致する有効な削除承認がありません。");
       };
       if (alias) {
         if (alias.projectId !== QA_PROJECT_ID || !record.deployments.some((d) => d.id === alias.deploymentId)
           || trackedAlias && alias.deploymentId !== trackedAlias.deploymentId) throw new Error("固定aliasが別の貸出を指しています。削除を拒否します。");
       }
       if (trackedAlias?.state === "pending" && !alias) { log(`Cake: ${record.slot} のalias作成応答が未確認です。削除・解放を保留します。`); return; }
-      if (!gateway.deletionApproved(plan)) { log(`Cake: ${record.slot} は削除対象manifestの承認待ちです。`); return; }
+      if (!(await gateway.deletionApproved(plan))) {
+        await assertCurrent(saved);
+        await gateway.requestOwnerPlan?.("cleanup", pr, saved);
+        log(`Cake: ${record.slot} は削除対象manifestの承認待ちです。`); return;
+      }
       if (trackedAlias?.state === "pending" && alias) {
-        assertDeletionApproval();
+        await assertDeletionApproval();
         saved = await save(saved, { aliasAssignment: { ...trackedAlias, state: "assigned" } });
         record = saved.payload;
       }
       if (alias) {
         await assertCurrent(saved);
-        assertDeletionApproval();
+        await assertDeletionApproval();
         await gateway.deleteAlias(record, plan);
         if (await gateway.alias(record.slot)) throw new Error("固定aliasの削除を確認できません。");
       }
       for (const deployment of deletionTargets) {
         await assertCurrent(saved);
-        assertDeletionApproval();
+        await assertDeletionApproval();
         await gateway.deleteDeployment(record, deployment, plan);
       }
       if ((await gateway.deployments(record)).length) { log(`Cake: ${record.slot} のdeployment削除を待っています。`); return; }
@@ -146,7 +159,7 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
       if (record.database && !(await gateway.databaseGone(record.database))) { log(`Cake: ${record.slot} のNative branch/endpoint消失を待っています。`); return; }
       if ((record.purpose !== "probe" || trackedAlias) && await gateway.alias(record.slot)) throw new Error("返却前の固定alias消失を確認できません。");
       const retiredDatabases = record.database ? [...record.retiredDatabases, record.database] : record.retiredDatabases;
-      assertDeletionApproval();
+      await assertDeletionApproval();
       await save(saved, { state: "free", retiredDatabases });
       log(`Cake: ${record.slot} の返却確認が完了しました。`);
       return;
@@ -163,7 +176,15 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
       await gateway.assertGate("probe", gateTarget(pr));
     } else {
       if (!gateway.generationEnabled()) { log(`Cake: ${record.slot} は生成無効のため保持します。`); return; }
-      if (pr.state !== "open" || !pr.approved) { log(`Cake: PR #${record.pr} の最新SHA承認を待っています。`); return; }
+      if (pr.state !== "open" || !pr.approved) {
+        if (pr.state === "open" && !ownerRequest) {
+          saved = await recover(saved); record = saved.payload;
+          if (record.intent) { log(`Cake: ${record.slot} の作成応答が未確認です。新しいPreview計画を保留します。`); return; }
+          await assertCurrent(saved);
+          await gateway.requestOwnerPlan?.("preview", pr, saved);
+        }
+        log(`Cake: PR #${record.pr} の最新SHA承認を待っています。`); return;
+      }
       await gateway.assertGate("create", gateTarget(pr));
     }
     saved = await recover(saved);
@@ -245,6 +266,56 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
     await save(saved, { readyDeploymentId: deployment.id, aliasSha: deployment.sha, deployments: record.deployments.map((d) => d.id === deployment.id ? { ...d, url } : d) });
     log(`Cake: ${record.slot} READY (PR #${record.pr}, ${deployment.sha.slice(0, 7)})`);
   };
+  if (ownerRequest) {
+    if (!Number.isSafeInteger(request.pr) || Number(request.pr) < 1 || !fullSha(request.sha)) throw new Error("owner承認要求には対象PRと現在の完全SHAが必要です。");
+    const currentPr = async () => {
+      const pr = await gateway.pullRequest(request.pr!);
+      if (!validPr(pr) || pr.number !== request.pr || pr.state !== "open" || pr.sha !== request.sha) throw new Error("owner承認要求のOPEN PR・現在完全SHAが一致しません。");
+      return pr;
+    };
+    let pr = await currentPr();
+    let existing = Object.values(pool).find((saved) => saved && saved.payload.state !== "free" && saved.payload.pr === pr.number) ?? undefined;
+    if (request.action === "request-release") {
+      if (!leaseToken(request.leaseId) || !existing || existing.payload.leaseId !== request.leaseId
+        || existing.payload.branch !== pr.branch) throw new Error("返却要求の現在lease・feature枝が一致しません。");
+      await reconcile(existing, "release");
+      return;
+    }
+    if (existing && (existing.payload.state !== "held" || existing.payload.purpose || existing.payload.branch !== pr.branch
+      || request.leaseId && existing.payload.leaseId !== request.leaseId)) throw new Error("Preview要求は現在の使用中leaseだけを更新できます。");
+    if (!existing && request.leaseId) throw new Error("Preview要求の指定leaseがありません。");
+    if (!gateway.requestOwnerPlan) { log(`Cake: PR #${pr.number} のowner計画作成入口がありません。貸出を保持します。`); return; }
+    if (existing) {
+      await assertCurrent(existing);
+      existing = await recover(existing);
+      if (existing.payload.intent) { log(`Cake: ${existing.payload.slot} の作成応答が未確認です。新しいPreview計画を保留します。`); return; }
+      await assertCurrent(existing);
+    }
+    await gateway.requestOwnerPlan("preview", pr, existing);
+    pr = await currentPr();
+    if (existing) {
+      await assertCurrent(existing);
+      await reconcile(existing);
+      return;
+    }
+    if (!pr.approved || !gateway.generationEnabled() || !gateway.claimAuthorization) {
+      log(`Cake: PR #${pr.number} のPreview計画は承認または有効化待ちです。貸出を取得しません。`); return;
+    }
+    const authorization = await gateway.claimAuthorization(pr);
+    if (!authorization) { log(`Cake: PR #${pr.number} の枠・leaseを指定したowner承認を待っています。`); return; }
+    if (!SLOTS.includes(authorization.slot) || !leaseToken(authorization.leaseId)) throw new Error("Preview承認の枠またはleaseが不正です。");
+    pool = await gateway.pool();
+    const record = claimRecord(pool, { pr: pr.number, branch: pr.branch, sha: pr.sha, leaseId: authorization.leaseId, slot: authorization.slot, now: now() });
+    if (!record) { log(`Cake: PR #${pr.number} の承認済み枠は使用中です。別枠を取得しません。`); return; }
+    await gateway.assertGate("create", gateTarget(pr));
+    pr = await currentPr();
+    if (!pr.approved || !gateway.generationEnabled() || !isDeepStrictEqual(await gateway.claimAuthorization(pr), authorization)) throw new Error("Preview貸出直前のowner承認が変わりました。");
+    const latest = (await gateway.pool())[record.slot];
+    if (!isDeepStrictEqual(latest, pool[record.slot])) throw new Error("承認済み枠の台帳世代が変わりました。");
+    const saved = await gateway.save(record);
+    await reconcile(saved);
+    return;
+  }
   if (request.action === "alias-only") {
     if (!Number.isSafeInteger(request.pr) || Number(request.pr) < 1 || !fullSha(request.sha)
       || !leaseToken(request.leaseId) || !SLOTS.includes(request.slot as QaLeaseRecord["slot"])
@@ -345,9 +416,20 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
     if (!validPr(pr) || pr.state !== "open" || !pr.approved || Object.values(pool).some((s) => s && s.payload.state !== "free" && s.payload.pr === pr.number)) continue;
     // A feature branch is single-use even when the same closed PR is reopened.
     if (Object.values(pool).some((s) => s?.payload.branch === pr.branch)) { log(`Cake: PR #${pr.number} は返却済みです。新しいタスク枝とPRを作成してください。`); continue; }
-    const record = claimRecord(pool, { pr: pr.number, branch: pr.branch, sha: pr.sha, leaseId: token(), now: now() });
+    const authorization = await gateway.claimAuthorization?.(pr);
+    if (authorization && (!SLOTS.includes(authorization.slot) || !leaseToken(authorization.leaseId))) throw new Error("生成承認の枠またはleaseが不正です。");
+    const record = claimRecord(pool, { pr: pr.number, branch: pr.branch, sha: pr.sha,
+      leaseId: authorization?.leaseId ?? token(), slot: authorization?.slot, now: now() });
     if (!record) { log(`Cake: PR #${pr.number} は空きQA枠を待っています。`); break; }
     await gateway.assertGate("create", gateTarget(pr));
+    if (authorization) {
+      const current = await gateway.pullRequest(pr.number);
+      if (!validPr(current) || current.state !== "open" || current.branch !== pr.branch || current.sha !== pr.sha
+        || !current.approved || !gateway.generationEnabled()
+        || !isDeepStrictEqual(await gateway.claimAuthorization?.(current), authorization)) throw new Error("貸出直前の枠・leaseへの生成承認が変わりました。");
+      const latest = (await gateway.pool())[record.slot];
+      if (!isDeepStrictEqual(latest, pool[record.slot])) throw new Error("承認済み枠の台帳世代が変わりました。");
+    }
     const saved = await gateway.save(record);
     pool[record.slot] = saved;
     await reconcile(saved);

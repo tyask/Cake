@@ -81,7 +81,7 @@ test("単一writer queueとtrusted main、診断のGET専用経路を維持す�
   assert.match(execution, /    environment: Preview/);
   assert.match(execution, /    concurrency:\n      group: cake-qa-pool-writer\n      queue: max\n      cancel-in-progress: false/);
   assert.match(execution, /          ref: refs\/heads\/main/);
-  assert.match(execution, /run: node --import tsx scripts\/qa-pool-writer\.ts/);
+  assert.match(execution, /export QA_TRUSTED_MAIN_SHA="\$\(git rev-parse HEAD\)"\s+node --import tsx scripts\/qa-pool-writer\.ts/);
   assert.match(diagnostics, /options: \[preflight, plan-probe, plan-release\]/);
   assert.doesNotMatch(diagnostics, /pull_request_target:|pull_request:|push:|schedule:|: write|environment:/);
   const inspection = job(runner, "diagnostics");

@@ -13,8 +13,8 @@ test("通常生成は有効化条件を持ち、close/明示cleanup/probeは独�
   assert.match(workflow, /types: \[opened, synchronize, reopened, closed\]/);
   assert.match(writer, /vars\.CAKE_QA_POOL_ENABLED == 'true'/);
   assert.match(writer, /github\.event_name == 'pull_request_target' && github\.event\.action == 'closed'/);
-  assert.match(writer, /contains\(fromJSON\('\["probe","alias-only","claim","release","refresh"\]'\), inputs\.action\)/);
-  assert.match(writer, /github\.event_name == 'schedule' && vars\.CAKE_QA_DELETE_APPROVALS != ''/);
+  assert.match(writer, /contains\(fromJSON\('\["request-preview","request-release","approve","revoke","probe","alias-only","claim","release","refresh"\]'\), inputs\.action\)/);
+  assert.match(writer, /github\.event_name == 'schedule'/);
   assert.match(writer, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
   assert.match(writer, /github\.event_name != 'workflow_dispatch' \|\| github\.ref == 'refs\/heads\/main'/);
   assert.match(writer, /startsWith\(github\.event\.pull_request\.head\.ref, 'codex\/'\)/);
@@ -38,7 +38,7 @@ test("資格情報を持つwriterはmainだけをcheckoutし、PRのコードや
   assert.match(poolRunner, /github\.ref == 'refs\/heads\/main'/);
   assert.match(poolRunner, /environment: Preview/);
   assert.match(poolRunner, /run: npm ci\s+- name: Run reviewed QA action/);
-  assert.match(poolRunner, /run: node --import tsx scripts\/qa-pool-writer\.ts/);
+  assert.match(poolRunner, /export QA_TRUSTED_MAIN_SHA="\$\(git rev-parse HEAD\)"\s+node --import tsx scripts\/qa-pool-writer\.ts/);
   assert.match(poolRunner, /CAKE_QA_APPROVED_HEADS: \$\{\{ vars\.CAKE_QA_APPROVED_HEADS \}\}/);
   for (const job of [inspect, writer]) {
     assert.match(job, /uses: \.\/\.github\/workflows\/qa-private-run\.yml/);
@@ -80,7 +80,7 @@ test("生成probeと削除には専用manifest環境値を渡し、旧pool全体
 });
 
 test("alias-onlyはmainの単一writerで既存候補の全識別入力を渡す", () => {
-  assert.match(workflow, /options: \[preflight, plan-probe, plan-release, probe, alias-only, claim, release, refresh\]/);
+  assert.match(workflow, /options: \[request-preview, request-release, approve, revoke, preflight, plan-probe, plan-release, probe, alias-only, claim, release, refresh\]/);
   assert.match(workflow, /deployment_id:\n        description: Existing READY deployment ID \(alias-only\)\n        required: false\n        type: string/);
   for (const name of ["pr_number", "source_sha", "slot", "lease_id", "deployment_id"]) {
     assert.match(writer, new RegExp(`${name}: \\$\\{\\{ inputs\\.${name} \\}\\}`));
@@ -88,6 +88,14 @@ test("alias-onlyはmainの単一writerで既存候補の全識別入力を渡す
   assert.match(poolRunner, /QA_DEPLOYMENT_ID: \$\{\{ inputs\.deployment_id \}\}/);
   assert.match(writer, /deployments: write/);
   assert.doesNotMatch(workflow, /secrets: inherit/);
+});
+
+test("owner承認はmainの同一writerでplan IDとactual run titleを結び、権限を拡大しない", () => {
+  assert.match(workflow, /run-name: Cake QA.*inputs\.action.*inputs\.plan_id/);
+  assert.match(writer, /plan_id: \$\{\{ inputs\.plan_id \}\}/);
+  assert.match(poolRunner, /QA_PLAN_ID: \$\{\{ inputs\.plan_id \}\}/);
+  assert.match(poolRunner, /QA_OWNER_FLOW: "true"/);
+  for (const source of [workflow, runner]) assert.doesNotMatch(source, /actions: write|actions: read|pull-requests: write|contents: write/);
 });
 
 test("固定QA/feature枝のGit自動deployと固定Git枝のCIを停止する", () => {

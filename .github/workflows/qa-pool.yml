@@ -1,4 +1,5 @@
 name: QA pool
+run-name: Cake QA ${{ inputs.action || github.event.action || github.event_name }} ${{ inputs.plan_id || '-' }}
 
 on:
   pull_request_target:
@@ -10,7 +11,7 @@ on:
         description: QA pool action
         required: true
         type: choice
-        options: [preflight, plan-probe, plan-release, probe, alias-only, claim, release, refresh]
+        options: [request-preview, request-release, approve, revoke, preflight, plan-probe, plan-release, probe, alias-only, claim, release, refresh]
         default: refresh
       pr_number:
         description: Target PR number
@@ -31,6 +32,10 @@ on:
         options: [qa1, qa2, qa3]
       deployment_id:
         description: Existing READY deployment ID (alias-only)
+        required: false
+        type: string
+      plan_id:
+        description: Exact owner plan ID (approve/revoke); review Actions summary first
         required: false
         type: string
   schedule:
@@ -73,8 +78,8 @@ jobs:
       github.repository == 'tyask/Cake' &&
       (vars.CAKE_QA_POOL_ENABLED == 'true' ||
        (github.event_name == 'pull_request_target' && github.event.action == 'closed') ||
-       (github.event_name == 'workflow_dispatch' && contains(fromJSON('["probe","alias-only","claim","release","refresh"]'), inputs.action)) ||
-       (github.event_name == 'schedule' && vars.CAKE_QA_DELETE_APPROVALS != '')) &&
+       (github.event_name == 'workflow_dispatch' && contains(fromJSON('["request-preview","request-release","approve","revoke","probe","alias-only","claim","release","refresh"]'), inputs.action)) ||
+       github.event_name == 'schedule') &&
       (github.event_name != 'workflow_dispatch' || !contains(fromJSON('["preflight","plan-probe","plan-release"]'), inputs.action)) &&
       (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') &&
       (github.event_name != 'pull_request_target' ||
@@ -94,6 +99,7 @@ jobs:
       source_sha: ${{ inputs.source_sha }}
       slot: ${{ inputs.slot }}
       deployment_id: ${{ inputs.deployment_id }}
+      plan_id: ${{ inputs.plan_id }}
     secrets:
       # A transient workflow-call secret masks the existing Variable before any step starts.
       production_database_host: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
