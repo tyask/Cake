@@ -18,6 +18,8 @@ import { contextualQaFailure, QaDiagnosticFailure, qaDiagnosticFields, qaFailure
 type Environment = Readonly<Record<string, string | undefined>>;
 type JsonObject = Record<string, unknown>;
 type ApiResult = { status: number; data: unknown };
+const QA_TEAM_ID = "team_D1Mcx2TdFWPKcypfu8KzNMub";
+type DeletionAlias = { uid: string; alias: string; projectId: string; deploymentId: string };
 export type QaTransport = (method: string, url: string, token: string, body?: unknown) => Promise<ApiResult>;
 const object = (value: unknown): JsonObject => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new QaDiagnosticFailure({ reason: "INVALID_RESPONSE" });
@@ -66,13 +68,14 @@ export class HttpQaGateway implements QaGateway {
   constructor(private readonly env: Environment, private readonly request: QaTransport = transport, private readonly access: "read" | "write" = "read") {
     maskQaHosts([env.CAKE_QA_PRODUCTION_DATABASE_HOST, env.CAKE_QA_DELETE_APPROVALS, env.CAKE_QA_ALIAS_APPROVALS], env);
   }
-  private async api(provider: "github" | "vercel" | "neon", path: string, method = "GET", body?: unknown, missing = false): Promise<unknown> {
+  private async api(provider: "github" | "vercel" | "neon", path: string, method = "GET", body?: unknown, missing = false, teamId?: string): Promise<unknown> {
     const diagnostic = apiDiagnosticContext(provider, path, method);
     if (this.access === "read" && method !== "GET") throw new QaDiagnosticFailure({ ...diagnostic, reason: "METHOD_NOT_ALLOWED" });
     const base = { github: "https://api.github.com", vercel: "https://api.vercel.com", neon: "https://console.neon.tech/api/v2" }[provider];
     const token = this.env[{ github: "GITHUB_TOKEN", vercel: "VERCEL_TOKEN", neon: "NEON_API_KEY" }[provider]];
     if (!token) throw new QaDiagnosticFailure({ ...diagnostic, reason: "AUTH_MISSING" });
-    const suffix = provider === "vercel" ? `${path.includes("?") ? "&" : "?"}slug=fumin1` : "";
+    if (teamId !== undefined && (provider !== "vercel" || teamId !== QA_TEAM_ID)) throw new QaDiagnosticFailure({ ...diagnostic, reason: "CHECK_FAILED" });
+    const suffix = provider === "vercel" ? `${path.includes("?") ? "&" : "?"}${teamId ? `teamId=${encodeURIComponent(teamId)}` : "slug=fumin1"}` : "";
     const response = await this.request(method, base + path + suffix, token, body).catch(() => {
       throw new QaDiagnosticFailure({ ...diagnostic, reason: "TRANSPORT_ERROR" });
     });
@@ -150,7 +153,7 @@ export class HttpQaGateway implements QaGateway {
   }
   private assertProject(value: unknown): JsonObject {
     const project = object(value), link = object(project.link);
-    if (project.id !== QA_PROJECT_ID || project.name !== "cake" || project.accountId !== "team_D1Mcx2TdFWPKcypfu8KzNMub"
+    if (project.id !== QA_PROJECT_ID || project.name !== "cake" || project.accountId !== QA_TEAM_ID
       || link.type !== "github" || link.org !== "tyask" || link.repo !== "Cake" || link.productionBranch !== "main") throw new Error("対象project/team/repositoryが一致しません。");
     this.repoId = safeNumber(link.repoId);
     return project;
@@ -346,20 +349,88 @@ export class HttpQaGateway implements QaGateway {
     try { return deletionApproval(this.env.CAKE_QA_DELETE_APPROVALS, plan, now); }
     catch { throw new QaDiagnosticFailure({ stage: "APPROVAL_VALIDATE", provider: "NONE", method: "NONE", reason: "VALIDATION_ERROR" }); }
   }
+  /** Keep only the identity needed for deletion; provider bodies never enter the ledger or errors. */
+  private async deletionAlias(identifier: string, expectedAlias: string, teamId: string, expectedUid?: string): Promise<DeletionAlias | null> {
+    const value = await this.api("vercel", `/v4/aliases/${encodeURIComponent(identifier)}`, "GET", undefined, true, teamId);
+    if (value === null) return null;
+    const alias = object(value);
+    if (typeof alias.uid !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_:+-]{0,255}$/.test(alias.uid)
+      || alias.alias !== expectedAlias || expectedUid !== undefined && alias.uid !== expectedUid) {
+      throw new QaDiagnosticFailure({ reason: "INVALID_RESPONSE" });
+    }
+    for (const key of ["teamId", "ownerId", "accountId"] as const) {
+      if (alias[key] !== undefined && alias[key] !== teamId) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+    }
+    for (const key of ["team", "owner"] as const) {
+      if (alias[key] === undefined) continue;
+      if (typeof alias[key] === "string") {
+        if (alias[key] !== teamId) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      } else {
+        const owner = object(alias[key]);
+        const ids = [owner.id, owner.uid].filter((id) => id !== undefined);
+        if (!ids.length || ids.some((id) => id !== teamId)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      }
+    }
+    const nested = alias.deployment === undefined || alias.deployment === null ? undefined : object(alias.deployment);
+    const deploymentId = str(alias.deploymentId ?? nested?.id);
+    if (nested?.id !== undefined && nested.id !== deploymentId
+      || nested?.projectId !== undefined && nested.projectId !== alias.projectId) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+    return { uid: alias.uid, alias: expectedAlias, projectId: str(alias.projectId), deploymentId };
+  }
+  private async assertAliasDeletionResources(record: QaLeaseRecord): Promise<void> {
+    const pr = await this.pullRequest(record.pr);
+    if (pr.repository !== QA_REPOSITORY || pr.base !== "main" || pr.branch !== record.branch || !fullSha(pr.sha)) {
+      throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+    }
+    const verify = (deployment: RemoteDeployment) => {
+      const known = record.deployments.find((d) => d.id === deployment.id);
+      if (!known || deployment.projectId !== QA_PROJECT_ID || !(deployment.target === null || deployment.target === "preview")
+        || deployment.pr !== record.pr || deployment.branch !== record.branch || deployment.leaseId !== record.leaseId
+        || deployment.sha !== known.sha || deployment.phase !== known.phase) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+    };
+    for (const deployment of await this.deployments(record)) verify(deployment);
+    for (const known of record.deployments) {
+      const deployment = await this.deployment(known.id);
+      if (deployment) {
+        if (deployment.id !== known.id) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+        verify(deployment);
+      }
+    }
+    await this.assertAliasDeletionDatabase(record);
+  }
+  private async assertAliasDeletionDatabase(record: QaLeaseRecord): Promise<void> {
+    if (record.database) {
+      const database = await this.database(record, "cleanup");
+      if (database ? !sameDatabase(database, record.database) : !(await this.databaseGone(record.database))) {
+        throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      }
+    }
+  }
   async deleteAlias(record: QaLeaseRecord, plan: DeletePlan) {
     try {
       if (this.access !== "write") throw new QaDiagnosticFailure({ reason: "METHOD_NOT_ALLOWED" });
       if (!this.deletionApproved(plan) || record.state !== "deleting" || !plan.alias
         || record.purpose === "probe" && !record.aliasAssignment
         || !isDeepStrictEqual(deletePlan(record), plan)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
-      const alias = await this.alias(record.slot);
-      const latest = (await this.pool())[record.slot];
-      if (!latest || !isDeepStrictEqual(latest.payload, record) || !this.deletionApproved(plan)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      const project = this.assertProject(await this.api("vercel", `/v9/projects/${QA_PROJECT_ID}`, "GET", undefined, false, QA_TEAM_ID));
+      const teamId = str(project.accountId);
+      const alias = await this.deletionAlias(plan.alias, plan.alias, teamId);
       if (!alias) return;
       if (alias.projectId !== QA_PROJECT_ID || (record.aliasAssignment
         ? alias.deploymentId !== record.aliasAssignment.deploymentId
         : !record.deployments.some((d) => d.id === alias.deploymentId))) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
-      await this.api("vercel", `/v2/aliases/${plan.alias}`, "DELETE");
+      await this.assertAliasDeletionResources(record);
+      const byId = await this.deletionAlias(alias.uid, plan.alias, teamId, alias.uid);
+      const byName = await this.deletionAlias(plan.alias, plan.alias, teamId);
+      if (!isDeepStrictEqual(byId, alias) || !isDeepStrictEqual(byName, alias)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      await this.assertAliasDeletionDatabase(record);
+      const latest = (await this.pool())[record.slot];
+      if (!latest || !isDeepStrictEqual(latest.payload, record) || !this.deletionApproved(plan)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      const result = object(await this.api("vercel", `/v2/aliases/${encodeURIComponent(alias.uid)}`, "DELETE", undefined, false, teamId));
+      if (result.status !== "SUCCESS") throw new QaDiagnosticFailure({ reason: "INVALID_RESPONSE" });
+      const remainingId = await this.deletionAlias(alias.uid, plan.alias, teamId, alias.uid);
+      const remainingName = await this.deletionAlias(plan.alias, plan.alias, teamId);
+      if (remainingId || remainingName) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
     } catch (error) {
       throw contextualQaFailure(error, { stage: "DELETE_ALIAS", provider: "VERCEL", method: "DELETE" });
     }
