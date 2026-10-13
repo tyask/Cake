@@ -1,5 +1,7 @@
 # QA承認フローの検証
 
+この文書は各実装・導入段階の検証記録です。以下の「今回」の操作禁止や未実証の記述は当時の範囲であり、現在の通常運用を一律禁止する指示ではありません。過去の詳細はそのまま残し、PR #42/#43のqa1実測、通常運用開始後の時点診断、未試験事項と現在の手順は [QA貸出運用](qa-pool.md) を参照してください。
+
 ## owner plan ID承認（今回の変更）
 
 対象は `codex/qa-owner-approval-flow` の専用worktree。trusted mainが別task `cake-qa-approval` に安全projectionを保存し、owner本人のauthenticated dispatchからplan ID一個を承認・revokeする設計を確認する。今回の実操作、workflow dispatch、Variable・Secret・権限変更、Preview/DB生成、DELETE、main mergeは行わない。本番と既存PR #33の設定を変更しない。
