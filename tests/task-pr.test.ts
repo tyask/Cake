@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runTaskPr } from "../scripts/task-pr";
 import { QA_ENVIRONMENT, QA_NEON_PROJECT_ID, QA_TASK, type QaLeaseRecord } from "../lib/qa-pool";
-import { CAKE_VERCEL_PROJECT, previewRecordPath, type TaskPreviewRecord, type WorkflowExecutor, type WorkflowCommandResult } from "../scripts/task-workflow";
+import { CAKE_VERCEL_PROJECT, previewRecordPath, type TaskPreviewRecord, type WorkflowExecutor, type WorkflowCommandResult, type PreviewProviderReader } from "../scripts/task-workflow";
 
 const branch = "codex/test-pr";
 const sha = "a".repeat(40);
@@ -48,7 +48,7 @@ async function fixture(t: TestContext) {
     project: commandResult(JSON.stringify(project)),
     main: commandResult(JSON.stringify({ name: "main", commit: { sha: mainSha } })),
     mainConfig: commandResult(JSON.stringify(contents())),
-    pushStatus: 0, pushUpdates: true, body: "", bodyFile: "" };
+    blob: commandResult(contents().sha), pushStatus: 0, pushUpdates: true, body: "", bodyFile: "" };
   const calls: { command: string; args: readonly string[] }[] = [];
   const execute: WorkflowExecutor = async (command, args) => {
     calls.push({ command, args: [...args] });
@@ -57,6 +57,7 @@ async function fixture(t: TestContext) {
       if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return commandResult(state.branch);
       if (args[0] === "status") return commandResult(state.status);
       if (args[0] === "rev-parse" && args[1] === "HEAD") return commandResult(state.sha);
+      if (args[0] === "rev-parse" && args[1] === `${sha}:vercel.json`) return state.blob;
       if (args[0] === "remote") return commandResult(state.origin);
       if (args[0] === "ls-remote") return commandResult(state.remote);
       if (args[0] === "show") return state.config;
@@ -78,6 +79,8 @@ async function fixture(t: TestContext) {
     if (command === "gh" && args[0] === "api") {
       if (args.includes("repos/tyask/Cake/branches/main")) return state.main;
       if (args.includes(`repos/tyask/Cake/contents/vercel.json?ref=${mainSha}`)) return state.mainConfig;
+      if (args.includes("repos/tyask/Cake/pulls/42")) return commandResult(JSON.stringify({ number: 42, state: "open",
+        head: { ref: state.branch, sha: state.sha, repo: { full_name: "tyask/Cake" } }, base: { ref: "main" } }));
       return state.ledger;
     }
     if (command === "gh" && args[0] === "pr" && ["create", "edit"].includes(args[1])) {
@@ -89,8 +92,16 @@ async function fixture(t: TestContext) {
     }
     assert.fail(`Unexpected command ${command}: ${args.join(" ")}`);
   };
+  const provider: PreviewProviderReader = async (path) => {
+    if (path.startsWith("/v9/projects/")) return project;
+    if (path.startsWith("/v4/aliases/")) return { projectId: CAKE_VERCEL_PROJECT, deploymentId: preview.deploymentId,
+      alias: "cake-qa1-fumin.vercel.app", uid: "mock_alias" };
+    if (path.startsWith("/v13/deployments/")) return { id: preview.deploymentId, projectId: CAKE_VERCEL_PROJECT, target: "preview", readyState: "READY", url: preview.url,
+      gitSource: { ref: branch, sha }, meta: { githubCommitRef: branch, githubCommitSha: sha, cakeQaPr: "42", cakeQaLeaseId: preview.leaseId, cakeQaPhase: "application" } };
+    assert.fail("Unexpected provider mock path");
+  };
   return { cwd, reportFile, state, calls, execute,
-    options: { cwd, execute, log: () => {}, args: ["--title", "固定QAの入口を整備", "--verification-file", reportFile] } };
+    options: { cwd, execute, provider, log: () => {}, args: ["--title", "固定QAの入口を整備", "--verification-file", reportFile] } };
 }
 
 test("同じPR/HEADとlive貸出の検証証拠で既存draft本文を更新し、ready/merge操作はしない", async (t) => {
@@ -100,6 +111,8 @@ test("同じPR/HEADとlive貸出の検証証拠で既存draft本文を更新し�
     assert.ok(f.state.body.includes(value));
   }
   assert.match(f.state.body, /QA枠: `qa1` \/ PR #42/);
+  assert.ok(f.state.body.indexOf("固定QA URL: https://cake-qa1-fumin.vercel.app") < f.state.body.indexOf(`診断用Deployment URL: ${preview.url}`));
+  assert.equal(f.state.body.includes(preview.database.host), false);
   assert.match(f.state.body, /台帳Deployment: `101`/);
   assert.match(f.state.body, /lint・test・build 成功\n- PreviewでA・B認証/);
   assert.equal(f.calls.filter((c) => c.args[1] === "edit").length, 1);
@@ -120,27 +133,26 @@ test("Preview未実施でも--draftでPRを作成し、未検証を本文へ明�
   assert.equal(f.calls.some((c) => c.command === "npx" || c.args[0] === "api" || c.args[0] === "push"), false);
 });
 
-test("Hobbyの初回draftはlocalとmainの停止設定・運用者確認後にpushし、remote HEAD確認後だけ作成する", async (t) => {
+test("初回draftはlocal blobとmain完全SHAの停止設定を照合し、remote HEAD確認後だけ作成する", async (t) => {
   const f = await fixture(t);
   f.state.remote = "";
   f.state.listed = commandResult("[]");
   await rm(previewRecordPath(f.cwd));
   assert.deepEqual(await runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }), { url: prUrl, existing: false });
-  const gate = f.calls.findIndex((c) => c.command === "gh" && c.args[0] === "variable");
   const config = f.calls.findIndex((c) => c.command === "git" && c.args[0] === "show");
-  const projectRead = f.calls.findIndex((c) => c.command === "npx");
   const mainRead = f.calls.findIndex((c) => c.args.includes("repos/tyask/Cake/branches/main"));
   const mainConfigRead = f.calls.findIndex((c) => c.args.includes(`repos/tyask/Cake/contents/vercel.json?ref=${mainSha}`));
   const push = f.calls.findIndex((c) => c.command === "git" && c.args[0] === "push");
   const create = f.calls.findIndex((c) => c.args[1] === "create");
-  assert.ok(config < gate && gate < projectRead && projectRead < mainRead && mainRead < mainConfigRead && mainConfigRead < push && push < create);
+  const blob = f.calls.findIndex((c) => c.command === "git" && c.args[0] === "rev-parse" && c.args[1] === `${sha}:vercel.json`);
+  assert.ok(config < mainRead && mainRead < mainConfigRead && mainConfigRead < blob && blob < push && push < create);
   assert.deepEqual(f.calls[config].args, ["show", `${sha}:vercel.json`]);
   assert.deepEqual(f.calls[push].args, ["push", "origin", `${sha}:refs/heads/${branch}`]);
   assert.equal(f.calls.filter((c) => c.args[0] === "ls-remote").length, 2);
   const mainCalls = f.calls.filter((c) => c.command === "gh" && c.args[0] === "api");
   assert.equal(mainCalls.length, 2);
   assert.ok(mainCalls.every((c) => c.args[c.args.indexOf("--method") + 1] === "GET"));
-  assert.equal(f.calls.filter((c) => c.command === "npx").length, 1);
+  assert.equal(f.calls.filter((c) => c.command === "npx" || c.args[0] === "variable").length, 0);
 });
 
 test("ゲート照会中にlocal HEADが動いても確認済みSHAだけをpushする", async (t) => {
@@ -158,21 +170,28 @@ test("ゲート照会中にlocal HEADが動いても確認済みSHAだけをpush
   assert.equal(f.state.body.includes("c".repeat(40)), false);
 });
 
-test("初回draftのpushはproject接続不一致・Preview無効・API失敗で停止する", async (t) => {
-  for (const response of [commandResult(JSON.stringify({ ...project, link: undefined })),
-    commandResult(JSON.stringify({ ...project, link: { ...project.link, org: "other" } })),
-    commandResult(JSON.stringify({ ...project, previewDeploymentsDisabled: true })),
-    commandResult(JSON.stringify({ ...project, previewDeploymentsDisabled: undefined })),
-    commandResult("private-api-error", 1)]) {
-    const f = await fixture(t);
-    f.state.remote = ""; f.state.listed = commandResult("[]"); f.state.project = response;
-    await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }),
-      (error: unknown) => error instanceof Error && !error.message.includes("private-"));
-    assert.equal(f.calls.some((c) => c.args[0] === "push" || c.args[1] === "create" || c.args[1] === "edit"), false);
+test("draftのpushはRepository VariableやVercel CLI認証へ依存しない", async t => {
+  const f = await fixture(t);
+  f.state.remote = ""; f.state.listed = commandResult("[]"); f.state.project = commandResult("private-project-error", 1);
+  f.state.gate = commandResult("private-variable-403", 1);
+  await runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] });
+  assert.equal(f.calls.some(c => c.command === "npx" || c.args[0] === "variable"), false);
+  assert.equal(f.calls.filter(c => c.args[0] === "push").length, 1);
+});
+
+test("git-showの末尾改行を含む実blob bytesを照合し、差し替えblobを拒否する", async t => {
+  for (const valid of [true, false]) {
+    const f = await fixture(t); f.state.remote = ""; f.state.listed = commandResult("[]");
+    const raw = JSON.stringify(gitConfig) + "\n", bytes = Buffer.from(raw);
+    f.state.config = commandResult(raw);
+    f.state.blob = commandResult(valid ? createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex") : "c".repeat(40));
+    if (valid) await runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] });
+    else await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }), /blob/);
+    assert.equal(f.calls.filter(c => c.args[0] === "push").length, valid ? 1 : 0);
   }
 });
 
-test("localが正しく確認flagがtrueでもmainの停止設定が欠落・不正・読取失敗ならpushとPR変更を行わない", async (t) => {
+test("localが正しくてもmainの停止設定が欠落・不正・読取失敗ならpushとPR変更を行わない", async (t) => {
   for (const failure of [commandResult(JSON.stringify(contents({}))),
     commandResult(JSON.stringify(contents({ git: { deploymentEnabled: { "**": false, main: true, qa1: true } } }))),
     commandResult(JSON.stringify({ ...contents(), type: "symlink" })),
@@ -198,18 +217,18 @@ test("main参照が不正・照会不可の場合はContentsを取得せずpush�
   }
 });
 
-test("draftの未push HEADはgate未確認/不正config/push失敗/remote不一致ならPRを作成しない", async (t) => {
-  for (const failure of ["unconfirmed", "config", "push", "remote"] as const) {
+test("draftの未push HEADは不正blob/config/push失敗/remote不一致ならPRを作成しない", async (t) => {
+  for (const failure of ["blob", "config", "push", "remote"] as const) {
     const f = await fixture(t);
     f.state.remote = "";
     f.state.listed = commandResult("[]");
-    if (failure === "unconfirmed") f.state.gate = commandResult("false");
+    if (failure === "blob") f.state.blob = commandResult("c".repeat(40));
     if (failure === "config") f.state.config = commandResult(JSON.stringify({ git: { deploymentEnabled: { "**": false, main: true, qa1: true } } }));
     if (failure === "push") f.state.pushStatus = 1;
     if (failure === "remote") f.state.pushUpdates = false;
     await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }));
     assert.equal(f.calls.some((c) => c.args[1] === "create" || c.args[1] === "edit"), false);
-    if (["unconfirmed", "config"].includes(failure)) assert.equal(f.calls.some((c) => c.args[0] === "push"), false);
+    if (["blob", "config"].includes(failure)) assert.equal(f.calls.some((c) => c.args[0] === "push"), false);
     if (failure === "config") assert.equal(f.calls.some((c) => c.command === "gh" && c.args[0] === "variable" || c.command === "npx" || c.args[0] === "api"), false);
   }
 });
@@ -252,11 +271,28 @@ test("旧形式/壊れた/別SHAのローカルPreview証拠ではPRを更新し
   const f = await fixture(t);
   for (const record of ["private-invalid-json", JSON.stringify({ ...preview, leaseId: undefined }),
     JSON.stringify({ ...preview, projectId: "prj_other" }), JSON.stringify({ ...preview, sha: "b".repeat(40) }),
-    JSON.stringify({ ...preview, prNumber: 43 }), JSON.stringify({ ...preview, url: "https://evil.example" })]) {
+    JSON.stringify({ ...preview, prNumber: 43 }), JSON.stringify({ ...preview, url: "https://evil.example" }),
+    JSON.stringify({ ...preview, fixedUrl: "https://cake-qa2-fumin.vercel.app" })]) {
     await writeFile(previewRecordPath(f.cwd), record);
     await assert.rejects(() => runTaskPr(f.options));
   }
   assert.equal(f.calls.some((c) => c.args[1] === "edit" || c.args[1] === "create"), false);
+});
+
+test("旧unique URL証跡があっても現在alias欠落・provider秘密エラー時はPRへ書き込まない", async t => {
+  for (const missing of [true, false]) {
+    const f = await fixture(t);
+    const provider: PreviewProviderReader = async path => {
+      if (path.startsWith("/v4/aliases/")) {
+        if (missing) return null;
+        throw new Error(`PRIVATE_TOKEN ${preview.database.host} PRIVATE_BODY`);
+      }
+      return f.options.provider(path);
+    };
+    await assert.rejects(() => runTaskPr({ ...f.options, provider }), (error: unknown) => error instanceof Error
+      && !error.message.includes("PRIVATE_") && !error.message.includes(preview.database.host));
+    assert.equal(f.calls.some(c => c.args[1] === "create" || c.args[1] === "edit"), false);
+  }
 });
 
 test("返却/他lease/別Deployment/別DBへ変わった枠はローカル証拠があっても拒否する", async (t) => {

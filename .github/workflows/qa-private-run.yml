@@ -24,6 +24,9 @@ on:
       deployment_id:
         required: false
         type: string
+      plan_id:
+        required: false
+        type: string
     secrets:
       # Passed from the existing repository Variable, without registering a new Secret.
       production_database_host:
@@ -67,7 +70,9 @@ jobs:
       - name: Install trusted dependencies
         run: npm ci
       - name: Run reviewed QA action
-        run: node --import tsx scripts/qa-pool-writer.ts
+        run: |
+          export QA_TRUSTED_MAIN_SHA="$(git rev-parse HEAD)"
+          node --import tsx scripts/qa-pool-writer.ts
         env:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_PATH: ${{ github.event_path }}
@@ -87,6 +92,8 @@ jobs:
           QA_SOURCE_SHA: ${{ inputs.source_sha }}
           QA_SLOT: ${{ inputs.slot }}
           QA_DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+          QA_PLAN_ID: ${{ inputs.plan_id }}
+          QA_OWNER_FLOW: "true"
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
   diagnostics:

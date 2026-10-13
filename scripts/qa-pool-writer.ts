@@ -14,6 +14,7 @@ import { aliasApproval, aliasPlan, deletionApproval, deletePlan, diagnoseDeletio
   type AliasPlan, type DeletePlan, type DeletionApprovalDiagnosis } from "../lib/qa-pool-authorization";
 import { maskQaHosts, publicQaOutput } from "../lib/qa-output-privacy";
 import { contextualQaFailure, QaDiagnosticFailure, qaDiagnosticFields, qaFailureAnnotation, type QaDiagnosticFields } from "../lib/qa-diagnostics";
+import { HttpOwnerApprovalStore } from "./qa-owner-store";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type JsonObject = Record<string, unknown>;
@@ -65,8 +66,10 @@ const transport: QaTransport = async (method, url, token, body) => {
 
 export class HttpQaGateway implements QaGateway {
   private repoId = 0;
+  private readonly ownerStore: HttpOwnerApprovalStore;
   constructor(private readonly env: Environment, private readonly request: QaTransport = transport, private readonly access: "read" | "write" = "read") {
     maskQaHosts([env.CAKE_QA_PRODUCTION_DATABASE_HOST, env.CAKE_QA_DELETE_APPROVALS, env.CAKE_QA_ALIAS_APPROVALS], env);
+    this.ownerStore = new HttpOwnerApprovalStore(env, (path, method, body) => this.api("github", path, method, body), () => this.ledgerRecords());
   }
   private async api(provider: "github" | "vercel" | "neon", path: string, method = "GET", body?: unknown, missing = false, teamId?: string): Promise<unknown> {
     const diagnostic = apiDiagnosticContext(provider, path, method);
@@ -131,7 +134,12 @@ export class HttpQaGateway implements QaGateway {
     const sha = str(head.sha);
     if (pr.state !== "open" && pr.state !== "closed") throw new Error("PR状態が不正です。");
     if (safeNumber(pr.number) !== number) throw new Error("取得PR番号が対象と一致しません。");
-    return { number: safeNumber(pr.number), state: pr.state, branch: str(head.ref), sha, repository: str(repo.full_name), base: str(base.ref), approved: this.approved(number, sha) };
+    const result: QaPullRequest = { number: safeNumber(pr.number), state: pr.state, branch: str(head.ref), sha, repository: str(repo.full_name), base: str(base.ref), approved: this.approved(number, sha) };
+    if (this.env.QA_OWNER_FLOW === "true") {
+      const owner = await this.ownerStore.preview(result, false);
+      if (owner.known) result.approved = owner.authorization !== null;
+    }
+    return result;
   }
   async openPullRequests(): Promise<QaPullRequest[]> {
     const result: QaPullRequest[] = [];
@@ -141,12 +149,25 @@ export class HttpQaGateway implements QaGateway {
       for (const value of batch) {
         const pr = object(value), head = object(pr.head), repo = object(head.repo);
         const number = safeNumber(pr.number), sha = str(head.sha);
-        result.push({ number, state: "open", branch: str(head.ref), sha, repository: str(repo.full_name), base: "main", approved: this.approved(number, sha) });
+        const selected: QaPullRequest = { number, state: "open", branch: str(head.ref), sha, repository: str(repo.full_name), base: "main", approved: this.approved(number, sha) };
+        if (this.env.QA_OWNER_FLOW === "true") {
+          const owner = await this.ownerStore.preview(selected, false);
+          if (owner.known) selected.approved = owner.authorization !== null;
+        }
+        result.push(selected);
       }
       if (batch.length < 100) return result;
     }
   }
   generationEnabled() { return this.env.CAKE_QA_POOL_ENABLED === "true"; }
+  async requestOwnerPlan(action: "preview" | "cleanup", pr: QaPullRequest, saved?: SavedLease) {
+    if (this.env.QA_OWNER_FLOW === "true") await this.ownerStore.requestPlan(action, pr, saved);
+  }
+  async claimAuthorization(pr: QaPullRequest) {
+    if (this.env.QA_OWNER_FLOW !== "true") return null;
+    return (await this.ownerStore.preview(pr)).authorization;
+  }
+  ownerDecision(planId: number, state: "approved" | "revoked") { return this.ownerStore.decide(planId, state); }
   probeAuthorization(pr: number, sha: string) {
     try { return probeApproval(this.env.CAKE_QA_PROBE_APPROVALS, pr, sha); }
     catch { throw new QaDiagnosticFailure({ stage: "PROBE_APPROVAL", provider: "NONE", method: "NONE", reason: "VALIDATION_ERROR" }); }
@@ -193,6 +214,7 @@ export class HttpQaGateway implements QaGateway {
       await this.gitConfiguration(target.branch, target.sha);
       const pr = await this.currentTarget(target);
       if (mode === "create" && !pr.approved || mode === "probe" && !this.probeAuthorization(pr.number, pr.sha)) throw new Error("対象PRの現在SHAへの生成承認がありません。");
+      if (mode === "create" && this.env.QA_OWNER_FLOW === "true") await this.ownerStore.assertCi(pr.number, pr.branch, pr.sha);
     }
   }
   private remote(value: unknown): RemoteDeployment {
@@ -233,10 +255,16 @@ export class HttpQaGateway implements QaGateway {
     return value === null ? null : this.remote(value);
   }
   async create(record: QaLeaseRecord): Promise<RemoteDeployment> {
+    if (this.access !== "write") throw new QaDiagnosticFailure({ stage: "CREATE_DEPLOYMENT", provider: "VERCEL", method: "POST", reason: "METHOD_NOT_ALLOWED" });
+    try { record = parseLeaseRecord(record); }
+    catch { throw new QaDiagnosticFailure({ stage: "CREATE_DEPLOYMENT", provider: "NONE", method: "NONE", reason: "VALIDATION_ERROR" }); }
     const intent = record.intent;
-    if (record.state !== "held" || !intent || intent.sha !== record.headSha) throw new Error("貸出と作成intentがありません。");
+    if (record.state !== "held" || !intent || intent.sha !== record.headSha
+      || intent.phase !== (record.database ? "application" : "provisioning")) {
+      throw new QaDiagnosticFailure({ stage: "CREATE_DEPLOYMENT", provider: "NONE", method: "NONE", reason: "CHECK_FAILED" });
+    }
     await this.assertGate(record.purpose === "probe" ? "probe" : "create", { pr: record.pr, branch: record.branch, sha: record.headSha });
-    if (record.purpose === "probe" && this.probeAuthorization(record.pr, record.headSha)?.slot !== record.slot) throw new Error("限定probeの承認がありません。");
+    if (record.database) await this.assertCreateDatabase(record);
     const env = {
       AUTH_MODE: "test",
       CAKE_QA_SLOT: record.slot, CAKE_QA_PR: String(record.pr), CAKE_QA_LEASE_TOKEN: record.leaseId,
@@ -245,6 +273,31 @@ export class HttpQaGateway implements QaGateway {
       // Empty on the first Native deployment: setup must fail before any DB connection.
       CAKE_QA_DATABASE_HOST: record.database?.host ?? "",
     };
+    // Native metadata reads may take time. The complete saved intent and current PR must still match.
+    let latest: SavedLease | null;
+    try { latest = (await this.pool())[record.slot]; }
+    catch (error) {
+      if (error instanceof QaDiagnosticFailure) throw error;
+      throw new QaDiagnosticFailure({ stage: "READ_LEDGER", provider: "GITHUB", method: "GET", reason: "CHECK_FAILED" });
+    }
+    if (!latest || !isDeepStrictEqual(latest.payload, record)) {
+      throw new QaDiagnosticFailure({ stage: "READ_LEDGER", provider: "GITHUB", method: "GET", reason: "CHECK_FAILED" });
+    }
+    let current: QaPullRequest;
+    try { current = await this.currentTarget({ pr: record.pr, branch: record.branch, sha: record.headSha }); }
+    catch (error) {
+      if (error instanceof QaDiagnosticFailure) throw error;
+      throw new QaDiagnosticFailure({ stage: "READ_PR", provider: "GITHUB", method: "GET", reason: "CHECK_FAILED" });
+    }
+    if (record.purpose === "probe" ? this.probeAuthorization(current.number, current.sha)?.slot !== record.slot
+      : !current.approved || !this.generationEnabled()) {
+      throw new QaDiagnosticFailure({ stage: "CREATE_DEPLOYMENT", provider: "NONE", method: "NONE", reason: "CHECK_FAILED" });
+    }
+    if (record.purpose !== "probe" && this.env.QA_OWNER_FLOW === "true") {
+      await this.ownerStore.assertCi(current.number, current.branch, current.sha);
+      const final = await this.currentTarget({ pr: record.pr, branch: record.branch, sha: record.headSha });
+      if (!final.approved || !this.generationEnabled()) throw new Error("作成直前に承認が失効しました。");
+    }
     const value = await this.api("vercel", "/v13/deployments?forceNew=1", "POST", {
       name: "cake", project: QA_PROJECT_ID,
       gitSource: { type: "github", repoId: this.repoId, ref: record.branch, sha: record.headSha },
@@ -252,6 +305,42 @@ export class HttpQaGateway implements QaGateway {
         cakeQaAttemptId: intent.attemptId, cakeQaPhase: intent.phase },
     });
     return this.remote(value);
+  }
+  /** An application deployment must never silently trigger Native replacement after its DB disappears. */
+  private async assertCreateDatabase(record: QaLeaseRecord): Promise<void> {
+    const expected = record.database;
+    if (!expected) return;
+    const reject = (): never => { throw new QaDiagnosticFailure({ stage: "READ_DATABASE", provider: "NEON", method: "GET", reason: "CHECK_FAILED" }); };
+    try {
+      const branch = object(object(await this.api("neon", `/projects/${QA_NEON_PROJECT_ID}/branches/${expected.branchId}`)).branch);
+      const endpoint = object(object(await this.api("neon", `/projects/${QA_NEON_PROJECT_ID}/endpoints/${expected.endpointId}`)).endpoint);
+      const { branches, endpoints } = await this.neonResources();
+      const listedBranches = branches.filter((value) => value.id === expected.branchId || value.name === `preview/${record.branch}`);
+      const listedEndpoints = endpoints.filter((value) => value.id === expected.endpointId
+        || value.branch_id === expected.branchId && value.type === "read_write");
+      if (listedBranches.length !== 1 || listedEndpoints.length !== 1) reject();
+      const listedBranch = listedBranches[0], listedEndpoint = listedEndpoints[0];
+      const branchMatches = (value: JsonObject) => value.id === expected.branchId && value.project_id === QA_NEON_PROJECT_ID
+        && value.name === `preview/${record.branch}` && value.parent_id === this.env.CAKE_QA_PARENT_BRANCH_ID
+        && value.default === false && value.protected === false
+        && typeof value.created_at === "string" && Number.isFinite(Date.parse(value.created_at))
+        && Date.parse(value.created_at) >= Date.parse(record.createdAt);
+      const endpointMatches = (value: JsonObject) => value.id === expected.endpointId && value.project_id === QA_NEON_PROJECT_ID
+        && value.branch_id === expected.branchId && value.type === "read_write";
+      if (!branchMatches(branch) || !branchMatches(listedBranch) || !endpointMatches(endpoint) || !endpointMatches(listedEndpoint)
+        || ["id", "project_id", "name", "parent_id", "default", "protected", "created_at"].some((key) => branch[key] !== listedBranch[key])
+        || ["id", "project_id", "branch_id", "type"].some((key) => endpoint[key] !== listedEndpoint[key])) reject();
+      const host = str(endpoint.host).replace(/-pooler(?=\.)/, "");
+      if (host !== str(listedEndpoint.host).replace(/-pooler(?=\.)/, "")) reject();
+      const actual: DatabaseIdentity = { projectId: QA_NEON_PROJECT_ID, branchId: str(branch.id), endpointId: str(endpoint.id), host };
+      if (!sameDatabase(actual, expected)
+        || host === (this.env.CAKE_QA_PRODUCTION_DATABASE_HOST ?? "").replace(/-pooler(?=\.)/, "")
+        || record.retiredDatabases.some((old) => old.branchId === actual.branchId || old.endpointId === actual.endpointId || old.host === actual.host)) reject();
+    } catch (error) {
+      const diagnostic = qaDiagnosticFields(error);
+      throw new QaDiagnosticFailure({ ...diagnostic, stage: "READ_DATABASE", provider: "NEON", method: "GET",
+        reason: diagnostic.reason === "UNKNOWN" ? "CHECK_FAILED" : diagnostic.reason });
+    }
   }
   private async neonResources(): Promise<{ branches: JsonObject[]; endpoints: JsonObject[] }> {
     const branches: JsonObject[] = [];
@@ -306,7 +395,25 @@ export class HttpQaGateway implements QaGateway {
     }
   }
   async assignAlias(record: QaLeaseRecord, deployment: RemoteDeployment) {
+    if (this.access !== "write") throw new Error("GET専用検査からaliasを変更できません。");
     if (record.purpose === "probe") throw new Error("限定probeは固定aliasを変更できません。");
+    const pr = await this.pullRequest(record.pr), latest = (await this.pool())[record.slot];
+    const ready = await this.deployment(deployment.id);
+    if (!this.generationEnabled() || !pr.approved || pr.state !== "open" || pr.sha !== record.headSha || pr.branch !== record.branch
+      || pr.repository !== QA_REPOSITORY || !latest || !isDeepStrictEqual(latest.payload, record)
+      || !ready || !isDeepStrictEqual(ready, deployment) || ready.state !== "READY" || ready.sha !== record.headSha
+      || ready.leaseId !== record.leaseId || ready.projectId !== QA_PROJECT_ID) throw new Error("alias直前の承認・READY・貸出が一致しません。");
+    const database = await this.database(record);
+    if (!database || !sameDatabase(database, record.database)) throw new Error("alias直前のNative DBが一致しません。");
+    const finalLease = (await this.pool())[record.slot];
+    if (!finalLease || !isDeepStrictEqual(finalLease.payload, record)) throw new Error("alias直前の貸出世代が変わりました。");
+    const current = await this.currentTarget({ pr: record.pr, branch: record.branch, sha: record.headSha });
+    if (!current.approved || !this.generationEnabled()) throw new Error("alias直前に承認が失効しました。");
+    if (this.env.QA_OWNER_FLOW === "true") {
+      await this.ownerStore.assertCi(current.number, current.branch, current.sha);
+      const final = await this.currentTarget({ pr: record.pr, branch: record.branch, sha: record.headSha });
+      if (!final.approved || !this.generationEnabled()) throw new Error("alias直前に承認が失効しました。");
+    }
     await this.api("vercel", `/v2/deployments/${deployment.id}/aliases`, "POST", { alias: qaAlias(record.slot) });
   }
   aliasApproved(plan: AliasPlan) { return aliasApproval(this.env.CAKE_QA_ALIAS_APPROVALS, plan); }
@@ -344,10 +451,16 @@ export class HttpQaGateway implements QaGateway {
     }
     await this.api("vercel", `/v2/deployments/${deployment.id}/aliases`, "POST", { alias: plan.alias });
   }
-  deletionApproved(plan: DeletePlan) {
+  deletionApproved(plan: DeletePlan): boolean | Promise<boolean> {
     const now = Date.now();
-    try { return deletionApproval(this.env.CAKE_QA_DELETE_APPROVALS, plan, now); }
-    catch { throw new QaDiagnosticFailure({ stage: "APPROVAL_VALIDATE", provider: "NONE", method: "NONE", reason: "VALIDATION_ERROR" }); }
+    const legacy = () => {
+      try { return deletionApproval(this.env.CAKE_QA_DELETE_APPROVALS, plan, now); }
+      catch { throw new QaDiagnosticFailure({ stage: "APPROVAL_VALIDATE", provider: "NONE", method: "NONE", reason: "VALIDATION_ERROR" }); }
+    };
+    if (this.env.QA_OWNER_FLOW === "true") {
+      return this.ownerStore.cleanup(plan).then((owner) => owner.known ? owner.approved : legacy());
+    }
+    return legacy();
   }
   /** Keep only the identity needed for deletion; provider bodies never enter the ledger or errors. */
   private async deletionAlias(identifier: string, expectedAlias: string, teamId: string, expectedUid?: string): Promise<DeletionAlias | null> {
@@ -409,7 +522,7 @@ export class HttpQaGateway implements QaGateway {
   async deleteAlias(record: QaLeaseRecord, plan: DeletePlan) {
     try {
       if (this.access !== "write") throw new QaDiagnosticFailure({ reason: "METHOD_NOT_ALLOWED" });
-      if (!this.deletionApproved(plan) || record.state !== "deleting" || !plan.alias
+      if (!await this.deletionApproved(plan) || record.state !== "deleting" || !plan.alias
         || record.purpose === "probe" && !record.aliasAssignment
         || !isDeepStrictEqual(deletePlan(record), plan)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
       const project = this.assertProject(await this.api("vercel", `/v9/projects/${QA_PROJECT_ID}`, "GET", undefined, false, QA_TEAM_ID));
@@ -425,7 +538,7 @@ export class HttpQaGateway implements QaGateway {
       if (!isDeepStrictEqual(byId, alias) || !isDeepStrictEqual(byName, alias)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
       await this.assertAliasDeletionDatabase(record);
       const latest = (await this.pool())[record.slot];
-      if (!latest || !isDeepStrictEqual(latest.payload, record) || !this.deletionApproved(plan)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      if (!latest || !isDeepStrictEqual(latest.payload, record) || !await this.deletionApproved(plan)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
       const result = object(await this.api("vercel", `/v2/aliases/${encodeURIComponent(alias.uid)}`, "DELETE", undefined, false, teamId));
       if (result.status !== "SUCCESS") throw new QaDiagnosticFailure({ reason: "INVALID_RESPONSE" });
       const remainingId = await this.deletionAlias(alias.uid, plan.alias, teamId, alias.uid);
@@ -437,7 +550,7 @@ export class HttpQaGateway implements QaGateway {
   }
   async deleteDeployment(record: QaLeaseRecord, deployment: RemoteDeployment, plan: DeletePlan) {
     try {
-      if (!this.deletionApproved(plan) || record.state !== "deleting" || !isDeepStrictEqual(deletePlan(record), plan)
+      if (!await this.deletionApproved(plan) || record.state !== "deleting" || !isDeepStrictEqual(deletePlan(record), plan)
         || !plan.deploymentIds.includes(deployment.id) || deployment.leaseId !== record.leaseId || deployment.projectId !== QA_PROJECT_ID) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
       const value = object(await this.api("vercel", `/v13/deployments/${deployment.id}`, "DELETE"));
       if (value.state !== "DELETED") throw new QaDiagnosticFailure({ reason: "INVALID_RESPONSE" });
@@ -608,7 +721,14 @@ export async function runQaWriter(env: Environment = process.env, request?: QaRe
         slot: env.QA_SLOT as QaLeaseRecord["slot"] | undefined, leaseId: env.QA_LEASE_ID });
       console.log(JSON.stringify(publicQaOutput(report, env), null, 2)); return;
     }
-    if (!["claim", "release", "refresh", "probe", "alias-only", "close"].includes(action)) throw new Error("QA操作が不正です。");
+    if (["approve", "revoke"].includes(action)) {
+      if (env.GITHUB_ACTIONS !== "true" || env.GITHUB_REPOSITORY !== QA_REPOSITORY || env.GITHUB_REF !== "refs/heads/main"
+        || env.EVENT_NAME !== "workflow_dispatch" || env.QA_OWNER_FLOW !== "true" || !/^[1-9][0-9]*$/.test(env.QA_PLAN_ID ?? "")) throw new Error("owner承認はmainのRun workflowから計画IDを指定してください。");
+      const writer = new HttpQaGateway(env, apiTransport, "write");
+      await writer.ownerDecision(safeNumber(Number(env.QA_PLAN_ID)), action === "approve" ? "approved" : "revoked");
+      return; // Consent receipts never perform resource mutations in their own run.
+    }
+    if (!["request-preview", "request-release", "claim", "release", "refresh", "probe", "alias-only", "close"].includes(action)) throw new Error("QA操作が不正です。");
     const pr = env.QA_PR_NUMBER ? safeNumber(Number(env.QA_PR_NUMBER)) : event.number ? safeNumber(event.number) : undefined;
     request = { action: action as QaRequest["action"], pr, leaseId: env.QA_LEASE_ID, sha: env.QA_SOURCE_SHA,
       slot: env.QA_SLOT as QaLeaseRecord["slot"] | undefined, deploymentId: env.QA_DEPLOYMENT_ID };

@@ -686,7 +686,9 @@ test("Vercel一覧はpagination.nextを辿り、循環や矛盾metadataを拒否
 
 test("生成APIはoriginal feature枝/完全SHA/attemptを使い、build/runtimeのQA識別値へ認証情報を渡さない", async () => {
   const calls: { method: string; url: string; body?: unknown }[] = [];
-  const record = { ...lease(), intent: { sha, phase: "provisioning" as const, attemptId: uuid(900), startedAt: now } };
+  const claim = lease();
+  const record = { ...claim, sequence: 2, previousRecordId: 1,
+    intent: { sha, phase: "provisioning" as const, attemptId: uuid(900), startedAt: now } };
   const transport: QaTransport = async (method, url, _token, body) => {
     calls.push({ method, url, body });
     if (method === "POST") return { status: 200, data: vercelValue(remote(record, "dpl_provisioning", "BUILDING", "provisioning")) };
@@ -698,6 +700,10 @@ test("生成APIはoriginal feature枝/完全SHA/attemptを使い、build/runtime
     if (path.endsWith("/pulls/42")) return { status: 200, data: { number: 42, state: "open", head: { ref: record.branch, sha, repo: { full_name: QA_REPOSITORY } }, base: { ref: "main" } } };
     if (path.endsWith("/branches/main")) return { status: 200, data: { name: "main", commit: { sha: newSha } } };
     if (path.endsWith("/contents/vercel.json")) return { status: 200, data: gitFile() };
+    if (path === `/repos/${QA_REPOSITORY}/deployments`) return { status: 200, data: [
+      { id: 1, task: QA_TASK, environment: QA_ENVIRONMENT, sha, payload: claim },
+      { id: 2, task: QA_TASK, environment: QA_ENVIRONMENT, sha, payload: record },
+    ] };
     return { status: 200, data: { project: { id: QA_NEON_PROJECT_ID } } };
   };
   const gateway = new HttpQaGateway(environment, transport, "write");
