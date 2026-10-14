@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { runQaRequestWithWaiting } from "../lib/qa-pool-runner";
 import { runQaRequest, type AliasTarget, type QaGateTarget, type QaGateway, type QaPullRequest, type QaRequest, type RemoteDeployment } from "../lib/qa-pool-service";
 import { HttpQaGateway, runQaWriter, type QaTransport } from "../scripts/qa-pool-writer";
 import { aliasApproval, deletePlan, deletionApproval, probeApproval, type AliasApproval, type AliasPlan, type DeleteApproval, type DeletePlan, type ProbeApproval } from "../lib/qa-pool-authorization";
@@ -774,13 +776,13 @@ test("PR workflowの空QA_ACTIONはclaimへ解決し、環境payloadをshell引�
   assert.equal(gateway.records.some((entry) => (entry.payload as QaLeaseRecord).pr === 43), false);
 });
 
-test("disabled writerのActions refreshは新規生成せず、local変更入口は拒否する", async () => {
+test("disabled writerの手動Actions refreshは新規生成せず、local変更入口は拒否する", async () => {
   let apiCalls = 0;
   const gateway = new MemoryGateway();
   gateway.generationAllowed = false;
   gateway.prs.set(42, pullRequest());
   const transport: QaTransport = async () => { apiCalls++; return { status: 200, data: {} }; };
-  await runQaWriter({ CAKE_QA_POOL_ENABLED: "false", EVENT_NAME: "schedule", GITHUB_ACTIONS: "true",
+  await runQaWriter({ CAKE_QA_POOL_ENABLED: "false", EVENT_NAME: "workflow_dispatch", GITHUB_ACTIONS: "true",
     GITHUB_REPOSITORY: QA_REPOSITORY, GITHUB_REF: "refs/heads/main" }, { action: "refresh" }, gateway);
   assert.ok(gateway.poolReads > 0);
   assert.equal(gateway.calls.includes("create"), false);
@@ -798,4 +800,32 @@ test("disabled writerでもclosed leaseのexactmanifest cleanupはActions入口�
     GITHUB_REF: "refs/heads/main" }, { action: "refresh" }, gateway);
   assert.equal(gateway.latest().payload.state, "free");
   assert.equal(gateway.calls.includes("create"), false);
+});
+
+test("QA workflow has no scheduled trigger and a stale schedule event is rejected before any API call", async () => {
+  const source = readFileSync(new URL("../.github/workflows/qa-pool.yml", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /^\s*schedule:|\bcron:|github\.event_name == 'schedule'/m);
+  assert.match(source, /types: \[opened, synchronize, reopened, closed\]/);
+  const gateway = new MemoryGateway();
+  await assert.rejects(() => runQaWriter({ GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: QA_REPOSITORY,
+    GITHUB_REF: "refs/heads/main", EVENT_NAME: "schedule" }, { action: "refresh" }, gateway), /定期監視は廃止/);
+  assert.equal(gateway.poolReads, 0); assert.equal(gateway.calls.length, 0);
+});
+
+test("request-preview finishes provisioning and application in one dispatch without scheduled refresh", async () => {
+  const gateway = new MemoryGateway(); gateway.seed(lease());
+  const adapter: QaGateway = gateway;
+  adapter.requestOwnerPlan = async () => {};
+  let clock = 0, sleeps = 0;
+  await runQaRequestWithWaiting(adapter, { action: "request-preview", pr: 42, sha }, {
+    now: () => clock, timeoutMs: 100, pollIntervalMs: 10, log: () => {},
+    sleep: async (delay) => {
+      clock += delay; sleeps++; gateway.native = database;
+      for (const deployment of gateway.remotes.values()) deployment.state = deployment.phase === "application" ? "READY" : "ERROR";
+    },
+  });
+  assert.equal(sleeps, 2); assert.equal(gateway.calls.filter(call => call === "create").length, 2);
+  assert.equal(gateway.latest().payload.readyDeploymentId, "dpl_created2");
+  assert.equal(gateway.latest().payload.aliasSha, sha);
+  assert.ok(gateway.prQueries.every(pr => pr === 42));
 });

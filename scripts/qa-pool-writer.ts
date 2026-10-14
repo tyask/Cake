@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +7,8 @@ import {
   QA_PROJECT_ID, QA_REPOSITORY, QA_TASK, replayDeployments, sameDatabase,
   type DatabaseIdentity, type GithubDeployment, type QaLeaseRecord, type SavedLease,
 } from "../lib/qa-pool";
-import { runQaRequest, type QaGateTarget, type QaGateway, type QaPullRequest, type QaRequest, type RemoteDeployment } from "../lib/qa-pool-service";
+import { type QaGateTarget, type QaGateway, type QaPullRequest, type QaRequest, type RemoteDeployment } from "../lib/qa-pool-service";
+import { runQaRequestWithWaiting } from "../lib/qa-pool-runner";
 import { decodeGitConfigFile, type GitConfigEvidence } from "../lib/qa-pool-gate";
 import { aliasApproval, aliasPlan, confirmedDeletionPlan, deletionApproval, deletePlan, diagnoseDeletionApproval, probeApproval,
   type AliasPlan, type DeletePlan, type DeletionApprovalDiagnosis } from "../lib/qa-pool-authorization";
@@ -740,10 +740,11 @@ export class HttpQaGateway implements QaGateway {
 }
 
 export async function runQaWriter(env: Environment = process.env, request?: QaRequest, gateway?: QaGateway, apiTransport: QaTransport = transport): Promise<void> {
+  if (env.EVENT_NAME === "schedule") throw new Error("QA定期監視は廃止しました。対象PRのイベントまたは手動実行を使ってください。");
   if (!request) {
     const event = env.EVENT_PATH ? object(JSON.parse(await readFile(env.EVENT_PATH, "utf8"))) : {};
     const action = env.QA_ACTION?.trim() || (env.EVENT_NAME === "pull_request_target" && event.action === "closed"
-      ? "close" : env.EVENT_NAME === "schedule" ? "refresh" : "claim");
+      ? "close" : "claim");
     if (["preflight", "plan-probe", "plan-release"].includes(action)) {
       const reader = new HttpQaGateway({ ...env, GITHUB_TOKEN: env.GITHUB_TOKEN ?? env.GH_TOKEN }, apiTransport);
       const report = await reader.inspect({ action: action as "preflight" | "plan-probe" | "plan-release",
@@ -765,7 +766,7 @@ export async function runQaWriter(env: Environment = process.env, request?: QaRe
   }
   // Mutations must run in the single reviewed Actions writer, never from a local CLI.
   if (env.GITHUB_ACTIONS !== "true" || env.GITHUB_REPOSITORY !== QA_REPOSITORY || env.GITHUB_REF !== "refs/heads/main") throw new Error("信頼済みmainの単一Actions writerから実行してください。");
-  await runQaRequest(gateway ?? new HttpQaGateway(env, apiTransport, "write"), request, { token: randomUUID });
+  await runQaRequestWithWaiting(gateway ?? new HttpQaGateway(env, apiTransport, "write"), request);
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   void runQaWriter().catch((error) => {

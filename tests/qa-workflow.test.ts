@@ -14,7 +14,7 @@ test("通常生成は有効化条件を持ち、close/明示cleanup/probeは独�
   assert.match(writer, /vars\.CAKE_QA_POOL_ENABLED == 'true'/);
   assert.match(writer, /github\.event_name == 'pull_request_target' && github\.event\.action == 'closed'/);
   assert.match(writer, /contains\(fromJSON\('\["request-preview","request-release","approve","revoke","probe","alias-only","claim","release","refresh"\]'\), inputs\.action\)/);
-  assert.match(writer, /github\.event_name == 'schedule'/);
+  assert.doesNotMatch(writer, /github\.event_name == 'schedule'/);
   assert.match(writer, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
   assert.match(writer, /github\.event_name != 'workflow_dispatch' \|\| github\.ref == 'refs\/heads\/main'/);
   assert.match(writer, /startsWith\(github\.event\.pull_request\.head\.ref, 'codex\/'\)/);
@@ -29,7 +29,7 @@ test("全writerは同一queueへ直列化し、default pending差替や実行キ
   assert.match(poolRunner, /concurrency:\s+group: cake-qa-pool-writer\s+queue: max\s+cancel-in-progress: false/);
   assert.equal(runner.match(/group: cake-qa-pool-writer/g)?.length, 1);
   assert.match(poolRunner, /timeout-minutes: 5/);
-  assert.match(workflow, /cron: "\*\/5 \* \* \* \*"/);
+  assert.doesNotMatch(workflow, /^\s*schedule:|\bcron:/m);
 });
 
 test("資格情報を持つwriterはmainだけをcheckoutし、PRのコードや引数をshellへ挿入しない", () => {

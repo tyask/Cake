@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { deletePlan, type DeletePlan } from "../lib/qa-pool-authorization";
 import { runQaRequest } from "../lib/qa-pool-service";
+import { runQaRequestWithWaiting } from "../lib/qa-pool-runner";
 import { nextRecord, QA_ENVIRONMENT, QA_NEON_PROJECT_ID, QA_PROJECT_ID, QA_REPOSITORY, QA_TASK, qaAlias,
   replayDeployments, type DatabaseIdentity, type GithubDeployment, type QaLeaseRecord } from "../lib/qa-pool";
 import { HttpQaGateway, type QaTransport } from "../scripts/qa-pool-writer";
@@ -129,7 +130,61 @@ test("merged PR close deletes its complete QA lease without an approval record a
   assert.ok(f.calls.filter(call => call.method === "POST").every(call => (call.body as { task: string }).task === QA_TASK));
 });
 
-test("Native cleanup delay retains deleting and the next scheduled refresh releases without another approval or DELETE", async () => {
+test("closed event runner waits for Native disappearance and frees the same lease without a scheduled run", async () => {
+  const f = new Fixture(); f.nativeCleanupImmediate = false;
+  let clock = 0, sleeps = 0;
+  await runQaRequestWithWaiting(f.gateway(), { action: "close", pr: 42 }, {
+    now: () => clock, timeoutMs: 100, pollIntervalMs: 10, log: () => {},
+    sleep: async (delay) => { clock += delay; sleeps++; f.nativePresent = false; },
+  });
+  assert.equal(sleeps, 1); assert.equal(f.latest().payload.state, "free");
+  assert.equal(f.deletes().length, 3);
+  assert.ok(f.calls.filter(call => call.path.includes("/pulls/")).every(call => call.path.endsWith("/42")));
+});
+
+test("cleanup timeout fails the run, retains deleting, and exact manual release resumes after Native completion", async () => {
+  const f = new Fixture(); f.nativeCleanupImmediate = false;
+  let clock = 0;
+  await assert.rejects(() => runQaRequestWithWaiting(f.gateway(), { action: "close", pr: 42 }, {
+    now: () => clock, timeoutMs: 20, pollIntervalMs: 10, log: () => {}, sleep: async (delay) => { clock += delay; },
+  }), /待機上限/);
+  assert.equal(f.latest().payload.state, "deleting"); assert.equal(f.deletes().length, 3);
+  f.nativePresent = false;
+  await runQaRequestWithWaiting(f.gateway(), { action: "release", pr: 42, leaseId }, { log: () => {} });
+  assert.equal(f.latest().payload.state, "free"); assert.equal(f.deletes().length, 3);
+});
+
+test("a changed lease snapshot during event waiting stops the run without freeing the replacement", async () => {
+  const f = new Fixture(); f.nativeCleanupImmediate = false;
+  let clock = 0;
+  await assert.rejects(() => runQaRequestWithWaiting(f.gateway(), { action: "close", pr: 42 }, {
+    now: () => clock, timeoutMs: 20, pollIntervalMs: 10, log: () => {}, sleep: async (delay) => { clock += delay; f.update({}); },
+  }), /貸出世代/);
+  assert.equal(f.latest().payload.state, "deleting"); assert.equal(f.deletes().length, 3);
+});
+
+test("approval waits and unknown intents do not turn into event polling or automatic deletion", async () => {
+  for (const mode of ["unmerged", "intent"] as const) {
+    const f = new Fixture();
+    if (mode === "unmerged") f.pr.merged = false;
+    else f.update({ intent: { sha, phase: "application", attemptId: "00000000-0000-4000-8000-000000000999", startedAt: timestamp } });
+    await runQaRequestWithWaiting(f.gateway(), { action: "close", pr: 42 }, {
+      log: () => {}, sleep: async () => { assert.fail("ambiguous or unapproved operations must not poll"); },
+    });
+    assert.equal(f.latest().payload.state, "deleting"); assert.equal(f.deletes().length, 0);
+  }
+});
+
+test("provider failures stop event waiting immediately and retain the recorded deletion targets", async () => {
+  const f = new Fixture();
+  f.before = (call) => { if (call.method === "DELETE") throw new Error("simulated provider failure"); };
+  await assert.rejects(() => runQaRequestWithWaiting(f.gateway(), { action: "close", pr: 42 }, {
+    log: () => {}, sleep: async () => { assert.fail("failed mutations must not be retried blindly"); },
+  }));
+  assert.equal(f.latest().payload.state, "deleting"); assert.equal(f.remotes.length, 2);
+});
+
+test("Native cleanup delay retains deleting and explicit refresh releases without another approval or DELETE", async () => {
   const f = new Fixture(); f.nativeCleanupImmediate = false;
   await f.run();
   assert.equal(f.latest().payload.state, "deleting"); assert.equal(f.nativePresent, true);
