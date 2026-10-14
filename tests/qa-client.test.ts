@@ -336,3 +336,13 @@ test("cache取得待機は有限で保存後にもmain/run/PRを再照合する"
     g.state.mainSha = "c".repeat(40);
   } }), /mainが変更/);
 });
+
+test("QA host digestは確認済みDBがある64桁hashのみ受理し本番一致やhost原文を拒否する", () => {
+  const verified = { ...published(), databaseHostDigest: "c".repeat(64), productionHostDigest: "d".repeat(64) };
+  assert.deepEqual(parseQaPublicLease(verified), verified);
+  for (const invalid of [{ ...lease, databaseHostDigest: "c".repeat(64) }, { ...verified, databaseHostDigest: "PRIVATE_HOST" },
+    { ...verified, databaseHostDigest: "d".repeat(64) }, { ...verified, databaseHostDigest: "C".repeat(64) },
+    { ...verified, databaseHostDigest: "c".repeat(63) }, { ...verified, databaseHost: "PRIVATE_HOST" }]) {
+    assert.throws(() => parseQaPublicLease(invalid), (error: unknown) => error instanceof Error && !error.message.includes("PRIVATE"));
+  }
+});

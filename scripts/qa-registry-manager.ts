@@ -113,8 +113,12 @@ export async function runRegistryAction(g: RegistryGateway, request: RegistryReq
   if (closed) await g.assertCloseEvent(request.pr); else await g.assertDispatchOwner();
   const pr = await g.pullRequest(request.pr);
   let record = selected(await g.store.read(), request.pr, request.leaseId);
-  const success = (payload: QaRegistryLease | null, status: "success" | "full" = "success") => ({ protocol: "cake-qa-result/v1", requestId: request.requestId, action: request.action, status,
-    payload: payload ? { ...registryPublicSummary(payload), productionHostDigest: g.productionHostDigest() } : null });
+  const success = (payload: QaRegistryLease | null, status: "success" | "full" = "success") => {
+    const current = payload ? parseRegistryLease(payload) : null;
+    return { protocol: "cake-qa-result/v1", requestId: request.requestId, action: request.action, status,
+      payload: current ? { ...registryPublicSummary(current), productionHostDigest: g.productionHostDigest(),
+        ...(current.database ? { databaseHostDigest: createHash("sha256").update(current.database.host.replace(/-pooler(?=\.)/, "")).digest("hex") } : {}) } : null };
+  };
   if (request.action === "status") {
     if (record?.state === "published") {
       const alias = await g.alias(record.slot), deployment = await g.deployment(record.readyDeploymentId!);

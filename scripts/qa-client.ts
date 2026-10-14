@@ -19,6 +19,7 @@ export type QaPublicLease = {
   leaseId: string; pr: number; branch: string; headSha: string; version: number; updatedAt?: string;
   deployments: QaDeployment[]; readyDeploymentId?: string; aliasSha?: string;
   productionHostDigest?: string;
+  databaseHostDigest?: string;
   database?: { projectId: typeof QA_NEON_PROJECT_ID; branchId: string; endpointId: string };
 };
 export type QaActionReceipt = {
@@ -44,7 +45,7 @@ const invalidReceipt = () => new Error("QA結果の形式または対象が一�
 /** Parse only the public projection; never carry a DB host, token, or provider response into local evidence. */
 export function parseQaPublicLease(value: unknown): QaPublicLease {
   if (!object(value) || !onlyKeys(value, ["slot", "state", "leaseId", "pr", "branch", "headSha", "version", "updatedAt",
-    "deployments", "deploymentIds", "readyDeploymentId", "aliasSha", "database", "productionHostDigest"])
+    "deployments", "deploymentIds", "readyDeploymentId", "aliasSha", "database", "productionHostDigest", "databaseHostDigest"])
     || !SLOTS.includes(value.slot as Slot) || !["reserved", "published", "deleting", "free"].includes(String(value.state))
     || !leaseToken(value.leaseId) || !positiveInteger(value.pr) || !validTaskBranch(value.branch)
     || !fullSha(value.headSha) || !positiveInteger(value.version) || !Array.isArray(value.deployments)
@@ -64,6 +65,8 @@ export function parseQaPublicLease(value: unknown): QaPublicLease {
   if (value.database !== undefined && (!object(value.database) || !onlyKeys(value.database, ["projectId", "branchId", "endpointId"])
     || value.database.projectId !== QA_NEON_PROJECT_ID || typeof value.database.branchId !== "string" || !/^br-[a-z0-9-]+$/.test(value.database.branchId)
     || typeof value.database.endpointId !== "string" || !/^ep-[a-z0-9-]+$/.test(value.database.endpointId))) throw invalidReceipt();
+  if (value.databaseHostDigest !== undefined && (!value.database || typeof value.databaseHostDigest !== "string"
+    || !/^[a-f0-9]{64}$/.test(value.databaseHostDigest) || value.databaseHostDigest === value.productionHostDigest)) throw invalidReceipt();
   if (value.readyDeploymentId !== undefined && (!deploymentId(value.readyDeploymentId)
     || !value.deployments.some((entry) => object(entry) && entry.id === value.readyDeploymentId && entry.phase === "application"))) throw invalidReceipt();
   if (value.aliasSha !== undefined && (!fullSha(value.aliasSha) || value.aliasSha !== value.headSha || !value.database

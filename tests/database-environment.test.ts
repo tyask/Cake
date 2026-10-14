@@ -75,3 +75,50 @@ test("Cloud/PCは本番hostを受け取らず検証済みfingerprintでDBを分�
   assert.throws(() => databaseConnectionString({ ...environment, CAKE_QA_PRODUCTION_DATABASE_HOST: preview.CAKE_QA_DATABASE_HOST }), /QA貸出とDBの照合/);
   assert.throws(() => databaseConnectionString({ VERCEL_ENV: "production", DATABASE_URL: "production-db", CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256: environment.CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256 }), /QA貸出とDBの照合/);
 });
+
+test("QA endpointは検証済みfingerprintで完全照合し、pooler表記を正規化する", () => {
+  const hash = (host: string) => createHash("sha256").update(host).digest("hex");
+  const environment = { ...preview, CAKE_QA_DATABASE_HOST: undefined,
+    CAKE_QA_DATABASE_HOST_SHA256: hash(preview.CAKE_QA_DATABASE_HOST),
+    CAKE_QA_PRODUCTION_DATABASE_HOST: undefined,
+    CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256: hash(preview.CAKE_QA_PRODUCTION_DATABASE_HOST) };
+  assert.equal(databaseConnectionString(environment), preview.CAKE_TEST_DATABASE_URL);
+  assert.deepEqual(previewDatabaseIdentity(environment), previewDatabaseIdentity(preview));
+  assert.equal(databaseConnectionString({ ...environment, CAKE_TEST_DATABASE_URL: preview.CAKE_TEST_DATABASE_URL.replace("-pooler", "") }), preview.CAKE_TEST_DATABASE_URL.replace("-pooler", ""));
+  assert.equal(databaseConnectionString({ ...preview, CAKE_QA_DATABASE_HOST_SHA256: environment.CAKE_QA_DATABASE_HOST_SHA256 }), preview.CAKE_TEST_DATABASE_URL);
+});
+
+test("QA host fingerprintの欠落・不正・本番一致・plain hostとの競合は接続前に拒否する", () => {
+  const hash = (host: string) => createHash("sha256").update(host).digest("hex");
+  const environment = { ...preview, CAKE_QA_DATABASE_HOST: undefined,
+    CAKE_QA_DATABASE_HOST_SHA256: hash(preview.CAKE_QA_DATABASE_HOST),
+    CAKE_QA_PRODUCTION_DATABASE_HOST: undefined,
+    CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256: hash(preview.CAKE_QA_PRODUCTION_DATABASE_HOST) };
+  for (const change of [
+    { CAKE_QA_DATABASE_HOST_SHA256: undefined }, { CAKE_QA_DATABASE_HOST_SHA256: "" },
+    { CAKE_QA_DATABASE_HOST_SHA256: "broken" }, { CAKE_QA_DATABASE_HOST_SHA256: "a".repeat(63) },
+    { CAKE_QA_DATABASE_HOST_SHA256: hash("ep-other.mock.aws.neon.tech") },
+    { CAKE_QA_DATABASE_HOST_SHA256: environment.CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256 },
+    { CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256: environment.CAKE_QA_DATABASE_HOST_SHA256 },
+    { CAKE_QA_DATABASE_HOST: "ep-other.mock.aws.neon.tech" }, { CAKE_QA_DATABASE_HOST: "" },
+    { CAKE_QA_PRODUCTION_DATABASE_HOST: preview.CAKE_QA_DATABASE_HOST },
+    { DATABASE_URL: preview.CAKE_TEST_DATABASE_URL },
+    { CAKE_TEST_DATABASE_URL: "postgresql://user:private@ep-other.mock.aws.neon.tech/cake" },
+  ]) assert.throws(() => databaseConnectionString({ ...environment, ...change }), (error: unknown) => {
+    assert.match(String(error), /QA貸出とDBの照合/);
+    assert.doesNotMatch(String(error), /private|postgresql|ep-other/);
+    return true;
+  });
+  assert.throws(() => databaseConnectionString({ ...preview, CAKE_QA_DATABASE_HOST_SHA256: hash("ep-other.mock.aws.neon.tech") }), /QA貸出とDBの照合/);
+  assert.throws(() => databaseConnectionString({ ...environment, CAKE_QA_DATABASE_HOST_SHA256: hash(preview.CAKE_QA_PRODUCTION_DATABASE_HOST),
+    CAKE_TEST_DATABASE_URL: `postgresql://user:private@${preview.CAKE_QA_PRODUCTION_DATABASE_HOST}/cake` }), /QA貸出とDBの照合/);
+});
+
+test("Production・Developmentに新しいQA host fingerprintが残っていれば接続を拒否する", () => {
+  const digest = createHash("sha256").update(preview.CAKE_QA_DATABASE_HOST).digest("hex");
+  for (const VERCEL_ENV of ["production", "development", undefined]) {
+    for (const CAKE_QA_DATABASE_HOST_SHA256 of [digest, ""]) {
+      assert.throws(() => databaseConnectionString({ VERCEL_ENV, DATABASE_URL: "production-db", CAKE_QA_DATABASE_HOST_SHA256 }), /QA貸出とDBの照合/);
+    }
+  }
+});

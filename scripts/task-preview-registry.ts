@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -12,6 +12,7 @@ const CLI_VERSION = "64.0.2";
 const TEAM_ID = "team_D1Mcx2TdFWPKcypfu8KzNMub";
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const deploymentId = (value: unknown): value is string => typeof value === "string" && /^dpl_[A-Za-z0-9_-]+$/.test(value);
+const hostDigest = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const failure = () => new Error("Previewを完了できませんでした。貸出を保持しています。記録済みDeploymentとActionsを確認して同じ作業を再開してください。");
 
 export type RegistryPreviewRecord = {
@@ -53,49 +54,19 @@ async function vercelApi(execute: WorkflowExecutor, cwd: string, path: string, g
   } finally { if (directory) await rm(directory, { recursive: true, force: true }); }
 }
 
-/** Read just the private QA URL; reject duplicates, expansions, and a mismatched endpoint without displaying it. */
-export function previewHostFromEnvironment(contents: string, database: NonNullable<QaPublicLease["database"]>, productionDigest: string): string {
-  try {
-    if (Buffer.byteLength(contents, "utf8") > 1_000_000 || !/^[a-f0-9]{64}$/.test(productionDigest)) throw new Error();
-    const lines = contents.split(/\r?\n/).filter((line) => /^\s*(?:export\s+)?CAKE_TEST_DATABASE_URL\s*=/.test(line));
-    if (lines.length !== 1) throw new Error();
-    let value = lines[0].replace(/^\s*(?:export\s+)?CAKE_TEST_DATABASE_URL\s*=\s*/, "").trim();
-    if (value.startsWith('"')) value = JSON.parse(value);
-    else if (value.startsWith("'")) {
-      if (!value.endsWith("'")) throw new Error();
-      value = value.slice(1, -1);
-    } else value = value.replace(/\s+#.*$/, "").trim();
-    if (typeof value !== "string" || value.includes("$") || /[\r\n\0]/.test(value)) throw new Error();
-    const url = new URL(value);
-    const host = url.hostname.replace(/-pooler(?=\.)/, "");
-    if (!["postgres:", "postgresql:"].includes(url.protocol) || !/^ep-[a-z0-9-]+\.[a-z0-9.-]+\.neon\.tech$/.test(host)
-      || host.split(".")[0] !== database.endpointId || !url.username || !url.password
-      || createHash("sha256").update(host).digest("hex") === productionDigest) throw new Error();
-    return host;
-  } catch { throw new Error("Preview専用DBの接続先を確認できませんでした。本番DBの代用やデプロイは行いません。"); }
-}
-
-async function pullDatabaseHost(execute: WorkflowExecutor, head: TaskHead, database: NonNullable<QaPublicLease["database"]>, digest: string, globalConfig?: string) {
-  const directory = await mkdtemp(join(tmpdir(), "cake-qa-env-"));
-  const file = join(directory, ".env.preview");
-  try {
-    await writeFile(file, "", { mode: 0o600, flag: "wx" });
-    // CLI link can download Development credentials into .env.local. Preserve
-    // the task's existing environment and create only the already-verified IDs.
-    const projectFile = resolve(head.cwd, ".vercel/project.json");
-    let existing: unknown;
-    try { existing = JSON.parse(await readFile(projectFile, "utf8")); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw failure(); }
-    if (existing !== undefined) {
-      if (!object(existing) || existing.projectId !== CAKE_VERCEL_PROJECT || existing.orgId !== TEAM_ID) throw failure();
-    } else {
-      await mkdir(resolve(head.cwd, ".vercel"), { recursive: true, mode: 0o700 });
-      await writeFile(projectFile, JSON.stringify({ projectId: CAKE_VERCEL_PROJECT, orgId: TEAM_ID, projectName: "cake" }), { mode: 0o600, flag: "wx" });
-    }
-    await commandOutput(execute, "npx", cliArgs(["env", "pull", file, "--yes", "--environment", "preview", "--git-branch", head.branch], globalConfig), head.cwd,
-      "Preview専用の環境設定を取得できませんでした。接続文字列は表示しません。");
-    return previewHostFromEnvironment(await readFile(file, "utf8"), database, digest);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+async function ensureProjectLink(cwd: string) {
+  // Link only the verified IDs. `vercel link` can download Development secrets;
+  // neither that command nor any environment/connection-string pull is needed.
+  const projectFile = resolve(cwd, ".vercel/project.json");
+  let existing: unknown;
+  try { existing = JSON.parse(await readFile(projectFile, "utf8")); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw failure(); }
+  if (existing !== undefined) {
+    if (!object(existing) || existing.projectId !== CAKE_VERCEL_PROJECT || existing.orgId !== TEAM_ID) throw failure();
+  } else {
+    await mkdir(resolve(cwd, ".vercel"), { recursive: true, mode: 0o700 });
+    await writeFile(projectFile, JSON.stringify({ projectId: CAKE_VERCEL_PROJECT, orgId: TEAM_ID, projectName: "cake" }), { mode: 0o600, flag: "wx" });
+  }
 }
 
 function assertRemote(value: Record<string, unknown>, lease: QaPublicLease, head: TaskHead, phase: QaDeployment["phase"], attemptId?: string) {
@@ -141,6 +112,7 @@ export async function runTaskPreviewRegistry({ args = [], cwd = process.cwd(), e
   await saveQaLease(head.cwd, lease);
   const finish = async (current: QaPublicLease): Promise<RegistryPreviewResult> => {
     await unchanged(head, execute);
+    await ensureProjectLink(head.cwd);
     const deployment = current.deployments.find((d) => d.id === current.readyDeploymentId && d.phase === "application" && d.sha === head.sha);
     if (!deployment?.url || !current.database) throw failure();
     await saveQaLease(head.cwd, current);
@@ -163,6 +135,7 @@ export async function runTaskPreviewRegistry({ args = [], cwd = process.cwd(), e
     || !/^[1-9][0-9]*$/.test(String(project.link.repoId))) throw failure();
   const repoId = Number(project.link.repoId);
   if (!Number.isSafeInteger(repoId)) throw failure();
+  await ensureProjectLink(head.cwd);
   const deadline = now() + timeoutMs;
   const wait = async (id: string, phase: QaDeployment["phase"], token?: string) => {
     while (now() < deadline) {
@@ -184,15 +157,25 @@ export async function runTaskPreviewRegistry({ args = [], cwd = process.cwd(), e
     lease = registered.payload;
     await saveQaLease(head.cwd, lease);
   };
-  const create = async (phase: QaDeployment["phase"], databaseHost: string) => {
+  const create = async (phase: QaDeployment["phase"]) => {
+    const prior = lease!;
+    if (phase === "application" && (!prior.database || !hostDigest(prior.databaseHostDigest)
+      || !hostDigest(prior.productionHostDigest) || prior.databaseHostDigest === prior.productionHostDigest)) throw failure();
     const token = randomUUID();
     const begun = await action({ action: "begin", leaseId: lease!.leaseId, phase, attemptId: token });
-    if (!begun.payload?.productionHostDigest) throw failure();
+    if (!begun.payload || !hostDigest(begun.payload.productionHostDigest) || begun.payload.leaseId !== prior.leaseId
+      || begun.payload.pr !== pr.number || begun.payload.branch !== head.branch || begun.payload.headSha !== head.sha
+      || begun.payload.state !== "reserved") throw failure();
+    if (phase === "application" && (!begun.payload.database || !hostDigest(begun.payload.databaseHostDigest)
+      || begun.payload.databaseHostDigest !== prior.databaseHostDigest || begun.payload.databaseHostDigest === begun.payload.productionHostDigest
+      || (["projectId", "branchId", "endpointId"] as const).some(key => begun.payload!.database![key] !== prior.database![key]))) throw failure();
     lease = begun.payload;
     await saveQaLease(head.cwd, lease);
     await unchanged(head, execute);
     const env = { AUTH_MODE: "test", CAKE_QA_SLOT: lease.slot, CAKE_QA_PR: String(pr.number), CAKE_QA_LEASE_TOKEN: lease.leaseId,
-      CAKE_QA_SOURCE_BRANCH: head.branch, CAKE_QA_SOURCE_SHA: head.sha, CAKE_QA_DATABASE_HOST: databaseHost,
+      CAKE_QA_SOURCE_BRANCH: head.branch, CAKE_QA_SOURCE_SHA: head.sha,
+      // Empty provisioning hash deliberately stops before connecting to a DB.
+      CAKE_QA_DATABASE_HOST_SHA256: phase === "application" ? lease.databaseHostDigest! : "",
       CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256: lease.productionHostDigest };
     // CLI `api` preserves the verified gitSource needed by Vercel Native Neon.
     // Neither connection strings nor auth tokens are command arguments.
@@ -223,7 +206,7 @@ export async function runTaskPreviewRegistry({ args = [], cwd = process.cwd(), e
       if (!object(detail.meta) || typeof detail.meta.cakeQaAttemptId !== "string") throw failure();
       await wait(observed.id, "provisioning", detail.meta.cakeQaAttemptId);
       await register(observed.id, "provisioning", detail.meta.cakeQaAttemptId);
-    } else { await create("provisioning", ""); }
+    } else { await create("provisioning"); }
   }
   if (!lease.database || !lease.productionHostDigest) throw failure();
   if (lease.headSha === head.sha && lease.readyDeploymentId) return finish(lease);
@@ -236,8 +219,7 @@ export async function runTaskPreviewRegistry({ args = [], cwd = process.cwd(), e
     await register(priorApplication.id, "application", detail.meta.cakeQaAttemptId);
     return finish(lease);
   }
-  const databaseHost = await pullDatabaseHost(execute, head, lease.database, lease.productionHostDigest, globalConfig);
-  await create("application", databaseHost);
+  await create("application");
   return finish(lease);
 }
 
