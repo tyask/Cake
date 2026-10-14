@@ -74,7 +74,7 @@ export async function runTaskPr({
 
   let evidence: string;
   if (draft) {
-    evidence = `## 固定QA\n\n未検証。QA枠の本人承認・DB分離・Native連携・生成前ゲート・cleanupの確認と、現在HEADを確認した固定QA URLでの画面/API検証が必要です。\n\n- ブランチ: \`${head.branch}\`\n- 対象コミット: \`${head.sha}\`\n`;
+    evidence = `## 固定QA\n\n未検証。開発・ローカル検証の後にdraft PRを作成し、デプロイ直前にActionsへQA枠を予約します。満枠時はdraftのまま終了し、再依頼時に再開します。現在HEADのDeployment固有URLと固定QA URLで画面/APIを確認してからReadyにします。\n\n- ブランチ: \`${head.branch}\`\n- 対象コミット: \`${head.sha}\`\n`;
   } else {
     const preview = await readPreviewRecord(head.cwd);
     if (preview.branch !== head.branch || preview.sha !== head.sha) {
@@ -113,8 +113,8 @@ export async function runTaskPr({
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  void runTaskPr({ args: process.argv.slice(2) }).catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : "PRの作成に失敗しました。");
+  void import("./task-pr-registry").then(({ runTaskPrRegistry }) => runTaskPrRegistry({ args: process.argv.slice(2) })).catch(() => {
+    console.error("PR操作が失敗しました。認証情報や外部応答は表示しません。draftとQA検証状態を確認してください。");
     process.exitCode = 1;
   });
 }

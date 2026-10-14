@@ -78,6 +78,7 @@ jobs:
           EVENT_PATH: ${{ github.event_path }}
           GITHUB_TOKEN: ${{ github.token }}
           CAKE_QA_POOL_ENABLED: ${{ vars.CAKE_QA_POOL_ENABLED }}
+          CAKE_QA_REGISTRY_ENABLED: ${{ vars.CAKE_QA_REGISTRY_ENABLED }}
           CAKE_QA_GIT_GATE_CONFIRMED: ${{ vars.CAKE_QA_GIT_GATE_CONFIRMED }}
           CAKE_QA_NATIVE_CONFIRMED: ${{ vars.CAKE_QA_NATIVE_CONFIRMED }}
           CAKE_QA_DELETE_APPROVALS: ${{ secrets.delete_approvals }}

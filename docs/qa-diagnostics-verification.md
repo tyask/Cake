@@ -2,7 +2,7 @@
 
 この文書はPR #35の診断専用bootstrap導入前に記録した過去の検証報告である。以下の319件というテスト数、remote head、公開保留、Preview source policyの確認結果は当時の対象commitと操作範囲の記録であり、現在の変更の結果や必須条件を表さない。
 
-2026-10-12のHobby対応で、有料のPreview source policyを必須にする診断を、同一repositoryのmain/対象PRの完全SHAにあるmain-only Git設定とblob SHAの確認へ置き換えた。新しい証拠は `gitConfiguration.scope: repository-git-trigger-configuration` とcommit/blobの識別情報を示し、 `backendForcedDeploymentPreventionProven: false` を維持する。project全体の強制停止やNativeのlive実証を意味しない。現行手順は [QA診断手順](qa-diagnostics.md) と [QA貸出運用](qa-pool.md)、現行変更の検証結果は [QA pool検証報告](qa-pool-verification.md) を参照する。
+2026-10-12のHobby対応で、有料のPreview source policyを必須にする診断を、同一repositoryのmain/対象PRの完全SHAにあるmain-only Git設定とblob SHAの確認へ置き換えた。新しい証拠は `gitConfiguration.scope: repository-git-trigger-configuration` とcommit/blobの識別情報を示し、 `backendForcedDeploymentPreventionProven: false` を維持する。project全体の強制停止やNativeのlive実証を意味しない。現行手順は [QA診断手順](qa-diagnostics.md) と [QA貸出運用](development-workflow.md)、現行変更の検証結果は [QA pool検証報告](qa-pool-verification.md) を参照する。
 
 現行の診断・CLI/console・報告はDB hostを省略し、削除承認はhostを含む完全DB identityをprivateに照合する。表示計画をそのまま承認JSONへコピーしない。Actions callerは既存repository Variableの本番host・削除承認JSON・alias承認JSONを一時的workflow_call secretsへ渡す。remote Secret登録・移動や値・権限の変更を伴わず、Preview Environmentの同名Variable overrideの同値も推定しない。過去ログ消去や実Actionsのmask検証は完了扱いにせず、この過去報告を現在の実操作承認へ流用しない。
 

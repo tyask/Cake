@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { databaseConnectionString, previewDatabaseIdentity } from "../lib/database-environment";
 
 const preview = {
@@ -61,4 +62,16 @@ test("ローカル・Developmentは対象worktreeで設定したDATABASE_URLを�
   for (const VERCEL_ENV of [undefined, "development"]) {
     assert.equal(databaseConnectionString({ VERCEL_ENV, DATABASE_URL: "local-test-db", CAKE_TEST_DATABASE_URL: "branch-db" }), "local-test-db");
   }
+});
+
+test("Cloud/PCは本番hostを受け取らず検証済みfingerprintでDBを分離する", () => {
+  const hash = (host: string) => createHash("sha256").update(host).digest("hex");
+  const environment = { ...preview, CAKE_QA_PRODUCTION_DATABASE_HOST: undefined,
+    CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256: hash(preview.CAKE_QA_PRODUCTION_DATABASE_HOST) };
+  assert.equal(databaseConnectionString(environment), preview.CAKE_TEST_DATABASE_URL);
+  for (const digest of ["", "broken", hash(preview.CAKE_QA_DATABASE_HOST)]) {
+    assert.throws(() => databaseConnectionString({ ...environment, CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256: digest }), /QA貸出とDBの照合/);
+  }
+  assert.throws(() => databaseConnectionString({ ...environment, CAKE_QA_PRODUCTION_DATABASE_HOST: preview.CAKE_QA_DATABASE_HOST }), /QA貸出とDBの照合/);
+  assert.throws(() => databaseConnectionString({ VERCEL_ENV: "production", DATABASE_URL: "production-db", CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256: environment.CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256 }), /QA貸出とDBの照合/);
 });
