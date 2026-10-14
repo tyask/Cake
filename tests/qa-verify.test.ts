@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { runInNewContext } from "node:vm";
 import type { Browser, BrowserContext, LaunchOptions, Route } from "playwright";
 import { saveQaLease, type QaActionRequest, type QaPublicLease } from "../scripts/qa-client";
 import { protectedQaRoute, QA_VERIFY_FAILURE, qaVerificationPath, runQaVerify } from "../scripts/qa-verify";
@@ -26,7 +27,7 @@ async function fixture(t: TestContext) {
   const state = {
     lease: fresh(), statusReads: 0, currentSha: sha, browserTitle: "Cake", sessionStatus: 200, appStatus: 200,
     wrongUser: false, exception: "", routeException: false, shutdownException: false,
-    hangStage: "", apiHang: "", lateRouteFailure: false,
+    hangStage: "", apiHang: "", lateRouteFailure: false, serializedEvaluate: false,
     afterBrowser: undefined as (() => void) | undefined, finalLease: undefined as QaPublicLease | undefined,
   };
   const events: string[] = [], logs: string[] = [], launches: LaunchOptions[] = [];
@@ -115,7 +116,13 @@ async function fixture(t: TestContext) {
               const id = state.wrongUser ? "test-user-wrong" : record.user;
               return new Response(JSON.stringify({ user: { id, email: "PRIVATE_APP_EMAIL" }, workspaces: [] }), { status });
             };
-            try { return await fn(arg); } finally { globalThis.fetch = originalFetch; }
+            try {
+              // Playwright transports callback source into another realm. Do
+              // the same without tsx helpers instead of running its Node closure.
+              const callback: typeof fn = state.serializedEvaluate
+                ? runInNewContext(`(${fn.toString()})`, { fetch: globalThis.fetch, URL, AbortSignal }) : fn;
+              return await callback(arg);
+            } finally { globalThis.fetch = originalFetch; }
           },
         };
         return {
@@ -360,6 +367,16 @@ test("APIのheaders待ちとJSON本文待ちにもAbortSignalの期限を適用�
     assert.equal(f.events.at(-1), "browser:close");
     assert.equal(JSON.parse(await readFile(qaVerificationPath(f.cwd), "utf8")).success, false);
   }
+});
+
+test("API callbackをtsx helperのない別realmへserializeしても4ケースのAPI検証が成功する", async t => {
+  const f = await fixture(t); f.state.serializedEvaluate = true;
+  const proof = await runQaVerify({ ...f.options, args: ["--url", uniqueUrl] });
+  assert.equal(proof.uniqueVerified, true);
+  assert.equal(f.contexts.length, 4);
+  assert.equal(f.apiRequests.length, 8);
+  assert.equal(f.state.statusReads, 2);
+  assert.ok(f.logs.filter(log => log.endsWith(" passed")).length === 4);
 });
 
 test("cleanupで発生する既知route abortは原例外を表示せず正常な画面/API結果を失敗にしない", async t => {

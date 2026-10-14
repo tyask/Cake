@@ -151,14 +151,16 @@ async function contextSmoke(context: BrowserContext, origin: string, user: typeo
   stage("api");
   const api = await page.evaluate(async ({ origin, userId, timeoutMs }) => {
     try {
-      const read = async (path: string) => {
-        // The abort remains attached while the response body is read as JSON.
-        const response = await fetch(new URL(path, origin), { method: "GET", credentials: "same-origin", redirect: "error", signal: AbortSignal.timeout(timeoutMs) });
-        return { status: response.status, data: await response.json() };
-      };
-      const [session, app] = await Promise.all([read("/api/auth/session"), read("/api/app")]);
-      return { sessionOk: session.status === 200 && session.data?.user?.id === userId,
-        appOk: app.status === 200 && app.data?.user?.id === userId && Array.isArray(app.data.workspaces) };
+      // Keep the serialized browser callback self-contained. A nested named
+      // function can acquire a tsx/esbuild __name helper unavailable in Chromium.
+      // Each abort stays attached while its response body is read as JSON.
+      const [session, app] = await Promise.all([
+        fetch(new URL("/api/auth/session", origin), { method: "GET", credentials: "same-origin", redirect: "error", signal: AbortSignal.timeout(timeoutMs) }),
+        fetch(new URL("/api/app", origin), { method: "GET", credentials: "same-origin", redirect: "error", signal: AbortSignal.timeout(timeoutMs) }),
+      ]);
+      const [sessionData, appData] = await Promise.all([session.json(), app.json()]);
+      return { sessionOk: session.status === 200 && sessionData?.user?.id === userId,
+        appOk: app.status === 200 && appData?.user?.id === userId && Array.isArray(appData.workspaces) };
     } catch { return { sessionOk: false, appOk: false }; }
   }, { origin, userId: user.id, timeoutMs: apiTimeoutMs });
   if (!api?.sessionOk || !api.appOk) throw failure();
