@@ -168,7 +168,7 @@ ActionsがNeon APIで貸出先DBの完全なhostとbranch・endpointを照合し
 
 本番との分離照合には`productionHostDigest`（本番hostを同じ方法で正規化したSHA-256）をActionsから受け取り、アプリguardの`CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256`へ渡す。本番host原文はActions側だけに置く。貸出先と本番のhost hashは非秘密の照合用metadataであり、DBの認証情報ではない。接続URL・host原文・資格情報をartifact・PR・ログへ出さない。旧plain host方式は既存環境の互換として保持し、新方式の公開receiptへ混ぜない。
 
-PR #49の検証では、qa1の予約とprovisioning DeploymentからのNative DB生成、Actionsによる初回registerまで確認した。ブランチの静的なPreview設定では実際の子DBに一致する接続先を取得できず、application Deploymentと画面・APIの検証は完了していない。今回のQA host hash対応は、mainのActionsにも導入してから同じ貸出で検証を再開する。この段階をQA公開・Ready・返却の完了と扱わない。
+PR #49では、qa1の予約とprovisioning DeploymentからのNative DB生成、Actionsによる初回registerまで確認した。静的なPreview設定と実際の子DBの接続先が異なる問題をQA host hashの照合で修正し、mainへ導入した。#49のマージ後、[自動返却 run 38596154103](https://github.com/tyask/Cake/actions/runs/38596154103)が全記録済み資源の消失を確認してqa1をfreeへ戻した。この貸出ではapplication Deploymentと画面・APIの検証は完了していないため、新しい試験PRで予約から公開・画面確認・close後の返却まで検証する。返却済みの貸出やブランチを再予約しない。
 
 ```bash
 npm run deploy:preview
