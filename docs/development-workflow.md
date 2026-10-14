@@ -163,6 +163,8 @@ npm run deploy:preview
 
 初回DBは空DBまたは承認済みQA初期fixtureを厳密照合して受け入れる。混入したschema・ユーザー・業務データを削除して続行しない。build・migration・seedとDB identityの照合に成功してから、READYなDeployment固有URLで画面操作・APIテストを行う。VercelがREADYになっただけでは動作確認完了としない。
 
+新方式の導入確認には試験用PRを使い、予約・固有URLの確認・固定URLの公開・Readyへの切替を順に実行する。試験PRのclose後は、自動返却Actionsが成功し、対象alias・全Deployment・専用DBが消失して枠が空きへ戻ったことを確認する。
+
 同じPRの追加commitは同じ貸出・テストDBを使い、編集データや利用者設定を保持する。新HEADで再デプロイ・再検証する。別PRには前の貸出のDBを再利用しない。
 
 `npm run qa:verify -- --url <Deployment固有URL>`でPC/mobile、A/Bテストログイン、ダッシュボード、読み取りAPIのスモーク確認を行う。Vercelの保護を通過する短期トークンは`vercel env run`で子プロセス環境へ渡し、チャット・ファイル・引数へ保存しない。変更箇所固有の操作・APIテストはCodexが別途行い、検証報告へ記載する。
