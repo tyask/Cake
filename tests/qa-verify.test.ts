@@ -4,8 +4,9 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { runInNewContext } from "node:vm";
 import type { Browser, BrowserContext, LaunchOptions, Route } from "playwright";
-import { saveQaLease, type QaPublicLease } from "../scripts/qa-client";
+import { saveQaLease, type QaActionRequest, type QaPublicLease } from "../scripts/qa-client";
 import { protectedQaRoute, QA_VERIFY_FAILURE, qaVerificationPath, runQaVerify } from "../scripts/qa-verify";
 import { QA_NEON_PROJECT_ID } from "../lib/qa-pool";
 import type { WorkflowExecutor } from "../scripts/task-workflow";
@@ -26,6 +27,7 @@ async function fixture(t: TestContext) {
   const state = {
     lease: fresh(), statusReads: 0, currentSha: sha, browserTitle: "Cake", sessionStatus: 200, appStatus: 200,
     wrongUser: false, exception: "", routeException: false, shutdownException: false,
+    hangStage: "", apiHang: "", lateRouteFailure: false, serializedEvaluate: false,
     afterBrowser: undefined as (() => void) | undefined, finalLease: undefined as QaPublicLease | undefined,
   };
   const events: string[] = [], logs: string[] = [], launches: LaunchOptions[] = [];
@@ -52,10 +54,12 @@ async function fixture(t: TestContext) {
   const launch = async (options: LaunchOptions): Promise<Browser> => {
     launches.push(options);
     if (state.exception) throw new Error(state.exception);
+    if (state.hangStage === "launch") return new Promise(() => {});
     let currentBrowserContexts = 0;
     const browser = {
       async newContext(options: Parameters<Browser["newContext"]>[0]) {
         currentBrowserContexts++;
+        if (state.hangStage === "context") return new Promise(() => {});
         const id = contexts.length, record: typeof contexts[number] = { options };
         contexts.push(record);
         let handler: ((route: Route) => Promise<void>) | undefined;
@@ -85,32 +89,63 @@ async function fixture(t: TestContext) {
         });
         const page = {
           setDefaultTimeout() {},
-          async goto(url: string) { record.origin = url; await routed(url); return { status: () => 200 }; },
+          async goto(url: string, options: { waitUntil: string; timeout: number }) {
+            assert.equal(options.waitUntil, "networkidle");
+            assert.ok(options.timeout > 0);
+            record.origin = url;
+            if (state.hangStage === "page") return new Promise(() => {});
+            await routed(url); return { status: () => 200 };
+          },
           url: () => record.origin!, title: async () => state.browserTitle,
           getByRole(role: string, options: { name: string | RegExp }) { return locator(role, options.name); },
           locator,
-          async evaluate(fn: (arg: { origin: string; userId: string }) => Promise<unknown>, arg: { origin: string; userId: string }) {
+          async evaluate(fn: (arg: { origin: string; userId: string; timeoutMs: number }) => Promise<unknown>, arg: { origin: string; userId: string; timeoutMs: number }) {
+            if (state.hangStage === "evaluate") return new Promise(() => {});
             const originalFetch = globalThis.fetch;
             globalThis.fetch = async (input, init) => {
               const url = String(input); apiRequests.push({ url, init }); await routed(url);
+              const signal = init?.signal;
+              assert.ok(signal);
+              const stalled = () => new Promise<never>((_resolve, reject) => {
+                if (signal.aborted) reject(new Error(`${token} aborted response`));
+                else signal.addEventListener("abort", () => reject(new Error(`${token} aborted response`)), { once: true });
+              });
+              if (state.apiHang === "headers") return stalled();
+              if (state.apiHang === "body") return { status: 200, json: stalled } as unknown as Response;
               const status = url.endsWith("/session") ? state.sessionStatus : state.appStatus;
               const id = state.wrongUser ? "test-user-wrong" : record.user;
               return new Response(JSON.stringify({ user: { id, email: "PRIVATE_APP_EMAIL" }, workspaces: [] }), { status });
             };
-            try { return await fn(arg); } finally { globalThis.fetch = originalFetch; }
+            try {
+              // Playwright transports callback source into another realm. Do
+              // the same without tsx helpers instead of running its Node closure.
+              const callback: typeof fn = state.serializedEvaluate
+                ? runInNewContext(`(${fn.toString()})`, { fetch: globalThis.fetch, URL, AbortSignal }) : fn;
+              return await callback(arg);
+            } finally { globalThis.fetch = originalFetch; }
           },
         };
         return {
           async route(_pattern: string, next: (route: Route) => Promise<void>) { handler = next; },
           async newPage() { return page; },
           async unrouteAll(options: { behavior: string }) {
-            assert.equal(options.behavior, "wait"); events.push(`${id}:unroute`);
+            assert.equal(options.behavior, "ignoreErrors"); events.push(`${id}:unroute`);
+            if (state.hangStage === "unroute") return new Promise(() => {});
+            if (state.lateRouteFailure) {
+              const previous = state.routeException;
+              state.routeException = true;
+              try { await routed(record.origin!); } finally { state.routeException = previous; }
+            }
             if (state.shutdownException) throw new Error(`${token} ${cookie} sensitive shutdown stack`);
           },
-          async close() { events.push(`${id}:close`); },
+          async close() { events.push(`${id}:close`); if (state.hangStage === "contextClose") return new Promise(() => {}); },
         } as unknown as BrowserContext;
       },
-      async close() { events.push("browser:close"); if (currentBrowserContexts) state.afterBrowser?.(); },
+      async close() {
+        events.push("browser:close");
+        if (state.hangStage === "browserClose") return new Promise(() => {});
+        if (currentBrowserContexts) state.afterBrowser?.();
+      },
     };
     return browser as unknown as Browser;
   };
@@ -150,6 +185,27 @@ test("固有URLと固定URLのPC/mobile・A/B確認が同じ貸出で揃った�
   assert.equal((await stat(qaVerificationPath(f.cwd))).mode & 0o777, 0o600);
   assert.equal((await stat(join(f.cwd, ".cake"))).mode & 0o777, 0o700);
   assert.ok(f.logs.every(message => !message.includes(token) && !message.includes(cookie)));
+});
+
+test("検証前後のstatus artifact取得案内をその場で転送しCloud adapterが各結果を取得できる", async t => {
+  const f = await fixture(t), notices: string[] = [];
+  const readStatus = f.options.statusRequest;
+  await runQaVerify({ ...f.options, args: ["--url", uniqueUrl], statusRequest: async (request: QaActionRequest) => {
+    const index = notices.length + 1;
+    const requestId = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    const notice = `Cake: QA artifact ${200 + index} run ${100 + index} request ${requestId} name qa-result-${requestId}`;
+    notices.push(notice);
+    request.log?.(notice);
+    // The adapter must observe the exact artifact before the status request
+    // returns; a completion-only report cannot unblock its archive download.
+    assert.equal(f.logs.at(-1), notice);
+    if (index === 1) assert.equal(f.launches.length, 0);
+    else assert.equal(f.events.at(-1), "browser:close");
+    return readStatus();
+  } });
+  assert.equal(f.state.statusReads, 2);
+  assert.deepEqual(f.logs.filter(message => message.startsWith("Cake: QA artifact ")), notices);
+  assert.ok(f.logs.every(message => !message.includes(token) && !message.includes(cookie) && !message.includes("PRIVATE_")));
 });
 
 test("ブラウザはTLS検証・CA環境を維持し秘密情報を子プロセスへ渡さない", async t => {
@@ -273,4 +329,60 @@ test("非同期route失敗は機密の原例外を再throwせずabortする", as
   } as unknown as Route;
   await protectedQaRoute(uniqueUrl, token, () => { failed = true; })(route);
   assert.equal(failed, true); assert.equal(aborted, true);
+});
+
+test("全caseの固定stageログで停止位置を追え、URLや認証・個人情報を出さない", async t => {
+  const f = await fixture(t);
+  await runQaVerify({ ...f.options, args: ["--url", uniqueUrl] });
+  for (const label of ["desktop A", "desktop B", "mobile A", "mobile B"]) {
+    const actual = f.logs.filter(message => message.startsWith(`Cake: QA ${label} `));
+    assert.deepEqual(actual, ["context", "page", "login", "api", "settings", "home", "cleanup", "passed"].map(stage => `Cake: QA ${label} ${stage}`));
+  }
+  assert.ok(f.logs.includes("Cake: QA browser launch") && f.logs.includes("Cake: QA browser cleanup"));
+  assert.ok(f.logs.every(log => !/PRIVATE_|https?:\/\/|Cookie|headers|stack|@cake\.local/.test(log)));
+});
+
+test("ページ・evaluate・unroute・context/browser終了が停止しても短い期限で失敗しproofを成功にしない", { timeout: 2_000 }, async t => {
+  for (const hang of ["launch", "context", "page", "evaluate", "unroute", "contextClose", "browserClose"]) {
+    const f = await fixture(t); f.state.hangStage = hang;
+    await assert.rejects(runQaVerify({ ...f.options, args: ["--url", uniqueUrl], browserTimeoutMs: 60,
+      caseTimeoutMs: 15, shutdownTimeoutMs: 5, apiTimeoutMs: 5 }), { message: QA_VERIFY_FAILURE });
+    assert.equal(f.state.statusReads, 1);
+    const proof = JSON.parse(await readFile(qaVerificationPath(f.cwd), "utf8"));
+    assert.equal(proof.uniqueVerified, false); assert.equal(proof.success, false);
+    if (hang !== "launch") assert.ok(f.events.includes("browser:close"));
+    if (["page", "evaluate", "unroute", "contextClose"].includes(hang)) assert.ok(f.events.includes("0:close"));
+    assert.ok(f.logs.every(log => !/PRIVATE_|stack/.test(log)));
+  }
+});
+
+test("APIのheaders待ちとJSON本文待ちにもAbortSignalの期限を適用する", { timeout: 2_000 }, async t => {
+  for (const phase of ["headers", "body"]) {
+    const f = await fixture(t); f.state.apiHang = phase;
+    await assert.rejects(runQaVerify({ ...f.options, args: ["--url", uniqueUrl], browserTimeoutMs: 100,
+      caseTimeoutMs: 60, shutdownTimeoutMs: 5, apiTimeoutMs: 5 }), { message: QA_VERIFY_FAILURE });
+    assert.ok(f.apiRequests.length > 0);
+    assert.ok(f.apiRequests.every(request => request.init?.signal instanceof AbortSignal));
+    assert.ok(f.apiRequests.some(request => request.init?.signal?.aborted));
+    assert.equal(f.events.at(-1), "browser:close");
+    assert.equal(JSON.parse(await readFile(qaVerificationPath(f.cwd), "utf8")).success, false);
+  }
+});
+
+test("API callbackをtsx helperのない別realmへserializeしても4ケースのAPI検証が成功する", async t => {
+  const f = await fixture(t); f.state.serializedEvaluate = true;
+  const proof = await runQaVerify({ ...f.options, args: ["--url", uniqueUrl] });
+  assert.equal(proof.uniqueVerified, true);
+  assert.equal(f.contexts.length, 4);
+  assert.equal(f.apiRequests.length, 8);
+  assert.equal(f.state.statusReads, 2);
+  assert.ok(f.logs.filter(log => log.endsWith(" passed")).length === 4);
+});
+
+test("cleanupで発生する既知route abortは原例外を表示せず正常な画面/API結果を失敗にしない", async t => {
+  const f = await fixture(t); f.state.lateRouteFailure = true;
+  const result = await runQaVerify({ ...f.options, args: ["--url", uniqueUrl] });
+  assert.equal(result.uniqueVerified, true);
+  assert.equal(f.contexts.length, 4);
+  assert.ok(f.logs.every(log => !/PRIVATE_|stack/.test(log)));
 });

@@ -56,7 +56,7 @@ PR #47のmain導入後、初回の[initialize run 38581479595](https://github.co
 
 Cloud/PCの共通クライアントは`scripts/qa-client.ts`。Actionsの結果は安全なID・状態だけの`qa-result-<requestId>` artifactの`result.json`から受け取る。DB host、接続文字列、認証情報をartifactへ出さない。mainの実行元SHA、workflow、依頼ID、owner本人、全job成功、初回attempt、PR・貸出の一致を確認し、別run・失敗run・rerunの結果を使わない。mainへの導入前は新コマンドを実行可能な入口として案内しない。旧方式の実装条件・実測記録は末尾の「旧方式の運用・検証記録」に保持する。
 
-通常はGitHub CLIがartifactをダウンロードする。Cloudでartifact保存先へのリダイレクトが403になる場合は、`CAKE_QA_ARTIFACT_CACHE`に作業用ディレクトリを指定する。共通コマンドは確認済みrunのartifact ID・依頼IDを通知して有限時間だけ待つ。CodexがGitHub連携のartifact取得ツールでその正確なIDを取得し、ZIPを同ディレクトリの`<artifact ID>.zip`へ置く。接続制限を迂回せず、GitHub APIのdigest・サイズとZIP全体を照合してから、単一の`result.json`を読み取る。任意のJSONやActionsログの転記をreceiptの代用にしない。取得後にもmain・PR・runを再照合し、作業終了後にcacheを削除する。ZIPのダウンロードURLをログ・PRへ表示しない。
+通常はGitHub CLIがartifactをダウンロードする。Cloudでartifact保存先へのリダイレクトが403になる場合は、`CAKE_QA_ARTIFACT_CACHE`に作業用ディレクトリを指定する。共通コマンドは確認済みrunのartifact ID・依頼IDを通知して有限時間だけ待つ。`qa:verify`も画面確認の前後にstatusを取得するため、両方の通知を同じ方法で処理する。CodexがGitHub連携のartifact取得ツールでその正確なIDを取得し、ZIPを同ディレクトリの`<artifact ID>.zip`へ置く。接続制限を迂回せず、GitHub APIのdigest・サイズとZIP全体を照合してから、単一の`result.json`を読み取る。任意のJSONやActionsログの転記をreceiptの代用にしない。取得後にもmain・PR・runを再照合し、作業終了後にcacheを削除する。ZIPのダウンロードURLをログ・PRへ表示しない。
 
 ## 役割と保存先
 
@@ -168,7 +168,7 @@ ActionsがNeon APIで貸出先DBの完全なhostとbranch・endpointを照合し
 
 本番との分離照合には`productionHostDigest`（本番hostを同じ方法で正規化したSHA-256）をActionsから受け取り、アプリguardの`CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256`へ渡す。本番host原文はActions側だけに置く。貸出先と本番のhost hashは非秘密の照合用metadataであり、DBの認証情報ではない。接続URL・host原文・資格情報をartifact・PR・ログへ出さない。旧plain host方式は既存環境の互換として保持し、新方式の公開receiptへ混ぜない。
 
-PR #49の検証では、qa1の予約とprovisioning DeploymentからのNative DB生成、Actionsによる初回registerまで確認した。ブランチの静的なPreview設定では実際の子DBに一致する接続先を取得できず、application Deploymentと画面・APIの検証は完了していない。今回のQA host hash対応は、mainのActionsにも導入してから同じ貸出で検証を再開する。この段階をQA公開・Ready・返却の完了と扱わない。
+PR #49では、qa1の予約とprovisioning DeploymentからのNative DB生成、Actionsによる初回registerまで確認した。静的なPreview設定と実際の子DBの接続先が異なる問題をQA host hashの照合で修正し、mainへ導入した。#49のマージ後、[自動返却 run 38596154103](https://github.com/tyask/Cake/actions/runs/38596154103)が全記録済み資源の消失を確認してqa1をfreeへ戻した。この貸出ではapplication Deploymentと画面・APIの検証は完了していないため、新しい試験PRで予約から公開・画面確認・close後の返却まで検証する。返却済みの貸出やブランチを再予約しない。
 
 ```bash
 npm run deploy:preview
@@ -180,7 +180,7 @@ npm run deploy:preview
 
 同じPRの追加commitは同じ貸出・テストDBを使い、編集データや利用者設定を保持する。新HEADで再デプロイ・再検証する。別PRには前の貸出のDBを再利用しない。
 
-`npm run qa:verify -- --url <Deployment固有URL>`でPC/mobile、A/Bテストログイン、ダッシュボード、読み取りAPIのスモーク確認を行う。Vercelの保護を通過する短期トークンは`vercel env run`で子プロセス環境へ渡し、チャット・ファイル・引数へ保存しない。変更箇所固有の操作・APIテストはCodexが別途行い、検証報告へ記載する。
+`npm run qa:verify -- --url <Deployment固有URL>`でPC/mobile、A/Bテストログイン、ダッシュボード、読み取りAPIのスモーク確認を行う。ブラウザ全体、各組み合わせ、API取得と終了処理には時間上限を設ける。表示する進捗はPC/mobile・A/Bと固定の確認段階だけとし、認証・レスポンス本文・原例外は出さない。失敗や時間超過では成功証拠を作らず、終了時に中断した背景通信を待ち続けない。Vercelの保護を通過する短期トークンは`vercel env run`で子プロセス環境へ渡し、チャット・ファイル・引数へ保存しない。変更箇所固有の操作・APIテストはCodexが別途行い、検証報告へ記載する。
 
 ### 6. 固定QA URLで公開して確認する
 
@@ -192,7 +192,7 @@ Codexが固定QA URLでもログイン、変更箇所の画面・API、必要な
 
 ### 7. PRをReady for reviewにする
 
-PR本文へ固定QA URL、Deployment固有URL、完全SHA、貸出ID、資源ID、lint/test/build、migration/seed、画面・APIの検証結果、未実施項目と理由を記載する。最新HEADと公開先の一致を確認し、次のコマンドで同じPRを更新してCodexがdraftを解除する。失敗・未確認のデプロイを成功として記載しない。必要な検証が不足している場合は`--draft`を付けてdraftを維持して理由を報告する。
+PR本文へ固定QA URL、Deployment固有URL、完全SHA、貸出ID、資源ID、lint/test/build、migration/seed、画面・APIの検証結果、未実施項目と理由を記載する。最新HEADと公開先の一致を確認し、次のコマンドで同じPRを更新してCodexがdraftを解除する。本文とタイトルはGitHub REST APIで更新し、更新に成功した後だけReadyへ進む。失敗・未確認のデプロイを成功として記載しない。必要な検証が不足している場合は`--draft`を付けてdraftを維持して理由を報告する。
 
 ```bash
 npm run task:pr -- --title '変更内容を表すタイトル' --verification-file /tmp/cake-verification.md

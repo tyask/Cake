@@ -1,7 +1,7 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runTaskPr } from "../scripts/task-pr";
@@ -32,6 +32,7 @@ const ledger = (value = payload) => ({ id: 101, task: QA_TASK, environment: QA_E
   payload: { ...value, sequence: 2, previousRecordId: 100 } });
 const commandResult = (stdout = "", status = 0): WorkflowCommandResult => ({ stdout, status, signal: null });
 const listedPr = (isDraft = true) => commandResult(JSON.stringify([{ url: prUrl, number: 42, headRefOid: sha, isDraft }]));
+const isPatch = (call: { command: string; args: readonly string[] }) => call.command === "gh" && call.args[0] === "api" && call.args.includes("PATCH");
 const project = { id: CAKE_VERCEL_PROJECT, name: "cake", accountId: "team_D1Mcx2TdFWPKcypfu8KzNMub",
   previewDeploymentsDisabled: false, link: { type: "github", org: "tyask", repo: "Cake", productionBranch: "main" } };
 
@@ -77,18 +78,27 @@ async function fixture(t: TestContext) {
     }
     if (command === "gh" && args[0] === "pr" && args[1] === "list") return state.listed;
     if (command === "gh" && args[0] === "api") {
+      if (args.includes("PATCH") && args.includes("repos/tyask/Cake/pulls/42")) {
+        state.bodyFile = args[args.indexOf("--input") + 1];
+        assert.equal((await stat(state.bodyFile)).mode & 0o777, 0o600);
+        const value = JSON.parse(await readFile(state.bodyFile, "utf8"));
+        assert.deepEqual(Object.keys(value).sort(), ["body", "title"]);
+        state.body = value.body;
+        return state.edited.status === 0 ? commandResult(JSON.stringify({ number: 42, html_url: prUrl, state: "open", title: value.title, body: value.body,
+          head: { ref: branch, sha, repo: { full_name: "tyask/Cake" } }, base: { ref: "main", repo: { full_name: "tyask/Cake" } } })) : state.edited;
+      }
       if (args.includes("repos/tyask/Cake/branches/main")) return state.main;
       if (args.includes(`repos/tyask/Cake/contents/vercel.json?ref=${mainSha}`)) return state.mainConfig;
       if (args.includes("repos/tyask/Cake/pulls/42")) return commandResult(JSON.stringify({ number: 42, state: "open",
         head: { ref: state.branch, sha: state.sha, repo: { full_name: "tyask/Cake" } }, base: { ref: "main" } }));
       return state.ledger;
     }
-    if (command === "gh" && args[0] === "pr" && ["create", "edit"].includes(args[1])) {
+    if (command === "gh" && args[0] === "pr" && args[1] === "create") {
       const index = args.indexOf("--body-file");
       assert.notEqual(index, -1);
       state.bodyFile = args[index + 1];
       state.body = await readFile(state.bodyFile, "utf8");
-      return args[1] === "create" ? state.created : state.edited;
+      return state.created;
     }
     assert.fail(`Unexpected command ${command}: ${args.join(" ")}`);
   };
@@ -115,7 +125,8 @@ test("同じPR/HEADとlive貸出の検証証拠で既存draft本文を更新し�
   assert.equal(f.state.body.includes(preview.database.host), false);
   assert.match(f.state.body, /台帳Deployment: `101`/);
   assert.match(f.state.body, /lint・test・build 成功\n- PreviewでA・B認証/);
-  assert.equal(f.calls.filter((c) => c.args[1] === "edit").length, 1);
+  assert.equal(f.calls.filter(isPatch).length, 1);
+  assert.equal(f.calls.some((c) => c.args[1] === "edit"), false);
   assert.equal(f.calls.some((c) => c.args.includes("ready") || c.args.includes("merge") || c.args.includes("--auto") || c.args.includes("--body")), false);
   await assert.rejects(() => readFile(f.state.bodyFile), /ENOENT/);
 });
@@ -202,7 +213,7 @@ test("localが正しくてもmainの停止設定が欠落・不正・読取失�
     f.state.remote = ""; f.state.listed = commandResult("[]"); f.state.mainConfig = failure;
     await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }),
       (error: unknown) => error instanceof Error && !error.message.includes("private-"));
-    assert.equal(f.calls.some((c) => c.args[0] === "push" || c.args[1] === "create" || c.args[1] === "edit"), false);
+    assert.equal(f.calls.some((c) => c.args[0] === "push" || c.args[1] === "create" || isPatch(c)), false);
   }
 });
 
@@ -227,7 +238,7 @@ test("draftの未push HEADは不正blob/config/push失敗/remote不一致ならP
     if (failure === "push") f.state.pushStatus = 1;
     if (failure === "remote") f.state.pushUpdates = false;
     await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }));
-    assert.equal(f.calls.some((c) => c.args[1] === "create" || c.args[1] === "edit"), false);
+    assert.equal(f.calls.some((c) => c.args[1] === "create" || isPatch(c)), false);
     if (["blob", "config"].includes(failure)) assert.equal(f.calls.some((c) => c.args[0] === "push"), false);
     if (failure === "config") assert.equal(f.calls.some((c) => c.command === "gh" && c.args[0] === "variable" || c.command === "npx" || c.args[0] === "api"), false);
   }
@@ -236,11 +247,11 @@ test("draftの未push HEADは不正blob/config/push失敗/remote不一致ならP
 test("--draftは既存draftの本文を更新でき、既存ready PRは未検証本文へ変更しない", async (t) => {
   const f = await fixture(t);
   await runTaskPr({ ...f.options, args: ["--draft", ...f.options.args] });
-  assert.equal(f.calls.filter((c) => c.args[1] === "edit").length, 1);
+  assert.equal(f.calls.filter(isPatch).length, 1);
   assert.match(f.state.body, /未検証/);
   f.state.listed = listedPr(false);
   await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] }), /既存PRはdraftではありません/);
-  assert.equal(f.calls.filter((c) => c.args[1] === "edit").length, 1);
+  assert.equal(f.calls.filter(isPatch).length, 1);
 });
 
 test("追加・重複・不足引数と不正タイトルをGit操作前に拒否する", async (t) => {
@@ -264,7 +275,7 @@ test("mainや未コミット変更、空の検証報告、未push HEADではPR�
   await assert.rejects(() => runTaskPr(f.options), /originのブランチ/);
   await writeFile(f.reportFile, " ");
   await assert.rejects(() => runTaskPr(f.options), /検証結果ファイル/);
-  assert.equal(f.calls.some((c) => c.args[1] === "edit" || c.args[1] === "create"), false);
+  assert.equal(f.calls.some((c) => isPatch(c) || c.args[1] === "create"), false);
 });
 
 test("旧形式/壊れた/別SHAのローカルPreview証拠ではPRを更新しない", async (t) => {
@@ -276,7 +287,7 @@ test("旧形式/壊れた/別SHAのローカルPreview証拠ではPRを更新し
     await writeFile(previewRecordPath(f.cwd), record);
     await assert.rejects(() => runTaskPr(f.options));
   }
-  assert.equal(f.calls.some((c) => c.args[1] === "edit" || c.args[1] === "create"), false);
+  assert.equal(f.calls.some((c) => isPatch(c) || c.args[1] === "create"), false);
 });
 
 test("旧unique URL証跡があっても現在alias欠落・provider秘密エラー時はPRへ書き込まない", async t => {
@@ -291,7 +302,7 @@ test("旧unique URL証跡があっても現在alias欠落・provider秘密エラ
     };
     await assert.rejects(() => runTaskPr({ ...f.options, provider }), (error: unknown) => error instanceof Error
       && !error.message.includes("PRIVATE_") && !error.message.includes(preview.database.host));
-    assert.equal(f.calls.some(c => c.args[1] === "create" || c.args[1] === "edit"), false);
+    assert.equal(f.calls.some(c => c.args[1] === "create" || isPatch(c)), false);
   }
 });
 
@@ -306,7 +317,7 @@ test("返却/他lease/別Deployment/別DBへ変わった枠はローカル証拠
     f.state.ledger = commandResult(JSON.stringify([records]));
     await assert.rejects(() => runTaskPr(f.options));
   }
-  assert.equal(f.calls.some((c) => c.args[1] === "edit" || c.args[1] === "create"), false);
+  assert.equal(f.calls.some((c) => isPatch(c) || c.args[1] === "create"), false);
 });
 
 test("paginationした最新snapshotを採用し、同じ貸出/Deployment/DBのrefreshは証拠を失効させない", async (t) => {
@@ -324,7 +335,7 @@ test("不正/重複PRと照会失敗では秘密応答を出さず書込を継�
     f.state.listed = listed;
     await assert.rejects(() => runTaskPr(f.options), (error: unknown) => error instanceof Error && !error.message.includes("private-"));
   }
-  assert.equal(f.calls.some((c) => c.args[1] === "edit" || c.args[1] === "create"), false);
+  assert.equal(f.calls.some((c) => isPatch(c) || c.args[1] === "create"), false);
 });
 
 test("PR更新/作成失敗時も本文の一時ファイルを削除し後続の書込を行わない", async (t) => {
@@ -335,6 +346,6 @@ test("PR更新/作成失敗時も本文の一時ファイルを削除し後続�
     await assert.rejects(() => runTaskPr({ ...f.options, args: [...f.options.args, ...(draft ? ["--draft"] : [])] }),
       (error: unknown) => error instanceof Error && !error.message.includes("private-"));
     await assert.rejects(() => readFile(f.state.bodyFile), /ENOENT/);
-    assert.equal(f.calls.filter((c) => c.args[1] === "edit" || c.args[1] === "create").length, 1);
+    assert.equal(f.calls.filter((c) => isPatch(c) || c.args[1] === "create").length, 1);
   }
 });

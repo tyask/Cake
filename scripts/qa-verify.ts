@@ -30,11 +30,21 @@ type VerifyOptions = {
   environment?: Readonly<Record<string, string | undefined>>; now?: () => Date;
   statusRequest?: (request: QaActionRequest) => Promise<QaActionResult>;
   launch?: (options: LaunchOptions) => Promise<Browser>;
+  browserTimeoutMs?: number; caseTimeoutMs?: number; shutdownTimeoutMs?: number; apiTimeoutMs?: number;
 };
 const failure = () => new Error(QA_VERIFY_FAILURE);
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const sameIdentity = (value: Record<string, unknown>, identity: VerificationIdentity) =>
   Object.entries(identity).every(([key, expected]) => value[key] === expected);
+
+async function bounded<T>(operation: () => Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([Promise.resolve().then(operation), new Promise<T>((_resolve, reject) => {
+      timer = setTimeout(() => reject(failure()), timeoutMs);
+    })]);
+  } finally { if (timer) clearTimeout(timer); }
+}
 
 export function qaVerificationPath(cwd: string): string { return resolve(cwd, ".cake/qa-verification.json"); }
 
@@ -121,11 +131,15 @@ export function protectedQaRoute(origin: string, token: string, failed: () => vo
   };
 }
 
-async function contextSmoke(context: BrowserContext, origin: string, user: typeof TEST_USERS[number], mobile: boolean): Promise<void> {
+type SmokeStage = "page" | "login" | "api" | "settings" | "home";
+async function contextSmoke(context: BrowserContext, origin: string, user: typeof TEST_USERS[number], mobile: boolean,
+  stage: (name: SmokeStage) => void, apiTimeoutMs: number): Promise<void> {
+  stage("page");
   const page = await context.newPage();
   page.setDefaultTimeout(TIMEOUT_MS);
-  const response = await page.goto(origin, { waitUntil: "domcontentloaded", timeout: TIMEOUT_MS });
+  const response = await page.goto(origin, { waitUntil: "networkidle", timeout: TIMEOUT_MS });
   if (response?.status() !== 200 || new URL(page.url()).origin !== origin || await page.title() !== "Cake") throw failure();
+  stage("login");
   const login = page.getByRole("button", { name: new RegExp(user.name) });
   await login.waitFor({ state: "visible" });
   await login.click();
@@ -134,42 +148,85 @@ async function contextSmoke(context: BrowserContext, origin: string, user: typeo
   if (new URL(page.url()).origin !== origin || await page.title() !== "Cake") throw failure();
 
   // Only booleans cross back to Node. Session/App responses contain private data and are never logged.
-  const api = await page.evaluate(async ({ origin, userId }) => {
+  stage("api");
+  const api = await page.evaluate(async ({ origin, userId, timeoutMs }) => {
     try {
-      const session = await fetch(new URL("/api/auth/session", origin), { method: "GET", credentials: "same-origin", redirect: "error" });
-      const app = await fetch(new URL("/api/app", origin), { method: "GET", credentials: "same-origin", redirect: "error" });
-      const sessionData = await session.json(), appData = await app.json();
+      // Keep the serialized browser callback self-contained. A nested named
+      // function can acquire a tsx/esbuild __name helper unavailable in Chromium.
+      // Each abort stays attached while its response body is read as JSON.
+      const [session, app] = await Promise.all([
+        fetch(new URL("/api/auth/session", origin), { method: "GET", credentials: "same-origin", redirect: "error", signal: AbortSignal.timeout(timeoutMs) }),
+        fetch(new URL("/api/app", origin), { method: "GET", credentials: "same-origin", redirect: "error", signal: AbortSignal.timeout(timeoutMs) }),
+      ]);
+      const [sessionData, appData] = await Promise.all([session.json(), app.json()]);
       return { sessionOk: session.status === 200 && sessionData?.user?.id === userId,
         appOk: app.status === 200 && appData?.user?.id === userId && Array.isArray(appData.workspaces) };
     } catch { return { sessionOk: false, appOk: false }; }
-  }, { origin, userId: user.id });
+  }, { origin, userId: user.id, timeoutMs: apiTimeoutMs });
   if (!api?.sessionOk || !api.appOk) throw failure();
+  stage("settings");
   const navigation = page.locator(mobile ? ".bottom-nav" : ".app-nav");
   await navigation.getByRole("button", { name: /設定/ }).click();
   await page.getByRole("heading", { name: "設定", exact: true }).waitFor({ state: "visible" });
+  stage("home");
   await navigation.getByRole("button", { name: /ホーム/ }).click();
   await page.locator(".app-shell").waitFor({ state: "visible" });
   if (new URL(page.url()).origin !== origin) throw failure();
 }
 
-async function browserSmoke(origin: string, token: string, options: LaunchOptions, launch: NonNullable<VerifyOptions["launch"]>): Promise<void> {
+async function browserSmoke(origin: string, token: string, options: LaunchOptions, launch: NonNullable<VerifyOptions["launch"]>, log: (message: string) => void,
+  limits: { browserTimeoutMs: number; caseTimeoutMs: number; shutdownTimeoutMs: number; apiTimeoutMs: number }): Promise<void> {
+  const deadline = Date.now() + limits.browserTimeoutMs;
+  const budget = (limit: number) => Math.max(1, Math.min(limit, deadline - Date.now()));
+  const work = <T>(operation: () => Promise<T>, limit: number) => {
+    if (Date.now() >= deadline) throw failure();
+    return bounded(operation, budget(limit));
+  };
   let browser: Browser | undefined;
+  let stopping = false;
   try {
-    browser = await launch(options);
+    log("Cake: QA browser launch");
+    browser = await work(async () => {
+      const launched = await launch({ ...options, timeout: budget(TIMEOUT_MS) });
+      // A late launcher result must not leave a browser running after timeout.
+      if (stopping) {
+        void bounded(() => launched.close(), limits.shutdownTimeoutMs).catch(() => {});
+        throw failure();
+      }
+      return launched;
+    }, TIMEOUT_MS);
     for (const mobile of [false, true]) for (const user of TEST_USERS) {
-      const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
-        isMobile: mobile, hasTouch: mobile, ignoreHTTPSErrors: false, serviceWorkers: "block", acceptDownloads: false });
+      const label = `${mobile ? "mobile" : "desktop"} ${user === TEST_USERS[0] ? "A" : "B"}`;
+      log(`Cake: QA ${label} context`);
+      const context = await work(() => browser!.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
+        isMobile: mobile, hasTouch: mobile, ignoreHTTPSErrors: false, serviceWorkers: "block", acceptDownloads: false }), TIMEOUT_MS);
       let routeFailed = false;
+      let closing = false;
       try {
-        await context.route("**/*", protectedQaRoute(origin, token, () => { routeFailed = true; }));
-        await contextSmoke(context, origin, user, mobile);
+        await work(() => context.route("**/*", protectedQaRoute(origin, token, () => { if (!closing) routeFailed = true; })), TIMEOUT_MS);
+        await work(() => contextSmoke(context, origin, user, mobile, name => {
+          if (closing || stopping || Date.now() >= deadline) throw failure();
+          log(`Cake: QA ${label} ${name}`);
+        }, limits.apiTimeoutMs), limits.caseTimeoutMs);
+      } catch {
+        log(`Cake: QA ${label} failed`);
+        throw failure();
       } finally {
-        try { await context.unrouteAll({ behavior: "wait" }); }
-        finally { await context.close(); }
+        closing = true;
+        log(`Cake: QA ${label} cleanup`);
+        try { await bounded(() => context.unrouteAll({ behavior: "ignoreErrors" }), budget(limits.shutdownTimeoutMs)); }
+        finally { await bounded(() => context.close(), budget(limits.shutdownTimeoutMs)); }
       }
       if (routeFailed) throw failure();
+      log(`Cake: QA ${label} passed`);
     }
-  } finally { if (browser) await browser.close(); }
+  } finally {
+    stopping = true;
+    if (browser) {
+      log("Cake: QA browser cleanup");
+      await bounded(() => browser!.close(), budget(limits.shutdownTimeoutMs));
+    }
+  }
 }
 
 /** The verification result is bound to the authoritative lease both before and after browser work. */
@@ -177,9 +234,11 @@ export async function runQaVerify({
   args = [], cwd = process.cwd(), execute = executeWorkflowCommand, log = console.log,
   environment = process.env, now = () => new Date(), statusRequest = requestQaAction,
   launch = async options => (await import("playwright")).chromium.launch(options),
+  browserTimeoutMs = 5 * 60_000, caseTimeoutMs = 60_000, shutdownTimeoutMs = 5_000, apiTimeoutMs = 15_000,
 }: VerifyOptions = {}): Promise<QaVerificationProof> {
   // Never propagate provider/browser exceptions: callers must not accidentally dump a raw stack.
   try {
+    if ([browserTimeoutMs, caseTimeoutMs, shutdownTimeoutMs, apiTimeoutMs].some(value => !Number.isSafeInteger(value) || value <= 0)) throw failure();
     if (args.length !== 2 || args[0] !== "--url") throw failure();
     const origin = previewUrl(args[1]), token = environment.VERCEL_OIDC_TOKEN;
     if (!token || /\s/.test(token) || token.length > 16_000) throw failure();
@@ -190,7 +249,7 @@ export async function runQaVerify({
     const cached = await localLease(head.cwd);
     if (cached && (cached.pr !== pr.number || cached.branch !== head.branch || cached.headSha !== head.sha)) throw failure();
     const request: QaActionRequest = { action: "status", head, mainSha, prNumber: pr.number,
-      leaseId: cached?.leaseId, execute, log: () => {} };
+      leaseId: cached?.leaseId, execute, log };
     const receipt = await statusRequest(request);
     if (receipt.status !== "success" || !receipt.payload) throw failure();
     const lease = parseQaPublicLease(receipt.payload);
@@ -205,7 +264,7 @@ export async function runQaVerify({
     // An unsuccessful rerun must invalidate an older complete proof for this deployment.
     await writeProof(head.cwd, proof);
     log("Cake: QAの画面・APIスモーク確認を開始します。");
-    await browserSmoke(origin, token, options, launch);
+    await browserSmoke(origin, token, options, launch, log, { browserTimeoutMs, caseTimeoutMs, shutdownTimeoutMs, apiTimeoutMs });
     const current = await cleanTaskHead(head.cwd, execute);
     if (current.sha !== head.sha || current.branch !== head.branch) throw failure();
     const finalReceipt = await statusRequest({ ...request, leaseId: lease.leaseId });
@@ -228,5 +287,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const fatal = () => { console.error(QA_VERIFY_FAILURE); process.exit(1); };
   process.on("uncaughtException", fatal);
   process.on("unhandledRejection", fatal);
-  void runQaVerify({ args: process.argv.slice(2) }).catch(() => { console.error(QA_VERIFY_FAILURE); process.exitCode = 1; });
+  void runQaVerify({ args: process.argv.slice(2) }).catch(fatal);
 }

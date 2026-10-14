@@ -7,6 +7,7 @@ import {
   readPreviewRecord, readyQaPreview, taskPullRequests, type WorkflowExecutor,
   type PreviewProviderReader,
 } from "./task-workflow";
+import { updateTaskPullRequest } from "./task-pr-update";
 
 type TaskPrOptions = { args?: readonly string[]; cwd?: string; execute?: WorkflowExecutor; log?: (message: string) => void; provider?: PreviewProviderReader };
 
@@ -90,17 +91,15 @@ export async function runTaskPr({
     evidence = `## Preview\n\n- 固定QA URL: ${current.fixedUrl}\n- 診断用Deployment URL: ${preview.url}\n- ブランチ: \`${head.branch}\`\n- 検証コミット: \`${head.sha}\`\n- Deployment: \`${preview.deploymentId}\`\n- QA枠: \`${preview.slot}\` / PR #${preview.prNumber}\n- 貸出ID: \`${preview.leaseId}\`\n- 台帳Deployment: \`${current.ledgerRecordId}\`\n- DB: 本番から分離したNeon Previewプロジェクト \`${preview.database.projectId}\` / branch \`${preview.database.branchId}\` / endpoint \`${preview.database.endpointId}\`。\n`;
   }
   const body = `## 変更内容\n\n${title}\n\n${evidence}\n## 検証結果\n\n${verification}\n`;
+  if (existingUrl) {
+    await updateTaskPullRequest(head, existing[0].number, title, body, execute);
+    log(`Cake: 既存のPRを最新の検証結果へ更新しました: ${existingUrl}`);
+    return { url: existingUrl, existing: true };
+  }
   const directory = await mkdtemp(join(tmpdir(), "cake-task-pr-"));
   try {
     const bodyFile = join(directory, "body.md");
     await writeFile(bodyFile, body, { mode: 0o600, flag: "wx" });
-    if (existingUrl) {
-      await commandOutput(execute, "gh", ["pr", "edit", existingUrl, "--repo", CAKE_REPOSITORY,
-        "--title", title, "--body-file", bodyFile], head.cwd,
-      "既存PRの更新に失敗しました。GitHub上のPR内容を確認し、task:prを再実行してください。");
-      log(`Cake: 既存のPRを最新の検証結果へ更新しました: ${existingUrl}`);
-      return { url: existingUrl, existing: true };
-    }
     const created = await commandOutput(execute, "gh", ["pr", "create", "--repo", CAKE_REPOSITORY,
       "--base", "main", "--head", head.branch, "--title", title, "--body-file", bodyFile, ...(draft ? ["--draft"] : [])], head.cwd,
     "PRを作成できませんでした。gh auth status とGitHubのPR一覧を確認してください。");
