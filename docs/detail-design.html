@@ -788,7 +788,7 @@ BootstrapData extends BootstrapMetadata
           </table></div>
           <h3>開発・QA管理の契約</h3>
           <p>開発手順の正本は<a href="development-workflow.md">開発・QA運用手順</a>。CloudとローカルPCは共通CLIを使い、ローカル検証→draft PR→デプロイ直前の予約→固有URL検証→固定URL公開・検証→Readyの順に進める。満枠時はdraftを維持して終了し、再依頼で再開する。</p>
-          <p>Actionsは信頼済みmainのコードで予約・作成intent・資源登録・公開・返却を直列実行する。管理DBはアプリDBから独立した常設Neonで、repo内の<code>db/qa-registry/</code>のDDLだけを適用する。条件付き予約とlease/version CASを用い、全資源消失後のみfreeにする。Cloudには管理DBの接続情報を渡さず、安全なIDだけの実行receiptを受け取る。</p>
+          <p>Actionsは信頼済みmainのコードで予約・作成intent・資源登録・公開・返却を直列実行する。管理DBはアプリDBから独立した常設Neonで、repo内の<code>db/qa-registry/</code>のDDLだけを適用する。条件付き予約とlease/version CASを用い、全資源消失後のみfreeにする。Cloudには管理DBの接続情報を渡さず、安全なIDだけの実行receiptを受け取る。artifactの外部保存先へCloudから接続できない場合はGitHub連携で取得し、GitHub APIのSHA-256とサイズを照合したZIPから同じreceiptを読み取る。完了したrunのreusable workflow、owner、main、依頼ID、PRとの照合は省略しない。</p>
           <p>マージと未マージcloseはいずれも対象PRの自動cleanupを起動する。定期監視は設けない。GitHub Deployments台帳と承認計画方式は旧方式として履歴を運用手順へ保持し、新方式有効化後は旧writerを停止する。旧全枠・alias・Deployment・DBの消失確認後のみ専用管理DBを初期化して切り替える。管理DDLは関数のドル引用を保ってトップレベル文へ分割し、Neon HTTPSの単一transactionで原子的に適用する。ログは固定の初期化stage名だけを表示する。</p>
           <h3>DB環境と公開順序</h3>
           <p><code>vercel.json</code>はbuildCommandにbuild:vercel、regionにsin1、Git自動配置に<code>**: false / main: true</code>を指定する。Vercel MarketplaceのNeonリソース<code>cake-preview</code>は本番と別のNeonプロジェクトを使い、Previewだけへ接続する。環境変数は<code>CAKE_TEST_</code>で始め、貸出先feature枝のNative Preview BranchingでDBをビルドとAPIに共用する。設定のない古い枝と直接REST/CLI経路には停止保証がなく、既存Preview/DBはこの設定で削除されない。</p>

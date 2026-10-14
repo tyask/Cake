@@ -50,11 +50,13 @@ mainの`scripts/qa-registry-initialize.ts`が、GitHub由来のowner本人・tru
 
 管理DDLはSQLのトップレベル文へ分割し、外側の`BEGIN` / `COMMIT`をNeon HTTPSの`transaction`へ置き換えて一括適用する。関数本体のドル引用内のセミコロンは分割しない。途中の文が失敗した場合は全体をrollbackする。初期化ログは固定のstage名だけを出し、接続先・SQL本文・DBエラーの詳細は表示しない。
 
-PR #47のmain導入後、初回の[initialize run 38581479595](https://github.com/tyask/Cake/actions/runs/38581479595)は失敗した。このrunでは停止stageを表示していないため、失敗原因とDBの適用状態は確認できていない。`CAKE_QA_POOL_ENABLED=false`を維持し、新方式を有効にせず、修正後のmainから新しい依頼UUIDで再確認する。再実行時も空DB・旧資源不在のguardを省略しない。
+PR #47のmain導入後、初回の[initialize run 38581479595](https://github.com/tyask/Cake/actions/runs/38581479595)は失敗した。このrunでは停止stageを表示していないため、その失敗原因をDDLと断定しない。PR #48のmain導入後、[initialize run 38584074090](https://github.com/tyask/Cake/actions/runs/38584074090)はowner・旧run停止・旧台帳・alias・Deployment・DB不在、DDL適用、管理DBの3枠freeのreadbackまで成功した。新方式を有効化し、[旧writerのrun 38584608059](https://github.com/tyask/Cake/actions/runs/38584608059)がskipすることを確認してからQA生成を再開した。再実行時も空DB・旧資源不在のguardを省略しない。
 
 管理DBの将来のschema変更は`db/qa-registry/`へ番号付きDDLを追加し、適用済みDDLを書き換えず、管理専用の適用手順をレビューして実行する。Cakeの業務migration、`npm run db:setup`、Vercelのアプリbuildから管理用DDLを実行しない。
 
 Cloud/PCの共通クライアントは`scripts/qa-client.ts`。Actionsの結果は安全なID・状態だけの`qa-result-<requestId>` artifactの`result.json`から受け取る。DB host、接続文字列、認証情報をartifactへ出さない。mainの実行元SHA、workflow、依頼ID、owner本人、全job成功、初回attempt、PR・貸出の一致を確認し、別run・失敗run・rerunの結果を使わない。mainへの導入前は新コマンドを実行可能な入口として案内しない。旧方式の実装条件・実測記録は末尾の「旧方式の運用・検証記録」に保持する。
+
+通常はGitHub CLIがartifactをダウンロードする。Cloudでartifact保存先へのリダイレクトが403になる場合は、`CAKE_QA_ARTIFACT_CACHE`に作業用ディレクトリを指定する。共通コマンドは確認済みrunのartifact ID・依頼IDを通知して有限時間だけ待つ。CodexがGitHub連携のartifact取得ツールでその正確なIDを取得し、ZIPを同ディレクトリの`<artifact ID>.zip`へ置く。接続制限を迂回せず、GitHub APIのdigest・サイズとZIP全体を照合してから、単一の`result.json`を読み取る。任意のJSONやActionsログの転記をreceiptの代用にしない。取得後にもmain・PR・runを再照合し、作業終了後にcacheを削除する。ZIPのダウンロードURLをログ・PRへ表示しない。
 
 ## 役割と保存先
 

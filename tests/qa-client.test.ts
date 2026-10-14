@@ -1,7 +1,7 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseQaActionReceipt, parseQaPublicLease, qaLeaseRecordPath, requestQaAction, runQaClient, type QaPublicLease } from "../scripts/qa-client";
@@ -24,6 +24,27 @@ const published = (): QaPublicLease => ({ ...lease, state: "published", version:
 const result = (stdout = "", status = 0): WorkflowCommandResult => ({ stdout, status, signal: null });
 const encoded = (value: unknown) => result(JSON.stringify(value));
 
+function archivedReceipt(value: unknown): Buffer {
+  const contents = Buffer.from(JSON.stringify(value)), name = Buffer.from("result.json");
+  let crc = 0xffffffff;
+  for (const byte of contents) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = crc >>> 1 ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  crc = (crc ^ 0xffffffff) >>> 0;
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt32LE(crc, 14);
+  local.writeUInt32LE(contents.length, 18); local.writeUInt32LE(contents.length, 22); local.writeUInt16LE(name.length, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6);
+  central.writeUInt32LE(crc, 16); central.writeUInt32LE(contents.length, 20); central.writeUInt32LE(contents.length, 24);
+  central.writeUInt16LE(name.length, 28);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(1, 8); end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + name.length, 12); end.writeUInt32LE(local.length + name.length + contents.length, 16);
+  return Buffer.concat([local, name, contents, central, name, end]);
+}
+
 async function fixture(t: TestContext) {
   const cwd = await mkdtemp(join(tmpdir(), "cake-qa-client-test-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
@@ -35,6 +56,7 @@ async function fixture(t: TestContext) {
     runMainSha: mainSha, runPath: ".github/workflows/qa-registry.yml", runRepo: "tyask/Cake",
     workflowId: 20, expired: false, artifactRunId: 100, artifactMain: mainSha,
     jobConclusion: "success", stepConclusion: "success", matches: 1, artifactMatches: 1,
+    artifactSize: 2048, artifactDigest: "sha256:" + "d".repeat(64), reusableSha: mainSha,
     queuedReads: 0, downloadRaw: undefined as string | undefined,
     afterDownload: undefined as (() => void) | undefined, dispatchStatus: 0,
   };
@@ -45,7 +67,7 @@ async function fixture(t: TestContext) {
     head_sha: state.runMainSha, run_attempt: state.attempt, display_title: `Cake QA ${state.action} ${state.requestId}`,
     repository: { id: 1, full_name: state.runRepo }, head_repository: { id: 1, full_name: "tyask/Cake" },
     actor: { id: state.actorId, type: "User" }, triggering_actor: { id: state.triggerId, type: "User" },
-    referenced_workflows: [{ path: `tyask/Cake/.github/workflows/qa-registry-run.yml@${mainSha}`, ref: "refs/heads/main", sha: mainSha }],
+    referenced_workflows: [{ path: `tyask/Cake/.github/workflows/qa-registry-run.yml@${state.reusableSha}`, ref: "refs/heads/main", sha: state.reusableSha }],
     status: state.runStatus, conclusion: state.runConclusion });
   const execute: WorkflowExecutor = async (command, args, directory) => {
     calls.push({ command, args: [...args], cwd: directory });
@@ -82,15 +104,16 @@ async function fixture(t: TestContext) {
         if (path === "repos/tyask/Cake/pulls/46") return encoded({ number: 46, state: state.prState, draft: state.draft,
           head: { ref: branch, sha: state.remoteSha, repo: { full_name: state.remoteRepo } }, base: { ref: "main", repo: { full_name: "tyask/Cake" } } });
         if (path === "repos/tyask/Cake/actions/workflows/qa-registry.yml") return encoded({ id: 20, path: ".github/workflows/qa-registry.yml", state: "active" });
-        if (path.startsWith("repos/tyask/Cake/actions/workflows/20/runs?")) return encoded({ workflow_runs: Array.from({ length: state.matches }, () => run()) });
+        if (path.startsWith("repos/tyask/Cake/actions/workflows/20/runs?")) return encoded({ workflow_runs: Array.from({ length: state.matches }, () => ({ id: 100,
+          display_title: `Cake QA ${state.action} ${state.requestId}` })) });
         if (path === "repos/tyask/Cake/actions/runs/100") {
-          if (state.queuedReads > 0) { state.queuedReads--; return encoded({ ...run(), status: "queued", conclusion: null }); }
+          if (state.queuedReads > 0) { state.queuedReads--; return encoded({ ...run(), status: "queued", conclusion: null, referenced_workflows: [] }); }
           return encoded(run());
         }
         if (path.startsWith("repos/tyask/Cake/actions/runs/100/jobs?")) return encoded({ total_count: 1, jobs: [{ run_id: 100, run_attempt: 1,
           status: "completed", conclusion: state.jobConclusion, steps: [{ status: "completed", conclusion: state.stepConclusion }] }] });
         if (path.startsWith("repos/tyask/Cake/actions/runs/100/artifacts?")) return encoded({ artifacts: Array.from({ length: state.artifactMatches }, () => ({ id: 200,
-          name: `qa-result-${state.requestId}`, expired: state.expired, size_in_bytes: 2048,
+          name: `qa-result-${state.requestId}`, expired: state.expired, size_in_bytes: state.artifactSize, digest: state.artifactDigest,
           workflow_run: { id: state.artifactRunId, head_sha: state.artifactMain, head_branch: "main" } })) });
       }
     }
@@ -256,4 +279,60 @@ test("不正引数・重複引数・不足引数はコマンド実行前に拒�
     await assert.rejects(runQaClient({ ...f.options, args }));
     assert.equal(f.calls.some((call) => call.args[0] === "workflow"), false);
   }
+});
+
+test("queuedのreusable情報が未展開でも待機し成功runの正確なmain結合は必須にする", async t => {
+  const f = await fixture(t); f.state.queuedReads = 1;
+  await requestQaAction(f.requestOptions);
+  assert.deepEqual(f.sleeps, [10]);
+  const g = await fixture(t); g.state.reusableSha = "c".repeat(40);
+  await assert.rejects(requestQaAction(g.requestOptions), /再利用workflow/);
+  assert.equal(g.calls.some(call => call.args[0] === "run"), false);
+});
+
+test("connector cacheはauthenticated artifactのexact ZIP digest/sizeとreceiptを検証して受理する", async t => {
+  const f = await fixture(t), cache = join(f.cwd, "artifact-cache");
+  await mkdir(cache, { mode: 0o700 });
+  const receipt = { protocol: "cake-qa-result/v1", requestId, action: "reserve", status: "success", payload: lease };
+  const archive = archivedReceipt(receipt);
+  f.state.artifactSize = archive.length; f.state.artifactDigest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
+  await writeFile(join(cache, "200.zip"), archive, { mode: 0o600 });
+  const value = await requestQaAction({ ...f.requestOptions, artifactCacheDir: cache });
+  assert.deepEqual(value.payload, lease);
+  assert.equal(f.calls.some(call => call.args[0] === "run"), false);
+  assert.ok(f.logs.includes(`Cake: QA artifact 200 run 100 request ${requestId} name qa-result-${requestId}`));
+});
+
+test("cacheのZIP差替え・サイズ不一致・別request・plain JSONを検証済み結果として扱わない", async t => {
+  for (const scenario of ["digest", "size", "request", "json"] as const) {
+    const f = await fixture(t), cache = join(f.cwd, "artifact-cache");
+    await mkdir(cache, { mode: 0o700 });
+    const receipt = { protocol: "cake-qa-result/v1", requestId: scenario === "request" ? attemptId : requestId,
+      action: "reserve", status: "success", payload: lease };
+    const archive = scenario === "json" ? Buffer.from(JSON.stringify(receipt)) : archivedReceipt(receipt);
+    f.state.artifactSize = archive.length + (scenario === "size" ? 1 : 0);
+    f.state.artifactDigest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
+    const stored = scenario === "digest" ? Buffer.from(archive).fill(0, 0, 4) : archive;
+    await writeFile(join(cache, "200.zip"), stored, { mode: 0o600 });
+    await assert.rejects(requestQaAction({ ...f.requestOptions, artifactCacheDir: cache }), /QA結果/);
+    assert.equal(f.calls.some(call => call.args[0] === "run"), false);
+  }
+});
+
+test("cache取得待機は有限で保存後にもmain/run/PRを再照合する", async t => {
+  const f = await fixture(t), cache = join(f.cwd, "artifact-cache");
+  await mkdir(cache, { mode: 0o700 });
+  await assert.rejects(requestQaAction({ ...f.requestOptions, artifactCacheDir: cache }), /取得待機時間/);
+  assert.deepEqual(f.sleeps, [10, 10, 10, 10, 10]);
+  assert.equal(f.calls.some(call => call.args[0] === "run"), false);
+  const g = await fixture(t), otherCache = join(g.cwd, "artifact-cache");
+  await mkdir(otherCache, { mode: 0o700 });
+  const archive = archivedReceipt({ protocol: "cake-qa-result/v1", requestId, action: "reserve", status: "success", payload: lease });
+  g.state.artifactSize = archive.length; g.state.artifactDigest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
+  let slept = false;
+  await assert.rejects(requestQaAction({ ...g.requestOptions, artifactCacheDir: otherCache, sleep: async () => {
+    assert.equal(slept, false); slept = true;
+    await writeFile(join(otherCache, "200.zip"), archive, { mode: 0o600 });
+    g.state.mainSha = "c".repeat(40);
+  } }), /mainが変更/);
 });
