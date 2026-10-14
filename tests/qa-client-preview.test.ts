@@ -1,17 +1,18 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { previewHostFromEnvironment, runTaskPreviewRegistry } from "../scripts/task-preview-registry";
+import { runTaskPreviewRegistry } from "../scripts/task-preview-registry";
 import { type QaActionRequest, type QaActionResult, type QaPublicLease, qaLeaseRecordPath } from "../scripts/qa-client";
 import { QA_NEON_PROJECT_ID } from "../lib/qa-pool";
 import { CAKE_VERCEL_PROJECT, type WorkflowExecutor, type WorkflowCommandResult } from "../scripts/task-workflow";
 
 const sha = "a".repeat(40), mainSha = "b".repeat(40), branch = "codex/qa-client-preview";
 const leaseId = "00000000-0000-4000-8000-000000000001";
-const qaHost = "ep-preview.mock.aws.neon.tech", privateUrl = `postgresql://PRIVATE_USER:PRIVATE_PASSWORD@${qaHost}/neondb`;
+const qaHost = "ep-preview.mock.aws.neon.tech";
+const databaseDigest = createHash("sha256").update(qaHost).digest("hex");
 const productionDigest = createHash("sha256").update("ep-production.mock.aws.neon.tech").digest("hex");
 const database = { projectId: QA_NEON_PROJECT_ID, branchId: "br-preview", endpointId: "ep-preview" } as const;
 const config = { git: { deploymentEnabled: { "**": false, main: true } } };
@@ -25,8 +26,9 @@ async function fixture(t: TestContext) {
   t.after(() => rm(cwd, { recursive: true, force: true }));
   let lease: QaPublicLease = { slot: "qa1", state: "reserved", leaseId, pr: 46, branch, headSha: sha, version: 1,
     deployments: [], productionHostDigest: productionDigest };
-  const state = { full: false, projectRepoId: 1234, applicationError: false, privateEnv: `CAKE_TEST_DATABASE_URL="${privateUrl}"\n`,
-    queuedReads: 0, alreadyPublished: false, beginFailure: false };
+  const state = { full: false, projectRepoId: 1234, applicationError: false,
+    queuedReads: 0, alreadyPublished: false, beginFailure: false,
+    databaseDigest: databaseDigest as string | undefined, applicationBeginMutation: "" };
   const requests: QaActionRequest[] = [], calls: { command: string; args: readonly string[] }[] = [], logs: string[] = [], sleeps: number[] = [];
   const bodies: Record<string, unknown>[] = [], temporaryFiles: string[] = [];
   const remotes = new Map<string, Record<string, unknown>>();
@@ -38,11 +40,21 @@ async function fixture(t: TestContext) {
     if (input.action === "begin") {
       if (state.beginFailure) throw new Error("pending intent");
       lease = { ...lease, state: "reserved", headSha: sha, version: lease.version + 1, readyDeploymentId: undefined, aliasSha: undefined };
+      if (input.phase === "application") {
+        if (state.applicationBeginMutation === "hash") lease.databaseHostDigest = "c".repeat(64);
+        if (state.applicationBeginMutation === "missingHash") lease.databaseHostDigest = undefined;
+        if (state.applicationBeginMutation === "prodEqual") lease.productionHostDigest = lease.databaseHostDigest;
+        if (state.applicationBeginMutation === "lease") lease.leaseId = "00000000-0000-4000-8000-000000000009";
+        if (state.applicationBeginMutation === "pr") lease.pr = 47;
+        if (state.applicationBeginMutation === "branch") lease.branch = "codex/OTHER";
+        if (state.applicationBeginMutation === "sha") lease.headSha = "c".repeat(40);
+        if (state.applicationBeginMutation === "endpoint") lease.database = { ...database, endpointId: "ep-OTHER" };
+      }
     }
     if (input.action === "register") {
       const remote = remotes.get(input.deploymentId!)!;
       const known = lease.deployments.some((entry) => entry.id === input.deploymentId);
-      lease = { ...lease, database, version: lease.version + 1,
+      lease = { ...lease, database, databaseHostDigest: state.databaseDigest, version: lease.version + 1,
         deployments: known ? lease.deployments : [...lease.deployments, { id: input.deploymentId!, sha, phase: input.phase!, url: `https://cake-${input.deploymentId!.replaceAll("_", "-")}.vercel.app` }],
         readyDeploymentId: input.phase === "application" && remote.readyState === "READY" ? input.deploymentId : undefined };
     }
@@ -68,13 +80,6 @@ async function fixture(t: TestContext) {
         size: bytes.length, encoding: "base64", sha: blob, content: bytes.toString("base64") });
     }
     if (command === "npx") {
-      if (args[2] === "link") return result();
-      if (args[2] === "env") {
-        const file = args[4]; temporaryFiles.push(file);
-        assert.equal((await stat(file)).mode & 0o777, 0o600);
-        assert.ok(args.includes("preview") && args.includes(branch));
-        await writeFile(file, state.privateEnv); return result();
-      }
       const path = args[3];
       assert.equal(new URL(path, "https://api.vercel.com").searchParams.get("teamId"), "team_D1Mcx2TdFWPKcypfu8KzNMub");
       if (path.startsWith("/v9/projects/")) return encoded({ id: CAKE_VERCEL_PROJECT, name: "cake", accountId: "team_D1Mcx2TdFWPKcypfu8KzNMub",
@@ -113,8 +118,9 @@ test("Cloud/PC共通PreviewはActions予約後にCLI gitSourceで二段階生成
   assert.deepEqual(result.record.database, database);
   assert.equal(f.bodies.length, 2);
   assert.deepEqual(f.bodies[0].gitSource, { type: "github", repoId: 1234, ref: branch, sha });
-  assert.equal((f.bodies[0].env as Record<string, string>).CAKE_QA_DATABASE_HOST, "");
-  assert.equal((f.bodies[1].env as Record<string, string>).CAKE_QA_DATABASE_HOST, qaHost);
+  assert.equal((f.bodies[0].env as Record<string, string>).CAKE_QA_DATABASE_HOST_SHA256, "");
+  assert.equal((f.bodies[1].env as Record<string, string>).CAKE_QA_DATABASE_HOST_SHA256, databaseDigest);
+  assert.equal((f.bodies[1].env as Record<string, string>).CAKE_QA_DATABASE_HOST, undefined);
   assert.equal((f.bodies[1].env as Record<string, string>).CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256, productionDigest);
   assert.deepEqual(f.requests.map((r) => r.action), ["reserve", "begin", "register", "register", "begin", "register", "register"]);
   assert.equal(f.requests.some((r) => r.action === "publish"), false);
@@ -136,7 +142,7 @@ test("満枠ならVercelへの操作なしでdraft終了する", async t => {
 test("同PR更新は確認済みDBを保持してapplicationだけ作成する", async t => {
   const f = await fixture(t);
   f.setLease({ slot: "qa1", state: "reserved", leaseId, pr: 46, branch, headSha: "c".repeat(40), version: 5,
-    deployments: [], database, productionHostDigest: productionDigest });
+    deployments: [], database, databaseHostDigest: databaseDigest, productionHostDigest: productionDigest });
   await runTaskPreviewRegistry(f.options);
   assert.equal(f.bodies.length, 1);
   assert.equal((f.bodies[0].meta as Record<string, string>).cakeQaPhase, "application");
@@ -167,13 +173,49 @@ test("未確定intentのbegin失敗時は新しいDeploymentを作らない", as
   assert.equal(f.bodies.length, 0);
 });
 
-test("private envの本番/別endpoint/重複/展開参照はhostを表示せず拒否する", () => {
-  assert.equal(previewHostFromEnvironment(`CAKE_TEST_DATABASE_URL='${privateUrl}'`, database, productionDigest), qaHost);
-  for (const contents of [`CAKE_TEST_DATABASE_URL=${privateUrl}\nCAKE_TEST_DATABASE_URL=${privateUrl}`, "CAKE_TEST_DATABASE_URL=$DATABASE_URL",
-    "CAKE_TEST_DATABASE_URL=postgresql://PRIVATE_USER:PRIVATE_PASSWORD@ep-production.mock.aws.neon.tech/neondb",
-    "CAKE_TEST_DATABASE_URL=postgresql://PRIVATE_USER:PRIVATE_PASSWORD@ep-other.mock.aws.neon.tech/neondb",
-    "DATABASE_URL=PRIVATE_URL", "CAKE_TEST_DATABASE_URL=PRIVATE_BAD_URL"]) {
-    assert.throws(() => previewHostFromEnvironment(contents, database, productionDigest), (error: unknown) => error instanceof Error
-      && !error.message.includes("PRIVATE") && !error.message.includes("neon.tech"));
+test("確認済みQA digestが欠落・不正・本番と一致する場合はapplicationを作成しない", async t => {
+  for (const invalid of [undefined, "PRIVATE_INVALID_HASH", productionDigest]) {
+    const f = await fixture(t); f.state.databaseDigest = invalid;
+    await assert.rejects(runTaskPreviewRegistry(f.options), (error: unknown) => error instanceof Error && !error.message.includes("PRIVATE"));
+    assert.equal(f.bodies.length, 1);
+    assert.equal(f.requests.some(request => request.action === "begin" && request.phase === "application"), false);
   }
+});
+
+test("fresh begin結果のQA hashとDB/PR/lease/branch/currentSHAを作成直前に照合する", async t => {
+  for (const mutation of ["hash", "missingHash", "prodEqual", "lease", "pr", "branch", "sha", "endpoint"]) {
+    const f = await fixture(t); f.state.applicationBeginMutation = mutation;
+    await assert.rejects(runTaskPreviewRegistry(f.options));
+    assert.equal(f.bodies.length, 1);
+    assert.equal((f.bodies[0].meta as Record<string, string>).cakeQaPhase, "provisioning");
+  }
+});
+
+test("Cloud/PCはenv/接続文字列を取得せずsafe project linkだけ作りenvlocalを保持する", async t => {
+  const f = await fixture(t), localFile = join(f.cwd, ".env.local");
+  await writeFile(localFile, "PRIVATE_LOCAL_ENV_UNCHANGED", { mode: 0o600 });
+  await runTaskPreviewRegistry(f.options);
+  assert.equal(f.calls.some(call => call.command === "npx" && ["env", "link"].includes(call.args[2])), false);
+  assert.equal(f.calls.some(call => call.args.some(arg => arg.startsWith("/v3/env/pull/"))), false);
+  assert.equal(await readFile(localFile, "utf8"), "PRIVATE_LOCAL_ENV_UNCHANGED");
+  assert.deepEqual(JSON.parse(await readFile(join(f.cwd, ".vercel/project.json"), "utf8")), {
+    projectId: CAKE_VERCEL_PROJECT, orgId: "team_D1Mcx2TdFWPKcypfu8KzNMub", projectName: "cake" });
+  for (const body of f.bodies) {
+    const env = body.env as Record<string, string>;
+    assert.equal(Object.hasOwn(env, "CAKE_QA_DATABASE_HOST"), false);
+    assert.equal(Object.hasOwn(env, "CAKE_TEST_DATABASE_URL"), false);
+    assert.equal(Object.hasOwn(env, "DATABASE_URL"), false);
+    assert.deepEqual(body.build, { env });
+  }
+});
+
+test("別projectのlocal linkを上書きせず作成前に停止する", async t => {
+  const f = await fixture(t), directory = join(f.cwd, ".vercel");
+  await mkdir(directory);
+  const file = join(directory, "project.json"), previous = JSON.stringify({ projectId: "prj_OTHER", orgId: "team_OTHER" });
+  await writeFile(file, previous, { mode: 0o600 });
+  await assert.rejects(runTaskPreviewRegistry(f.options));
+  assert.equal(await readFile(file, "utf8"), previous);
+  assert.equal(f.requests.some(request => request.action === "begin"), false);
+  assert.equal(f.bodies.length, 0);
 });

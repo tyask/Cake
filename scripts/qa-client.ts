@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,7 @@ import {
   assertTaskGitGate, CAKE_REPOSITORY, cleanTaskHead, commandOutput, executeWorkflowCommand,
   previewUrl, taskPullRequests, validTaskBranch, type TaskHead, type WorkflowExecutor,
 } from "./task-workflow";
+import { readQaArtifactArchive } from "./qa-artifact";
 
 export const QA_REGISTRY_WORKFLOW = ".github/workflows/qa-registry.yml";
 export const QA_RESULT_PROTOCOL = "cake-qa-result/v1" as const;
@@ -18,6 +19,7 @@ export type QaPublicLease = {
   leaseId: string; pr: number; branch: string; headSha: string; version: number; updatedAt?: string;
   deployments: QaDeployment[]; readyDeploymentId?: string; aliasSha?: string;
   productionHostDigest?: string;
+  databaseHostDigest?: string;
   database?: { projectId: typeof QA_NEON_PROJECT_ID; branchId: string; endpointId: string };
 };
 export type QaActionReceipt = {
@@ -31,6 +33,7 @@ export type QaActionRequest = {
   requestId?: string; execute?: WorkflowExecutor; log?: (message: string) => void;
   now?: () => number; sleep?: (milliseconds: number) => Promise<void>;
   timeoutMs?: number; pollIntervalMs?: number;
+  artifactCacheDir?: string;
 };
 type JsonObject = Record<string, unknown>;
 const object = (value: unknown): value is JsonObject => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -42,7 +45,7 @@ const invalidReceipt = () => new Error("QA結果の形式または対象が一�
 /** Parse only the public projection; never carry a DB host, token, or provider response into local evidence. */
 export function parseQaPublicLease(value: unknown): QaPublicLease {
   if (!object(value) || !onlyKeys(value, ["slot", "state", "leaseId", "pr", "branch", "headSha", "version", "updatedAt",
-    "deployments", "deploymentIds", "readyDeploymentId", "aliasSha", "database", "productionHostDigest"])
+    "deployments", "deploymentIds", "readyDeploymentId", "aliasSha", "database", "productionHostDigest", "databaseHostDigest"])
     || !SLOTS.includes(value.slot as Slot) || !["reserved", "published", "deleting", "free"].includes(String(value.state))
     || !leaseToken(value.leaseId) || !positiveInteger(value.pr) || !validTaskBranch(value.branch)
     || !fullSha(value.headSha) || !positiveInteger(value.version) || !Array.isArray(value.deployments)
@@ -62,6 +65,8 @@ export function parseQaPublicLease(value: unknown): QaPublicLease {
   if (value.database !== undefined && (!object(value.database) || !onlyKeys(value.database, ["projectId", "branchId", "endpointId"])
     || value.database.projectId !== QA_NEON_PROJECT_ID || typeof value.database.branchId !== "string" || !/^br-[a-z0-9-]+$/.test(value.database.branchId)
     || typeof value.database.endpointId !== "string" || !/^ep-[a-z0-9-]+$/.test(value.database.endpointId))) throw invalidReceipt();
+  if (value.databaseHostDigest !== undefined && (!value.database || typeof value.databaseHostDigest !== "string"
+    || !/^[a-f0-9]{64}$/.test(value.databaseHostDigest) || value.databaseHostDigest === value.productionHostDigest)) throw invalidReceipt();
   if (value.readyDeploymentId !== undefined && (!deploymentId(value.readyDeploymentId)
     || !value.deployments.some((entry) => object(entry) && entry.id === value.readyDeploymentId && entry.phase === "application"))) throw invalidReceipt();
   if (value.aliasSha !== undefined && (!fullSha(value.aliasSha) || value.aliasSha !== value.headSha || !value.database
@@ -134,11 +139,16 @@ function trustedRun(value: unknown, expected: { id?: number; mainSha: string; wo
     || value.repository.id !== expected.repoId || !object(value.head_repository) || value.head_repository.full_name !== CAKE_REPOSITORY
     || value.head_repository.id !== expected.repoId || !object(value.actor) || value.actor.type !== "User" || value.actor.id !== expected.ownerId
     || !object(value.triggering_actor) || value.triggering_actor.type !== "User" || value.triggering_actor.id !== expected.ownerId
-    || !Array.isArray(value.referenced_workflows) || value.referenced_workflows.length !== 1
-    || !object(value.referenced_workflows[0]) || value.referenced_workflows[0].path !== `${CAKE_REPOSITORY}/.github/workflows/qa-registry-run.yml@${expected.mainSha}`
-    || value.referenced_workflows[0].sha !== expected.mainSha || value.referenced_workflows[0].ref !== "refs/heads/main"
     || !["queued", "waiting", "pending", "in_progress", "requested", "completed"].includes(String(value.status))) {
     throw new Error("QA Actionsの実行元・main・owner・依頼IDの一致を確認できませんでした。");
+  }
+  // GitHub can populate reusable-workflow metadata only after a queued run starts.
+  // Do not consume its artifact until the final, successful source is verified.
+  if (value.status === "completed" && value.conclusion === "success" && (!Array.isArray(value.referenced_workflows)
+    || value.referenced_workflows.length !== 1 || !object(value.referenced_workflows[0])
+    || value.referenced_workflows[0].path !== `${CAKE_REPOSITORY}/.github/workflows/qa-registry-run.yml@${expected.mainSha}`
+    || value.referenced_workflows[0].sha !== expected.mainSha || value.referenced_workflows[0].ref !== "refs/heads/main")) {
+    throw new Error("QA Actionsの成功結果とmainの再利用workflowを照合できませんでした。");
   }
 }
 
@@ -166,7 +176,11 @@ export async function requestQaAction({
     || request.leaseId !== undefined && !leaseToken(request.leaseId)
     || request.phase !== undefined && !["provisioning", "application"].includes(request.phase)
     || request.attemptId !== undefined && !leaseToken(request.attemptId)
-    || request.deploymentId !== undefined && !deploymentId(request.deploymentId)) throw new Error("QA操作の引数が不正です。");
+    || request.deploymentId !== undefined && !deploymentId(request.deploymentId)
+    || request.artifactCacheDir !== undefined && (typeof request.artifactCacheDir !== "string" || !request.artifactCacheDir.trim()
+      || /[\r\n\0]/.test(request.artifactCacheDir))) throw new Error("QA操作の引数が不正です。");
+  const artifactCacheDir = request.artifactCacheDir ?? process.env.CAKE_QA_ARTIFACT_CACHE;
+  if (artifactCacheDir !== undefined && (!artifactCacheDir.trim() || /[\r\n\0]/.test(artifactCacheDir))) throw new Error("QA artifactの保存先が不正です。");
   const needsLease = ["begin", "register", "publish", "release"].includes(request.action);
   if (needsLease && !request.leaseId || request.action === "begin" && (!request.phase || !request.attemptId)
     || request.action === "register" && (!request.phase || !request.attemptId || !request.deploymentId)
@@ -196,7 +210,12 @@ export async function requestQaAction({
       const matches = runs.workflow_runs.filter((entry) => object(entry) && entry.display_title === expected.title);
       if (matches.length > 1) throw new Error("同じQA依頼IDのActionsが複数あります。結果は使用しません。");
       run = matches[0];
-      if (run !== undefined) { trustedRun(run, expected); runId = run.id as number; }
+      // Collection responses may omit detailed actor/reusable-source metadata.
+      // The exact run GET below must verify every identity before any result is used.
+      if (run !== undefined) {
+        if (!object(run) || !positiveInteger(run.id)) throw invalidReceipt();
+        runId = run.id;
+      }
     }
     if (runId !== undefined) {
       run = await api(execute, request.head.cwd, `repos/${CAKE_REPOSITORY}/actions/runs/${runId}`);
@@ -213,16 +232,39 @@ export async function requestQaAction({
           || !positiveInteger(artifact.size_in_bytes) || artifact.size_in_bytes > 256_000 || !object(artifact.workflow_run)
           || artifact.workflow_run.id !== runId || artifact.workflow_run.head_sha !== request.mainSha
           || artifact.workflow_run.head_branch !== "main") throw invalidReceipt();
-        const directory = await mkdtemp(join(tmpdir(), "cake-qa-result-"));
-        let receipt: QaActionReceipt;
-        try {
-          await commandOutput(execute, "gh", ["run", "download", String(runId), "--repo", CAKE_REPOSITORY, "--name", artifactName, "--dir", directory],
-            request.head.cwd, "QA結果artifactを取得できませんでした。");
-          const raw = await readFile(join(directory, "result.json"), "utf8");
-          if (Buffer.byteLength(raw, "utf8") > 128_000) throw invalidReceipt();
-          let value: unknown; try { value = JSON.parse(raw); } catch { throw invalidReceipt(); }
-          receipt = parseQaActionReceipt(value, { ...request, requestId });
-        } finally { await rm(directory, { recursive: true, force: true }); }
+        let raw: string;
+        if (artifactCacheDir !== undefined) {
+          // A connector-downloaded ZIP is trusted only if it has the digest and
+          // exact size obtained through the authenticated, scoped GitHub API.
+          if (typeof artifact.digest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(artifact.digest)) throw invalidReceipt();
+          log(`Cake: QA artifact ${artifact.id} run ${runId} request ${requestId} name ${artifactName}`);
+          const cachePath = resolve(artifactCacheDir, `${artifact.id}.zip`);
+          const cacheDeadline = Math.min(deadline, now() + 60_000);
+          while (true) {
+            let present = false;
+            try {
+              const entry = await lstat(cachePath);
+              if (!entry.isFile() || entry.isSymbolicLink()) throw invalidReceipt();
+              present = true;
+            } catch (error) { if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw invalidReceipt(); }
+            if (present) break;
+            const remaining = cacheDeadline - now();
+            if (remaining <= 0) throw new Error("QA artifactの取得待機時間を超えました。認証付きで取得した同じartifactを用意して再実行してください。");
+            await sleep(Math.min(pollIntervalMs, remaining));
+          }
+          try { raw = await readQaArtifactArchive(cachePath, { digest: artifact.digest, sizeInBytes: artifact.size_in_bytes as number }); }
+          catch { throw invalidReceipt(); }
+        } else {
+          const directory = await mkdtemp(join(tmpdir(), "cake-qa-result-"));
+          try {
+            await commandOutput(execute, "gh", ["run", "download", String(runId), "--repo", CAKE_REPOSITORY, "--name", artifactName, "--dir", directory],
+              request.head.cwd, "QA結果artifactを取得できませんでした。");
+            raw = await readFile(join(directory, "result.json"), "utf8");
+          } finally { await rm(directory, { recursive: true, force: true }); }
+        }
+        if (Buffer.byteLength(raw, "utf8") > 128_000) throw invalidReceipt();
+        let value: unknown; try { value = JSON.parse(raw); } catch { throw invalidReceipt(); }
+        const receipt = parseQaActionReceipt(value, { ...request, requestId });
         // Re-read after download: reruns, a changed main, or a changed PR invalidate the receipt.
         const latest = await api(execute, request.head.cwd, `repos/${CAKE_REPOSITORY}/actions/runs/${runId}`);
         trustedRun(latest, { ...expected, id: runId });
@@ -260,6 +302,7 @@ export async function saveQaLease(cwd: string, lease: QaPublicLease): Promise<vo
 type QaClientOptions = {
   args?: readonly string[]; cwd?: string; execute?: WorkflowExecutor; log?: (message: string) => void;
   now?: () => number; sleep?: (milliseconds: number) => Promise<void>; timeoutMs?: number; pollIntervalMs?: number;
+  artifactCacheDir?: string;
 };
 
 function parseArgs(args: readonly string[]) {

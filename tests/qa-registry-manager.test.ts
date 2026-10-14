@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -71,9 +71,9 @@ class FakeGateway extends RegistryGateway {
   uncertainAssignment = false;
   assignmentLanded = true;
   afterDelete?: () => void;
-  constructor(record: QaRegistryLease | null = reservation(), manualRelease = false) {
+  constructor(record: QaRegistryLease | null = reservation(), manualRelease = false, environment: Record<string, string | undefined> = {}) {
     const store = new MemoryStore();
-    super({}, store, async () => { assert.fail("fake action must not contact a provider"); }, manualRelease);
+    super(environment, store, async () => { assert.fail("fake action must not contact a provider"); }, manualRelease);
     this.memory = store; store.value.slots.qa1 = record;
   }
   async assertDispatchOwner() { if (!this.allowed) throw new Error("dispatch owner mismatch"); }
@@ -342,6 +342,34 @@ test("status redacts private Native host and reports current registry, not local
   const result = await gateway.run("status");
   assert.deepEqual(result.payload?.database, { projectId: database.projectId, branchId: database.branchId, endpointId: database.endpointId });
   assert.equal(JSON.stringify(result).includes(database.host), false); assert.equal(gateway.memory.writes, 0);
+  assert.equal(result.payload?.databaseHostDigest, createHash("sha256").update(database.host).digest("hex"));
+});
+
+test("public QA fingerprint is absent before DB discovery and never persists raw host or fingerprint into the lease", async () => {
+  const productionHost = "ep-production-pooler.mock.aws.neon.tech";
+  const gateway = new FakeGateway(reservation(), false, { CAKE_QA_PRODUCTION_DATABASE_HOST: productionHost });
+  const before = await gateway.memory.read();
+  const result = await gateway.run("status");
+  assert.equal(Object.hasOwn(result.payload!, "databaseHostDigest"), false);
+  assert.equal(result.payload?.productionHostDigest, createHash("sha256").update(productionHost.replace("-pooler", "")).digest("hex"));
+  assert.equal(JSON.stringify(result).includes(productionHost), false);
+  assert.deepEqual(await gateway.memory.read(), before);
+  gateway.ready();
+  const discovered = await gateway.memory.read();
+  const withDatabase = await gateway.run("status");
+  assert.equal(withDatabase.payload?.databaseHostDigest, createHash("sha256").update(database.host).digest("hex"));
+  assert.equal(JSON.stringify(withDatabase).includes(database.host), false);
+  assert.deepEqual(await gateway.memory.read(), discovered);
+});
+
+test("public QA fingerprint uses the normalized validated endpoint and rejects malformed private DB metadata", async () => {
+  const host = "ep-registry-fixture-pooler.mock.aws.neon.tech";
+  const gateway = new FakeGateway(reservation({ database: { ...database, endpointId: "ep-registry-fixture-pooler", host } }));
+  const result = await gateway.run("status");
+  assert.equal(result.payload?.databaseHostDigest, createHash("sha256").update(host.replace("-pooler", "")).digest("hex"));
+  assert.equal(JSON.stringify(result).includes(host), false);
+  gateway.memory.value.slots.qa1!.database!.host = "invalid-host";
+  await assert.rejects(gateway.run("status"));
 });
 
 test("published status verifies current alias, commit, deployment and Native identity", async () => {

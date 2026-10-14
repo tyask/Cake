@@ -21,7 +21,7 @@ Cakeの開発、PR作成、QA予約、デプロイ、検証、返却の手順を
 
 管理用resource `fumin1/cake-qa-registry`（ID `store_zFAmizNB1NM3cSNF`）はVercel Marketplaceで作成済み。Neonの`free_v3`、region `iad1`、`auth=false`で、Cakeアプリのprojectには接続していない。`auth=false`はMarketplace resourceの作成設定であり、DBを認証不要で公開したという意味ではない。料金・上限は利用時のplanで確認する。
 
-利用者は次の2件を[Repository Secrets設定](https://github.com/tyask/Cake/settings/secrets/actions)へ非公開で登録した。GitHub Secrets管理APIは403のためCodex側から登録内容を読み取って検証していない。接続成功はinitialize実行で確認する。接続情報を変更する場合も管理用resourceのConnectから取得し、チャットやPRへ貼らない。
+利用者は次の2件を[Repository Secrets設定](https://github.com/tyask/Cake/settings/secrets/actions)へ非公開で登録した。GitHub Secrets管理APIは403のため値を読み取って検証していないが、initialize run `38584074090`でActionsからの接続・初期化・3枠freeのreadbackは成功した。接続情報を変更する場合も管理用resourceのConnectから取得し、チャットやPRへ貼らない。
 
 | Secret | 登録する値 |
 | --- | --- |
@@ -50,11 +50,13 @@ mainの`scripts/qa-registry-initialize.ts`が、GitHub由来のowner本人・tru
 
 管理DDLはSQLのトップレベル文へ分割し、外側の`BEGIN` / `COMMIT`をNeon HTTPSの`transaction`へ置き換えて一括適用する。関数本体のドル引用内のセミコロンは分割しない。途中の文が失敗した場合は全体をrollbackする。初期化ログは固定のstage名だけを出し、接続先・SQL本文・DBエラーの詳細は表示しない。
 
-PR #47のmain導入後、初回の[initialize run 38581479595](https://github.com/tyask/Cake/actions/runs/38581479595)は失敗した。このrunでは停止stageを表示していないため、失敗原因とDBの適用状態は確認できていない。`CAKE_QA_POOL_ENABLED=false`を維持し、新方式を有効にせず、修正後のmainから新しい依頼UUIDで再確認する。再実行時も空DB・旧資源不在のguardを省略しない。
+PR #47のmain導入後、初回の[initialize run 38581479595](https://github.com/tyask/Cake/actions/runs/38581479595)は失敗した。このrunでは停止stageを表示していないため、その失敗原因をDDLと断定しない。PR #48のmain導入後、[initialize run 38584074090](https://github.com/tyask/Cake/actions/runs/38584074090)はowner・旧run停止・旧台帳・alias・Deployment・DB不在、DDL適用、管理DBの3枠freeのreadbackまで成功した。`CAKE_QA_REGISTRY_ENABLED=true`と`CAKE_QA_POOL_ENABLED=true`へ切り替え、[旧writerのrun 38584608059](https://github.com/tyask/Cake/actions/runs/38584608059)がskipすることを確認してからQA生成を再開した。再実行時も空DB・旧資源不在のguardを省略しない。
 
 管理DBの将来のschema変更は`db/qa-registry/`へ番号付きDDLを追加し、適用済みDDLを書き換えず、管理専用の適用手順をレビューして実行する。Cakeの業務migration、`npm run db:setup`、Vercelのアプリbuildから管理用DDLを実行しない。
 
 Cloud/PCの共通クライアントは`scripts/qa-client.ts`。Actionsの結果は安全なID・状態だけの`qa-result-<requestId>` artifactの`result.json`から受け取る。DB host、接続文字列、認証情報をartifactへ出さない。mainの実行元SHA、workflow、依頼ID、owner本人、全job成功、初回attempt、PR・貸出の一致を確認し、別run・失敗run・rerunの結果を使わない。mainへの導入前は新コマンドを実行可能な入口として案内しない。旧方式の実装条件・実測記録は末尾の「旧方式の運用・検証記録」に保持する。
+
+通常はGitHub CLIがartifactをダウンロードする。Cloudでartifact保存先へのリダイレクトが403になる場合は、`CAKE_QA_ARTIFACT_CACHE`に作業用ディレクトリを指定する。共通コマンドは確認済みrunのartifact ID・依頼IDを通知して有限時間だけ待つ。CodexがGitHub連携のartifact取得ツールでその正確なIDを取得し、ZIPを同ディレクトリの`<artifact ID>.zip`へ置く。接続制限を迂回せず、GitHub APIのdigest・サイズとZIP全体を照合してから、単一の`result.json`を読み取る。任意のJSONやActionsログの転記をreceiptの代用にしない。取得後にもmain・PR・runを再照合し、作業終了後にcacheを削除する。ZIPのダウンロードURLをログ・PRへ表示しない。
 
 ## 役割と保存先
 
@@ -89,6 +91,13 @@ npx --yes vercel@64.0.2 link --scope fumin1 --project cake
 ```
 
 Gitの取得、GitHub API、Vercelの認証は別々に確認する。QA操作には`tyask/Cake`のowner本人のGitHub認証と、`fumin1/cake`にアクセスできるVercel本人認証を使う。未認証なら各環境で`gh auth login`や`vercel login`を行う。device認証は表示されたURLを利用者が開いて認証する。CloudとPCの間で認証ファイルをコピーしない。worktreeの`.vercel`もコピーせず、対象projectへのlinkを確認する。
+
+`GH_TOKEN` / `GITHUB_TOKEN`はGitHub CLIの保存済み認証より優先する。401発生後に本人ログインをやり直しても、古い環境変数が残ると認証は切り替わらない。保存済み本人認証を使う場合は、そのタスクのコマンドだけ両変数を外し、同じ`GH_CONFIG_DIR`をghとnpmへ引き継ぐ。例えばCloudのBashでは、本人確認済みの設定に対して次を使える。認証ファイルは作業ユーザーだけが読める権限で保存し、値を表示・Git登録しない。
+
+```bash
+env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR=/workspace/.gh-cli gh api user --jq .login
+env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR=/workspace/.gh-cli npm run qa:status
+```
 
 Cloudでは環境のネットワーク方針、proxy、CA、書込み可能な場所を確認し、制限を迂回しない。npmの既定キャッシュへ書き込めない場合は、書込み可能な一時ディレクトリを指定する。
 
@@ -153,15 +162,21 @@ main向けの同一repositoryのPRを作る。Git連携でfeatureブランチの
 
 Codexが`npm run deploy:preview`で予約した貸出に対してVercel CLIの`vercel api`から実証済みのGitSource作成経路を呼び、Previewとタスク専用Native DBを準備する。Cloud/PC側が作成を行い、ActionsはDeploymentを生成しない。通常の`vercel deploy`によるファイルuploadでNative branchが生成される保証は確認していないため、この共通コマンドの作成経路を使う。
 
-外部資源の作成前にActionsへ操作情報を記録し、作成後にDeployment・Neon branch・endpointの正確なIDを登録する。作成のbegin/registerはこの共通コマンドの内部処理であり、利用者が手入力で台帳を書き換えない。失敗や通信断時に同じ資源を二重作成しない。タスク専用hostはVercel CLIで対象ブランチのPreview設定をprivateな一時ファイルへ取得し、ActionsがNeon APIで検証したendpoint IDとの一致を確認する。接続文字列やhostをartifact・PR・ログへ出さず、台帳外の直接作成をしない。
+外部資源の作成前にActionsへ操作情報を記録し、作成後にDeployment・Neon branch・endpointの正確なIDを登録する。作成のbegin/registerはこの共通コマンドの内部処理であり、利用者が手入力で台帳を書き換えない。失敗や通信断時に同じ資源を二重作成しない。
 
-本番との分離照合には、安全な`productionHostDigest`（本番hostのSHA-256）をActionsから受け取り、アプリguardの`CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256`へ渡す。Cloud/PCへ本番hostの原文を返さない。旧plain host方式は既存環境の互換として保持し、新方式の公開receiptへ混ぜない。
+ActionsがNeon APIで貸出先DBの完全なhostとbranch・endpointを照合し、そのhostをpooler表記の差分だけ正規化してSHA-256にした`databaseHostDigest`を返す。Cloud/PCはこの値を`CAKE_QA_DATABASE_HOST_SHA256`としてアプリへ渡す。アプリはNativeが供給する`CAKE_TEST_DATABASE_URL`のhostを同じ方法で照合し、不一致・確認不足ならDB接続前に停止する。endpoint IDの一部分だけの比較で代用しない。新CLIはDB接続URLやhost原文を取得せず、ローカルの`.vercel`にはprojectの識別情報だけを保存する。ブランチの静的なPreview設定を`env pull`してNative DBの接続先と推定しない。
+
+本番との分離照合には`productionHostDigest`（本番hostを同じ方法で正規化したSHA-256）をActionsから受け取り、アプリguardの`CAKE_QA_PRODUCTION_DATABASE_HOST_SHA256`へ渡す。本番host原文はActions側だけに置く。貸出先と本番のhost hashは非秘密の照合用metadataであり、DBの認証情報ではない。接続URL・host原文・資格情報をartifact・PR・ログへ出さない。旧plain host方式は既存環境の互換として保持し、新方式の公開receiptへ混ぜない。
+
+PR #49の検証では、qa1の予約とprovisioning DeploymentからのNative DB生成、Actionsによる初回registerまで確認した。ブランチの静的なPreview設定では実際の子DBに一致する接続先を取得できず、application Deploymentと画面・APIの検証は完了していない。今回のQA host hash対応は、mainのActionsにも導入してから同じ貸出で検証を再開する。この段階をQA公開・Ready・返却の完了と扱わない。
 
 ```bash
 npm run deploy:preview
 ```
 
 初回DBは空DBまたは承認済みQA初期fixtureを厳密照合して受け入れる。混入したschema・ユーザー・業務データを削除して続行しない。build・migration・seedとDB identityの照合に成功してから、READYなDeployment固有URLで画面操作・APIテストを行う。VercelがREADYになっただけでは動作確認完了としない。
+
+新方式の導入確認には試験用PRを使い、予約・固有URLの確認・固定URLの公開・Readyへの切替を順に実行する。試験PRのclose後は、自動返却Actionsが成功し、対象alias・全Deployment・専用DBが消失して枠が空きへ戻ったことを確認する。
 
 同じPRの追加commitは同じ貸出・テストDBを使い、編集データや利用者設定を保持する。新HEADで再デプロイ・再検証する。別PRには前の貸出のDBを再利用しない。
 
