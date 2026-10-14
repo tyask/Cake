@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { isTestAuthEnabled } from "@/lib/auth-mode";
 import { findTestUser } from "@/lib/test-users";
+import { activeTestUsers } from "@/lib/test-fixture-context";
 import { createAuthCallbacks } from "@/lib/auth-callbacks";
 import { ensureTestUser, findRegisteredUser, updateRegisteredProfile } from "@/lib/user-access";
 
@@ -19,7 +20,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           },
           authorize(credentials) {
             if (!isTestAuthEnabled()) return null;
-            const user = findTestUser(credentials?.testUserKey);
+            let user;
+            try { user = findTestUser(credentials?.testUserKey, activeTestUsers()); } catch { return null; }
             if (!user) return null;
             return { id: user.id, email: user.email, name: user.name, image: null };
           },

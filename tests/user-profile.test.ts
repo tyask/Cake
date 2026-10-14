@@ -74,10 +74,26 @@ test("Googleプロフィール更新は画像だけ更新し、設定済みの�
 });
 
 test("テストユーザーの再ログインも保存済みのユーザー名を上書きしない", async () => {
-  await withDatabaseRows([["test-user-a", "test-a@cake.local", "新しい名前", "", "f", "t"]], async queries => {
-    assert.equal(await ensureTestUser({ ...user, id: "test-user-a", email: "test-a@cake.local" }), true);
-    const conflictUpdate = queries[0].query.split("ON CONFLICT (id) DO UPDATE SET")[1];
-    assert.ok(conflictUpdate);
-    assert.doesNotMatch(conflictUpdate, /\bname\s*=/);
-  });
+  const environment: Record<string, string | undefined> = {
+    AUTH_MODE: "test", VERCEL_ENV: "development",
+    CAKE_QA_SLOT: undefined, CAKE_QA_PR: undefined, CAKE_QA_LEASE_TOKEN: undefined,
+    CAKE_QA_SOURCE_BRANCH: undefined, CAKE_QA_SOURCE_SHA: undefined,
+    CAKE_QA_DATABASE_HOST: undefined, CAKE_QA_PRODUCTION_DATABASE_HOST: undefined,
+  };
+  const previous = new Map(Object.keys(environment).map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(environment)) {
+    if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  }
+  try {
+    await withDatabaseRows([["test-user-a", "test-a@cake.local", "新しい名前", "", "f", "t"]], async queries => {
+      assert.equal(await ensureTestUser({ ...user, id: "test-user-a", email: "test-a@cake.local" }), true);
+      const conflictUpdate = queries[0].query.split("ON CONFLICT (id) DO UPDATE SET")[1];
+      assert.ok(conflictUpdate);
+      assert.doesNotMatch(conflictUpdate, /\bname\s*=/);
+    });
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
 });

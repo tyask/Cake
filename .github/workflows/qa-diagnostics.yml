@@ -1,0 +1,50 @@
+name: QA diagnostics (read only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Read-only inspection or informational plan
+        required: true
+        type: choice
+        options: [preflight, plan-probe, plan-release]
+        default: preflight
+      pr_number:
+        description: Target PR number (plan only)
+        required: false
+        type: string
+      source_sha:
+        description: Current full PR SHA (plan-probe)
+        required: false
+        type: string
+      slot:
+        description: Exact proposed slot (plan-probe)
+        required: false
+        type: choice
+        options: [qa1, qa2, qa3]
+      lease_id:
+        description: Current lease UUID (plan-release)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  deployments: read
+
+jobs:
+  inspect:
+    if: github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/qa-private-run.yml
+    with:
+      mode: diagnostics
+      action: ${{ inputs.action }}
+      pr_number: ${{ inputs.pr_number }}
+      source_sha: ${{ inputs.source_sha }}
+      slot: ${{ inputs.slot }}
+      lease_id: ${{ inputs.lease_id }}
+    secrets:
+      # The runner masks this transient secret before printing step env.
+      production_database_host: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}

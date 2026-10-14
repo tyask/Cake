@@ -1,0 +1,130 @@
+name: QA private runner
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        required: true
+        type: string
+      action:
+        required: false
+        type: string
+      pr_number:
+        required: false
+        type: string
+      lease_id:
+        required: false
+        type: string
+      source_sha:
+        required: false
+        type: string
+      slot:
+        required: false
+        type: string
+      deployment_id:
+        required: false
+        type: string
+      plan_id:
+        required: false
+        type: string
+    secrets:
+      # Passed from the existing repository Variable, without registering a new Secret.
+      production_database_host:
+        required: false
+      delete_approvals:
+        required: false
+      alias_approvals:
+        required: false
+      VERCEL_TOKEN:
+        required: false
+      NEON_API_KEY:
+        required: false
+
+# Each job inherits the caller's existing permissions: read for inspection,
+# deployments: write only for the already authorized pool writer.
+jobs:
+  pool:
+    if: >-
+      inputs.mode == 'pool' && github.repository == 'tyask/Cake' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: Preview
+    concurrency:
+      group: cake-qa-pool-writer
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - name: Checkout trusted main scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tyask/Cake
+          ref: refs/heads/main
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install trusted dependencies
+        run: npm ci
+      - name: Run reviewed QA action
+        run: |
+          export QA_TRUSTED_MAIN_SHA="$(git rev-parse HEAD)"
+          node --import tsx scripts/qa-pool-writer.ts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CAKE_QA_POOL_ENABLED: ${{ vars.CAKE_QA_POOL_ENABLED }}
+          CAKE_QA_GIT_GATE_CONFIRMED: ${{ vars.CAKE_QA_GIT_GATE_CONFIRMED }}
+          CAKE_QA_NATIVE_CONFIRMED: ${{ vars.CAKE_QA_NATIVE_CONFIRMED }}
+          CAKE_QA_DELETE_APPROVALS: ${{ secrets.delete_approvals }}
+          CAKE_QA_ALIAS_APPROVALS: ${{ secrets.alias_approvals }}
+          CAKE_QA_PROBE_APPROVALS: ${{ vars.CAKE_QA_PROBE_APPROVALS }}
+          CAKE_QA_PRODUCTION_DATABASE_HOST: ${{ secrets.production_database_host }}
+          CAKE_QA_PARENT_BRANCH_ID: ${{ vars.CAKE_QA_PARENT_BRANCH_ID }}
+          CAKE_QA_APPROVED_HEADS: ${{ vars.CAKE_QA_APPROVED_HEADS }}
+          QA_ACTION: ${{ inputs.action }}
+          QA_PR_NUMBER: ${{ inputs.pr_number }}
+          QA_LEASE_ID: ${{ inputs.lease_id }}
+          QA_SOURCE_SHA: ${{ inputs.source_sha }}
+          QA_SLOT: ${{ inputs.slot }}
+          QA_DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+          QA_PLAN_ID: ${{ inputs.plan_id }}
+          QA_OWNER_FLOW: "true"
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+  diagnostics:
+    if: >-
+      inputs.mode == 'diagnostics' && github.repository == 'tyask/Cake' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout reviewed main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies without API credentials
+        run: npm ci
+      - name: Inspect without mutations
+        run: node --import tsx scripts/qa-bootstrap.ts
+        env:
+          QA_BOOTSTRAP_ACTION: ${{ inputs.action }}
+          QA_BOOTSTRAP_PR_NUMBER: ${{ inputs.pr_number }}
+          QA_BOOTSTRAP_SOURCE_SHA: ${{ inputs.source_sha }}
+          QA_BOOTSTRAP_SLOT: ${{ inputs.slot }}
+          QA_BOOTSTRAP_LEASE_ID: ${{ inputs.lease_id }}
+          GITHUB_TOKEN: ${{ github.token }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          CAKE_QA_PARENT_BRANCH_ID: ${{ vars.CAKE_QA_PARENT_BRANCH_ID }}
+          CAKE_QA_PRODUCTION_DATABASE_HOST: ${{ secrets.production_database_host }}

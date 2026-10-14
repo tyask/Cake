@@ -1,0 +1,10 @@
+export const PREVIEW_FIXTURE_GUARD_REVISION: string;
+export const PREVIEW_FIXTURE_SCHEMA_SHA256: string;
+export const PREVIEW_FIXTURE_EMPTY_SCHEMA_SHA256: readonly string[];
+export const PREVIEW_FIXTURE_SCHEMA_CATEGORIES: readonly { key: string; count: number; sha256: string }[];
+export const PREVIEW_FIXTURE_MIGRATIONS: readonly { name: string; sha256: string }[];
+export function previewFixtureCatalogSql(): string;
+export function previewFixtureCatalogFingerprintSql(): string;
+export function previewFixtureEmptyDatabaseSql(): string;
+export function previewFixtureBaseValidationSql(): string;
+export function assertPreviewFixtureMigrationSources(migrations: readonly { name: string; sql: string }[]): void;

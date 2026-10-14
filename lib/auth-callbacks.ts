@@ -1,6 +1,7 @@
 import type { NextAuthConfig } from "next-auth";
 import { isTestAuthEnabled } from "./auth-mode";
 import { isTestIdentity, normalizeEmail } from "./user-access";
+import { canUseAdministratorRole, isActiveTestIdentity } from "./test-fixture-context";
 import type { AppUser, RegisteredUser } from "./types";
 
 export async function resolveSessionUser(
@@ -10,9 +11,11 @@ export async function resolveSessionUser(
   if (!identity?.id || !identity.email) return null;
   const testIdentity = isTestIdentity(identity);
   if (isTestAuthEnabled() !== testIdentity) return null;
+  if (testIdentity && !isActiveTestIdentity(identity)) return null;
   const registered = await findUser(identity.id, identity.email);
-  if (!registered?.isEnabled) return null;
-  return { ...registered, isAdmin: testIdentity ? false : registered.isAdmin };
+  if (!registered?.isEnabled || registered.id !== identity.id
+    || normalizeEmail(registered.email) !== normalizeEmail(identity.email)) return null;
+  return { ...registered, isAdmin: canUseAdministratorRole(registered) };
 }
 
 export interface UserAccessStore {
@@ -25,7 +28,7 @@ export function createAuthCallbacks(store: UserAccessStore): NonNullable<NextAut
   return {
     async signIn({ user, account, profile }) {
       if (account?.provider === "test-login") {
-        if (!isTestAuthEnabled() || !isTestIdentity(user) || !user.id || !user.email) return false;
+        if (!isTestAuthEnabled() || !isActiveTestIdentity(user) || !user.id || !user.email) return false;
         return store.ensureTestUser({ id: user.id, email: normalizeEmail(user.email)!, name: user.name ?? user.email, imageUrl: null });
       }
       const email = normalizeEmail(profile?.email);
@@ -49,7 +52,7 @@ export function createAuthCallbacks(store: UserAccessStore): NonNullable<NextAut
         token.sub = registered.id;
         token.email = registered.email;
       } else if (account?.provider === "test-login") {
-        if (!isTestAuthEnabled() || !isTestIdentity(user)) return null;
+        if (!isTestAuthEnabled() || !isActiveTestIdentity(user)) return null;
         token.sub = user.id;
         token.email = normalizeEmail(user.email);
       }
