@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Browser, BrowserContext, LaunchOptions, Route } from "playwright";
-import { saveQaLease, type QaPublicLease } from "../scripts/qa-client";
+import { saveQaLease, type QaActionRequest, type QaPublicLease } from "../scripts/qa-client";
 import { protectedQaRoute, QA_VERIFY_FAILURE, qaVerificationPath, runQaVerify } from "../scripts/qa-verify";
 import { QA_NEON_PROJECT_ID } from "../lib/qa-pool";
 import type { WorkflowExecutor } from "../scripts/task-workflow";
@@ -150,6 +150,27 @@ test("固有URLと固定URLのPC/mobile・A/B確認が同じ貸出で揃った�
   assert.equal((await stat(qaVerificationPath(f.cwd))).mode & 0o777, 0o600);
   assert.equal((await stat(join(f.cwd, ".cake"))).mode & 0o777, 0o700);
   assert.ok(f.logs.every(message => !message.includes(token) && !message.includes(cookie)));
+});
+
+test("検証前後のstatus artifact取得案内をその場で転送しCloud adapterが各結果を取得できる", async t => {
+  const f = await fixture(t), notices: string[] = [];
+  const readStatus = f.options.statusRequest;
+  await runQaVerify({ ...f.options, args: ["--url", uniqueUrl], statusRequest: async (request: QaActionRequest) => {
+    const index = notices.length + 1;
+    const requestId = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    const notice = `Cake: QA artifact ${200 + index} run ${100 + index} request ${requestId} name qa-result-${requestId}`;
+    notices.push(notice);
+    request.log?.(notice);
+    // The adapter must observe the exact artifact before the status request
+    // returns; a completion-only report cannot unblock its archive download.
+    assert.equal(f.logs.at(-1), notice);
+    if (index === 1) assert.equal(f.launches.length, 0);
+    else assert.equal(f.events.at(-1), "browser:close");
+    return readStatus();
+  } });
+  assert.equal(f.state.statusReads, 2);
+  assert.deepEqual(f.logs.filter(message => message.startsWith("Cake: QA artifact ")), notices);
+  assert.ok(f.logs.every(message => !message.includes(token) && !message.includes(cookie) && !message.includes("PRIVATE_")));
 });
 
 test("ブラウザはTLS検証・CA環境を維持し秘密情報を子プロセスへ渡さない", async t => {

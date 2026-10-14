@@ -190,7 +190,7 @@ export async function runQaVerify({
     const cached = await localLease(head.cwd);
     if (cached && (cached.pr !== pr.number || cached.branch !== head.branch || cached.headSha !== head.sha)) throw failure();
     const request: QaActionRequest = { action: "status", head, mainSha, prNumber: pr.number,
-      leaseId: cached?.leaseId, execute, log: () => {} };
+      leaseId: cached?.leaseId, execute, log };
     const receipt = await statusRequest(request);
     if (receipt.status !== "success" || !receipt.payload) throw failure();
     const lease = parseQaPublicLease(receipt.payload);

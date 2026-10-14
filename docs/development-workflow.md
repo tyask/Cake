@@ -56,7 +56,7 @@ PR #47のmain導入後、初回の[initialize run 38581479595](https://github.co
 
 Cloud/PCの共通クライアントは`scripts/qa-client.ts`。Actionsの結果は安全なID・状態だけの`qa-result-<requestId>` artifactの`result.json`から受け取る。DB host、接続文字列、認証情報をartifactへ出さない。mainの実行元SHA、workflow、依頼ID、owner本人、全job成功、初回attempt、PR・貸出の一致を確認し、別run・失敗run・rerunの結果を使わない。mainへの導入前は新コマンドを実行可能な入口として案内しない。旧方式の実装条件・実測記録は末尾の「旧方式の運用・検証記録」に保持する。
 
-通常はGitHub CLIがartifactをダウンロードする。Cloudでartifact保存先へのリダイレクトが403になる場合は、`CAKE_QA_ARTIFACT_CACHE`に作業用ディレクトリを指定する。共通コマンドは確認済みrunのartifact ID・依頼IDを通知して有限時間だけ待つ。CodexがGitHub連携のartifact取得ツールでその正確なIDを取得し、ZIPを同ディレクトリの`<artifact ID>.zip`へ置く。接続制限を迂回せず、GitHub APIのdigest・サイズとZIP全体を照合してから、単一の`result.json`を読み取る。任意のJSONやActionsログの転記をreceiptの代用にしない。取得後にもmain・PR・runを再照合し、作業終了後にcacheを削除する。ZIPのダウンロードURLをログ・PRへ表示しない。
+通常はGitHub CLIがartifactをダウンロードする。Cloudでartifact保存先へのリダイレクトが403になる場合は、`CAKE_QA_ARTIFACT_CACHE`に作業用ディレクトリを指定する。共通コマンドは確認済みrunのartifact ID・依頼IDを通知して有限時間だけ待つ。`qa:verify`も画面確認の前後にstatusを取得するため、両方の通知を同じ方法で処理する。CodexがGitHub連携のartifact取得ツールでその正確なIDを取得し、ZIPを同ディレクトリの`<artifact ID>.zip`へ置く。接続制限を迂回せず、GitHub APIのdigest・サイズとZIP全体を照合してから、単一の`result.json`を読み取る。任意のJSONやActionsログの転記をreceiptの代用にしない。取得後にもmain・PR・runを再照合し、作業終了後にcacheを削除する。ZIPのダウンロードURLをログ・PRへ表示しない。
 
 ## 役割と保存先
 
