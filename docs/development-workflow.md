@@ -192,7 +192,7 @@ Codexが固定QA URLでもログイン、変更箇所の画面・API、必要な
 
 ### 7. PRをReady for reviewにする
 
-PR本文へ固定QA URL、Deployment固有URL、完全SHA、貸出ID、資源ID、lint/test/build、migration/seed、画面・APIの検証結果、未実施項目と理由を記載する。最新HEADと公開先の一致を確認し、次のコマンドで同じPRを更新してCodexがdraftを解除する。失敗・未確認のデプロイを成功として記載しない。必要な検証が不足している場合は`--draft`を付けてdraftを維持して理由を報告する。
+PR本文へ固定QA URL、Deployment固有URL、完全SHA、貸出ID、資源ID、lint/test/build、migration/seed、画面・APIの検証結果、未実施項目と理由を記載する。最新HEADと公開先の一致を確認し、次のコマンドで同じPRを更新してCodexがdraftを解除する。本文とタイトルはGitHub REST APIで更新し、更新に成功した後だけReadyへ進む。失敗・未確認のデプロイを成功として記載しない。必要な検証が不足している場合は`--draft`を付けてdraftを維持して理由を報告する。
 
 ```bash
 npm run task:pr -- --title '変更内容を表すタイトル' --verification-file /tmp/cake-verification.md

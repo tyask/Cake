@@ -1,13 +1,15 @@
-import { readFile, stat, mkdtemp, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { resolve } from "node:path";
 import { runTaskPr } from "./task-pr";
 import { requestQaAction } from "./qa-client";
+import { updateTaskPullRequest } from "./task-pr-update";
 import { cleanTaskHead, assertTaskGitGate, commandOutput, taskPullRequests, executeWorkflowCommand, CAKE_REPOSITORY, type WorkflowExecutor } from "./task-workflow";
 
-type Options = { args?: readonly string[]; cwd?: string; execute?: WorkflowExecutor; log?: (message: string) => void };
+type Options = { args?: readonly string[]; cwd?: string; execute?: WorkflowExecutor; log?: (message: string) => void;
+  statusRequest?: typeof requestQaAction };
 /** Shared Cloud/PC entry. Ready is allowed only after live registry/provider verification. */
-export async function runTaskPrRegistry({ args = [], cwd = process.cwd(), execute = executeWorkflowCommand, log = console.log }: Options = {}) {
+export async function runTaskPrRegistry({ args = [], cwd = process.cwd(), execute = executeWorkflowCommand, log = console.log,
+  statusRequest = requestQaAction }: Options = {}) {
   if (args.includes("--draft")) return runTaskPr({ args, cwd, execute, log });
   if (args.length !== 4 || args[0] !== "--title" || args[2] !== "--verification-file" || !args[1]?.trim()
     || args[1].length > 240 || /[\r\n\0]/.test(args[1]) || !args[3]?.trim()) throw new Error("Specify --title and --verification-file for the verified PR.");
@@ -22,7 +24,7 @@ export async function runTaskPrRegistry({ args = [], cwd = process.cwd(), execut
   const remote = await commandOutput(execute, "git", ["ls-remote", "--heads", "origin", `refs/heads/${head.branch}`], head.cwd, "Cannot verify the pushed PR commit.");
   if (remote !== `${head.sha}\trefs/heads/${head.branch}`) throw new Error("Current commit is not pushed; repeat deployment and tests.");
   const mainSha = await assertTaskGitGate(head, execute);
-  const receipt = await requestQaAction({ action: "status", prNumber: pr.number, head, mainSha, execute, log });
+  const receipt = await statusRequest({ action: "status", prNumber: pr.number, head, mainSha, execute, log });
   const lease = receipt.payload;
   if (!lease || lease.state !== "published" || lease.headSha !== head.sha || lease.aliasSha !== head.sha || !lease.database || !lease.readyDeploymentId) throw new Error("Current PR QA publication is not verified.");
   const deployment = lease.deployments.find(d => d.id === lease.readyDeploymentId);
@@ -36,12 +38,8 @@ export async function runTaskPrRegistry({ args = [], cwd = process.cwd(), execut
   const current = await cleanTaskHead(head.cwd, execute);
   if (current.sha !== head.sha || current.branch !== head.branch) throw new Error("PR head changed during QA verification.");
   const body = `${title}\n\n## QA\n\n- 固定QA URL: https://cake-${lease.slot}-fumin.vercel.app\n- Deployment URL: ${deployment.url}\n- PR: #${pr.number} / branch: ${head.branch}\n- Commit: ${head.sha}\n- QA枠: ${lease.slot} / 貸出ID: ${lease.leaseId}\n- Deployment: ${lease.readyDeploymentId}\n- 管理DB世代: ${lease.version}\n- テストDB: ${lease.database.projectId} / ${lease.database.branchId} / ${lease.database.endpointId}\n\n## 検証結果\n\n${verification}\n`;
-  const directory = await mkdtemp(join(tmpdir(), "cake-registry-pr-"));
-  try {
-    const file = join(directory, "body.md"); await writeFile(file, body, { mode: 0o600 });
-    await commandOutput(execute, "gh", ["pr", "edit", pr.url, "--repo", CAKE_REPOSITORY, "--title", title, "--body-file", file], head.cwd, "PR body update failed; PR remains unchanged or draft.");
-    if (pr.isDraft) await commandOutput(execute, "gh", ["pr", "ready", pr.url, "--repo", CAKE_REPOSITORY], head.cwd, "PR Ready transition failed.");
-    log(`Cake: QAを確認したPRを更新しました: ${pr.url}`);
-    return { url: pr.url, existing: true };
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  await updateTaskPullRequest(head, pr.number, title, body, execute);
+  if (pr.isDraft) await commandOutput(execute, "gh", ["pr", "ready", pr.url, "--repo", CAKE_REPOSITORY], head.cwd, "PR Ready transition failed.");
+  log(`Cake: QAを確認したPRを更新しました: ${pr.url}`);
+  return { url: pr.url, existing: true };
 }
