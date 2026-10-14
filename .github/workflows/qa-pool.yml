@@ -38,8 +38,6 @@ on:
         description: Exact owner plan ID (approve/revoke); review Actions summary first
         required: false
         type: string
-  schedule:
-    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
@@ -78,8 +76,7 @@ jobs:
       github.repository == 'tyask/Cake' &&
       (vars.CAKE_QA_POOL_ENABLED == 'true' ||
        (github.event_name == 'pull_request_target' && github.event.action == 'closed') ||
-       (github.event_name == 'workflow_dispatch' && contains(fromJSON('["request-preview","request-release","approve","revoke","probe","alias-only","claim","release","refresh"]'), inputs.action)) ||
-       github.event_name == 'schedule') &&
+       (github.event_name == 'workflow_dispatch' && contains(fromJSON('["request-preview","request-release","approve","revoke","probe","alias-only","claim","release","refresh"]'), inputs.action))) &&
       (github.event_name != 'workflow_dispatch' || !contains(fromJSON('["preflight","plan-probe","plan-release"]'), inputs.action)) &&
       (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') &&
       (github.event_name != 'pull_request_target' ||

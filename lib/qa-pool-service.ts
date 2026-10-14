@@ -38,13 +38,15 @@ export interface QaGateway {
 }
 export type QaRequest = { action: "claim" | "refresh" | "release" | "probe" | "alias-only" | "close" | "request-preview" | "request-release";
   pr?: number; leaseId?: string; sha?: string; slot?: QaLeaseRecord["slot"]; deploymentId?: string };
+export type QaPending = { pr: number; leaseId: string; kind: "cleanup" | "preview" };
 const terminal = (state: string) => ["READY", "ERROR", "CANCELED", "BLOCKED"].includes(state);
 
 /** One bounded reconciliation pass; never waits for a build or Native cleanup. */
-export async function runQaRequest(gateway: QaGateway, request: QaRequest, options: { now?: () => string; token?: () => string; log?: (message: string) => void } = {}): Promise<void> {
+export async function runQaRequest(gateway: QaGateway, request: QaRequest, options: { now?: () => string; token?: () => string; log?: (message: string) => void; onPending?: (pending: QaPending) => void } = {}): Promise<void> {
   const now = options.now ?? (() => new Date().toISOString());
   const token = options.token ?? randomUUID;
   const log = options.log ?? console.log;
+  const pending = (record: QaLeaseRecord, kind: QaPending["kind"]) => options.onPending?.({ pr: record.pr, leaseId: record.leaseId, kind });
   let pool = await gateway.pool();
   const ownerRequest = request.action === "request-preview" || request.action === "request-release";
   const gateTarget = (pr: QaPullRequest): QaGateTarget => ({ pr: pr.number, branch: pr.branch, sha: pr.sha });
@@ -154,9 +156,9 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
         await assertDeletionApproval();
         await gateway.deleteDeployment(record, deployment, plan);
       }
-      if ((await gateway.deployments(record)).length) { log(`Cake: ${record.slot} のdeployment削除を待っています。`); return; }
+      if ((await gateway.deployments(record)).length) { log(`Cake: ${record.slot} のdeployment削除を待っています。`); pending(record, "cleanup"); return; }
       for (const known of record.deployments) if (await gateway.deployment(known.id)) throw new Error("deployment消失を確認できません。");
-      if (record.database && !(await gateway.databaseGone(record.database))) { log(`Cake: ${record.slot} のNative branch/endpoint消失を待っています。`); return; }
+      if (record.database && !(await gateway.databaseGone(record.database))) { log(`Cake: ${record.slot} のNative branch/endpoint消失を待っています。`); pending(record, "cleanup"); return; }
       if ((record.purpose !== "probe" || trackedAlias) && await gateway.alias(record.slot)) throw new Error("返却前の固定alias消失を確認できません。");
       const retiredDatabases = record.database ? [...record.retiredDatabases, record.database] : record.retiredDatabases;
       await assertDeletionApproval();
@@ -196,7 +198,7 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
     if (record.intent) { log(`Cake: ${record.slot} の作成応答が未確認です。重複作成しません。`); return; }
     if (!record.database && record.deployments.length) {
       const database = await gateway.database(record);
-      if (!database) { log(`Cake: ${record.slot} のNative DB識別を待っています。`); return; }
+      if (!database) { log(`Cake: ${record.slot} のNative DB識別を待っています。`); pending(record, "preview"); return; }
       saved = await save(saved, { database }); record = saved.payload;
     }
     // Keep all deployment IDs, including failed provisioning builds and older head SHAs.
@@ -207,7 +209,7 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
         const remote = await gateway.deployment(older.id);
         if (!remote) throw new Error("使用中deploymentが消失しました。Native DB再作成を防ぐため停止します。");
         check(record, remote);
-        if (!terminal(remote.state)) { log(`Cake: ${record.slot} の既存build完了を待っています。`); return; }
+        if (!terminal(remote.state)) { log(`Cake: ${record.slot} の既存build完了を待っています。`); pending(record, "preview"); return; }
       }
       const current = await gateway.pullRequest(record.pr);
       if (!validPr(current) || current.branch !== record.branch || current.state !== "open" || current.sha !== record.headSha) return;
@@ -225,12 +227,17 @@ export async function runQaRequest(gateway: QaGateway, request: QaRequest, optio
       if (deployment.sha !== saved.payload.intent!.sha || deployment.attemptId !== saved.payload.intent!.attemptId || deployment.phase !== saved.payload.intent!.phase) throw new Error("作成応答のSHAまたはintentが一致しません。");
       await save(saved, { deployments: [...saved.payload.deployments, { id: deployment.id, sha: deployment.sha, phase: deployment.phase, url: deployment.url }], intent: undefined });
       log(`Cake: ${record.slot} の${deployment.phase} deploymentを記録しました。`);
+      pending(record, "preview");
       return;
     }
     const deployment = await gateway.deployment(candidate.id);
     if (!deployment) throw new Error("使用中deploymentが消失しました。枠を保持します。");
     check(record, deployment);
-    if (deployment.phase !== "application" || deployment.state !== "READY") { log(`Cake: ${record.slot} deployment ${deployment.state}`); return; }
+    if (deployment.phase !== "application" || deployment.state !== "READY") {
+      log(`Cake: ${record.slot} deployment ${deployment.state}`);
+      if (!terminal(deployment.state)) pending(record, "preview");
+      return;
+    }
     // Native identity is re-read even on same-PR pushes; no silent branch recreation.
     const identity = await gateway.database(record);
     if (!identity || !sameDatabase(identity, record.database)) throw new Error("Native DB識別子が変更・消失しました。");

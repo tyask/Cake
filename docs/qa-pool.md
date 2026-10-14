@@ -6,9 +6,9 @@
 
 対象はGitHub `tyask/Cake`、Vercel `fumin1/cake`（`prj_Z37vquodhpRd08ZTAtYnP0qa59jD`）、Preview専用Neonリソース `cake-preview`（project `misty-meadow-88903426`）。既存GitHub Environment `Preview` を使い、qa1/2/3用Environmentや管理DBを追加しない。
 
-通常運用の標準入口は、信頼済みmainが作る小さな安全plan IDのowner承認である。ユーザーは通常運用開始を明示し、Repositoryの `CAKE_QA_POOL_ENABLED` / `CAKE_QA_GIT_GATE_CONFIRMED` / `CAKE_QA_NATIVE_CONFIRMED` をtrueに登録した。2026-10-14 JSTの[GET専用診断（run 38485838972 / job 115599157037）](https://github.com/tyask/Cake/actions/runs/38485838972/job/115599157037)では3flagの実効true、旧4承認Variableの空状態、qa1の `free` と使用中QA DB 0個を確認した。これは診断時点の証拠であり、以後の依頼でも現在の実効値・台帳・対象HEADを再読取する。flagの有効化だけで個別PRの生成や削除を許可しない。
+通常のPreview生成の標準入口は、信頼済みmainが作る小さな安全plan IDのowner承認である。ユーザーは通常運用開始を明示し、Repositoryの `CAKE_QA_POOL_ENABLED` / `CAKE_QA_GIT_GATE_CONFIRMED` / `CAKE_QA_NATIVE_CONFIRMED` をtrueに登録した。2026-10-14 JSTの[GET専用診断（run 38485838972 / job 115599157037）](https://github.com/tyask/Cake/actions/runs/38485838972/job/115599157037)では3flagの実効true、旧4承認Variableの空状態、qa1の `free` と使用中QA DB 0個を確認した。これは診断時点の証拠であり、以後の依頼でも現在の実効値・台帳・対象HEADを再読取する。flagの有効化だけで個別PRの生成や削除を許可しない。
 
-個別の開発依頼で許可された範囲内では、Codexが既存のowner本人の `gh` 認証を使い、計画の機械照合、`qa:approve`、後続writerの確認まで代行できる。許可済みの対象について毎回のチャット再確認や本人のGitHub UI操作を必須にしない。現在HEADごとの計画確認・owner承認Actionsは省略せず、依頼の対象・資源数・操作範囲を広げる恒久的な権限にはしない。不可逆な削除は全対象とQA DB・登録データの喪失内容を示して別途承認を得る。draftからの公開とmergeはユーザーが判断する。
+個別の開発依頼で許可された範囲内では、Codexが既存のowner本人の `gh` 認証を使い、計画の機械照合、`qa:approve`、後続writerの確認まで代行できる。許可済みの対象について毎回のチャット再確認や本人のGitHub UI操作を必須にしない。Preview生成では現在HEADごとの計画確認・owner承認Actionsは省略せず、依頼の対象・資源数・操作範囲を広げる恒久的な権限にはしない。ユーザーは、同一repositoryのmainへマージ済みの通常QA leaseを自動返却する運用方針を承認した。QA DBと入力データも削除され、対象ごとのcleanup owner承認は要求しない。未マージclose・OPEN PRの手動返却・限定probeの削除は、全対象とデータ喪失を示して別途承認を得る。draftからの公開とmergeはユーザーが判断する。
 
 実環境の受入結果は[PR #42](https://github.com/tyask/Cake/pull/42)と[PR #43](https://github.com/tyask/Cake/pull/43)の記録を参照する。qa1の順次貸出、同PR更新でのlease・DB・ユーザー・登録データ保持、固定aliasの最新READY一致、返却後の別PRで新DBと初期状態、既存owner認証による承認代行とcleanup・`free` を実証した。同時3枠、実ブラウザでのPC/スマートフォン全操作、外部callerとのalias競合、実行中Function/transactionの終了は未試験。子DBの初期状態が親fixtureの継承と空DB初期化のどちらで得られたかは区別できておらず、親fixture継承の実証完了とはしない。
 
@@ -48,29 +48,29 @@ Ignored Build Stepはdeployment作成後に働き、Native integrationはアプ�
 
 ### mainへの導入と公開
 
-mainへのmergeはユーザーだけが行う。mainのProductionを維持するGit設定により、mergeは自動Production deploymentと既存の本番build、その後の `db:setup` を起動し得る。実装・ローカル検証、mainへの導入、個別の生成・alias割当、cleanupの承認は分ける。導入後の個別操作も、その時点の台帳と実資源を再照合する。設定監査が未完の既存PR #33は、この通常運用開始の許可だけでは変更・反映しない。
+mainへのmergeはユーザーだけが行う。mainのProductionを維持するGit設定により、mergeは自動Production deploymentと既存の本番build、その後の `db:setup` を起動し得る。実装・ローカル検証、mainへの導入、個別の生成・alias割当、マージ済み通常QAの自動返却方針、その他のcleanupの個別承認は分ける。導入後の個別操作も、その時点の台帳と実資源を再照合する。導入時には設定監査が未完の既存PR #33を通常運用開始の許可だけで変更・反映しなかった。この履歴を現在のマージ済み通常QAの自動返却禁止にはしない。
 
-owner承認のcleanupを継続できるよう、5分ごとのscheduleは通常poolのflagがfalseでもwriterを起動する。承認がなければVercel/Neon資源を変更せず、`deleting` を使用中として保持する。有効なowner cleanup承認または完全一致する旧削除承認があれば、scheduleが再照合してcleanupを進め得る。merge前に現在の対象・承認状態と実行中・待機中writerを確認し、確認不能ならmergeや操作承認を停止する。GET診断の先行や手動一回だけの実行を、この入口だけでは保証しない。運用停止が必要ならその変更も別承認とし、期限切れの承認を延長しない。
+QAの5分schedule定期監視は廃止した。マージ済み通常leaseの返却はclosedイベントの同じActionsでalias解除・全Deployment削除・DB消失確認・freeまで進める。非同期完了は10秒間隔・最大3分の待機予算で確認し、上限到達・API失敗時はrunを失敗させdeletingを保持する。回復は対象PR番号と現在leaseを指定するmainのreleaseで行う。未マージclose・OPEN手動返却・probeは有効な個別承認を再照合する。通常Preview生成もrequest-previewの同じ実行内で完了を待ち、上限時はdeploy:previewを再実行する。追加flag・資格情報・承認receiptは作らず、家計の定期支払いCronは変更しない。
 
-## 正本と短い単一writer
+## 正本と単一writer
 
 正本はGitHub Deploymentのimmutable payload snapshot。専用 `task: cake-qa-lease`、`environment: Preview`、`payload.protocol: cake-qa/v1` の記録だけを扱い、通常のVercel記録を混ぜない。全ページを取得し、GitHub deployment ID順に各枠の `sequence` と `previousRecordId` を検証する。未知protocol、系列の分岐、重複所有、API失敗は空き扱いせず停止する。
 
 payloadは枠、PR番号、feature枝、完全head SHA、lease UUID、`held` / `deleting` / `free`、作成・更新時刻、作成intent、全deployment ID/SHA/phase、READY deployment、Native DB identity、返却済みDB識別子を保持する。限定aliasは `aliasAssignment: {alias, deploymentId, sha, state}` の `pending` / `assigned` を記録し、`purpose: probe` を維持する。hostは内部の台帳・照合で使うが、診断・CLI・報告へ出さない。秘密情報や接続文字列は保存しない。新snapshotは直前の記録へ連結し、既知deployment、alias対象、返却済みDBの識別記録を消さない。
 
-書込みとclaim/release/alias mutationは信頼済みmainコードを使う1つの短いActions writerだけが行う。`pull_request_target`、`workflow_dispatch`、`schedule` が同じwriterを起動する。全枠・全操作で固定concurrency group、`queue: max`、`cancel-in-progress: false` を共有する。PRコードをwrite token付きでcheckout・実行しない。開発者のローカルCLIはGitHubへ計画要求・承認のdispatchを行い、結果を読む。Vercel/Neon資源を直接予約・配置・解放しない。
+書込みとclaim/release/alias mutationは信頼済みmainコードを使う1つのActions writerだけが行う。`pull_request_target`、`workflow_dispatch` が同じwriterを起動する。全枠・全操作で固定concurrency group、`queue: max`、`cancel-in-progress: false` を共有する。PRコードをwrite token付きでcheckout・実行しない。開発者のローカルCLIはGitHubへ計画要求・承認のdispatchを行い、結果を読む。Vercel/Neon資源を直接予約・配置・解放しない。
 
-限定実証の貸出はsnapshotの `purpose: probe` で通常運用と区別する。probeの継続は明示した手動入口だけから行い、PRイベントやscheduleから生成を自動継続せず、候補aliasも自動更新しない。probeも同じ3枠と単一queueを使い、失敗・期限切れ・承認不足で既存leaseやDBを解放しない。
+限定実証の貸出はsnapshotの `purpose: probe` で通常運用と区別する。probeの継続は明示した手動入口だけから行い、PRイベントから生成を自動継続せず、候補aliasも自動更新しない。probeも同じ3枠と単一queueを使い、失敗・期限切れ・承認不足で既存leaseやDBを解放しない。
 
-長いbuildやcleanup完了待ちは排他区間で行わず、intentを保存してAPI操作を開始し、後続の短い実行で照合する。`queue: max` は実行中1件＋最大100pending、満杯時は新requestがcancelされる。FIFOはgroupの待機開始順で入力順ではない。cancelされたrequestは未予約とし、毎回最新snapshotとleaseを読み直す。pending置換方式へfallbackしない。
+1回のservice照合は待機せず、対象限定のrunnerがclosed/release/request-release/request-previewで非同期完了だけを待つ。承認待ち・不明intent・不明alias・terminal build失敗・API失敗を盲目的にpoll/retryしない。10秒間隔・最大3分の待機予算を使い、外部API時間は別途かかるためActions jobの5分上限も維持する。待機前後の貸出台帳を比較し、世代変更で停止する。queueを保持して待つため他枠はこの実行の終了後に進む。`queue: max` は実行中1件＋最大100pending、満杯時は要求側が再実行し、cancel-in-progressは使わない。
 
-GitHub Deployment作成は完全SHAを `ref` に指定し、`auto_merge: false`、`production_environment: false`、`transient_environment: true`。台帳の `required_contexts: []` はアプリの必須CIを代用しない。現writerはstatusを書き込まない。将来表示用statusを追加する場合も `auto_inactive: false` を明示する。statusのsuccess/inactive/failure、PR close/merge、workflow完了、時間経過で貸出を解放しない。status履歴は90日で削除されるため、正本をstatus履歴へ依存させない。
+GitHub Deployment作成は完全SHAを `ref` に指定し、`auto_merge: false`、`production_environment: false`、`transient_environment: true`。台帳の `required_contexts: []` はアプリの必須CIを代用しない。現writerはstatusを書き込まない。将来表示用statusを追加する場合も `auto_inactive: false` を明示する。statusのsuccess/inactive/failure、PR close/merge、workflow完了、時間経過だけで貸出を解放しない。マージ済み通常QAも全資源の消失確認後にだけfreeにする。status履歴は90日で削除されるため、正本をstatus履歴へ依存させない。
 
 これはGitHub APIのCASや永続ロックではなく、単一writerとsnapshot系列を前提としたprotocol。別workflowや通常APIから専用taskへ直接書き込まない。
 
 ## 小さな計画とowner承認
 
-貸出台帳の `cake-qa-lease` と承認台帳の `cake-qa-approval` を分ける。後者は既存Environment `Preview` と `cake-qa-approval/v1` を使い、通常配置の `preview` と返却の `cleanup` を対象にする。公開planにはPR・feature枝・完全SHA・slot・lease・直前台帳ID・生成main SHA・確認済み親branch ID・生成run ID/attempt・期限、全deployment ID・候補alias・hostなしDB project/branch/endpoint ID、生成数上限、SHA-256 digestを載せる。DB host、接続文字列、資格情報、privateな完全manifestは公開しない。期限は既定2時間、最大24時間で、自動延長しない。plan IDは一つの対象・操作・期限を指すレビュー入口であり、通常運用でもHEADごとに小さな計画を確認する。cleanupの表示にはQA DBと入力データが失われることを明記する。
+貸出台帳の `cake-qa-lease` と承認台帳の `cake-qa-approval` を分ける。後者は既存Environment `Preview` と `cake-qa-approval/v1` を使い、通常配置の `preview` と、個別承認を要する返却の `cleanup` を対象にする。マージ済み通常leaseの自動返却はcleanup planのowner承認を要求せず、人間の承認receiptを作成・流用しない。公開planにはPR・feature枝・完全SHA・slot・lease・直前台帳ID・生成main SHA・確認済み親branch ID・生成run ID/attempt・期限、全deployment ID・候補alias・hostなしDB project/branch/endpoint ID、生成数上限、SHA-256 digestを載せる。DB host、接続文字列、資格情報、privateな完全manifestは公開しない。期限は既定2時間、最大24時間で、自動延長しない。plan IDは一つの対象・操作・期限を指すレビュー入口であり、通常運用でもHEADごとに小さな計画を確認する。cleanupの表示にはQA DBと入力データが失われることを明記する。
 
 1. 信頼済みmainが現在PRの完全head、slot・lease・台帳世代、保存済み資源を読み直し、安全な対象ID・操作範囲・期限とdigestを持つplanを作る。未確認の作成intentはGETで回復してから計画へ含め、未回復なら計画を保留する。計画発行はCI成功の証明ではなく、Preview承認と生成・alias変更の前に、その完全SHAの最新pushとpull_requestのCIが両方completed/successであることをGitHub APIで照合する。返却はCI成功を条件にしない。計画生成はVercel/Neon資源を変更しないが、安全なGitHub承認台帳の書込みを伴う。既存GET専用 `preflight` / `plan-probe` / `plan-release` 自体に書込みを追加しない。
 2. ownerは表示された小さな計画を確認し、`npm run qa:approve -- --plan-id <ID>` で承認する。個別依頼の許可範囲内では、Codexが既存owner本人の `gh` 認証で機械照合と実行を代行できる。現在の計画を照合することと、許可済み対象について毎回チャットで再確認することは別である。取消は同じコマンドに `--revoke` を付ける。GitHubのRun workflowでもmainの `action=approve` / `revoke` と `plan_id` 一個を指定できる。巨大なVariable JSONや新しい資格情報を要求しない。入力中のowner名・actor ID、CI結果、コメントやfork側の主張を承認証拠にしない。
@@ -79,7 +79,7 @@ GitHub Deployment作成は完全SHAを `ref` に指定し、`auto_merge: false`�
 
 owner認証の根拠はauthenticated dispatchとGitHub由来のrun metadataであり、Deploymentsの `creator` 単独ではない。`GITHUB_TOKEN` はGitHub App installation tokenなので、workflowのAPI書込みはappへ帰属する。writerのcreator確認とは別に、実runのactorとtriggering_actorがともにrepository ownerの数値ID・`User` であること、main・repository・workflow pathとtrusted main SHAを確認する。承認は初回attemptだけを受け入れ、rerunを拒否する。run APIにはdispatch入力本文がないため、GitHubが返した `display_title` の `Cake QA approve <ID>` / `Cake QA revoke <ID>` とimmutable planを結び付ける。`creator` の欠落・偽装、metadataの読取拒否や不正、対象planとの結合が不明なら停止し、追加permissionや資格情報で補わない。
 
-通常のCLI操作は `deploy:preview` → `WAIT_APPROVAL` とplan IDを確認 → owner承認runの成功確認 → 再度 `deploy:preview` の順に進める。再実行するCLIも現在HEADと同leaseの承認を読み直す。owner planは通常previewとcleanupだけに使い、既存の限定 `probe` / `alias-only` の個別承認を代替しない。`QA_OWNER_FLOW=true` はworkflow内部の固定envであり、追加repository Variableとして登録しない。
+通常のCLI操作は `deploy:preview` → `WAIT_APPROVAL` とplan IDを確認 → owner承認runの成功確認 → 再度 `deploy:preview` の順に進める。再実行するCLIも現在HEADと同leaseの承認を読み直す。owner planは通常previewと個別承認を要するcleanupだけに使い、マージ済み通常leaseの自動返却には不要。既存の限定 `probe` / `alias-only` の個別承認を代替しない。`QA_OWNER_FLOW=true` はworkflow内部の固定envであり、追加repository Variableとして登録しない。
 
 [GitHub Freeの公開repository](https://docs.github.com/en/get-started/learning-about-github/githubs-plans#github-free-for-personal-accounts)はこの基本Actions/API構成を利用できる。ただし手動dispatchを実行できるwrite accessはowner専用ではなく、main以外のrefも指定できるため、main固定とowner照合はCake側の条件とする。public Deploymentsは認証なしでも読めるので、安全projectionをprivate manifestの保管場所に使わない。根拠は[手動実行](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)、[dispatchイベント](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch)、[actor/rerun contexts](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts)、[run API](https://docs.github.com/en/rest/actions/workflow-runs#get-a-workflow-run)、[GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token)、[Deployments API](https://docs.github.com/en/rest/deployments/deployments#get-a-deployment)。GitHubのenvironment reviewer機能や有料planをこの入口の条件にしない。
 
@@ -87,15 +87,15 @@ owner認証の根拠はauthenticated dispatchとGitHub由来のrun metadataで�
 
 ### 旧承認の読取互換
 
-`CAKE_QA_APPROVED_HEADS` と `CAKE_QA_DELETE_APPROVALS` は移行中の読取互換を残す。前者はレビュー対象の完全head SHA、後者は既存のlease・全ID・alias・完全DB identity・期限が一致する場合だけ従前の照合を通す。値の自動登録・変換・延長や、owner planによる旧不一致の救済をしない。未知・不正・不一致・期限切れの扱いも既存matcherに従う。新しい標準操作ではplan IDを使い、通常運用flag、Git設定の確認、pool有効化を承認台帳から自動変更しない。
+`CAKE_QA_APPROVED_HEADS` と `CAKE_QA_DELETE_APPROVALS` は移行中の読取互換を残す。前者はレビュー対象の完全head SHA、後者は既存のlease・全ID・alias・完全DB identity・期限が一致する場合だけ従前の照合を通す。値の自動登録・変換・延長や、owner planによる旧不一致の救済をしない。未知・不正・不一致・期限切れの扱いも既存matcherに従う。新しいPreview生成・個別承認が必要な返却ではplan IDを使う。マージ済み通常leaseの自動返却はこれと別のソース管理された方針とし、通常運用flag、Git設定の確認、pool有効化を承認台帳から自動変更しない。
 
-旧削除承認が有効なまま残れば、既存scheduleやclose経路がcleanupを進め得る。新しい「planを先に確認する」UIだけで、旧承認による実行や待機中writerを停止したと扱わない。PR #33など設定監査が未完の旧枝は通常運用開始の許可だけでは変更せず、mainの設定だけで対象HEADのGit停止を補わない。
+旧削除承認が有効なまま残れば、closeや明示的な手動実行がcleanupを進め得る。新しい「planを先に確認する」UIだけで、旧承認による実行や待機中writerを停止したと扱わない。導入時のPR #33など設定監査が未完の旧枝への生成は通常運用開始の許可だけでは進めず、mainの設定だけで対象HEADのGit停止を補わなかった。生成のGitゲートと、マージ済み通常leaseの自動返却は区別する。
 
 ## 通常運用の設定と導入前の限定入口
 
 通常運用の生成・自動alias更新には `CAKE_QA_POOL_ENABLED` / `CAKE_QA_GIT_GATE_CONFIRMED` / `CAKE_QA_NATIVE_CONFIRMED` の3つがtrueであり、現在対象のowner plan承認と各gateが成立する必要がある。通常運用開始の明示承認前はfalseまたは未設定で保持する。登録報告だけで実効値を推定せず、既存GET専用診断を使う。Repository Variables管理APIの権限をdraft PR作成やowner-plan標準経路の条件にしない。
 
-GET専用の `preflight` / `plan-release`、5項目承認の限定 `probe`、9項目承認の既存READY probe向け `alias-only` は別入口とする。限定入口のためにpool/確認flagを先行してtrueへ変えず、通常生成のhead承認も追加しない。通常配置とcleanupの標準承認はowner plan IDで行う。次のVariable承認列は既存経路の読取互換契約であり、新標準の操作手順として巨大JSONの登録を要求しない。
+GET専用の `preflight` / `plan-release`、5項目承認の限定 `probe`、9項目承認の既存READY probe向け `alias-only` は別入口とする。限定入口のためにpool/確認flagを先行してtrueへ変えず、通常生成のhead承認も追加しない。通常配置と、未マージclose・OPENの手動返却に必要なcleanupの標準承認はowner plan IDで行う。マージ済み通常leaseは個別cleanup承認を要求せず、probeの削除には引き続き既存の期限付き個別承認を使う。次のVariable承認列は既存経路の読取互換契約であり、新標準の操作手順として巨大JSONの登録を要求しない。
 
 | 設定 | 確認・承認の範囲 |
 | --- | --- |
@@ -110,7 +110,7 @@ GET専用の `preflight` / `plan-release`、5項目承認の限定 `probe`、9�
 
 既存Vercel tokenとNeon API key、Actionsの短命 `GITHUB_TOKEN` を使う。`deployments: write` 等の必要権限と既存Environment `Preview` の実行・承認方針も確認する。新Secret・資格情報や権限を勝手に追加しない。Vercel-managed NeonのCLI/APIにはNeon API keyが必要で、一般のproject-scoped keyもEditor権限を持ちread-onlyとは限らない。
 
-認証に成功したことやtokenの書込みscopeは操作の承認を意味しない。通常運用の有効化、特定headの生成承認、特定ID集合の削除承認、Native/cleanupの検証結果を分けて扱う。一括の削除許可booleanは使用しない。期限切れ・不明・対象不一致は操作を停止し、承認対象を広げない。新しいSecretの配置、追加scope、ネットワーク変更、本番操作は個別開発依頼の通常QA操作に含めない。
+認証に成功したことやtokenの書込みscopeは操作の承認を意味しない。通常運用の有効化、特定headの生成承認、特定ID集合の削除承認、Native/cleanupの検証結果を分けて扱う。一括の削除許可booleanは使用しない。マージ済み通常QAの自動返却は利用者が承認したソース管理された方針に限り、RESTのmerged確認と現在leaseの完全照合を要する。個別承認の期限切れ、自動返却条件の不明、対象不一致は操作を停止し、対象を広げない。新しいSecretの配置、追加scope、ネットワーク変更、本番操作は個別開発依頼の通常QA操作に含めない。
 
 ## GET専用preflightと限定probe
 
@@ -136,13 +136,13 @@ probe承認は台帳・Previewの限定生成を許すもので、削除や新�
 
 本番endpointとの比較には既存repository Variableの非秘密 `CAKE_QA_PRODUCTION_DATABASE_HOST` を使い、読取確認した実hostを使う。推定hostで補わず、接続文字列や秘密値を出力しない。ネットワーク拒否、SSO、Deployment Protectionを迂回しない。
 
-QA読取検査のJSON/CLI・console・報告はdeployment URL・接続文字列・資格情報・raw DB hostを出力せず、allowlistしたproject/branch/endpoint/deployment ID等と判定だけを示す。表示された安全な削除計画は、そのままコピーできる承認JSONではない。内部の完全DB identityにはhostを保持し、別途承認されたprivate入力で厳密照合する。Gitゲートの証拠は `scope: repository-git-trigger-configuration` とmain/対象commit・blobの識別情報を持ち、`backendForcedDeploymentPreventionProven: false` のままとする。設定読取成功をproject全体の強制停止やlive実証完了として表示しない。
+QA読取検査のJSON/CLI・console・報告はdeployment URL・接続文字列・資格情報・raw DB hostを出力せず、allowlistしたproject/branch/endpoint/deployment ID等と判定だけを示す。表示された安全な削除計画は、そのままコピーできる承認JSONではない。内部の完全DB identityにはhostを保持し、自動返却の現在lease照合または個別承認されたprivate入力との厳密照合に使う。Gitゲートの証拠は `scope: repository-git-trigger-configuration` とmain/対象commit・blobの識別情報を持ち、`backendForcedDeploymentPreventionProven: false` のままとする。設定読取成功をproject全体の強制停止やlive実証完了として表示しない。
 
 Actionsでは既存repository Variableの本番host、削除承認JSON、alias承認JSONをcallerの `jobs.secrets` から共通 `qa-private-run.yml` の一時的な `workflow_call` secretsへ渡し、calleeは対応するenv keyでprivateな照合へ供給する。remote Secretの登録・移動、Variable値や追加権限の変更はしない。callerにEnvironmentがないため、Preview Environmentの同名Variable overrideを引き継いだと推定しない。runnerのmaskと出力allowlistは別の防御であり、実Actionsのmask検証や過去ログの消去は完了扱いにしない。既存ログのraw値も報告へ転記しない。
 
 ### 削除承認のGET診断と失敗分類
 
-`qa-pool.yml` の `action=plan-release` / `pr_number` / `lease_id` は、同じ既存Environment `Preview` でGET専用のinspect jobを実行する。変更用writer jobは選択されず、transportもGET以外を拒否する。対象資源を照合した完全な内部 `DeletePlan` と、callerから既に渡された旧 `CAKE_QA_DELETE_APPROVALS` を比較し、追加のVariables API呼出しや状態変更を行わない。ここでの `deleteApproval` は旧入力の診断であり、新しいowner planの発行・承認結果を代用しない。
+`qa-pool.yml` の `action=plan-release` / `pr_number` / `lease_id` は、同じ既存Environment `Preview` でGET専用のinspect jobを実行する。変更用writer jobは選択されず、transportもGET以外を拒否する。対象資源を照合した完全な内部 `DeletePlan` と、callerから既に渡された旧 `CAKE_QA_DELETE_APPROVALS` を比較し、追加のVariables API呼出しや状態変更を行わない。ここでの `deleteApproval` は旧入力の診断であり、新しいowner planの発行・承認結果や、マージ済み通常QAの自動返却可否を示すものではない。
 
 `deleteApproval` は `valid`（JSON配列として解析できたか）、`matches`（期限以外の完全対象一致）、`expiry`、`decision`、固定 `reason` だけを返す。未設定・空白は現行どおり空配列として扱う。hostを含む全DB identityと全deployment ID集合は内部で比較し、承認全文・entry・host・期限の原値を表示しない。対象計画が確認できなければ一致と期限は未確認にする。
 
@@ -192,49 +192,51 @@ NeonのPreview actionと `Resource must be active before deployment` が必要�
 
 `held` と `deleting` はどちらも使用中。PR close/mergeは返却開始条件であり、cleanup完了前に空きを増やさない。
 
-不可逆な削除の前に、記録済み全deployment・alias・Native child branch/endpointと、QA DB・登録データが失われることを示して別承認を得る。個別開発依頼による通常生成やowner認証の利用だけで削除許可を推定しない。
+利用者が承認した運用方針により、通常leaseは同一repositoryのmainへPRがマージされたら自動返却する。closedイベントから信頼済みmainの単一writerを使い、対象ごとのcleanup planのowner承認は要求しない。追加flag・Repository Variable・資格情報は作らず、人間の承認receiptを生成・代用しない。QA DBと入力データも失われる。この方針がmainに導入されてから実行され、コード・文書の変更だけを実資源の削除実施やlive検証として扱わない。
 
-1. `plan-release` をGET専用transportで実行し、現在lease・台帳・全deployment ID・alias・Native identity・intent/orphanと実効削除承認サマリーを確認する。この入口は安全な計画と判定だけを返し、`deleting`への状態変更、生成、削除を行わない。確認不能な対象は承認候補を確定せず停止する。
-2. PR close/mergeは対象leaseの `deleting` と安全なcleanup plan IDを残す。OPEN PRの手動計画要求はmainの `action=request-release` に対象 `pr_number`・完全 `source_sha`・現在 `lease_id` を指定する。この入口はOPENを条件とするため、閉じたPRではcloseによる計画発行を確認する。ownerはplanの `projectId` / `pr` / `sha` / `slot` / `leaseId` / 全 `resources.deploymentIds` / `resources.alias` / hostなしDB識別情報・世代・期限とデータ喪失の注記をレビューし、一個のplanを承認する。削除の別承認を得た対象ではCodexが既存owner認証によるplan承認を代行できる。完全DB identityを持つmanifestはmain内部で再構成してdigestを照合する。全IDは昇順、通常aliasは候補名、限定probeは未記録ならnull・記録済みなら候補名を保持する。旧private `CAKE_QA_DELETE_APPROVALS` は完全DB identityと期限まで一致する既存入力のみ読取互換。消失したIDやaliasを対象集合から除かず、head・lease・DB・alias・ID集合・世代が変われば再計画・再承認する。
-3. 承認runの成功後、閉じたPRはmainの既存 `action=release` に対象 `pr_number`・現在 `lease_id` を指定して対象だけを再照合するか、既存5分scheduleでcleanupを継続する。OPENの対象では `request-release` も使える。閉じたPRに `request-release` を繰り返さず、他PRまで扱うglobal refreshへ代替しない。writerは先に `deleting` snapshotを永続化して配置とalias更新を止め、承認待ちも使用中として保持する。承認run自身はDELETEを行わない。closeはそのPRだけを扱い、他枠のclaim・全OPEN PR列挙・global reconcile・生成へ広げない。未完了create intentや曖昧なorphanを解決できなければ削除・freeへ進めない。限定aliasの `pending` がexact GETで未確認ならcleanupも停止し、記録を保持する。
-4. 成功・失敗・初回provisioningを含む記録済み全deployment IDをまずGETし、全件のproject・PR・feature枝・記録済みSHA・phase・leaseを検証する。現在PRのbranch・head repository・base、完全DB identityまたは既知DBの消失、台帳の全記録と承認期限も削除直前に再照合する。現在の完全な対象集合と期限付き承認が一致するときだけ、承認されたaliasとdeployment IDをDELETEする。名前の類似で未記録対象を削除せず、Productionや他PRに触れない。cancel APIは現writerに未実装で、実行中buildのcancelやFunction停止をこの操作で保証しない。
-5. alias消失、全記録IDの不在、関連deployment残存なしをGETで確認する。`assigned` のalias GETがnullなら既に削除された可能性があるため、alias記録と全IDを保ったまま他の消失確認を続ける。alias変更だけで旧固有URLのアプリ/API停止とは扱わない。正常な認証・全ページ取得・対象ID照合によりNative branchと全endpointの消失も確認し、HTTP成功、PR close、403やtimeoutを消失証拠にしない。
+未マージでcloseしたPR、OPEN PRの手動返却、限定probeは自動返却の対象外。これらの不可逆な削除は、記録済み全deployment・alias・Native child branch/endpointと、QA DB・登録データが失われることを示して別承認を得る。個別開発依頼による通常生成やowner認証の利用だけで削除許可を推定しない。probeはPRがマージされても従来の期限付き個別削除承認を維持する。
+
+1. closeのwriterは対象leaseを `deleting` に保存し、配置とalias更新を止める。自動返却ではGitHub RESTの現在PRを読み直し、番号・head repository・base main・feature枝・closedかつmergedであることを確認する。イベント入力や台帳だけからmergedを推定しない。現在slotのdeleting lease・head SHA・全記録deployment ID・alias・完全DB identityと、内部の完全削除計画を一致させる。QAがmerged HEADより古い場合も、削除するのは当該leaseの記録済み資源だけとする。未完了create intentや曖昧なorphanを解決できなければ削除・freeへ進めない。限定aliasの `pending` がexact GETで未確認ならcleanupも停止して記録を保持する。closeはそのPRだけを扱い、他枠のclaim・全OPEN PR列挙・global reconcile・生成へ広げない。
+2. 個別承認を要する返却では、GET専用 `plan-release` で現在lease・台帳・全deployment ID・alias・Native identity・intent/orphanと実効削除承認サマリーを確認できる。この入口は安全な計画と判定だけを返し、状態変更・生成・削除をしない。未マージcloseは安全なcleanup plan IDを残し、OPENの手動計画要求はmainの `action=request-release` に対象 `pr_number`・完全 `source_sha`・現在 `lease_id` を指定する。ownerは全対象・台帳世代・期限・digest・データ喪失をレビューし、許可済み範囲ではCodexが既存owner認証で `qa:approve` を代行できる。probeは既存の個別承認経路を維持する。完全DB identityはmain内部で照合し、公開計画を承認JSONへコピーさせない。消失したIDやaliasも対象集合から除かず、手動計画のhead・lease・DB・alias・ID集合・世代が変われば再計画・再承認する。
+3. マージ済み通常leaseはclosedの同じrun内で削除・消失確認まで進める。個別承認の対象は承認run成功後、対象pr_number・現在lease_idのaction=releaseで同じ完了待ちを進める。OPENではrequest-releaseも使えるがclosed PRには使わない。3分の待機予算を超えた返却はdeletingを保持してrunを失敗させ、現在のPR・leaseのreleaseで再開する。定期監視・自動の全枠scanは行わず、対象限定操作をglobal refreshへ代替しない。承認run自身はDELETEを行わない。
+4. 成功・失敗・初回provisioningを含む記録済み全deployment IDをまずGETし、全件のproject・preview target・PR・feature枝・記録済みSHA・phase・leaseを検証する。現在lease・完全な対象集合・PRの所属と自動返却条件または個別承認、完全DB identityまたは既知DBの消失を各mutation直前にも再照合し、一致するaliasとdeployment IDだけをDELETEする。名前の類似で未記録対象を削除せず、Production、親DB、他PRに触れない。cancel APIは現writerに未実装で、実行中buildのcancelやFunction停止をこの操作で保証しない。
+5. alias消失、全記録IDの不在、関連deployment残存なしをGETで確認する。`assigned` のalias GETがnullなら既に削除された可能性があるため、alias記録と全IDを保ったまま他の消失確認を続ける。通常aliasは候補名、限定probeは未記録ならnull・記録済みなら候補名を保持する。alias変更だけで旧固有URLのアプリ/API停止とは扱わない。正常な認証・全ページ取得・対象ID照合によりNative branchと全endpointの消失も直接GETで確認し、HTTP成功、PR close/merge、403やtimeoutを消失証拠にしない。
 6. 消失結果を記録し、DB identityを返却済み識別子へ追加して `free` snapshotを保存する。開始済みFunction/transactionの監視・終了確認は現writerに未実装で、資源消失と実処理停止を区別する。次leaseが古いbranch ID・endpoint ID・hostを使うことを拒否する。deploymentの復元をNeon DBの復元保証として扱わない。
 
-delete失敗、権限不足、ネットワーク拒否、Neon読取不能、intent未解決は `deleting` のまま保持し、後続writerで回復する。応答喪失は再読取して確定し、盲目的に同じ生成要求を繰り返さない。retentionによる途中削除も台帳とNative identityをreconcileする。保持deploymentを残してDBを温存する返却はしない。deployment/branch/endpoint消失は資源の削除確認であり、開始済みFunction/transactionの即停止を保証するものではない。現writerは実行中処理の監視APIを照会しない。この実処理の停止挙動もlive検証で確認する。
+delete失敗、権限不足、ネットワーク拒否、Neon読取不能、intent未解決は `deleting` のまま保持し、後続writerが現在の記録・実資源・自動返却条件または個別承認を再照合して回復する。応答喪失は再読取して確定し、盲目的に同じ生成要求を繰り返さない。retentionによる途中削除も台帳とNative identityをreconcileする。保持deploymentを残してDBを温存する返却はしない。deployment/branch/endpoint消失は資源の削除確認であり、開始済みFunction/transactionの即停止を保証するものではない。現writerは実行中処理の監視APIを照会しない。この実処理の停止挙動もlive検証で確認する。
 
-cleanupの実証結果、API認証のscope、削除の明示承認は独立した情報。cleanup未実証を承認済みとして補ったり、tokenがDELETE可能という理由で承認を省略したりしない。intentが一覧で解決できない場合やDBが生成されなかったことを証明できない場合の手動復旧入口は未実装で、貸出を保持して調査する。
+cleanupの実証結果、API認証のscope、自動返却方針、個別削除承認は独立した情報。cleanup未実証を検証済みとして補ったり、tokenがDELETE可能という理由で自動返却条件や個別承認を省略したりしない。intentが一覧で解決できない場合やDBが生成されなかったことを証明できない場合の手動復旧入口は未実装で、貸出を保持して調査する。
 
-削除は通常生成の有効化やNative確認flagをtrueにして許可する仕組みではない。生成停止中でも、記録と実資源の所属・完全な対象集合・期限付き削除承認・必要な読取認証が揃えば対象PRの返却を再照合する。probeのalias有無は `aliasAssignment` 記録に従い、aliasや一部IDが途中で消失しても承認対象集合を勝手に縮めない。
+削除は通常生成の有効化やNative確認flagをtrueにして許可する仕組みではない。生成停止中でも、記録と実資源の所属・完全な対象集合・必要な読取認証と、マージ済み通常QAの自動返却条件または期限付き個別削除承認が揃えば対象PRの返却を再照合する。旧private `CAKE_QA_DELETE_APPROVALS` は完全DB identityと期限まで一致する既存入力のみ読取互換とし、新標準のために再登録しない。probeのalias有無は `aliasAssignment` 記録に従い、aliasや一部IDが途中で消失しても対象集合を勝手に縮めない。
 
 ### alias UIDを使う削除
 
 [Get an Alias](https://vercel.com/docs/rest-api/aliases/get-an-alias) はhostnameまたはIDからaliasを取得し、`uid`・`alias`・`projectId`・`deploymentId`を返す。[Delete an Alias](https://vercel.com/docs/rest-api/aliases/delete-an-alias) はalias IDを削除対象とし、path説明ではIDまたはaliasを許容している。従って、実機のhostname指定DELETE 404を「hostnameが非対応だから」と断定しない。公式CLIの [alias rm](https://github.com/vercel/vercel/blob/main/packages/cli/src/commands/alias/rm.ts) はlookup後の `alias.uid` を削除し、[Client](https://github.com/vercel/vercel/blob/main/packages/cli/src/util/client.ts) が選択teamをscopeへ渡す。ただしCLIのliteral endpointは `/now/aliases/...` で、v2の根拠はREST仕様。Cakeでのproject・deployment・検証済みaccountIdの照合は追加guardである。PR #42/#43のcleanupではUID指定削除とUID・候補名の不在確認を実証したが、過去のhostname指定DELETE 404の原因を断定する証拠にはしない。
 
-削除候補の正確な名前をGETし、取得したUID・名前・project・deploymentが現在の記録と一致することを確認する。teamはslugやalias名から推測せず、読取・照合済みprojectの `accountId` を使い、同じ `teamId` scopeでUIDを再GETする。DELETE直前にも候補名をGETしてUID・割当先・team所属を再照合し、現在lease・記録全体・承認期限・完全DB identityの既存gateを通した対象だけを `/v2/aliases/{uid}?teamId=...` で削除する。削除専用の読取とDELETEは検証済み `teamId` だけをqueryへ渡し、通常の他Vercel操作が使う `slug` と同時送信しない。HTTP成功と応答の `status=SUCCESS` を確認しても、同じ実行内ではUID・候補名双方のGET404まで消失完了としない。privateな承認の `alias` は候補名のままとし、UIDへの置換や承認項目の追加は行わない。UIDや割当先の変更を観測した場合は新しい対象を自動追跡して削除せず停止する。GETからDELETEまでの完全な排他やCASを保証せず、Actionsの単一queueも外部callerを排他しない。直前GETの後に同じUIDが外部から再割当された競合は、DELETE後の不在確認でも完全に検出できないため、最後に観測した所属の照合を絶対的な誤削除防止保証としない。
+削除候補の正確な名前をGETし、取得したUID・名前・project・deploymentが現在の記録と一致することを確認する。teamはslugやalias名から推測せず、読取・照合済みprojectの `accountId` を使い、同じ `teamId` scopeでUIDを再GETする。DELETE直前にも候補名をGETしてUID・割当先・team所属を再照合し、現在lease・記録全体・自動返却条件または個別承認期限・完全DB identityの既存gateを通した対象だけを `/v2/aliases/{uid}?teamId=...` で削除する。削除専用の読取とDELETEは検証済み `teamId` だけをqueryへ渡し、通常の他Vercel操作が使う `slug` と同時送信しない。HTTP成功と応答の `status=SUCCESS` を確認しても、同じ実行内ではUID・候補名双方のGET404まで消失完了としない。privateな承認の `alias` は候補名のままとし、UIDへの置換や承認項目の追加は行わない。UIDや割当先の変更を観測した場合は新しい対象を自動追跡して削除せず停止する。GETからDELETEまでの完全な排他やCASを保証せず、Actionsの単一queueも外部callerを排他しない。直前GETの後に同じUIDが外部から再割当された競合は、DELETE後の不在確認でも完全に検出できないため、最後に観測した所属の照合を絶対的な誤削除防止保証としない。
 
 | 観測 | 判定と次の処理 |
 | --- | --- |
 | 正しい認証・team scopeで対象を限定したGETが404 | その読取での不在。`assigned` の記録を保持して他の資源の消失確認を続ける。未確認の `pending` は引き続き保留し、不在だけで `free` にしない |
 | UID指定DELETEが404、403、timeout、その他失敗 | 削除成功とせず固定stage/statusを報告して停止し、`deleting` と全記録IDを保持する。hostname DELETEなどへのfallbackや盲目的な再DELETEをしない |
-| DELETE応答後のUIDまたは候補名GETが残存、別割当、読取不能 | 未完了・不明として停止する。後続の承認済み再開でまずGETし、消失と現在の対象を確認する |
+| DELETE応答後のUIDまたは候補名GETが残存、別割当、読取不能 | 未完了・不明として停止する。後続の自動返却条件または個別承認を満たす再開でまずGETし、消失と現在の対象を確認する |
 | 同じ実行のUID・候補名、全記録deployment、関連deployment、Native branch・全endpointの不在を確認 | 初めて返却済みDB identityを記録して `free` にできる。HTTP成功だけで解放しない |
 
 現実装はalias UIDを台帳に追加保存しない。transport failureなどの不明結果から別runで再開する場合、最初の候補名GET404は「現在その名前が不在」という証拠であり、前runの旧UIDを独立して確認した証拠ではない。`assigned` の記録と全対象IDを保持したまま、既存serviceの他資源・所属・生成停止gateの確認へ進む。前runのDELETE成功や旧UIDの独立消失を後から確認済みと報告しない。
 
 ### 導入時のcleanup再開条件と現在の適用
 
-導入時の承認はコード修正・検証・draft PRまでであり、remote DELETE、cleanup dispatch、設定変更、main merge、新規deployment/DB生成を含まなかった。その後のPR #42/#43では対象・データ喪失を別承認してcleanupと `free` を確認した。以下の再照合条件は引き続き適用し、削除済み旧Variableの復元や従前の10:00期限の延長を標準手順にしない。
+導入時の承認はコード修正・検証・draft PRまでであり、remote DELETE、cleanup dispatch、設定変更、main merge、新規deployment/DB生成を含まなかった。その後のPR #42/#43では対象・データ喪失を別承認してcleanupと `free` を確認した。これらは当時の実証履歴であり、現在は利用者がマージ済み通常QAの自動返却方針を承認している。未マージclose・OPEN手動返却・probeには個別承認を維持する。削除済み旧Variableの復元や従前の10:00期限の延長を標準手順にしない。
 
-1. ユーザーがmain導入を判断する前に、自動Production build → `db:setup` の影響、現在の実効承認状態、実行中・待機中のwriter、schedule条件を確認する。確認不能ならmerge・承認再登録を停止する。
-2. main導入後のGET専用 `plan-release` で閉じた対象PRの現在lease・全記録ID・aliasの割当所属・完全DB identity・intent/orphanの状態を確認する。UIDの照合は削除専用の内部読取で行う。このGET診断で新owner承認を発行せず、旧Variableの `DENIED` を勝手に補わない。
-3. 別途許可されたmainの `request-release`（OPEN PRのみ）またはcloseのplan発行から、具体的な対象・新期限を持つ安全なcleanup plan IDをレビューし、ownerが承認する。承認runの成功後、閉じたPRでは現在のPR番号・leaseを指定する既存 `action=release`、またはscheduleによる継続を確認する。標準経路は旧Variableへのprivate JSON再登録を要求しない。旧入力を使う場合だけGET診断の `deleteApproval.decision=ALLOWED` を確認する。承認後はscheduleも動くため、GET先行や手動一回だけの実行を保証しない。
-4. 失敗したら固定stage/statusだけを記録して停止し、期限を延長せず、無確認のretryをしない。再開には現在の記録・資源・承認runを再照合する。最新receiptの失敗・未完了なら新owner dispatch、対象や期限が変われば新planへの別承認が必要になる。
+1. ユーザーがmain導入を判断する前に、自動Production build → `db:setup` の影響、マージ済み通常QAの自動返却方針、個別承認の状態、実行中・待機中writerとイベント・手動実行条件を確認する。Codexはmergeや現在資源の削除を、この実装変更の付随作業として実行しない。
+2. main導入後はwriterが現在lease・全記録ID・aliasの所属・完全DB identity・intent/orphanと、RESTのmerged状態または個別承認を再照合する。GET専用 `plan-release` は同じ対象の診断に使えるが、自動返却の前に人が実行する必須手順ではない。UID照合は削除専用の内部読取で行い、GET診断から新owner承認を発行したり、旧Variableの `DENIED` を承認済みへ書き換えたりしない。
+3. マージ済み通常QAは個別cleanup承認を要求せずclosed内で完了を待つ。未マージclose・OPEN手動返却は別途許可されたrequest-release（OPENのみ）またはcloseのplanをレビュー・owner承認し、対象PR番号・現在leaseのreleaseで再開する。probeは既存の個別承認を使う。通常経路は旧private JSON再登録を要求せず、旧入力を使う場合だけdeleteApproval.decision=ALLOWEDを確認する。QAの定期監視は廃止しており、上限・失敗時は現在対象の手動再実行で回復する。
+4. 失敗したら固定stage/statusだけを記録し、deletingと全記録を保持する。後続writerは現在の記録・資源・自動返却条件または個別承認を再照合して回復する。個別承認は期限を延長せず、最新receiptの失敗・未完了なら新owner dispatch、対象や期限が変われば新planへの別承認を必要とする。
 5. 全alias・全記録deployment・関連deployment・Native branch/全endpointの不在と台帳の `free` だけを返却完了とする。次PRの新しいDB identityと旧DB非再利用はcleanup成功だけで検証済みとしない。PR #42から#43への順次貸出で確認した範囲は両PRの実証記録に分けて残す。
 
 ## 開発者のコマンドと検証
 
-コードを検証・commitしたら、最初に `task:pr --draft` でmain向けPRを作る。通常のdraft入口でoriginとHEADが一致せずpushが必要な場合は、同一repositoryのmain/対象HEADを完全SHAで読む `vercel.json` のmain-only停止設定（`**: false` / `main: true`、main以外のtrueなし）とローカルcommitのblobを共通checkerで検証してからfeature枝をpushする。この入口はRepository Variablesの管理権限や3flagの有効化を要求しない。Preview未実施はdraft本文で理由を明示でき、文書のみの変更ではPreviewは不要。`deploy:preview` は同じGit設定のゲートに加え通常有効化と先行PRを確認してから検証済みSHAをfeature枝へpushし、mainへ `request-preview` をdispatchする。plan承認待ちなら安全なplan IDを返し、承認run成功後の再実行で同PR/同lease/current HEADのREADY記録を読む。CLIはVercel/Neonを直接生成・削除しない。個別開発依頼の生成範囲を守り、cleanupは全対象とデータ喪失の別承認を得る。
+コードを検証・commitしたら、最初に `task:pr --draft` でmain向けPRを作る。通常のdraft入口でoriginとHEADが一致せずpushが必要な場合は、同一repositoryのmain/対象HEADを完全SHAで読む `vercel.json` のmain-only停止設定（`**: false` / `main: true`、main以外のtrueなし）とローカルcommitのblobを共通checkerで検証してからfeature枝をpushする。この入口はRepository Variablesの管理権限や3flagの有効化を要求しない。Preview未実施はdraft本文で理由を明示でき、文書のみの変更ではPreviewは不要。`deploy:preview` は同じGit設定のゲートに加え通常有効化と先行PRを確認してから検証済みSHAをfeature枝へpushし、mainへ `request-preview` をdispatchする。plan承認待ちなら安全なplan IDを返し、承認run成功後の再実行で同PR/同lease/current HEADのREADY記録を読む。CLIはVercel/Neonを直接生成・削除しない。個別開発依頼の生成範囲を守る。マージ済み通常QAは承認済み方針により自動返却し、未マージclose・OPEN手動返却・probeは全対象とデータ喪失の別承認を得る。
 
 ```bash
 npm run task:pr -- --draft --title '変更内容を表すタイトル' --verification-file /tmp/cake-verification.md
