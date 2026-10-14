@@ -152,6 +152,8 @@ main向けの同一repositoryのPRを作る。Git連携でfeatureブランチの
 
 文書のみの変更はQAデプロイ不要と理由を記載できる。設定変更の導入PRも、未導入の機能を使って検証済みと扱わない。
 
+CIのランタイム・テスト実行設定と説明文書だけを変更し、アプリ・QA運用コード・DB・依存関係を変更しない場合は、PreviewではそのCI環境を検証できないためQA枠を予約しない。PR本文へ理由を記載し、共通コマンドでdraft PRを作成する。現在HEADのpush・PR両方のCIで`npm ci`・lint・test・buildの成功を確認した後、本文を更新し`gh pr ready`でdraftを解除する。この場合はQAの貸出や画面検証証拠を作らない。
+
 ### 4. デプロイ直前にQA枠を予約する
 
 `npm run deploy:preview`はデプロイ直前にmainのActionsへ予約を依頼し、貸出IDを取得する。予約だけ行う共通入口は`npm run qa:reserve`、貸出状態の読取は`npm run qa:status`である。PR番号・現在の完全SHAを使い、Actionsが同一repository、OPEN PR、main向け、ブランチ、現在HEADを確認して空き枠を条件付き更新で予約する。以後の操作はこの貸出IDを照合する。
@@ -198,7 +200,7 @@ PR本文へ固定QA URL、Deployment固有URL、完全SHA、貸出ID、資源ID�
 npm run task:pr -- --title '変更内容を表すタイトル' --verification-file /tmp/cake-verification.md
 ```
 
-CIはNode.js 24で`npm ci`、lint、test、buildを行う。mainのRulesetはPR経由と必須`ci`の成功、最新mainへの追従を要求する。Codexはマージ・自動マージ設定を行わない。利用者が差分、検証結果、QA画面を確認してマージする。
+CIはNode.js 24.19.0に固定して`npm ci`、lint、test、buildを行う。24系の最新版へ自動追従させない。Node.js 24.21.0のCIではPGliteの実SQLテスト中にプロセスが異常終了したため、Cloudと同じ版へ揃える暫定対策である。`corrupted size vs. prev_size`やV8の内部assertによる停止をSQLのアサーション失敗と扱わず、DBテストは省略しない。ランタイムを更新するときは、SQLテストと全体のlint/test/buildを新しい版で確認してからCIの固定値を変更する。mainのRulesetはPR経由と必須`ci`の成功、最新mainへの追従を要求する。Codexはマージ・自動マージ設定を行わない。利用者が差分、検証結果、QA画面を確認してマージする。
 
 ## 台帳と競合防止
 
