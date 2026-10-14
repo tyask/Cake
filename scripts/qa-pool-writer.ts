@@ -10,7 +10,7 @@ import {
 } from "../lib/qa-pool";
 import { runQaRequest, type QaGateTarget, type QaGateway, type QaPullRequest, type QaRequest, type RemoteDeployment } from "../lib/qa-pool-service";
 import { decodeGitConfigFile, type GitConfigEvidence } from "../lib/qa-pool-gate";
-import { aliasApproval, aliasPlan, deletionApproval, deletePlan, diagnoseDeletionApproval, probeApproval,
+import { aliasApproval, aliasPlan, confirmedDeletionPlan, deletionApproval, deletePlan, diagnoseDeletionApproval, probeApproval,
   type AliasPlan, type DeletePlan, type DeletionApprovalDiagnosis } from "../lib/qa-pool-authorization";
 import { maskQaHosts, publicQaOutput } from "../lib/qa-output-privacy";
 import { contextualQaFailure, QaDiagnosticFailure, qaDiagnosticFields, qaFailureAnnotation, type QaDiagnosticFields } from "../lib/qa-diagnostics";
@@ -134,8 +134,8 @@ export class HttpQaGateway implements QaGateway {
     const sha = str(head.sha);
     if (pr.state !== "open" && pr.state !== "closed") throw new Error("PR状態が不正です。");
     if (safeNumber(pr.number) !== number) throw new Error("取得PR番号が対象と一致しません。");
-    const result: QaPullRequest = { number: safeNumber(pr.number), state: pr.state, branch: str(head.ref), sha, repository: str(repo.full_name), base: str(base.ref), approved: this.approved(number, sha) };
-    if (this.env.QA_OWNER_FLOW === "true") {
+    const result: QaPullRequest = { number: safeNumber(pr.number), state: pr.state, branch: str(head.ref), sha, repository: str(repo.full_name), base: str(base.ref), approved: pr.state === "open" && this.approved(number, sha) };
+    if (result.state === "open" && this.env.QA_OWNER_FLOW === "true") {
       const owner = await this.ownerStore.preview(result, false);
       if (owner.known) result.approved = owner.authorization !== null;
     }
@@ -451,14 +451,32 @@ export class HttpQaGateway implements QaGateway {
     }
     await this.api("vercel", `/v2/deployments/${deployment.id}/aliases`, "POST", { alias: plan.alias });
   }
-  deletionApproved(plan: DeletePlan): boolean | Promise<boolean> {
-    const now = Date.now();
+  /** A merged normal QA lease is retired automatically; other returns retain explicit approval. */
+  private async mergedCleanupAuthorized(plan: DeletePlan): Promise<boolean> {
+    if (!confirmedDeletionPlan(plan)) return false;
+    const saved = (await this.pool())[plan.slot];
+    if (!saved || saved.payload.state !== "deleting" || saved.payload.purpose || saved.payload.intent
+      || !isDeepStrictEqual(deletePlan(saved.payload), plan)) return false;
+    const pr = object(await this.api("github", `/repos/${QA_REPOSITORY}/pulls/${plan.pr}`));
+    if (pr.number !== plan.pr || pr.state !== "closed" || pr.merged !== true
+      || typeof pr.merged_at !== "string" || !Number.isFinite(Date.parse(pr.merged_at))
+      || !fullSha(pr.merge_commit_sha)) return false;
+    const head = object(pr.head), base = object(pr.base);
+    if (object(head.repo).full_name !== QA_REPOSITORY || object(base.repo).full_name !== QA_REPOSITORY
+      || base.ref !== "main" || head.ref !== saved.payload.branch || !fullSha(head.sha)) return false;
+    // QA may lag the merged head. Delete only the exact recorded resources, including older SHAs.
+    const latest = (await this.pool())[plan.slot];
+    return latest?.id === saved.id && isDeepStrictEqual(latest.payload, saved.payload);
+  }
+  async deletionApproved(plan: DeletePlan): Promise<boolean> {
+    if (await this.mergedCleanupAuthorized(plan)) return true;
     const legacy = () => {
-      try { return deletionApproval(this.env.CAKE_QA_DELETE_APPROVALS, plan, now); }
+      try { return deletionApproval(this.env.CAKE_QA_DELETE_APPROVALS, plan, Date.now()); }
       catch { throw new QaDiagnosticFailure({ stage: "APPROVAL_VALIDATE", provider: "NONE", method: "NONE", reason: "VALIDATION_ERROR" }); }
     };
     if (this.env.QA_OWNER_FLOW === "true") {
-      return this.ownerStore.cleanup(plan).then((owner) => owner.known ? owner.approved : legacy());
+      const owner = await this.ownerStore.cleanup(plan);
+      return owner.known ? owner.approved : legacy();
     }
     return legacy();
   }
@@ -509,9 +527,9 @@ export class HttpQaGateway implements QaGateway {
         verify(deployment);
       }
     }
-    await this.assertAliasDeletionDatabase(record);
+    await this.assertDeletionDatabase(record);
   }
-  private async assertAliasDeletionDatabase(record: QaLeaseRecord): Promise<void> {
+  private async assertDeletionDatabase(record: QaLeaseRecord): Promise<void> {
     if (record.database) {
       const database = await this.database(record, "cleanup");
       if (database ? !sameDatabase(database, record.database) : !(await this.databaseGone(record.database))) {
@@ -536,7 +554,7 @@ export class HttpQaGateway implements QaGateway {
       const byId = await this.deletionAlias(alias.uid, plan.alias, teamId, alias.uid);
       const byName = await this.deletionAlias(plan.alias, plan.alias, teamId);
       if (!isDeepStrictEqual(byId, alias) || !isDeepStrictEqual(byName, alias)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
-      await this.assertAliasDeletionDatabase(record);
+      await this.assertDeletionDatabase(record);
       const latest = (await this.pool())[record.slot];
       if (!latest || !isDeepStrictEqual(latest.payload, record) || !await this.deletionApproved(plan)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
       const result = object(await this.api("vercel", `/v2/aliases/${encodeURIComponent(alias.uid)}`, "DELETE", undefined, false, teamId));
@@ -550,8 +568,18 @@ export class HttpQaGateway implements QaGateway {
   }
   async deleteDeployment(record: QaLeaseRecord, deployment: RemoteDeployment, plan: DeletePlan) {
     try {
+      if (this.access !== "write") throw new QaDiagnosticFailure({ reason: "METHOD_NOT_ALLOWED" });
       if (!await this.deletionApproved(plan) || record.state !== "deleting" || !isDeepStrictEqual(deletePlan(record), plan)
         || !plan.deploymentIds.includes(deployment.id) || deployment.leaseId !== record.leaseId || deployment.projectId !== QA_PROJECT_ID) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      const known = record.deployments.find((d) => d.id === deployment.id);
+      const current = await this.deployment(deployment.id);
+      if (!known || !current || current.id !== deployment.id || current.projectId !== QA_PROJECT_ID
+        || !(current.target === null || current.target === "preview") || current.pr !== record.pr
+        || current.branch !== record.branch || current.leaseId !== record.leaseId
+        || current.sha !== known.sha || current.phase !== known.phase) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
+      await this.assertDeletionDatabase(record);
+      const latest = (await this.pool())[record.slot];
+      if (!latest || !isDeepStrictEqual(latest.payload, record) || !await this.deletionApproved(plan)) throw new QaDiagnosticFailure({ reason: "CHECK_FAILED" });
       const value = object(await this.api("vercel", `/v13/deployments/${deployment.id}`, "DELETE"));
       if (value.state !== "DELETED") throw new QaDiagnosticFailure({ reason: "INVALID_RESPONSE" });
     } catch (error) {
@@ -700,9 +728,11 @@ export class HttpQaGateway implements QaGateway {
       return deletePlan(record);
     });
     summary.deleteApproval = diagnoseDeletionApproval(this.env.CAKE_QA_DELETE_APPROVALS, planned, approvalNow);
+    const automatic = planned ? await check("Merged PR cleanup policy", () => this.mergedCleanupAuthorized(planned)) : false;
     summary.plan = planned ? { ...planned, database: publicDatabase(planned.database ?? undefined),
-      approvalManifestRequiresPrivateHost: Boolean(planned.database),
-      databaseDataLossRequiresApproval: Boolean(planned.database),
+      approvalManifestRequiresPrivateHost: Boolean(planned.database) && !automatic,
+      databaseDataLossRequiresApproval: Boolean(planned.database) && !automatic,
+      ...(automatic ? { automaticMergedCleanup: true } : {}),
       dataLossNotice: planned.database ? "削除するとQA DBと入力データを失います。deploymentの復元はDBの復旧を保証しません。" : null,
     } : null;
     return summary;

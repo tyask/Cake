@@ -105,7 +105,7 @@ export function deletionApproval(text: string | undefined, plan: DeletePlan, now
   });
 }
 
-const confirmedDeletionPlan = (plan: unknown): plan is DeletePlan => object(plan)
+export const confirmedDeletionPlan = (plan: unknown): plan is DeletePlan => object(plan)
   && leaseToken(plan.leaseId) && fullSha(plan.headSha) && plan.projectId === QA_PROJECT_ID
   && integer(plan.pr) && SLOTS.includes(plan.slot as Slot) && Array.isArray(plan.deploymentIds)
   && !plan.deploymentIds.some((id) => !/^dpl_[a-zA-Z0-9_-]+$/.test(id))

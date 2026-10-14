@@ -180,16 +180,16 @@ test("不正statusやenum、unknown errorのmessage/stack/bodyをannotationへ�
   assert.equal(qaDiagnosticFields(contextualQaFailure(unknown, { stage: "DELETE_ALIAS", provider: "VERCEL", method: "DELETE" })).reason, "UNKNOWN");
 });
 
-test("operational承認は既存matcherを1回だけ使い、不正JSONは引続きthrowする", () => {
+test("手動返却の承認は既存matcherを1回だけ使い、不正JSONは引続きthrowする", async () => {
   const f = fixture(), originalNow = Date.now; let calls = 0;
   const now = originalNow();
   try {
     Date.now = () => { calls++; return now; };
-    assert.equal(new HttpQaGateway(f.env, f.request).deletionApproved(deletePlan(f.record)), true);
+    assert.equal(await new HttpQaGateway(f.env, f.request).deletionApproved(deletePlan(f.record)), true);
     assert.equal(calls, 1);
   } finally { Date.now = originalNow; }
   f.env.CAKE_QA_DELETE_APPROVALS = `{${privateSentinel}`;
-  assert.throws(() => new HttpQaGateway(f.env, f.request).deletionApproved(deletePlan(f.record)), (error: unknown) => {
+  await assert.rejects(() => new HttpQaGateway(f.env, f.request).deletionApproved(deletePlan(f.record)), (error: unknown) => {
     assert.deepEqual(qaDiagnosticFields(error), { stage: "APPROVAL_VALIDATE", provider: "NONE", method: "NONE", status: null, reason: "VALIDATION_ERROR" });
     assertPrivate(qaFailureAnnotation(error)); return true;
   });
