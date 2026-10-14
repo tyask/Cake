@@ -213,6 +213,7 @@ export async function runRegistryManager(env: Env = process.env): Promise<void> 
   const closed = env.EVENT_NAME === "pull_request_target";
   const event = closed ? obj(JSON.parse(await readFile(env.EVENT_PATH!, "utf8"))) : null;
   const pr = closed ? Number(obj(event!.pull_request).number) : Number(env.QA_PR_NUMBER);
+  if (initializing) console.log("Cake: QA registry initialize stage=configuration");
   const store = createQaRegistryStore({ ...env });
   const g = new RegistryGateway(env, store, undefined, !closed && env.QA_ACTION === "release");
   if (initializing) { await initializeRegistry(g, env); return; }
@@ -230,5 +231,10 @@ export async function runRegistryManager(env: Env = process.env): Promise<void> 
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  void runRegistryManager().catch(() => { console.error("QA operation failed. The registry remains reserved; inspect the scoped operation and retry safely."); process.exitCode = 1; });
+  void runRegistryManager().catch(() => {
+    console.error(process.env.QA_ACTION === "initialize"
+      ? "QA registry initialization failed. Keep QA cutover disabled; inspect the last initialization stage."
+      : "QA operation failed. The registry remains reserved; inspect the scoped operation and retry safely.");
+    process.exitCode = 1;
+  });
 }

@@ -48,6 +48,10 @@ mainの`scripts/qa-registry-initialize.ts`が、GitHub由来のowner本人・tru
 
 初期化runの成功と管理DBの3枠を読み取り確認してから`CAKE_QA_REGISTRY_ENABLED=true`へ変更し、旧writerがskipすることを確認して`CAKE_QA_POOL_ENABLED=true`へ戻す。initializeは通常操作と異なりreceipt artifactを作らないので、同じ依頼UUIDのrunと安全な初期化完了ログを確認する。使用中DBを空に戻す目的でinitializeを再実行しない。
 
+管理DDLはSQLのトップレベル文へ分割し、外側の`BEGIN` / `COMMIT`をNeon HTTPSの`transaction`へ置き換えて一括適用する。関数本体のドル引用内のセミコロンは分割しない。途中の文が失敗した場合は全体をrollbackする。初期化ログは固定のstage名だけを出し、接続先・SQL本文・DBエラーの詳細は表示しない。
+
+PR #47のmain導入後、初回の[initialize run 38581479595](https://github.com/tyask/Cake/actions/runs/38581479595)は失敗した。このrunでは停止stageを表示していないため、失敗原因とDBの適用状態は確認できていない。`CAKE_QA_POOL_ENABLED=false`を維持し、新方式を有効にせず、修正後のmainから新しい依頼UUIDで再確認する。再実行時も空DB・旧資源不在のguardを省略しない。
+
 管理DBの将来のschema変更は`db/qa-registry/`へ番号付きDDLを追加し、適用済みDDLを書き換えず、管理専用の適用手順をレビューして実行する。Cakeの業務migration、`npm run db:setup`、Vercelのアプリbuildから管理用DDLを実行しない。
 
 Cloud/PCの共通クライアントは`scripts/qa-client.ts`。Actionsの結果は安全なID・状態だけの`qa-result-<requestId>` artifactの`result.json`から受け取る。DB host、接続文字列、認証情報をartifactへ出さない。mainの実行元SHA、workflow、依頼ID、owner本人、全job成功、初回attempt、PR・貸出の一致を確認し、別run・失敗run・rerunの結果を使わない。mainへの導入前は新コマンドを実行可能な入口として案内しない。旧方式の実装条件・実測記録は末尾の「旧方式の運用・検証記録」に保持する。
