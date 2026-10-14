@@ -95,10 +95,10 @@ export async function runTaskPreview({
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  void runTaskPreview({ args: process.argv.slice(2) }).then((result) => {
-    if ("status" in result && result.status === "WAIT_APPROVAL") process.exitCode = 2;
-  }).catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : "タスク用Previewの作成に失敗しました。");
+  void import("./task-preview-registry").then(({ runTaskPreviewRegistry }) => runTaskPreviewRegistry({ args: process.argv.slice(2) })).then((result) => {
+    if (result.status === "FULL") process.exitCode = 2;
+  }).catch(() => {
+    console.error("タスク用Previewを確認できません。現在の貸出・Actions・CLI認証を確認してください。秘密情報は表示しません。");
     process.exitCode = 1;
   });
 }

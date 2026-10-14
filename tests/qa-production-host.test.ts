@@ -33,7 +33,7 @@ test("本番host Variableはrunner起動前のworkflow-call secretとしてだ�
       bindings++;
     }
   }
-  assert.equal(bindings, 3);
+  assert.equal(bindings, 4);
 });
 
 test("secretを本番比較guardの同じ環境名へ渡し、runtime権限追加を使わない", () => {

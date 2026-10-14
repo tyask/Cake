@@ -71,7 +71,7 @@ export class HttpQaGateway implements QaGateway {
     maskQaHosts([env.CAKE_QA_PRODUCTION_DATABASE_HOST, env.CAKE_QA_DELETE_APPROVALS, env.CAKE_QA_ALIAS_APPROVALS], env);
     this.ownerStore = new HttpOwnerApprovalStore(env, (path, method, body) => this.api("github", path, method, body), () => this.ledgerRecords());
   }
-  private async api(provider: "github" | "vercel" | "neon", path: string, method = "GET", body?: unknown, missing = false, teamId?: string): Promise<unknown> {
+  protected async api(provider: "github" | "vercel" | "neon", path: string, method = "GET", body?: unknown, missing = false, teamId?: string): Promise<unknown> {
     const diagnostic = apiDiagnosticContext(provider, path, method);
     if (this.access === "read" && method !== "GET") throw new QaDiagnosticFailure({ ...diagnostic, reason: "METHOD_NOT_ALLOWED" });
     const base = { github: "https://api.github.com", vercel: "https://api.vercel.com", neon: "https://console.neon.tech/api/v2" }[provider];
@@ -414,6 +414,9 @@ export class HttpQaGateway implements QaGateway {
       const final = await this.currentTarget({ pr: record.pr, branch: record.branch, sha: record.headSha });
       if (!final.approved || !this.generationEnabled()) throw new Error("alias直前に承認が失効しました。");
     }
+    const beforeAssignment = await this.alias(record.slot);
+    if (beforeAssignment && (beforeAssignment.projectId !== QA_PROJECT_ID
+      || !record.deployments.some(d => d.id === beforeAssignment.deploymentId))) throw new Error("alias直前に別の貸出への割当を検出しました。");
     await this.api("vercel", `/v2/deployments/${deployment.id}/aliases`, "POST", { alias: qaAlias(record.slot) });
   }
   aliasApproved(plan: AliasPlan) { return aliasApproval(this.env.CAKE_QA_ALIAS_APPROVALS, plan); }
@@ -740,6 +743,7 @@ export class HttpQaGateway implements QaGateway {
 }
 
 export async function runQaWriter(env: Environment = process.env, request?: QaRequest, gateway?: QaGateway, apiTransport: QaTransport = transport): Promise<void> {
+  if (env.CAKE_QA_REGISTRY_ENABLED === "true") throw new Error("管理DBへ切替済みのため旧QA writerを停止しました。");
   if (env.EVENT_NAME === "schedule") throw new Error("QA定期監視は廃止しました。対象PRのイベントまたは手動実行を使ってください。");
   if (!request) {
     const event = env.EVENT_PATH ? object(JSON.parse(await readFile(env.EVENT_PATH, "utf8"))) : {};

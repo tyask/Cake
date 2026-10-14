@@ -24,6 +24,7 @@ class AliasFixture {
   calls: Call[] = [];
   time = Date.parse(timestamp);
   revoked = false;
+  aliasOwner: { projectId: string; deploymentId: string } | null = null;
   beforeGet?: (path: string) => void;
   constructor() {
     const first = claimRecord({ qa1: null, qa2: null, qa3: null }, { pr: 42, branch: this.current.branch, sha, leaseId, slot: "qa1", now: timestamp })!;
@@ -47,6 +48,7 @@ class AliasFixture {
     this.calls.push({ method, path });
     if (method === "GET") {
       this.beforeGet?.(path); assert.equal(body, undefined);
+      if (path === "/v4/aliases/cake-qa1-fumin.vercel.app") return { status: this.aliasOwner ? 200 : 404, data: this.aliasOwner };
       if (path === `/repos/${QA_REPOSITORY}/deployments`) return { status: 200, data: structuredClone(this.records) };
       if (path === `/v13/deployments/${this.deployment.id}`) return { status: 200, data: {
         id: this.deployment.id, projectId: QA_PROJECT_ID, target: null, readyState: "READY", gitSource: { ref: this.current.branch, sha },
@@ -87,6 +89,13 @@ test("normal alias POST rechecks current consent after READY, DB and lease reads
   assert.ok(lastConsent > f.calls.findLastIndex((call) => call.path === `/projects/${QA_NEON_PROJECT_ID}/endpoints`));
   assert.ok(lastConsent > f.calls.findLastIndex((call) => call.path === `/repos/${QA_REPOSITORY}/deployments`));
   assert.equal(f.calls.at(-1)?.method, "POST"); assert.equal(f.records.length, 2);
+});
+
+test("foreign alias observed immediately before assignment prevents overwrite", async () => {
+  const f = new AliasFixture();
+  f.aliasOwner = { projectId: QA_PROJECT_ID, deploymentId: "dpl_foreign_lease" };
+  await assert.rejects(() => f.assign(), /別の貸出/);
+  f.assertReadOnly();
 });
 
 test("consent expiry during the READY GET stops the alias POST", async () => {

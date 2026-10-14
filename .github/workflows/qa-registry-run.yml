@@ -1,0 +1,100 @@
+name: QA registry private runner
+
+on:
+  workflow_call:
+    inputs:
+      action:
+        required: false
+        type: string
+      request_id:
+        required: false
+        type: string
+      pr_number:
+        required: false
+        type: string
+      lease_id:
+        required: false
+        type: string
+      source_sha:
+        required: false
+        type: string
+      phase:
+        required: false
+        type: string
+      attempt_id:
+        required: false
+        type: string
+      deployment_id:
+        required: false
+        type: string
+    secrets:
+      production_database_host:
+        required: false
+      registry_database_url:
+        required: false
+      registry_database_host:
+        required: false
+      VERCEL_TOKEN:
+        required: false
+      NEON_API_KEY:
+        required: false
+
+jobs:
+  registry:
+    if: github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: cake-qa-pool-writer
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tyask/Cake
+          ref: refs/heads/main
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install reviewed dependencies
+        run: npm ci
+      - name: Execute scoped QA operation
+        run: |
+          export QA_TRUSTED_MAIN_SHA="$(git rev-parse HEAD)"
+          mkdir -p .cake/qa-result
+          node --import tsx scripts/qa-registry-manager.ts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CAKE_QA_REGISTRY_ENABLED: ${{ vars.CAKE_QA_REGISTRY_ENABLED }}
+          CAKE_QA_REGISTRY_DATABASE_URL: ${{ secrets.registry_database_url }}
+          CAKE_QA_REGISTRY_DATABASE_HOST: ${{ secrets.registry_database_host }}
+          CAKE_QA_POOL_ENABLED: ${{ vars.CAKE_QA_POOL_ENABLED }}
+          CAKE_QA_GIT_GATE_CONFIRMED: ${{ vars.CAKE_QA_GIT_GATE_CONFIRMED }}
+          CAKE_QA_NATIVE_CONFIRMED: ${{ vars.CAKE_QA_NATIVE_CONFIRMED }}
+          CAKE_QA_PRODUCTION_DATABASE_HOST: ${{ secrets.production_database_host }}
+          CAKE_QA_PARENT_BRANCH_ID: ${{ vars.CAKE_QA_PARENT_BRANCH_ID }}
+          QA_ACTION: ${{ inputs.action }}
+          QA_REQUEST_ID: ${{ inputs.request_id }}
+          QA_PR_NUMBER: ${{ inputs.pr_number }}
+          QA_LEASE_ID: ${{ inputs.lease_id }}
+          QA_SOURCE_SHA: ${{ inputs.source_sha }}
+          QA_PHASE: ${{ inputs.phase }}
+          QA_ATTEMPT_ID: ${{ inputs.attempt_id }}
+          QA_DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+          QA_RESULT_PATH: .cake/qa-result/result.json
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      - name: Upload safe operation receipt
+        if: github.event_name == 'workflow_dispatch' && inputs.action != 'initialize' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-result-${{ inputs.request_id }}
+          path: .cake/qa-result/result.json
+          if-no-files-found: error
+          retention-days: 1

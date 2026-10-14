@@ -1,6 +1,6 @@
 # QAのGET専用読取診断
 
-診断単体はQA poolを有効化せず、アプリ、DB、build、seedを実行しない。GETだけで設定不足と資源の識別情報を確認し、probe・返却の計画を表示する。貸出の取得・返却、deployment作成・削除、alias変更、DB接続、設定適用の実行入口は持たない。main/対象PRの完全SHAにあるGit設定を確認し、writerと通常CLIの生成前確認は [QA貸出運用](qa-pool.md) の別の契約に従う。
+診断単体はQA poolを有効化せず、アプリ、DB、build、seedを実行しない。GETだけで設定不足と資源の識別情報を確認し、probe・返却の計画を表示する。貸出の取得・返却、deployment作成・削除、alias変更、DB接続、設定適用の実行入口は持たない。main/対象PRの完全SHAにあるGit設定を確認し、writerと通常CLIの生成前確認は [QA貸出運用](development-workflow.md) の別の契約に従う。
 
 通常運用開始は利用者が明示許可済み。2026-10-14 JSTのGET専用QA pool preflight [run 38485838972 / job 115599157037](https://github.com/tyask/Cake/actions/runs/38485838972/job/115599157037)で、実効 `CAKE_QA_POOL_ENABLED` / `CAKE_QA_GIT_GATE_CONFIRMED` / `CAKE_QA_NATIVE_CONFIRMED` はtrue、旧4承認入力は空、qa1 free、使用中QA DBは0個と確認した。これはその時点の観測であり、新しいタスクでは同等の既存認証、選択したCake環境、運用規則、実効設定と台帳を再確認する。セッション間の認証・許可の自動共有は保証しない。
 
