@@ -65,5 +65,7 @@ jobs:
           CAKE_CANNELE_ENABLED: ${{ vars.CAKE_CANNELE_ENABLED }}
           CAKE_QA_REGISTRY_ENABLED: ${{ vars.CAKE_QA_REGISTRY_ENABLED }}
           CAKE_QA_POOL_ENABLED: ${{ vars.CAKE_QA_POOL_ENABLED }}
-          CAKE_QA_REGISTRY_DATABASE_URL: ${{ secrets.CAKE_QA_REGISTRY_DATABASE_URL }}
-          CAKE_QA_REGISTRY_DATABASE_HOST: ${{ secrets.CAKE_QA_REGISTRY_DATABASE_HOST }}
+          # Fresh owner credential under a new name; never re-supply retired
+          # credentials to historical legacy workflows through their old names.
+          CAKE_QA_REGISTRY_DATABASE_URL: ${{ secrets.CANNELE_REGISTRY_ADMIN_DATABASE_URL }}
+          CAKE_QA_REGISTRY_DATABASE_HOST: ${{ secrets.CANNELE_REGISTRY_ADMIN_DATABASE_HOST }}

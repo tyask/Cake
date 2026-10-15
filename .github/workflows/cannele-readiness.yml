@@ -31,7 +31,7 @@ jobs:
       # Reusable-workflow secret inputs mask this existing Variable before any
       # runner step logs its environment. No new repository Secret is created.
       production_database_host: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
-      registry_database_url: ${{ secrets.CAKE_QA_REGISTRY_DATABASE_URL }}
-      registry_database_host: ${{ secrets.CAKE_QA_REGISTRY_DATABASE_HOST }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      registry_database_url: ${{ secrets.CANNELE_REGISTRY_ADMIN_DATABASE_URL }}
+      registry_database_host: ${{ secrets.CANNELE_REGISTRY_ADMIN_DATABASE_HOST }}
+      VERCEL_TOKEN: ${{ secrets.CANNELE_TRANSITION_VERCEL_TOKEN }}
+      NEON_API_KEY: ${{ secrets.CANNELE_TRANSITION_NEON_API_KEY }}

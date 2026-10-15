@@ -1,0 +1,234 @@
+name: Reviewed Cannele onboarding runner
+
+on:
+  workflow_call:
+    inputs:
+      action:
+        required: true
+        type: string
+      reviewed_revision:
+        required: true
+        type: string
+      request_id:
+        required: true
+        type: string
+      transition_json:
+        required: false
+        default: ""
+        type: string
+      runtime_context_json:
+        required: false
+        default: ""
+        type: string
+      runtime_role_name:
+        required: false
+        default: ""
+        type: string
+      confirm_credential_drain:
+        required: true
+        type: boolean
+    secrets:
+      admin_database_url:
+        required: false
+      admin_database_host:
+        required: false
+      runtime_database_url:
+        required: false
+      runtime_database_host:
+        required: false
+      transition_vercel_token:
+        required: false
+      transition_neon_api_key:
+        required: false
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+jobs:
+  administer:
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.repository == 'tyask/Cake' &&
+      github.ref == 'refs/heads/main' && github.actor == github.repository_owner &&
+      github.run_attempt == '1' && inputs.reviewed_revision == github.sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Repository vars only; no Preview environment overrides or legacy Secrets.
+    concurrency:
+      group: cake-qa-pool-writer
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - name: Checkout exact reviewed Cake main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tyask/Cake
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.19.0"
+          cache: npm
+      - name: Validate public operation and committed source pin
+        id: public
+        run: |
+          node --input-type=module <<'CANNELE_ONBOARDING_INPUT_JS'
+          import { lstatSync, readFileSync, appendFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          import { isAbsolute, join } from 'node:path';
+          const invalid = () => { throw new Error('Onboarding public inputs or source pin are invalid.'); };
+          const env = process.env, action = env.CANNELE_ONBOARDING_ACTION;
+          const revision = env.CANNELE_ONBOARDING_EXPECTED_REVISION, requestId = env.CANNELE_ONBOARDING_REQUEST_ID;
+          if (!['inspect', 'transition', 'provision-runtime'].includes(action) || !/^[a-f0-9]{40}$/.test(revision ?? '') || revision !== env.GITHUB_SHA ||
+              !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(requestId ?? '') || !isAbsolute(env.RUNNER_TEMP ?? '')) invalid();
+          const parsePublic = (raw) => {
+            if (!raw || Buffer.byteLength(raw) > 131072) invalid();
+            let value; try { value = JSON.parse(raw); } catch { invalid(); }
+            if (!value || typeof value !== 'object' || Array.isArray(value)) invalid();
+            const visit = (item, depth = 0) => {
+              if (depth > 32) invalid();
+              if (typeof item === 'string' && /(?:https?:\/\/|postgres(?:ql)?:\/\/|-----BEGIN.*PRIVATE KEY)/i.test(item)) invalid();
+              if (item && typeof item === 'object') for (const [key, child] of Object.entries(item)) {
+                if (/^(?:password|token|secret|privateKey|databaseUrl|connectionString|__proto__|prototype|constructor)$/i.test(key)) invalid();
+                visit(child, depth + 1);
+              }
+            };
+            visit(value); return value;
+          };
+          const transition = env.CANNELE_ONBOARDING_TRANSITION_JSON ?? '', context = env.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON ?? '', role = env.CANNELE_ONBOARDING_RUNTIME_ROLE_NAME ?? '';
+          const drain = env.CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN;
+          if (!['true', 'false'].includes(drain)) invalid();
+          let transitionValue;
+          if (action === 'inspect' && (transition || context || role || drain !== 'false')) invalid();
+          if (action === 'transition') { if (context || role || drain !== 'true') invalid(); transitionValue = parsePublic(transition); }
+          if (action === 'provision-runtime') { if (transition || drain !== 'false' || !/^[a-z][a-z0-9_]{0,62}$/.test(role)) invalid(); parsePublic(context); }
+          const file = 'cannele-onboarding.config.json', stat = lstatSync(file);
+          if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 16384) invalid();
+          const git = (args, encoding = 'utf8') => execFileSync('git', args, { encoding, maxBuffer: 262144 });
+          if (git(['rev-parse', 'HEAD']).trim() !== revision || git(['status', '--porcelain', '--', file]).trim()) invalid();
+          if (!/^100644 blob [a-f0-9]{40}\tcannele-onboarding\.config\.json\n?$/.test(git(['ls-tree', 'HEAD', '--', file]))) invalid();
+          const local = readFileSync(file), committed = git(['show', `HEAD:${file}`], 'buffer');
+          if (!local.equals(committed)) invalid();
+          let config; try { config = JSON.parse(local.toString('utf8')); } catch { invalid(); }
+          if (!config || Object.keys(config).sort().join(',') !== 'canneleSourceRevision,protocol' || config.protocol !== 'cake-cannele-onboarding/v1' || !/^[a-f0-9]{40}$/.test(config.canneleSourceRevision ?? '')) invalid();
+          // cakeRevision identifies the immutable earlier 002 fence installation,
+          // while reviewed_revision authenticates this current onboarding run.
+          if (transitionValue && (!/^[a-f0-9]{40}$/.test(transitionValue.source?.cakeRevision ?? '') || transitionValue.source?.canneleRevision !== config.canneleSourceRevision)) invalid();
+          appendFileSync(env.GITHUB_OUTPUT, `source_revision=${config.canneleSourceRevision}\nsource_dir=${join(env.RUNNER_TEMP, 'cannele-onboarding-source', requestId)}\nresult_path=${join(env.RUNNER_TEMP, 'cannele-onboarding', requestId, 'result.json')}\n`);
+          CANNELE_ONBOARDING_INPUT_JS
+        env:
+          CANNELE_ONBOARDING_ACTION: ${{ inputs.action }}
+          CANNELE_ONBOARDING_EXPECTED_REVISION: ${{ inputs.reviewed_revision }}
+          CANNELE_ONBOARDING_REQUEST_ID: ${{ inputs.request_id }}
+          CANNELE_ONBOARDING_TRANSITION_JSON: ${{ inputs.transition_json }}
+          CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON: ${{ inputs.runtime_context_json }}
+          CANNELE_ONBOARDING_RUNTIME_ROLE_NAME: ${{ inputs.runtime_role_name }}
+          CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN: ${{ inputs.confirm_credential_drain }}
+      - name: Install reviewed Cake dependencies without administrative credentials
+        run: npm ci
+      - name: Prepare exact merged Cannele source without administrative credentials
+        run: |
+          node --input-type=module <<'CANNELE_ONBOARDING_SOURCE_JS'
+          import { execFileSync } from 'node:child_process';
+          import { existsSync, mkdirSync } from 'node:fs';
+          import { dirname } from 'node:path';
+          const source = process.env.CANNELE_ONBOARDING_SOURCE_DIR, revision = process.env.CANNELE_ONBOARDING_SOURCE_REVISION;
+          const run = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 120000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }).trim();
+          try {
+            if (existsSync(source)) throw new Error();
+            mkdirSync(dirname(source), { recursive: true, mode: 0o700 });
+            run(['-c', 'credential.helper=', 'clone', '--quiet', '--no-checkout', '--single-branch', '--branch', 'main', '--', 'https://github.com/tyask/cannele.git', source]);
+            run(['-C', source, 'merge-base', '--is-ancestor', revision, 'origin/main']);
+            run(['-C', source, 'checkout', '--quiet', '--detach', revision]);
+            if (run(['-C', source, 'rev-parse', 'HEAD']) !== revision || run(['-C', source, 'status', '--porcelain'])) throw new Error();
+          } catch { throw new Error('Exact merged Cannele source could not be prepared.'); }
+          CANNELE_ONBOARDING_SOURCE_JS
+        env:
+          CANNELE_ONBOARDING_SOURCE_DIR: ${{ steps.public.outputs.source_dir }}
+          CANNELE_ONBOARDING_SOURCE_REVISION: ${{ steps.public.outputs.source_revision }}
+      - name: Install pinned Cannele dependencies without administrative credentials
+        working-directory: ${{ steps.public.outputs.source_dir }}
+        run: npm ci
+      - name: Generate pinned Cannele contracts without administrative credentials
+        working-directory: ${{ steps.public.outputs.source_dir }}
+        run: node --import tsx scripts/generate-contracts.ts
+      - name: Inspect the fenced registry with the separate administrator
+        if: inputs.action == 'inspect'
+        run: |
+          export QA_TRUSTED_MAIN_SHA="$(git rev-parse HEAD)"
+          node --import tsx scripts/cannele-onboarding.ts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CANNELE_ONBOARDING_ACTION: ${{ inputs.action }}
+          CANNELE_ONBOARDING_EXPECTED_REVISION: ${{ inputs.reviewed_revision }}
+          CANNELE_ONBOARDING_REQUEST_ID: ${{ inputs.request_id }}
+          CANNELE_ONBOARDING_RESULT_PATH: ${{ steps.public.outputs.result_path }}
+          CANNELE_ONBOARDING_SOURCE_DIR: ${{ steps.public.outputs.source_dir }}
+          CANNELE_ONBOARDING_TRANSITION_JSON: ${{ inputs.transition_json }}
+          CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON: ${{ inputs.runtime_context_json }}
+          CANNELE_ONBOARDING_RUNTIME_ROLE_NAME: ${{ inputs.runtime_role_name }}
+          CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN: ${{ inputs.confirm_credential_drain }}
+          CAKE_CANNELE_ENABLED: ${{ vars.CAKE_CANNELE_ENABLED }}
+          CAKE_QA_POOL_ENABLED: ${{ vars.CAKE_QA_POOL_ENABLED }}
+          CAKE_QA_REGISTRY_ENABLED: ${{ vars.CAKE_QA_REGISTRY_ENABLED }}
+          CANNELE_REGISTRY_ADMIN_DATABASE_URL: ${{ secrets.admin_database_url }}
+          CANNELE_REGISTRY_ADMIN_DATABASE_HOST: ${{ secrets.admin_database_host }}
+      - name: Run the explicitly confirmed atomic legacy transition
+        if: inputs.action == 'transition'
+        run: |
+          export QA_TRUSTED_MAIN_SHA="$(git rev-parse HEAD)"
+          node --import tsx scripts/cannele-onboarding.ts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CANNELE_ONBOARDING_ACTION: ${{ inputs.action }}
+          CANNELE_ONBOARDING_EXPECTED_REVISION: ${{ inputs.reviewed_revision }}
+          CANNELE_ONBOARDING_REQUEST_ID: ${{ inputs.request_id }}
+          CANNELE_ONBOARDING_RESULT_PATH: ${{ steps.public.outputs.result_path }}
+          CANNELE_ONBOARDING_SOURCE_DIR: ${{ steps.public.outputs.source_dir }}
+          CANNELE_ONBOARDING_TRANSITION_JSON: ${{ inputs.transition_json }}
+          CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON: ${{ inputs.runtime_context_json }}
+          CANNELE_ONBOARDING_RUNTIME_ROLE_NAME: ${{ inputs.runtime_role_name }}
+          CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN: ${{ inputs.confirm_credential_drain }}
+          CAKE_CANNELE_ENABLED: ${{ vars.CAKE_CANNELE_ENABLED }}
+          CAKE_QA_POOL_ENABLED: ${{ vars.CAKE_QA_POOL_ENABLED }}
+          CAKE_QA_REGISTRY_ENABLED: ${{ vars.CAKE_QA_REGISTRY_ENABLED }}
+          CANNELE_REGISTRY_ADMIN_DATABASE_URL: ${{ secrets.admin_database_url }}
+          CANNELE_REGISTRY_ADMIN_DATABASE_HOST: ${{ secrets.admin_database_host }}
+          CANNELE_TRANSITION_VERCEL_TOKEN: ${{ secrets.transition_vercel_token }}
+          CANNELE_TRANSITION_NEON_API_KEY: ${{ secrets.transition_neon_api_key }}
+      - name: Grant and verify the existing dedicated runtime LOGIN
+        if: inputs.action == 'provision-runtime'
+        run: |
+          export QA_TRUSTED_MAIN_SHA="$(git rev-parse HEAD)"
+          node --import tsx scripts/cannele-onboarding.ts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CANNELE_ONBOARDING_ACTION: ${{ inputs.action }}
+          CANNELE_ONBOARDING_EXPECTED_REVISION: ${{ inputs.reviewed_revision }}
+          CANNELE_ONBOARDING_REQUEST_ID: ${{ inputs.request_id }}
+          CANNELE_ONBOARDING_RESULT_PATH: ${{ steps.public.outputs.result_path }}
+          CANNELE_ONBOARDING_SOURCE_DIR: ${{ steps.public.outputs.source_dir }}
+          CANNELE_ONBOARDING_TRANSITION_JSON: ${{ inputs.transition_json }}
+          CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON: ${{ inputs.runtime_context_json }}
+          CANNELE_ONBOARDING_RUNTIME_ROLE_NAME: ${{ inputs.runtime_role_name }}
+          CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN: ${{ inputs.confirm_credential_drain }}
+          CAKE_CANNELE_ENABLED: ${{ vars.CAKE_CANNELE_ENABLED }}
+          CAKE_QA_POOL_ENABLED: ${{ vars.CAKE_QA_POOL_ENABLED }}
+          CAKE_QA_REGISTRY_ENABLED: ${{ vars.CAKE_QA_REGISTRY_ENABLED }}
+          CANNELE_REGISTRY_ADMIN_DATABASE_URL: ${{ secrets.admin_database_url }}
+          CANNELE_REGISTRY_ADMIN_DATABASE_HOST: ${{ secrets.admin_database_host }}
+          CANNELE_REGISTRY_DATABASE_URL: ${{ secrets.runtime_database_url }}
+          CANNELE_REGISTRY_DATABASE_HOST: ${{ secrets.runtime_database_host }}
+      - name: Upload strict public onboarding receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cannele-onboarding-${{ inputs.action }}-${{ inputs.request_id }}
+          path: ${{ steps.public.outputs.result_path }}
+          if-no-files-found: error
+          retention-days: 1

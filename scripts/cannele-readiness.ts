@@ -146,7 +146,11 @@ export class ReadinessGateway extends HttpQaGateway {
     const parent = object(object(await this.get("neon",`/projects/${QA_NEON_PROJECT_ID}/branches/${context.parentId}`)).branch);
     if (parent.id !== context.parentId || parent.project_id !== QA_NEON_PROJECT_ID) return fail("READINESS_PROVIDER_SCOPE_INVALID");
     const branches = await this.neonInventory("branches"), endpoints = await this.neonInventory("endpoints");
-    if (!branches.some(branch => branch.id === context.parentId && ["id","project_id","parent_id","name","default","protected"].every(key=>isDeepStrictEqual(branch[key],parent[key])))) return fail("READINESS_INVENTORY_INCOMPLETE");
+    const listedParent = branches.find(branch => branch.id === context.parentId);
+    if (!listedParent) return fail("READINESS_NEON_PARENT_MISSING");
+    for (const key of ["id","project_id","parent_id","name","default","protected"] as const) {
+      if (!isDeepStrictEqual(listedParent[key],parent[key])) return fail(`READINESS_NEON_PARENT_${key.toUpperCase()}_MISMATCH`);
+    }
     if (branches.some(branch => branch.project_id !== QA_NEON_PROJECT_ID) || endpoints.some(endpoint => endpoint.project_id !== QA_NEON_PROJECT_ID
       || !branches.some(branch => branch.id === endpoint.branch_id) || String(endpoint.host).split(".")[0] !== endpoint.id)) return fail("READINESS_PROVIDER_SCOPE_INVALID");
     const endpointDigests = endpoints.map(endpoint => hostDigest(text(endpoint.host,/^ep-[a-z0-9-]+\.[a-z0-9.-]+\.neon\.tech$/)));
@@ -169,12 +173,15 @@ export class ReadinessGateway extends HttpQaGateway {
       const body=object(await this.get("neon",`/projects/${QA_NEON_PROJECT_ID}/${kind}${kind === "branches" ? `?limit=100&sort_by=created_at&sort_order=asc${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}` : ""}`));
       const rows=array(body[kind]);
       for(const raw of rows){const item=object(raw);const id=text(item.id,kind === "branches" ? /^br-[a-z0-9-]+$/ : /^ep-[a-z0-9-]+$/);if(ids.has(id))return fail("READINESS_INVENTORY_INCOMPLETE");ids.add(id);items.push(item);}
-      if(body.pagination === undefined){if(body.next!==undefined||body.next_cursor!==undefined||body.cursor!==undefined)return fail("READINESS_INVENTORY_INCOMPLETE");if(kind === "endpoints" || rows.length<100)return items;return fail("READINESS_INVENTORY_INCOMPLETE");}
+      if(body.next!==undefined||body.next_cursor!==undefined||body.cursor!==undefined)return fail("READINESS_INVENTORY_INCOMPLETE");
+      if(body.pagination === undefined){if(kind === "endpoints" || rows.length<100)return items;return fail("READINESS_INVENTORY_INCOMPLETE");}
       const pagination=object(body.pagination);
       if(kind === "endpoints" || Object.keys(pagination).some(key=>!["next","sort_by","sort_order"].includes(key))
         || (pagination.sort_by!==undefined && pagination.sort_by!=="created_at") || (pagination.sort_order!==undefined && pagination.sort_order!=="asc"))return fail("READINESS_INVENTORY_INCOMPLETE");
       const next=pagination.next;
-      if(next===null || (next===undefined && kind === "branches" && pagination.sort_by === "created_at" && pagination.sort_order === "asc" && rows.length<100))return items;
+      // Neon documents next/sort_by/sort_order as optional. An absent next on
+      // a short final branch page is complete even when optional echoes are absent.
+      if(next===null || (next===undefined && rows.length<100))return items;
       if(typeof next!=="string" || !next || next.length>2048 || cursors.has(next) || page===19)return fail("READINESS_INVENTORY_INCOMPLETE");
       cursors.add(next);cursor=next;
     }

@@ -22,7 +22,7 @@ const fixtureSnapshot=():PrivateSnapshot=>({hostDigest:"c".repeat(64),deployment
   roleCapabilities:{login:true,superuser:false,createRole:true,createDatabase:false,replication:false,bypassRls:false,ownsDatabase:true,ownsLegacySchema:true,schemaOwnerMember:true,publicSchemaCreateForPublic:false,hasMembership:false},otherSessions:0,
   slots:["qa1","qa2","qa3"].map(slot=>({slot,state:"free",version:0})),allSlotsFree:true,requestsSettled:true,leasesSettled:true,historicalRows:0}});
 
-type Options={run?:Record<string,unknown>;main?:string;orphan?:boolean;taggedProduction?:boolean;vercelPagination?:Record<string,unknown>;neonPagination?:Record<string,unknown>;total?:unknown;calls?:string[]};
+type Options={run?:Record<string,unknown>;main?:string;orphan?:boolean;taggedProduction?:boolean;vercelPagination?:Record<string,unknown>;neonPagination?:Record<string,unknown>;neonTopCursor?:string;total?:unknown;calls?:string[]};
 function transport(options:Options={}):QaTransport{
   return async(method,address,token)=>{
     assert.equal(method,"GET");const url=new URL(address);const path=url.pathname;options.calls?.push(address);
@@ -50,7 +50,7 @@ function transport(options:Options={}):QaTransport{
     if(path===`/api/v2/projects/${neonProject}`)return{status:200,data:{project:{id:neonProject,name:"cake-preview"}}};
     const branch={id:parent,project_id:neonProject,parent_id:null,name:"parent",default:true,protected:true};
     if(path===`/api/v2/projects/${neonProject}/branches/${parent}`)return{status:200,data:{branch}};
-    if(path===`/api/v2/projects/${neonProject}/branches`)return{status:200,data:{branches:[branch],...(options.neonPagination?{pagination:options.neonPagination}:{})}};
+    if(path===`/api/v2/projects/${neonProject}/branches`)return{status:200,data:{branches:[branch],...(options.neonPagination?{pagination:options.neonPagination}:{}),...(options.neonTopCursor?{next_cursor:options.neonTopCursor}:{})}};
     if(path===`/api/v2/projects/${neonProject}/endpoints`)return{status:200,data:{endpoints:[{id:"ep-qa-parent",project_id:neonProject,branch_id:parent,host:"ep-qa-parent.mock.aws.neon.tech"}]}};
     if(path.endsWith("/branches/br-historical")||path.endsWith("/endpoints/ep-historical"))return{status:404,data:null};
     assert.fail("Unexpected Neon read");
@@ -91,9 +91,17 @@ test("an untracked Preview or qaTagged Production is a blocker, with safe curren
 });
 
 test("partial or unknown provider pagination and malformed total counts never become empty-inventory proof",async()=>{
-  for(const options of [{vercelPagination:{next:null,cursor:"remaining"}},{neonPagination:{next:null,next_cursor:"remaining"}},... [null,"",false].map(total=>({total}))]){
+  for(const options of [{vercelPagination:{next:null,cursor:"remaining"}},{neonPagination:{next:null,next_cursor:"remaining"}},{neonPagination:{},neonTopCursor:"remaining"},... [null,"",false].map(total=>({total}))]){
     const receipt=await collectReadiness(environment,{source,transport:transport(options),database:async()=>fixtureSnapshot()});
     assert.equal(receipt.observedConditionsSatisfied,false);assert.ok(receipt.blockers.some(code=>["READINESS_RESPONSE_INVALID","READINESS_INVENTORY_INCOMPLETE"].includes(code)));
+  }
+});
+
+test("documented Neon final pages may omit next and optional sorting echoes",async()=>{
+  for(const neonPagination of [{},{sort_by:"created_at"},{sort_order:"asc"},{sort_by:"created_at",sort_order:"asc"}]){
+    const receipt=await collectReadiness(environment,{source,transport:transport({neonPagination}),database:async()=>fixtureSnapshot()});
+    assert.equal(receipt.providers?.complete,true);
+    assert.equal(receipt.observedConditionsSatisfied,true);
   }
 });
 
@@ -137,12 +145,12 @@ async function fixture(){
   try{await client.connect();await client.query(legacyDdl);return{client,close};}catch(error){await close();throw error;}
 }
 
-test("actual PG17 readonly snapshot preserves 001/002 loans and recognizes superseded intent receipts as settled",{skip:!databaseUrl},async()=>{
+test("actual PostgreSQL readonly snapshot preserves 001/002 loans and recognizes superseded intent receipts as settled",{skip:!databaseUrl},async()=>{
   const f=await fixture();
   try{
     const connection="postgresql://synthetic-user:synthetic-password@ep-registry-fixture-pooler.mock.aws.neon.tech/synthetic_registry";
     const baseline=await inspectReadinessDatabase(postgresBatch(f.client),connection,legacyDdl,fenceDdl);assert.equal(baseline.summary.catalog,"001");assert.equal(baseline.summary.allSlotsFree,true);
-    assert.match(baseline.summary.postgresVersion,/^17\.[0-9]+$/,"Numeric server version excludes distribution/build suffixes on the real PG17 fixture");
+    assert.match(baseline.summary.postgresVersion,/^(?:17|18)\.[0-9]+$/,"Numeric server version excludes distribution/build suffixes on the supported real PostgreSQL fixtures");
     const first={repository,base:"main",pr:42,branch:"codex/readiness-fixture",headSha:revision,requestId:randomUUID(),leaseId:randomUUID(),now:"2026-10-15T00:00:00.000Z",slot:"qa1"};
     let record=(await f.client.query("SELECT cake_qa_registry.reserve($1::jsonb,$2) AS value",[JSON.stringify(first),"a".repeat(64)])).rows[0].value;
     const repeated={...first,requestId:randomUUID(),leaseId:randomUUID()};

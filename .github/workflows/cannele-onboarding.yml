@@ -1,0 +1,68 @@
+name: Administer Cannele onboarding
+run-name: Cannele onboarding ${{ inputs.action }} ${{ inputs.request_id }} from ${{ inputs.reviewed_revision }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Reviewed administrative operation
+        required: true
+        default: inspect
+        type: choice
+        options: [inspect, transition, provision-runtime]
+      reviewed_revision:
+        description: Reviewed full current Cake main commit SHA
+        required: true
+        type: string
+      request_id:
+        description: New UUID for this operation
+        required: true
+        type: string
+      transition_json:
+        description: Reviewed public transition JSON; transition only, never credentials
+        required: false
+        default: ""
+        type: string
+      runtime_context_json:
+        description: Reviewed public runtime context JSON; provision-runtime only
+        required: false
+        default: ""
+        type: string
+      runtime_role_name:
+        description: Existing dedicated LOGIN role; provision-runtime only
+        required: false
+        default: ""
+        type: string
+      confirm_credential_drain:
+        description: Old actors stopped, credentials withdrawn, sessions drained; transition only
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+jobs:
+  onboarding:
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.repository == 'tyask/Cake' &&
+      github.ref == 'refs/heads/main' && github.actor == github.repository_owner &&
+      github.run_attempt == '1' && inputs.reviewed_revision == github.sha
+    uses: ./.github/workflows/cannele-onboarding-run.yml
+    with:
+      action: ${{ inputs.action }}
+      reviewed_revision: ${{ inputs.reviewed_revision }}
+      request_id: ${{ inputs.request_id }}
+      transition_json: ${{ inputs.transition_json }}
+      runtime_context_json: ${{ inputs.runtime_context_json }}
+      runtime_role_name: ${{ inputs.runtime_role_name }}
+      confirm_credential_drain: ${{ inputs.confirm_credential_drain }}
+    secrets:
+      admin_database_url: ${{ secrets.CANNELE_REGISTRY_ADMIN_DATABASE_URL }}
+      admin_database_host: ${{ secrets.CANNELE_REGISTRY_ADMIN_DATABASE_HOST }}
+      runtime_database_url: ${{ inputs.action == 'provision-runtime' && secrets.CANNELE_REGISTRY_DATABASE_URL || '' }}
+      runtime_database_host: ${{ inputs.action == 'provision-runtime' && secrets.CANNELE_REGISTRY_DATABASE_HOST || '' }}
+      transition_vercel_token: ${{ inputs.action == 'transition' && secrets.CANNELE_TRANSITION_VERCEL_TOKEN || '' }}
+      transition_neon_api_key: ${{ inputs.action == 'transition' && secrets.CANNELE_TRANSITION_NEON_API_KEY || '' }}
