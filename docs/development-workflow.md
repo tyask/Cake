@@ -64,7 +64,7 @@ PR #47のmain導入後、初回の[initialize run 38581479595](https://github.co
 
 使用中の旧貸出がある場合は、旧方式でcleanupを確認してからglobal停止guardを有効にする。停止後に旧cleanup jobが動くことを前提としない。owner本人は、4つの旧workflowのqueued / in-progress / waitingなどのrunがすべて終了したことに加え、旧コードを使うCloud・PC・別の自動処理を止め、旧認証の撤去と管理DB接続sessionのdrainを確認する。Actions一覧やDB内のfenceだけでは、古いowner資格情報を使う外部処理の停止・権限失効を保証できない。確認できない状態では適用しない。
 
-この互換installerに使うActions内の管理DB owner接続Secretは、002導入まで保持する。旧Cloud・PCが保持する資格情報と混同しない。002導入後、切替とreceipt再確認に使う別の管理者接続を確保してから、旧owner接続情報も失効・撤去し、全接続を終了してCanneleの移行を実行する。
+互換installerとreadinessも、新しい`CANNELE_REGISTRY_ADMIN_DATABASE_URL` / `_HOST`だけを使う。既存objectの実ownerとして接続できる新しい資格情報を別名へ確保し、旧password・旧Secret名を失効・撤去して接続sessionを終了してから002を導入する。SQL roleを変える場合は既存objectのownership要件を確認し、旧Secret名へ新passwordを入れ直さない。
 
 レビューした現在のmainの完全なSHAを指定して、専用workflowを依頼する。`confirm_legacy_drain=true`は上述の外部停止・認証・session確認を完了したownerの明示確認であり、installerが外部停止を自動的に証明する値ではない。
 
@@ -311,7 +311,7 @@ APIの202は未完了を示す。`nextAction: advance`に対して、依頼中�
 
 Cake専用Cannele APIのProduction healthと、GitHub App用Secret・暗号化キーのSensitive/Production限定設定は確認済み。本人pairing・Actions OIDC認可、Cakeのprovider binding、管理DB接続とruntime role、DB writer fenceとclean-start移行、実QAの受入検証は未完了である。共通管理DDLの正本はCanneleの`db/migrations/`、業務DDLの正本は引き続きCakeの`db/migrations/`である。
 
-切替前の読取確認には、mainへ導入した`cannele-readiness.yml`を使う。旧`qa:inspect`のGitHub Deployments台帳は現在のSQL台帳の全枠状態を証明しない。専用のreadinessは、既存の管理DB・provider資格情報をActions内だけで使い、現在の3枠、未完了request、履歴の解決状態、既知schema、管理者権限、全QA資源を読み取る。DBは読取専用transaction、providerはGETだけとし、DDL、資源の削除、flag・環境変数の変更、Canneleへの切替は行わない。
+切替前の読取確認には、mainへ導入した`cannele-readiness.yml`を使う。旧`qa:inspect`のGitHub Deployments台帳は現在のSQL台帳の全枠状態を証明しない。専用のreadinessは、新しい`CANNELE_REGISTRY_ADMIN_*`・`CANNELE_TRANSITION_*`の資格情報をActions内だけで使い、現在の3枠、未完了request、履歴の解決状態、既知schema、管理者権限、全QA資源を読み取る。DBは読取専用transaction、providerはGETだけとし、DDL、資源の削除、flag・環境変数の変更、Canneleへの切替は行わない。
 
 owner本人が、レビューした現在mainの完全SHAと新しい依頼UUIDを指定する。
 
@@ -341,17 +341,17 @@ PostgreSQL 18ではNOT NULL制約がcatalogへ追加されるため、Canneleの
 | `transition` | レビューしたJSONをそのまま渡し、既存の一つのtransactionで旧fenceをmaintenanceへ進め、freshな完全provider証跡を照合してから旧6tables/functionsの削除とCannele初期化を行う。失敗時はrollbackする。 |
 | `provision-runtime` | 事前に作成した専用LOGINへ固定ACLを設定し、別の実ログインでcontext・最小権限を検証する。admin/runtimeのhost・port・DB、明示したroleとの一致を権限付与前に確認する。 |
 
-全actionにglobal停止gateのtrueと旧2flagsのfalseが必要である。外部停止・資格情報撤去・session drainを実際に完了するまで、`confirm_credential_drain=true`やadmissionの6項目をtrueで補わない。旧owner資格情報は002 installerまで保持し、別途保持した新しい管理者接続を確立してから旧資格情報を失効させる。同じ管理roleのpassword更新でも、旧passwordの無効化と旧接続の終了、fresh loginを確認する。
+全actionにglobal停止gateのtrueと旧2flagsのfalseが必要である。外部停止・資格情報撤去・session drainを実際に完了するまで、`confirm_credential_drain=true`やadmissionの6項目をtrueで補わない。002 installerにも同じ新しい管理者Secret名を使う。新しい管理者接続を確立してから旧資格情報を失効させ、002を導入する。同じ管理roleのpassword更新でも、旧passwordの無効化と旧接続の終了、fresh loginを確認する。
 
 新しい接続・provider資格情報は次のRepository Secretsへ登録する。値は設定画面へ直接入力し、Cloud・チャット・JSON引数・artifactへ渡さない。
 
 | Repository Secret | 用途 |
 | --- | --- |
 | `CANNELE_REGISTRY_ADMIN_DATABASE_URL` / `CANNELE_REGISTRY_ADMIN_DATABASE_HOST` | 切替とreceipt再確認に使う、更新済み管理者接続。APIへ登録しない。 |
-| `CANNELE_TRANSITION_VERCEL_TOKEN` / `CANNELE_TRANSITION_NEON_API_KEY` | 旧資格情報撤去後の移行用read-only API確認。旧`VERCEL_TOKEN` / `NEON_API_KEY`名へ新しい値を入れ直さない。 |
+| `CANNELE_TRANSITION_VERCEL_TOKEN` / `CANNELE_TRANSITION_NEON_API_KEY` | readinessと旧資格情報撤去後の移行用read-only API確認。旧`VERCEL_TOKEN` / `NEON_API_KEY`名へ新しい値を入れ直さない。 |
 | `CANNELE_REGISTRY_DATABASE_URL` / `CANNELE_REGISTRY_DATABASE_HOST` | runtime権限確認用の専用LOGIN接続。HOSTはURLの実hostnameと完全一致させる。 |
 
-旧`CAKE_QA_REGISTRY_DATABASE_URL` / `_HOST`は002導入後に撤去する。新しい管理者接続を旧Secret名へ入れ直すと、古いworkflowが新しい資格情報を取得できるため避ける。別の管理者接続を確保しないまま旧資格情報だけを消さない。
+旧`CAKE_QA_REGISTRY_DATABASE_URL` / `_HOST`は新管理者接続を確保してから、002導入前に撤去する。新しい管理者接続を旧Secret名へ入れ直すと、古いworkflowが新しい資格情報を取得できるため避ける。別の管理者接続を確保しないまま旧資格情報だけを消さない。
 
 runtime LOGINは管理専用DBのSQL editorなどで、次のreview済み形を使って事前に作る。passwordは専用の乱数を用意し、実値をGit・チャットへ書かない。既存roleの権限やpasswordを無条件に上書きしない。Neon UI/API作成roleの管理membershipをAPIに引き継がない。
 

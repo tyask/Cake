@@ -45,6 +45,12 @@ test('owner/main first-attempt dispatcher binds a same-commit reusable helper wi
   }
   assert.match(dispatcher,/secrets\.CANNELE_TRANSITION_VERCEL_TOKEN/);assert.match(dispatcher,/secrets\.CANNELE_TRANSITION_NEON_API_KEY/);
   assert.doesNotMatch([dispatcher,runner].join('\n'),/secrets\.VERCEL_TOKEN\b|secrets\.NEON_API_KEY\b/);
+  const readiness=readFileSync(new URL('../.github/workflows/cannele-readiness.yml',import.meta.url),'utf8');
+  assert.match(readiness,/secrets\.CANNELE_REGISTRY_ADMIN_DATABASE_URL/);
+  assert.match(readiness,/secrets\.CANNELE_REGISTRY_ADMIN_DATABASE_HOST/);
+  assert.match(readiness,/secrets\.CANNELE_TRANSITION_VERCEL_TOKEN/);
+  assert.match(readiness,/secrets\.CANNELE_TRANSITION_NEON_API_KEY/);
+  assert.doesNotMatch(readiness,/secrets\.(?:CAKE_QA_REGISTRY_DATABASE_(?:URL|HOST)|VERCEL_TOKEN\b|NEON_API_KEY\b)/);
   assert.match(dispatcher,/uses: \.\/\.github\/workflows\/cannele-onboarding-run\.yml/);
   assert.match(runner,/repository: tyask\/Cake\s+ref: \$\{\{ github\.sha \}\}\s+fetch-depth: 0\s+persist-credentials: false/);
 });
