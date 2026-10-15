@@ -102,11 +102,11 @@ test("partial or unknown provider pagination and malformed total counts never be
   }
 });
 
-async function inventoryReceipt(path:string,response:(page:number)=>unknown){
+async function inventoryReceipt(path:string,response:(page:number,url:URL)=>unknown){
   let page=0;const base=transport();
   return collectReadiness(environment,{source,database:async()=>fixtureSnapshot(),transport:async(method,address,token,body)=>{
     assert.equal(method,"GET");assert.equal(body,undefined);
-    if(new URL(address).pathname===path)return{status:200,data:response(page++)};
+    const url=new URL(address);if(url.pathname===path)return{status:200,data:response(page++,url)};
     return base(method,address,token,body);
   }});
 }
@@ -148,10 +148,10 @@ test("Neon branch inventory keeps strict pagination rules and identifies each sa
     ["PAGINATION_INVALID",()=>({branches:[branch],pagination:null})],
     ["PAGINATION_UNKNOWN_KEY",()=>({branches:[branch],pagination:{next:null,[privateValue]:privateValue}})],
     ["PAGINATION_SORT_BY_MISMATCH",()=>({branches:[branch],pagination:{next:null,sort_by:false}})],
-    ["PAGINATION_SORT_ORDER_MISMATCH",()=>({branches:[branch],pagination:{next:null,sort_order:"desc"}})],
+    ...["Asc","sideways",false,0].map(sort_order=>["PAGINATION_SORT_ORDER_MISMATCH",()=>({branches:[branch],pagination:{next:null,sort_order}})] as [string,()=>unknown]),
     ["PAGINATION_FULL_UNMARKED",()=>({branches:full})],
     ["PAGINATION_NEXT_MISSING",()=>({branches:full,pagination:{}})],
-    ...[false,"",2048.5,"x".repeat(2049)].map(next=>["PAGINATION_NEXT_INVALID",()=>({branches:[branch],pagination:{next}})] as [string,()=>unknown]),
+    ...[false,0,2048.5,"x".repeat(2049)].map(next=>["PAGINATION_NEXT_INVALID",()=>({branches:[branch],pagination:{next}})] as [string,()=>unknown]),
     ["PAGINATION_CURSOR_LOOP",()=>({branches:[],pagination:{next:"same-cursor"}})],
     ["DUPLICATE_ID",()=>({branches:[branch,branch]})],
     ["PAGE_LIMIT",page=>({branches:[],pagination:{next:`cursor-${page}`}})],
@@ -186,6 +186,36 @@ test("documented Neon final pages may omit next and optional sorting echoes",asy
     const receipt=await collectReadiness(environment,{source,transport:transport({neonPagination}),database:async()=>fixtureSnapshot()});
     assert.equal(receipt.providers?.complete,true);
     assert.equal(receipt.observedConditionsSatisfied,true);
+  }
+});
+
+test("Neon follows the first response's known sort order with normalized subsequent GETs and accepts empty next as EOF",async()=>{
+  const branch={id:parent,project_id:neonProject,parent_id:null,name:"parent",default:true,protected:true};
+  for(const initialOrder of ["asc","desc","ASC","DESC"]){
+    const queries:URL[]=[];
+    const receipt=await inventoryReceipt(`/api/v2/projects/${neonProject}/branches`,(page,url)=>{
+      queries.push(url);
+      assert.equal(url.searchParams.get("sort_by"),"created_at");
+      assert.equal(url.searchParams.get("sort_order"),page===0?"asc":initialOrder.toLowerCase());
+      assert.equal(url.searchParams.get("cursor"),page===0?null:"fixture-cursor");
+      return{branches:page===0?[branch]:[],pagination:{next:page===0?"fixture-cursor":"",sort_by:"created_at",sort_order:page===0?initialOrder:initialOrder.toUpperCase()}};
+    });
+    assert.equal(queries.length,2);assert.equal(receipt.providers?.neon.branchCount,1);
+    assert.equal(receipt.observedConditionsSatisfied,true);assert.deepEqual(receipt.blockers,[]);
+  }
+  const full=[branch,...Array.from({length:99},(_,index)=>({...branch,id:`br-fixture-${index}`}))];
+  const final=await inventoryReceipt(`/api/v2/projects/${neonProject}/branches`,()=>({branches:full,pagination:{next:"",sort_order:"DESC"}}));
+  assert.equal(final.providers?.complete,true);assert.equal(final.providers?.neon.branchCount,100);
+  assert.ok(final.blockers.includes("PROVIDER_RESOURCES_PRESENT"),"EOF does not hide actual remaining child branches");
+});
+
+test("Neon rejects a changed sort order after the first page, including after an omitted first echo",async()=>{
+  const branch={id:parent,project_id:neonProject,parent_id:null,name:"parent",default:true,protected:true};
+  for(const [first,second] of [["desc","asc"],["ASC","DESC"],[undefined,"desc"]]){
+    const receipt=await inventoryReceipt(`/api/v2/projects/${neonProject}/branches`,page=>({branches:page===0?[branch]:[],
+      pagination:{next:page===0?"fixture-cursor":"",...(page===0?(first===undefined?{}:{sort_order:first}):{sort_order:second})}}));
+    assert.equal(receipt.providers,null);assert.equal(receipt.observedConditionsSatisfied,false);
+    assert.ok(receipt.blockers.includes("READINESS_INVENTORY_NEON_BRANCHES_PAGINATION_SORT_ORDER_MISMATCH"));
   }
 });
 

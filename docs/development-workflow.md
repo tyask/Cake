@@ -331,7 +331,7 @@ providerの読取失敗は、`blockers`に`READINESS_PROVIDER_<provider>_<stage>
 
 PR #57のマージ後の[readiness run 38744829643](https://github.com/tyask/Cake/actions/runs/38744829643)は、main `0ef3daaecfa860d354bda763ac28d0de94af40a2`・owner本人・初回attempt・専用helper・全job成功を確認した。artifact `11978330490`のZIP全体のSHA-256 `ae0d93edc13e913d567d73e9074a0e0b9d43b100e51bc42ccf1f57f8b85d491f`、依頼UUID、実行元とworkflow blobを照合して読んだ。管理DBはPostgreSQL 18.6、専用identityと001 catalogが一致し、qa1/version44・qa2/version13・qa3/version13がすべてfree、履歴70件・requests・leasesは解決済み、他のDB接続0件、旧未完了workflow 0件だった。002は未適用。providerの一覧検証は`READINESS_INVENTORY_INCOMPLETE`で未確定だったため、このrunだけで全資源不在や切替可能とは扱わない。実効flagは当時POOL/REGISTRYともtrue・CANNELE未設定だった。利用者の変更後、[readiness run 38749502912](https://github.com/tyask/Cake/actions/runs/38749502912)でも同じsource・owner・初回attempt・全job成功を確認した。artifact `11979914628`のZIP SHA-256 `41369548502b324e6eca3f7ceb1d92e86c11784f5fa57bfdfecb02b9c73ace5c`と依頼・source blobを照合し、POOL=false・REGISTRY=true・CANNELE未設定、3枠free・履歴状態不変・他session 0・旧未完了run 0を確認した。provider一覧は引き続き未確定で、global停止や002適用はまだ行っていない。
 
-PostgreSQL 18ではNOT NULL制約がcatalogへ追加されるため、Canneleの移行helperは17/18それぞれの完全な固定hashで照合する。17.10と18.4の使い捨てDBで検証し、実18.6も移行前に同じhashと一致することを確認する。Neonの最終branchページでは`next`とsort echoが省略され得る。仕様上の短い最終ページを受け入れつつ、不明なcursor・未知field・未完了ページは引き続き拒否する。
+PostgreSQL 18ではNOT NULL制約がcatalogへ追加されるため、Canneleの移行helperは17/18それぞれの完全な固定hashで照合する。17.10と18.4の使い捨てDBで検証し、実18.6も移行前に同じhashと一致することを確認する。Neonのbranch一覧は最初の応答の`sort_order`が`asc`・`desc`・`ASC`・`DESC`なら小文字へ正規化し、次ページのGETへ引き継ぐ。2ページ目以降の順序変更や未知の値は拒否し、`sort_by=created_at`を維持する。最終branchページの`next`とsort echoは省略され得て、`next`の空文字もnullと同じ終端として扱う。短い最終ページでの省略を受け入れつつ、false・0、不明なcursor・未知field・重複ID・未完了ページは引き続き拒否する。
 
 ### Actionsからの管理操作
 
