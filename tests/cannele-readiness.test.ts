@@ -142,6 +142,7 @@ test("actual PG17 readonly snapshot preserves 001/002 loans and recognizes super
   try{
     const connection="postgresql://synthetic-user:synthetic-password@ep-registry-fixture-pooler.mock.aws.neon.tech/synthetic_registry";
     const baseline=await inspectReadinessDatabase(postgresBatch(f.client),connection,legacyDdl,fenceDdl);assert.equal(baseline.summary.catalog,"001");assert.equal(baseline.summary.allSlotsFree,true);
+    assert.match(baseline.summary.postgresVersion,/^17\.[0-9]+$/,"Numeric server version excludes distribution/build suffixes on the real PG17 fixture");
     const first={repository,base:"main",pr:42,branch:"codex/readiness-fixture",headSha:revision,requestId:randomUUID(),leaseId:randomUUID(),now:"2026-10-15T00:00:00.000Z",slot:"qa1"};
     let record=(await f.client.query("SELECT cake_qa_registry.reserve($1::jsonb,$2) AS value",[JSON.stringify(first),"a".repeat(64)])).rows[0].value;
     const repeated={...first,requestId:randomUUID(),leaseId:randomUUID()};

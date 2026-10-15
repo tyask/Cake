@@ -192,7 +192,8 @@ export type ProviderSummary = {complete:true;aliases:{slot:string;absent:boolean
   historicalResources:{complete:true;deploymentCount:number;deploymentAbsent:number;branchCount:number;branchAbsent:number;endpointCount:number;endpointAbsent:number;hostCount:number;hostsAbsent:number}};
 export type PrivateSnapshot = {summary:DatabaseSummary;hostDigest:string;deployments:Set<string>;branches:Set<string>;endpoints:Set<string>;hosts:Set<string>};
 
-const metadataSql = `SELECT current_database() AS database_name,current_setting('server_version') AS postgres_version,
+const metadataSql = `SELECT current_database() AS database_name,
+  (current_setting('server_version_num')::integer / 10000)::text || '.' || (current_setting('server_version_num')::integer % 10000)::text AS postgres_version,
   to_regnamespace('cannele_registry') IS NULL AND NOT EXISTS(SELECT FROM pg_namespace WHERE nspname NOT IN ('public','cake_qa_registry','information_schema') AND nspname NOT LIKE 'pg\\_%' ESCAPE '\\')
     AND NOT EXISTS(SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f')) AS dedicated,
   (SELECT jsonb_agg(to_jsonb(i)) FROM cake_qa_registry.identity i) AS identities,
