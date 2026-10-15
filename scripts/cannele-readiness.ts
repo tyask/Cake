@@ -191,8 +191,9 @@ export class ReadinessGateway extends HttpQaGateway {
   private async neonInventory(kind: "branches" | "endpoints"): Promise<Object_[]> {
     const scope = kind === "branches" ? "NEON_BRANCHES" : "NEON_ENDPOINTS";
     const items:Object_[]=[]; const ids=new Set<string>(); const cursors=new Set<string>(); let cursor:string|undefined;
+    let sortOrder:"asc"|"desc"="asc";
     for(let page=0;page<20;page++) {
-      const body=inventoryObject(await this.get("neon",`/projects/${QA_NEON_PROJECT_ID}/${kind}${kind === "branches" ? `?limit=100&sort_by=created_at&sort_order=asc${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}` : ""}`),scope,"RESPONSE_INVALID");
+      const body=inventoryObject(await this.get("neon",`/projects/${QA_NEON_PROJECT_ID}/${kind}${kind === "branches" ? `?limit=100&sort_by=created_at&sort_order=${sortOrder}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}` : ""}`),scope,"RESPONSE_INVALID");
       const rows=inventoryRows(body[kind],scope);
       for(const raw of rows){const item=inventoryObject(raw,scope,"ITEM_INVALID");const id=inventoryId(item.id,kind === "branches" ? /^br-[a-z0-9-]+$/ : /^ep-[a-z0-9-]+$/,scope);if(ids.has(id))return inventoryFail(scope,"DUPLICATE_ID");ids.add(id);items.push(item);}
       if(body.next!==undefined||body.next_cursor!==undefined||body.cursor!==undefined)return inventoryFail(scope,"PAGINATION_TOP_MARKER");
@@ -201,13 +202,18 @@ export class ReadinessGateway extends HttpQaGateway {
       const pagination=inventoryObject(body.pagination,scope,"PAGINATION_INVALID");
       if(Object.keys(pagination).some(key=>!["next","sort_by","sort_order"].includes(key)))return inventoryFail(scope,"PAGINATION_UNKNOWN_KEY");
       if(pagination.sort_by!==undefined && pagination.sort_by!=="created_at")return inventoryFail(scope,"PAGINATION_SORT_BY_MISMATCH");
-      if(pagination.sort_order!==undefined && pagination.sort_order!=="asc")return inventoryFail(scope,"PAGINATION_SORT_ORDER_MISMATCH");
+      if(pagination.sort_order!==undefined){
+        const returnedOrder=pagination.sort_order==="asc"||pagination.sort_order==="ASC"?"asc"
+          :pagination.sort_order==="desc"||pagination.sort_order==="DESC"?"desc":inventoryFail(scope,"PAGINATION_SORT_ORDER_MISMATCH");
+        if(page>0 && returnedOrder!==sortOrder)return inventoryFail(scope,"PAGINATION_SORT_ORDER_MISMATCH");
+        sortOrder=returnedOrder;
+      }
       const next=pagination.next;
       // Neon documents next/sort_by/sort_order as optional. An absent next on
       // a short final branch page is complete even when optional echoes are absent.
-      if(next===null || (next===undefined && rows.length<100))return items;
+      if(next===null || next==="" || (next===undefined && rows.length<100))return items;
       if(next===undefined)return inventoryFail(scope,"PAGINATION_NEXT_MISSING");
-      if(typeof next!=="string" || !next || next.length>2048)return inventoryFail(scope,"PAGINATION_NEXT_INVALID");
+      if(typeof next!=="string" || next.length>2048)return inventoryFail(scope,"PAGINATION_NEXT_INVALID");
       if(cursors.has(next))return inventoryFail(scope,"PAGINATION_CURSOR_LOOP");
       if(page===19)return inventoryFail(scope,"PAGE_LIMIT");
       cursors.add(next);cursor=next;
