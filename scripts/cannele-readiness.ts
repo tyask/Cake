@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from "node:util";
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import { fullSha, leaseToken, qaAlias, QA_REPOSITORY, QA_PROJECT_ID, QA_NEON_PROJECT_ID, SLOTS } from "../lib/qa-pool";
 import { parseRegistryLease, type QaRegistryLease } from "../lib/qa-registry";
+import { qaDiagnosticFields } from "../lib/qa-diagnostics";
 import { registryConnectionString } from "./qa-registry-store";
 import { HttpQaGateway, type QaTransport } from "./qa-pool-writer";
 import { expectedLegacyCatalog, expectedFencedCatalog, legacyCatalogSql, LEGACY_DDL_SHA256, LEGACY_WORKFLOWS } from "./qa-registry-fence";
@@ -64,7 +65,10 @@ export class ReadinessGateway extends HttpQaGateway {
     if (provider !== "github" && !this.authorized) return fail("READINESS_RUN_UNTRUSTED");
     if (++this.calls > 250 || Date.now()-this.started > 180_000) return fail("READINESS_READ_LIMIT");
     try { return await this.api(provider,path,"GET",undefined,missing); }
-    catch { return fail("READINESS_PROVIDER_UNKNOWN"); }
+    catch (error) {
+      const diagnostic = qaDiagnosticFields(error);
+      return fail(`READINESS_PROVIDER_${diagnostic.provider}_${diagnostic.stage}_HTTP_${diagnostic.status ?? "NONE"}_${diagnostic.reason}`);
+    }
   }
   async authorize(source: ReadinessSource): Promise<{ runId: string; runAttempt: 1 }> {
     const e = this.environment;
