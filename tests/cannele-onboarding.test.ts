@@ -43,7 +43,9 @@ const context = { instanceId, repositoryId: 1318171856, bindingDigest: "c".repea
 const request = { protocol: "cannele-legacy-transition/v1", transitionId: randomUUID(), database: { hostDigest: "e".repeat(64), name: "neondb" },
   source: { canneleRevision, cakeRevision: revision, legacyDdlSha256: "1".repeat(64), fenceDdlSha256: "2".repeat(64) }, legacy: { writerEpoch: 1, stateDigest: "3".repeat(64), footprintDigest: "4".repeat(64) },
   binding: { instanceId }, repository: { id: "1318171856", fullName: "tyask/Cake" }, scope: {},
-  admission: { reviewerGitHubId: "16447050", allCloudTasksStopped: true, allPcSessionsStopped: true, oldProviderCreationCredentialsRevoked: true,
+  admission: { protocol: "cannele-legacy-admission/v1", reviewId: randomUUID(), reviewerGitHubId: "16447050", stoppedAt: "2026-10-15T00:00:00.000Z", reviewedAt: "2026-10-15T00:01:00.000Z",
+    trustedMainRevision: revision, legacyWorkflowBlobShas: { "qa-pool": revision, "qa-private-run": revision, "qa-registry": revision, "qa-registry-run": revision },
+    allCloudTasksStopped: true, allPcSessionsStopped: true, oldProviderCreationCredentialsRevoked: true,
     legacyRegistryAndOwnerCredentialsRevoked: true, noInFlightProviderWriters: true, noUnknownCreationIntents: true } };
 function coreFixture(changes: Partial<OnboardingCore> = {}) {
   const events: string[] = [], received: unknown[] = [];
@@ -54,7 +56,8 @@ function coreFixture(changes: Partial<OnboardingCore> = {}) {
     inspect: async () => { events.push("inspect"); return { identity: { protocol: "cake-qa-registry/v1", databaseName: "neondb", writerMode: "legacy", writerEpoch: 1, fenceReceipt: { revision } }, stateDigest: "5".repeat(64), footprintDigest: "6".repeat(64) }; },
     transition: async (_client, _migrations, input, options) => {
       events.push("transition:begin"); received.push(structuredClone(input)); await options.verify({ boundedCoreProof: true }); events.push("transition:commit");
-      return { replayed: false, schemaVersion: 4, schemaChecksum: context.schemaChecksum, transition: { transitionId: request.transitionId, evidenceDigest: "7".repeat(64) } };
+      return { replayed: false, schemaVersion: 4, schemaChecksum: context.schemaChecksum, transition: { transitionId: request.transitionId, evidenceDigest: "7".repeat(64),
+        ...((input.admission as Record<string, unknown>).oldProviderCreationCredentialsRevoked === false ? { providerCredentialRetentionAccepted: true } : {}) } };
     },
     provision: async (_client, input) => { events.push("provision"); received.push(structuredClone(input)); },
     assertRuntime: async (_client, input) => { events.push("assertRuntime"); received.push(structuredClone(input)); },
@@ -121,6 +124,62 @@ test("transition requires a real explicit drain admission, preserves request byt
   const replay = coreFixture({ transition: async (_client, _migrations, input) => { assert.deepEqual(input, request); return { replayed: true, schemaVersion: 4, schemaChecksum: context.schemaChecksum, transition: { transitionId: request.transitionId, evidenceDigest: "7".repeat(64) } }; } });
   const result = await runOnboarding({ ...transitionEnvironment, CANNELE_TRANSITION_VERCEL_TOKEN: "", CANNELE_TRANSITION_NEON_API_KEY: "" }, { source, transport: transport(), core: async () => replay.core });
   assert.equal(result.result.replayed, true); assert.equal(replay.events.includes("providerTransport"), false);
+  assert.equal(Object.hasOwn(result.result, "providerCredentialRetentionAccepted"), false);
+});
+
+test("explicit provider credential retention preserves the reviewed input without claiming revocation", async () => {
+  const retained = { ...request, admission: { ...request.admission, oldProviderCreationCredentialsRevoked: false, providerCredentialRetentionAccepted: true } };
+  const fixture = coreFixture();
+  const receipt = await runOnboarding({ ...transitionEnvironment, CANNELE_ONBOARDING_TRANSITION_JSON: JSON.stringify(retained) }, { source, transport: transport(), core: async () => fixture.core });
+  assert.deepEqual(fixture.received[0], retained);
+  assert.equal((fixture.received[0] as typeof retained).admission.oldProviderCreationCredentialsRevoked, false);
+  assert.equal(receipt.result.providerCredentialRetentionAccepted, true);
+  const replay = coreFixture({ transition: async (_client, _migrations, input) => {
+    assert.deepEqual(input, retained);
+    return { replayed: true, schemaVersion: 4, schemaChecksum: context.schemaChecksum, transition: { transitionId: request.transitionId, evidenceDigest: "7".repeat(64), providerCredentialRetentionAccepted: true } };
+  } });
+  const result = await runOnboarding({ ...transitionEnvironment, CANNELE_ONBOARDING_TRANSITION_JSON: JSON.stringify(retained), CANNELE_TRANSITION_VERCEL_TOKEN: "", CANNELE_TRANSITION_NEON_API_KEY: "" },
+    { source, transport: transport(), core: async () => replay.core });
+  assert.equal(result.result.replayed, true); assert.equal(replay.events.includes("providerTransport"), false);
+  assert.equal(result.result.providerCredentialRetentionAccepted, true);
+  assert.equal(Object.hasOwn(request.admission, "providerCredentialRetentionAccepted"), false, "old revoked input stays unchanged");
+});
+
+test("public retention evidence must match the actual immutable core receipt, on first execution and replay", async () => {
+  const retained = { ...request, admission: { ...request.admission, oldProviderCreationCredentialsRevoked: false, providerCredentialRetentionAccepted: true } };
+  for (const replayed of [false, true]) for (const input of [request, retained]) {
+    const retainedPolicy = input === retained;
+    const invalidMarkers = retainedPolicy ? [{}, ...[undefined, false, null, "true"].map(providerCredentialRetentionAccepted => ({ providerCredentialRetentionAccepted }))]
+      : [undefined, true, false, null, "true"].map(providerCredentialRetentionAccepted => ({ providerCredentialRetentionAccepted }));
+    for (const marker of invalidMarkers) {
+      const fixture = coreFixture({ transition: async () => ({ replayed, schemaVersion: 4, schemaChecksum: context.schemaChecksum,
+        transition: { transitionId: request.transitionId, evidenceDigest: "7".repeat(64), ...marker } }) });
+      await assert.rejects(runOnboarding({ ...transitionEnvironment, CANNELE_ONBOARDING_TRANSITION_JSON: JSON.stringify(input) },
+        { source, transport: transport(), core: async () => fixture.core }), { code: "ONBOARDING_RESULT_INVALID" });
+    }
+  }
+});
+
+test("ambiguous provider policy and unconfirmed actor or DB drain fail before core or credential access", async () => {
+  const retained = { ...request.admission, oldProviderCreationCredentialsRevoked: false, providerCredentialRetentionAccepted: true };
+  const commaKey = Object.fromEntries(Object.entries(retained).filter(([key]) => !["reviewId", "reviewedAt"].includes(key)));
+  commaKey["reviewId,reviewedAt"] = "untrusted combined key";
+  const invalid = [
+    { ...request.admission, oldProviderCreationCredentialsRevoked: false },
+    ...[false, null, "true"].map(providerCredentialRetentionAccepted => ({ ...retained, providerCredentialRetentionAccepted })),
+    ...[true, false, null, "true"].map(providerCredentialRetentionAccepted => ({ ...request.admission, providerCredentialRetentionAccepted })),
+    ...["allCloudTasksStopped", "allPcSessionsStopped", "legacyRegistryAndOwnerCredentialsRevoked", "noInFlightProviderWriters", "noUnknownCreationIntents"]
+      .map(name => ({ ...retained, [name]: false })),
+    { ...retained, unknownRetentionPolicy: true },
+    commaKey,
+  ];
+  for (const admission of invalid) {
+    let loaded = 0;
+    await assert.rejects(runOnboarding({ ...transitionEnvironment, CANNELE_ONBOARDING_TRANSITION_JSON: JSON.stringify({ ...request, admission }) },
+      { source, transport: transport(), core: async () => { loaded++; return coreFixture().core; } }),
+    error => ["ONBOARDING_CREDENTIAL_DRAIN_UNCONFIRMED", "ONBOARDING_INPUT_INVALID"].includes((error as { code: string }).code));
+    assert.equal(loaded, 0);
+  }
 });
 
 test("runtime grants bind explicit context and same DB then authenticate a separate non-owner LOGIN", async () => {

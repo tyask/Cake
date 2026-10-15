@@ -14,8 +14,10 @@ const SHA = /^[a-f0-9]{40}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const FLAGS = ["CAKE_CANNELE_ENABLED", "CAKE_QA_POOL_ENABLED", "CAKE_QA_REGISTRY_ENABLED"] as const;
-const DRAIN_FIELDS = ["allCloudTasksStopped", "allPcSessionsStopped", "oldProviderCreationCredentialsRevoked",
-  "legacyRegistryAndOwnerCredentialsRevoked", "noInFlightProviderWriters", "noUnknownCreationIntents"] as const;
+const DRAIN_FIELDS = ["allCloudTasksStopped", "allPcSessionsStopped", "legacyRegistryAndOwnerCredentialsRevoked",
+  "noInFlightProviderWriters", "noUnknownCreationIntents"] as const;
+const ADMISSION_FIELDS = ["protocol", "reviewId", "reviewerGitHubId", "stoppedAt", "reviewedAt", "trustedMainRevision",
+  "legacyWorkflowBlobShas", ...DRAIN_FIELDS, "oldProviderCreationCredentialsRevoked"] as const;
 type Env = Readonly<Record<string, string | undefined>>;
 type Object_ = Record<string, unknown>;
 export type OnboardingAction = "inspect" | "transition" | "provision-runtime";
@@ -33,7 +35,7 @@ function json(value: string | undefined): Object_ {
   try { return object(JSON.parse(value)); } catch { return fail("ONBOARDING_INPUT_INVALID"); }
 }
 function exact(value: Object_, keys: readonly string[]): void {
-  if (Object.keys(value).sort().join(",") !== [...keys].sort().join(",")) fail("ONBOARDING_INPUT_INVALID");
+  if (Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) fail("ONBOARDING_INPUT_INVALID");
 }
 function secret(environment: Env, name: string): string {
   const value = environment[name];
@@ -126,7 +128,10 @@ function transitionInput(environment: Env, source: OnboardingSource): Object_ {
   const input = json(environment.CANNELE_ONBOARDING_TRANSITION_JSON);
   if (environment.CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN !== "true") return fail("ONBOARDING_CREDENTIAL_DRAIN_UNCONFIRMED");
   const admission = object(input.admission), sources = object(input.source), repository = object(input.repository);
-  if (DRAIN_FIELDS.some(name => admission[name] !== true)) return fail("ONBOARDING_CREDENTIAL_DRAIN_UNCONFIRMED");
+  const revoked = admission.oldProviderCreationCredentialsRevoked, hasRetention = Object.hasOwn(admission, "providerCredentialRetentionAccepted");
+  if (DRAIN_FIELDS.some(name => admission[name] !== true)
+    || !(revoked === true && !hasRetention || revoked === false && hasRetention && admission.providerCredentialRetentionAccepted === true)) return fail("ONBOARDING_CREDENTIAL_DRAIN_UNCONFIRMED");
+  exact(admission, [...ADMISSION_FIELDS, ...(revoked === false ? ["providerCredentialRetentionAccepted"] : [])]);
   if (sources.canneleRevision !== source.canneleRevision || !SHA.test(String(sources.cakeRevision))
     || repository.id !== String(REPOSITORY_ID) || repository.fullName !== REPOSITORY || admission.reviewerGitHubId !== String(OWNER_ID)) return fail("ONBOARDING_CONTEXT_INVALID");
   // Full closed shape, binding, checksums, timestamps and exact prior fence are
@@ -179,8 +184,12 @@ export async function runOnboarding(environment: Env, dependencies: { source: On
               vercelToken: secret(environment, "CANNELE_TRANSITION_VERCEL_TOKEN"), neonApiKey: secret(environment, "CANNELE_TRANSITION_NEON_API_KEY") })), request) });
           const receipt = object(transitioned.transition);
           if (typeof transitioned.replayed !== "boolean") return fail("ONBOARDING_RESULT_INVALID");
+          const retained = object(input!.admission).oldProviderCreationCredentialsRevoked === false;
+          const hasRetention = Object.hasOwn(receipt, "providerCredentialRetentionAccepted");
+          if (retained ? !hasRetention || receipt.providerCredentialRetentionAccepted !== true : hasRetention) return fail("ONBOARDING_RESULT_INVALID");
           result = { transitionId: text(receipt.transitionId, UUID), replayed: transitioned.replayed, schemaVersion: number(transitioned.schemaVersion),
-            schemaChecksum: text(transitioned.schemaChecksum, DIGEST), evidenceDigest: text(receipt.evidenceDigest, DIGEST) };
+            schemaChecksum: text(transitioned.schemaChecksum, DIGEST), evidenceDigest: text(receipt.evidenceDigest, DIGEST),
+            ...(hasRetention ? { providerCredentialRetentionAccepted: true } : {}) };
         } else {
           const runtime = core.connection({ CANNELE_REGISTRY_DATABASE_URL: secret(environment, "CANNELE_REGISTRY_DATABASE_URL"),
             CANNELE_REGISTRY_DATABASE_HOST: secret(environment, "CANNELE_REGISTRY_DATABASE_HOST") });

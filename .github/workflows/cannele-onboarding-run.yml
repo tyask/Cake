@@ -25,6 +25,7 @@ on:
         default: ""
         type: string
       confirm_credential_drain:
+        description: Old actors stopped and old management DB/owner credentials and sessions drained; provider policy in transition JSON
         required: true
         type: boolean
     secrets:
