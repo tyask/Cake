@@ -101,6 +101,7 @@ jobs:
   diagnostics:
     if: >-
       inputs.mode == 'diagnostics' && github.repository == 'tyask/Cake' &&
+      vars.CAKE_CANNELE_ENABLED != 'true' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -56,6 +56,28 @@ PR #47のmain導入後、初回の[initialize run 38581479595](https://github.co
 
 管理DBの将来のschema変更は`db/qa-registry/`へ番号付きDDLを追加し、適用済みDDLを書き換えず、管理専用の適用手順をレビューして実行する。Cakeの業務migration、`npm run db:setup`、Vercelのアプリbuildから管理用DDLを実行しない。
 
+### Cannele切替前の旧管理DB互換fence
+
+`db/qa-registry/002_cannele_fence.sql`と専用の`qa-registry-fence.yml`はCanneleへの切替準備である。実装の追加だけで実DBへ適用した、旧認証を失効させた、APIへ切り替えたとは扱わない。適用済みの`001_registry.sql`は変更しない。
+
+適用前に、今回の旧workflow停止guardを含むmainをレビューして導入する。`CAKE_CANNELE_ENABLED=true`は旧`qa-pool.yml` / `qa-private-run.yml` / `qa-registry.yml` / `qa-registry-run.yml`のQA操作jobを停止する。`CAKE_QA_POOL_ENABLED=false`、`CAKE_QA_REGISTRY_ENABLED=false`も維持する。この段階のflagは旧job停止を表し、Cannele APIの稼働やCloud/PCクライアントの移行完了を証明しない。二つの旧flagだけをfalseへ変更すると旧`qa-pool.yml`のclosedイベント処理が動き得るため、Cannele停止guardを省略しない。
+
+使用中の旧貸出がある場合は、旧方式でcleanupを確認してからglobal停止guardを有効にする。停止後に旧cleanup jobが動くことを前提としない。owner本人は、4つの旧workflowのqueued / in-progress / waitingなどのrunがすべて終了したことに加え、旧コードを使うCloud・PC・別の自動処理を止め、旧認証の撤去と管理DB接続sessionのdrainを確認する。Actions一覧やDB内のfenceだけでは、古いowner資格情報を使う外部処理の停止・権限失効を保証できない。確認できない状態では適用しない。
+
+レビューした現在のmainの完全なSHAを指定して、専用workflowを依頼する。`confirm_legacy_drain=true`は上述の外部停止・認証・session確認を完了したownerの明示確認であり、installerが外部停止を自動的に証明する値ではない。
+
+```text
+gh workflow run qa-registry-fence.yml --repo tyask/Cake --ref main -f action=install -f reviewed_revision=<レビュー済み現在mainの40桁SHA> -f confirm_legacy_drain=true
+```
+
+installerはowner本人、初回run、専用workflow、checkoutと現在mainの一致、停止flags、全4workflowの完全な一覧を検査する。専用DBのhost pin、旧identity、`001`の固定SHA-256とtable・column・constraint・index・function本体を含む既知のobject footprintを照合する。未知のobject、変更されたguard、別DB、Cannele schema、部分適用済みfenceがあれば停止する。GitHubとDB以外のAPIは呼ばず、providerの認証情報も受け取らない。
+
+適用前に、同じordered lock内で既存のidentityとschemaを読み取り検査する。すでに完全に同じrevision・checksumのreceiptと`002`のobject・function本体があれば、保存済みreceiptを返してDDLやUPDATEを実行しない。異なるreceipt・部分適用・schema driftがあれば拒否する。`action=inspect`ではこの読み取り検査だけを行い、未適用の場合もDDLへ進まない。応答が失われた場合は同じレビュー済みSHAの`inspect`で確認し、mainが変わった場合は別のレビュー済み読取手順で元のreceiptを照合する。
+
+初回の適用は同じNeon transaction内で旧legacy lock、Cannele control lockの順に取得し、`001`のschema検査を再実施してから、`002`、両DDLのchecksumとmain SHAを含むimmutable receipt、readbackをまとめてcommitする。既存の貸出・履歴・資源IDを保持し、`writer_mode=legacy`、`writer_epoch=1`の互換状態で終える。途中失敗はrollbackし、応答が不明ならreceiptを読み取り確認するまで適用成功と扱わない。fence適用だけで旧資源を削除したりCannele用の空台帳を作ったりしない。
+
+実際のCannele clean-startは別のレビュー済み管理手順で行う。旧writerをmaintenanceへ変える処理とCannele初期化は、この互換installerの対象外である。新しい旧initializerは同じordered lock内でCannele schemaまたはmaintenance fenceを検出すると拒否し、切替後の旧台帳再作成を防ぐ。Cannele側のschemaはAPIを無効化しても保持する。
+
 Cloud/PCの共通クライアントは`scripts/qa-client.ts`。Actionsの結果は安全なID・状態だけの`qa-result-<requestId>` artifactの`result.json`から受け取る。DB host、接続文字列、認証情報をartifactへ出さない。mainの実行元SHA、workflow、依頼ID、owner本人、全job成功、初回attempt、PR・貸出の一致を確認し、別run・失敗run・rerunの結果を使わない。mainへの導入前は新コマンドを実行可能な入口として案内しない。旧方式の実装条件・実測記録は末尾の「旧方式の運用・検証記録」に保持する。
 
 通常はGitHub CLIがartifactをダウンロードする。Cloudでartifact保存先へのリダイレクトが403になる場合は、`CAKE_QA_ARTIFACT_CACHE`に作業用ディレクトリを指定する。共通コマンドは確認済みrunのartifact ID・依頼IDを通知して有限時間だけ待つ。`qa:verify`も画面確認の前後にstatusを取得するため、両方の通知を同じ方法で処理する。CodexがGitHub連携のartifact取得ツールでその正確なIDを取得し、ZIPを同ディレクトリの`<artifact ID>.zip`へ置く。接続制限を迂回せず、GitHub APIのdigest・サイズとZIP全体を照合してから、単一の`result.json`を読み取る。任意のJSONやActionsログの転記をreceiptの代用にしない。取得後にもmain・PR・runを再照合し、作業終了後にcacheを削除する。ZIPのダウンロードURLをログ・PRへ表示しない。

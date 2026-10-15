@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { neon, neonConfig, type NeonQueryFunction, type NeonQueryFunctionInTransaction, type NeonQueryInTransaction } from "@neondatabase/serverless";
-import { applyRegistryDdl, registryDdlStatements, splitSqlStatements } from "../scripts/qa-registry-ddl";
+import { applyRegistryDdl, registryDdlStatements, registryInitializationGuard, registrySafeSearchPath, registryWriterLocks, splitSqlStatements } from "../scripts/qa-registry-ddl";
 import { NeonQaRegistryStore } from "../scripts/qa-registry-store";
 
 const ddl = () => readFileSync(new URL("../db/qa-registry/001_registry.sql", import.meta.url), "utf8");
@@ -72,7 +72,7 @@ test("repository DDL uses one transaction with one query per complete top-level 
   let batches = 0;
   await applyRegistryDdl(batchClient(async batch => {
     batches++;
-    assert.deepEqual(batch.map(query => query.statement), expected);
+    assert.deepEqual(batch.map(query => query.statement), [registrySafeSearchPath, ...registryWriterLocks, registryInitializationGuard, ...expected]);
     assert.equal(batch.every(query => query.parameters.length === 0), true);
   }), ddl());
   assert.equal(batches, 1);
@@ -94,7 +94,7 @@ test("the real Neon HTTP driver sends separate DDL queries in exactly one batch 
       assert.equal(typeof options.body, "string");
       const body = JSON.parse(options.body as string) as { queries: { query: string; params: unknown[] }[]; query?: string };
       assert.equal(body.query, undefined, "A full-DDL single prepared query is unsupported");
-      assert.deepEqual(body.queries.map(query => query.query), expected);
+      assert.deepEqual(body.queries.map(query => query.query), [registrySafeSearchPath, ...registryWriterLocks, registryInitializationGuard, ...expected]);
       assert.equal(body.queries.every(query => query.params.length === 0), true);
       return new Response(JSON.stringify({ results: body.queries.map(() => ({ fields: [], rows: [], rowCount: 0 })) }), {
         status: 200, headers: { "Content-Type": "application/json" },
@@ -161,5 +161,27 @@ test("a mid-batch SQL failure rolls back earlier DDL and preserves existing data
       COMMIT;`), /transaction failed/);
     assert.equal((await db.query("SELECT to_regnamespace('partial_registry') IS NULL AS absent")).rows[0].absent, true);
     assert.deepEqual((await db.query("SELECT * FROM preserved ORDER BY id")).rows, [{ id: 1 }]);
+  } finally { await db.close(); }
+});
+
+test("an initializer cannot recreate legacy state when the retained Cannele schema exists", async () => {
+  const { PGlite } = await loadPGlite();
+  const db = new PGlite() as MemoryDatabase;
+  try {
+    await db.exec("CREATE SCHEMA cannele_registry");
+    await assert.rejects(applyRegistryDdl(memoryBatch(db), "BEGIN; CREATE SCHEMA forbidden_legacy; COMMIT;"), /transaction failed/);
+    assert.equal((await db.query("SELECT to_regnamespace('forbidden_legacy') IS NULL AS absent")).rows[0].absent, true);
+    assert.equal((await db.query("SELECT to_regnamespace('cannele_registry') IS NOT NULL AS retained")).rows[0].retained, true);
+  } finally { await db.close(); }
+});
+
+test("an initializer refuses a persisted maintenance fence before any DDL is applied", async () => {
+  const { PGlite } = await loadPGlite();
+  const db = new PGlite() as MemoryDatabase;
+  try {
+    await db.exec("CREATE SCHEMA cake_qa_registry; CREATE TABLE cake_qa_registry.identity (writer_mode text); INSERT INTO cake_qa_registry.identity VALUES ('maintenance')");
+    await assert.rejects(applyRegistryDdl(memoryBatch(db), "BEGIN; CREATE SCHEMA forbidden_legacy; COMMIT;"), /transaction failed/);
+    assert.equal((await db.query("SELECT to_regnamespace('forbidden_legacy') IS NULL AS absent")).rows[0].absent, true);
+    assert.deepEqual((await db.query("SELECT writer_mode FROM cake_qa_registry.identity")).rows, [{ writer_mode: "maintenance" }]);
   } finally { await db.close(); }
 });

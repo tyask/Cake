@@ -11,6 +11,7 @@ import { HttpQaGateway, type QaTransport } from "./qa-pool-writer";
 import { createQaRegistryStore } from "./qa-registry-store";
 import { HttpOwnerApprovalStore } from "./qa-owner-store";
 import { initializeRegistry } from "./qa-registry-initialize";
+import { registryLegacyWorkflows } from "./qa-registry-ddl";
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type RegistryAction = "reserve" | "status" | "begin" | "register" | "publish" | "release" | "migrate";
@@ -87,13 +88,24 @@ export class RegistryGateway extends HttpQaGateway {
     if (Object.values(await legacy.pool()).some(saved => saved && saved.payload.state !== "free")) throw new Error("Legacy QA pool is still occupied; do not create a second ledger owner.");
   }
   async assertLegacyRunsIdle(): Promise<void> {
-    for (let page = 1; page <= 1000; page++) {
-      const response = obj(await this.api("github", `/repos/${QA_REPOSITORY}/actions/workflows/qa-pool.yml/runs?per_page=100&page=${page}`));
-      if (!Array.isArray(response.workflow_runs)) throw new Error("Cannot verify legacy workflow queue.");
-      for (const raw of response.workflow_runs) if (obj(raw).status !== "completed") throw new Error("Wait for all legacy QA workflow runs to finish before initializing.");
-      if (response.workflow_runs.length < 100) return;
+    for (const workflow of registryLegacyWorkflows) for (let page = 1; page <= 100; page++) {
+      const response = obj(await this.api("github", `/repos/${QA_REPOSITORY}/actions/workflows/${workflow}/runs?per_page=100&page=${page}`));
+      if (!Array.isArray(response.workflow_runs) || !Number.isSafeInteger(response.total_count) || Number(response.total_count)<0) throw new Error("Cannot verify legacy workflow queue.");
+      for (const raw of response.workflow_runs) {
+        const run = obj(raw);
+        // The already authorized initializer itself is listed as active by its own entry workflow.
+        const self = this.registryEnv.EVENT_NAME === "workflow_dispatch" && this.registryEnv.QA_ACTION === "initialize"
+          && String(run.id) === this.registryEnv.GITHUB_RUN_ID && run.path === ".github/workflows/qa-registry.yml"
+          && run.event === "workflow_dispatch" && run.head_branch === "main" && run.head_sha === this.registryEnv.QA_TRUSTED_MAIN_SHA
+          && run.run_attempt === 1 && run.status === "in_progress";
+        if (run.status !== "completed" && !self) throw new Error("Wait for all legacy QA workflow runs to finish before initializing.");
+      }
+      if (response.workflow_runs.length < 100) {
+        if ((page-1)*100+response.workflow_runs.length<Number(response.total_count)) throw new Error("Legacy workflow list is incomplete.");
+        break;
+      }
+      if (page === 100) throw new Error("Legacy workflow list is incomplete.");
     }
-    throw new Error("Legacy workflow list is incomplete.");
   }
 }
 

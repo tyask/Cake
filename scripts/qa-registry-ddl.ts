@@ -3,6 +3,28 @@ import type { NeonQueryFunction } from "@neondatabase/serverless";
 const FORMAT_ERROR = "QA registry repository DDL is incomplete or has unsupported transaction boundaries.";
 const APPLY_ERROR = "QA registry initialization transaction failed; database error details suppressed.";
 type Statement = { sql: string; executable: string };
+export const registryLegacyWorkflows = ["qa-pool.yml", "qa-private-run.yml", "qa-registry.yml", "qa-registry-run.yml"] as const;
+
+/** Every compatibility path takes the legacy lock before the Cannele control lock. */
+export const registryWriterLocks = [
+  "SELECT pg_advisory_xact_lock(hashtext('cake:qa-registry:v1'));",
+  "SELECT pg_advisory_xact_lock(hashtextextended('cannele_registry:control', 0));",
+] as const;
+export const registrySafeSearchPath = "SET LOCAL search_path = pg_catalog;";
+
+export const registryInitializationGuard = `DO $registry_initialization_guard$
+DECLARE retired boolean;
+BEGIN
+  IF to_regnamespace('cannele_registry') IS NOT NULL THEN
+    RAISE EXCEPTION 'Cake QA initialization is retired';
+  END IF;
+  IF to_regclass('cake_qa_registry.identity') IS NOT NULL THEN
+    EXECUTE 'SELECT COALESCE(bool_or(to_jsonb(i)->>''writer_mode'' = ''maintenance''), false)
+             FROM cake_qa_registry.identity i' INTO retired;
+    IF retired THEN RAISE EXCEPTION 'Cake QA initialization is retired'; END IF;
+  END IF;
+END;
+$registry_initialization_guard$;`;
 
 /** PostgreSQL lexical boundaries, rather than splitting function bodies at ';'. */
 function statements(input: string): Statement[] {
@@ -88,7 +110,7 @@ export function registryDdlStatements(input: string): string[] {
 
 /** Neon HTTPS accepts a batch of separate prepared statements in one transaction. */
 export async function applyRegistryDdl(client: Pick<NeonQueryFunction<false, false>, "transaction">, input: string): Promise<void> {
-  const batch = registryDdlStatements(input);
+  const batch = [registrySafeSearchPath, ...registryWriterLocks, registryInitializationGuard, ...registryDdlStatements(input)];
   try { await client.transaction(transaction => batch.map(statement => transaction.query(statement, []))); }
   catch { throw new Error(APPLY_ERROR); }
 }

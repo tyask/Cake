@@ -447,3 +447,31 @@ test("close event authorization verifies actual target and fresh PR closed state
     }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test("old initialization drains all four workflows and exempts only its exact authorized active initialize run", async () => {
+  const own = { ...goodInitializeRun(), id: 123 };
+  const initializationEnv = { ...dispatchEnvironment, QA_ACTION: "initialize" };
+  const seen: string[] = [];
+  const gateway = new RegistryGateway(initializationEnv, new MemoryStore(), async (_method, address) => {
+    const workflow = new URL(address).pathname.split("/").at(-2)!; seen.push(workflow);
+    return { status: 200, data: { total_count: workflow === "qa-registry.yml" ? 1 : 0,
+      workflow_runs: workflow === "qa-registry.yml" ? [own] : [] } };
+  });
+  await gateway.assertLegacyRunsIdle();
+  assert.deepEqual(seen,["qa-pool.yml","qa-private-run.yml","qa-registry.yml","qa-registry-run.yml"]);
+  for (const workflow of seen) {
+    const blocked = new RegistryGateway(initializationEnv, new MemoryStore(), async (_method,address) => ({status:200,data:{total_count:1,
+      workflow_runs:[new URL(address).pathname.includes(workflow) ? { ...own, id: 999, status: "queued" } : {status:"completed"}]}}));
+    await assert.rejects(blocked.assertLegacyRunsIdle(), /all legacy QA workflow runs/);
+  }
+  for (const changes of [{id:999},{head_sha:newSha},{run_attempt:2},{status:"queued"},{path:".github/workflows/qa-private-run.yml"}]) {
+    const blocked=new RegistryGateway(initializationEnv,new MemoryStore(),async()=>({status:200,data:{total_count:1,workflow_runs:[{...own,...changes}]}}));
+    await assert.rejects(blocked.assertLegacyRunsIdle(), /all legacy QA workflow runs/);
+  }
+  await assert.rejects(new RegistryGateway(initializationEnv,new MemoryStore(),async()=>({status:200,data:{total_count:1,workflow_runs:[]}})).assertLegacyRunsIdle(), /incomplete/);
+});
+
+function goodInitializeRun() {
+  return { actor: {id:10,type:"User"}, triggering_actor:{id:10,type:"User"}, event:"workflow_dispatch",head_branch:"main",head_sha:mainSha,
+    path:".github/workflows/qa-registry.yml",run_attempt:1,status:"in_progress" };
+}
