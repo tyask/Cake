@@ -1,0 +1,244 @@
+name: Cannele QA release
+run-name: Cake QA return ${{ github.event.pull_request.number || inputs.lease_id }}
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      lease_id:
+        description: Exact saved Cannele lease UUID for a closed PR
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  release:
+    if: >-
+      github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' &&
+      vars.CAKE_CANNELE_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.action == 'closed' && vars.CANNELE_FEATURE_BRANCH_PREFIX != '' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.base.ref == 'main' &&
+        startsWith(github.event.pull_request.head.ref, vars.CANNELE_FEATURE_BRANCH_PREFIX)))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Return the exact QA loan through Cannele
+        env:
+          CAKE_CANNELE_ENABLED: ${{ vars.CAKE_CANNELE_ENABLED }}
+          CANNELE_API_ORIGIN: ${{ vars.CANNELE_API_ORIGIN }}
+          CANNELE_INSTANCE_ID: ${{ vars.CANNELE_INSTANCE_ID }}
+          CANNELE_FEATURE_BRANCH_PREFIX: ${{ vars.CANNELE_FEATURE_BRANCH_PREFIX }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+          REPOSITORY: ${{ github.repository }}
+          CONTROL_REF: ${{ github.ref }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          INPUT_LEASE_ID: ${{ inputs.lease_id }}
+        run: |
+          node --input-type=module <<'CANNELE_RELEASE_JS'
+          import { readFile, appendFile } from 'node:fs/promises';
+          import { createHash } from 'node:crypto';
+          import { setTimeout as delay } from 'node:timers/promises';
+
+          // This reviewed workflow runs from main and fetches no repository code.
+          // Every credential stays in memory and scoped HTTPS request headers.
+          const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          const CODE = /^[A-Z0-9_]{1,80}$/;
+          const env = process.env;
+          const started = Date.now();
+          const deadline = started + 570_000;
+          const failure = code => Object.assign(new Error('QA return could not be completed.'), { code });
+          const object = value => {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) throw failure('INVALID_RESPONSE');
+            return value;
+          };
+          const uuid = value => {
+            if (typeof value !== 'string' || !UUID.test(value)) throw failure('INVALID_IDENTITY');
+            return value;
+          };
+          function remaining(maximum) {
+            const available = deadline - Date.now();
+            if (available <= 0) throw failure('TIME_BUDGET_EXCEEDED');
+            return Math.min(available, maximum);
+          }
+          function waitSeconds(header, fallback = 1) {
+            return typeof header === 'string' && /^\d{1,6}$/.test(header)
+              ? Math.min(30, Math.max(1, Number(header))) : fallback;
+          }
+          async function wait(seconds) {
+            const milliseconds = Math.min(30, Math.max(1, seconds)) * 1000;
+            if (milliseconds >= remaining(570_000)) throw failure('TIME_BUDGET_EXCEEDED');
+            await delay(milliseconds);
+          }
+          async function readJson(response) {
+            if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) throw failure('INVALID_RESPONSE');
+            const reader = response.body?.getReader();
+            if (!reader) throw failure('INVALID_RESPONSE');
+            const chunks = []; let size = 0;
+            try {
+              for (;;) {
+                const chunk = await reader.read();
+                if (chunk.done) break;
+                size += chunk.value.byteLength;
+                if (size > 65_536) { await reader.cancel(); throw failure('INVALID_RESPONSE'); }
+                chunks.push(chunk.value);
+              }
+            } finally { reader.releaseLock(); }
+            try { return object(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)))); }
+            catch { throw failure('INVALID_RESPONSE'); }
+          }
+          function key(route, body) {
+            const bytes = createHash('sha256').update(JSON.stringify(['cannele-release-v1', env.CANNELE_INSTANCE_ID,
+              env.RUN_ID, env.RUN_ATTEMPT, route, body])).digest();
+            bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+            const hex = bytes.subarray(0, 16).toString('hex');
+            return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+          }
+          let origin;
+          async function oidc() {
+            let url;
+            try { url = new URL(env.ACTIONS_ID_TOKEN_REQUEST_URL); } catch { throw failure('OIDC_UNAVAILABLE'); }
+            if (url.protocol !== 'https:' || url.username || url.password || url.hash ||
+              !(url.hostname === 'run-actions.githubusercontent.com' || /^[a-z0-9-]+\.actions\.githubusercontent\.com$/.test(url.hostname)) ||
+              typeof env.ACTIONS_ID_TOKEN_REQUEST_TOKEN !== 'string' || !env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) throw failure('OIDC_UNAVAILABLE');
+            url.searchParams.set('audience', `urn:cannele:${env.CANNELE_INSTANCE_ID}:release`);
+            let response;
+            try { response = await fetch(url, { redirect: 'manual', cache: 'no-store', signal: AbortSignal.timeout(remaining(30_000)),
+              headers: { Authorization: `Bearer ${env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}`, Accept: 'application/json' } }); }
+            catch { throw failure('OIDC_UNAVAILABLE'); }
+            if (response.status !== 200 || response.redirected) throw failure('OIDC_UNAVAILABLE');
+            const value = (await readJson(response)).value;
+            if (typeof value !== 'string' || value.length > 32_768 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value)) throw failure('OIDC_UNAVAILABLE');
+            return value;
+          }
+          async function request(method, route, body, requestKey) {
+            // Retry an uncertain response with the exact same UUID and body.
+            for (let attempt = 0; attempt < 3; attempt++) {
+              const token = await oidc();
+              let response;
+              try {
+                response = await fetch(`${origin}${route}`, { method, redirect: 'manual', cache: 'no-store',
+                  signal: AbortSignal.timeout(remaining(60_000)), headers: { Authorization: `Bearer ${token}`, Accept: 'application/json',
+                    ...(method === 'POST' ? { 'Content-Type': 'application/json', 'Idempotency-Key': requestKey } : {}) },
+                  ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+              } catch {
+                if (attempt === 2) throw failure('API_RESPONSE_UNKNOWN');
+                await wait(1); continue;
+              }
+              if (response.redirected || response.status >= 300 && response.status < 400) throw failure('API_REDIRECT_REJECTED');
+              if ([429, 500, 502, 503, 504].includes(response.status)) {
+                await response.body?.cancel().catch(() => undefined);
+                if (attempt === 2) throw failure('API_UNAVAILABLE');
+                await wait(waitSeconds(response.headers.get('retry-after'))); continue;
+              }
+              if (!/(?:^|,)\s*no-store\s*(?:,|$)/i.test(response.headers.get('cache-control') || '')) throw failure('INVALID_RESPONSE');
+              let value;
+              try { value = await readJson(response); }
+              catch (error) {
+                if (error?.code === 'INVALID_RESPONSE') throw error;
+                if (attempt === 2) throw failure('API_RESPONSE_UNKNOWN');
+                await wait(1); continue;
+              }
+              if (![200, 202].includes(response.status)) throw failure(typeof value.code === 'string' && CODE.test(value.code) ? value.code : 'API_REJECTED');
+              return { status: response.status, value, wait: waitSeconds(response.headers.get('retry-after')) };
+            }
+            throw failure('API_UNAVAILABLE');
+          }
+          function operation(value, expectedId, expectedLease) {
+            const op = object(value);
+            uuid(op.operationId);
+            if (op.kind !== 'release' || !['running', 'awaiting_provider', 'blocked_unknown', 'succeeded', 'failed'].includes(op.status) ||
+              !Number.isSafeInteger(op.revision) || op.revision < 1 || !['advance', 'inspect', 'none'].includes(op.nextAction) ||
+              (expectedId !== undefined && op.operationId !== expectedId)) throw failure('OPERATION_IDENTITY_CHANGED');
+            uuid(op.leaseId);
+            if (expectedLease !== undefined && op.leaseId !== expectedLease) throw failure('LEASE_IDENTITY_CHANGED');
+            if (['succeeded', 'failed'].includes(op.status) && op.nextAction !== 'none' || op.status === 'blocked_unknown' && op.nextAction !== 'inspect') throw failure('INVALID_RESPONSE');
+            return op;
+          }
+          async function report(leaseId, operationId, state, slot) {
+            const lines = ['### QA返却', `状態: ${state}`];
+            if (leaseId) lines.push(`貸出: \`${uuid(leaseId)}\``);
+            if (operationId) lines.push(`操作: \`${uuid(operationId)}\``);
+            if (['qa1', 'qa2', 'qa3'].includes(slot)) lines.push(`QA枠: \`${slot}\``);
+            const output = `${lines.join('\n\n')}\n`;
+            if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, output, 'utf8');
+            console.log(`QA返却: ${state}${leaseId ? ` / 貸出 ${leaseId}` : ''}${operationId ? ` / 操作 ${operationId}` : ''}`);
+          }
+          async function main() {
+            if (env.CAKE_CANNELE_ENABLED !== 'true' || env.REPOSITORY !== 'tyask/Cake' || env.CONTROL_REF !== 'refs/heads/main' ||
+              env.WORKFLOW_REF !== 'tyask/Cake/.github/workflows/cannele-release.yml@refs/heads/main' ||
+              !/^[1-9]\d{0,15}$/.test(env.RUN_ID || '') || !/^[1-9]\d{0,15}$/.test(env.RUN_ATTEMPT || '')) throw failure('UNTRUSTED_WORKFLOW');
+            uuid(env.CANNELE_INSTANCE_ID);
+            const prefix = env.CANNELE_FEATURE_BRANCH_PREFIX;
+            if (typeof prefix !== 'string' || !/^codex\/[A-Za-z0-9/_-]{1,122}$/.test(prefix) || prefix.includes('//') || !/[/\-]$/.test(prefix)) throw failure('INVALID_BINDING');
+            let configured;
+            try { configured = new URL(env.CANNELE_API_ORIGIN); } catch { throw failure('INVALID_BINDING'); }
+            if (configured.protocol !== 'https:' || configured.origin !== env.CANNELE_API_ORIGIN || configured.username || configured.password || configured.hash) throw failure('INVALID_BINDING');
+            origin = configured.origin;
+            let event;
+            try { event = object(JSON.parse(await readFile(env.EVENT_PATH, 'utf8'))); } catch { throw failure('INVALID_EVENT'); }
+            if (object(event.repository).full_name !== env.REPOSITORY) throw failure('INVALID_EVENT');
+            let route, body, expectedLease;
+            if (env.EVENT_NAME === 'pull_request_target') {
+              const pr = object(event.pull_request);
+              if (event.action !== 'closed' || pr.state !== 'closed' || !Number.isSafeInteger(pr.number) || pr.number < 1 ||
+                object(object(pr.head).repo).full_name !== env.REPOSITORY || object(object(pr.base).repo).full_name !== env.REPOSITORY ||
+                object(pr.base).ref !== 'main' || typeof object(pr.head).ref !== 'string' || !pr.head.ref.startsWith(prefix) || pr.head.ref.length <= prefix.length ||
+                !/^[0-9a-f]{40}$/.test(pr.head.sha || '') || typeof pr.closed_at !== 'string' || !Number.isFinite(Date.parse(pr.closed_at))) throw failure('INVALID_EVENT');
+              route = `/v1/prs/${pr.number}/releases`; body = { sourceSha: pr.head.sha, closedAt: pr.closed_at };
+            } else if (env.EVENT_NAME === 'workflow_dispatch') {
+              expectedLease = uuid(env.INPUT_LEASE_ID);
+              if (object(event.inputs).lease_id !== expectedLease) throw failure('INVALID_EVENT');
+              route = `/v1/leases/${expectedLease}/releases`; body = { reason: 'closed' };
+            } else throw failure('INVALID_EVENT');
+            const admitted = await request('POST', route, body, key(route, body));
+            if (admitted.status === 200 && admitted.value.operation === undefined) {
+              const lease = admitted.value.lease;
+              if (lease === null && env.EVENT_NAME === 'pull_request_target') {
+                if (admitted.value.prNumber !== event.pull_request.number || admitted.value.sourceSha !== body.sourceSha || admitted.value.closedAt !== body.closedAt) throw failure('INVALID_RESPONSE');
+                await report(undefined, undefined, '貸出なし'); return;
+              }
+              const freed = object(lease);
+              uuid(freed.leaseId);
+              if (freed.state !== 'free' || expectedLease !== undefined && freed.leaseId !== expectedLease) throw failure('LEASE_IDENTITY_CHANGED');
+              await report(freed.leaseId, admitted.value.operationId, '返却済み', freed.slot); return;
+            }
+            let op = operation(admitted.value.operation, undefined, expectedLease);
+            const operationId = op.operationId; const leaseId = op.leaseId;
+            await report(leaseId, operationId, '返却中');
+            for (let step = 0; step < 128; step++) {
+              if (op.status === 'succeeded') {
+                const freed = object(object(op.result).lease);
+                if (freed.leaseId !== leaseId || freed.state !== 'free' || !Number.isSafeInteger(freed.version) || freed.version < 1) throw failure('INVALID_RESPONSE');
+                await report(leaseId, operationId, '返却済み', freed.slot); return;
+              }
+              if (op.status === 'failed' || op.status === 'blocked_unknown' || op.nextAction === 'inspect') throw failure(op.status === 'failed' ? 'RELEASE_FAILED' : 'RELEASE_BLOCKED_UNKNOWN');
+              const read = await request('GET', `/v1/operations/${operationId}`);
+              op = operation(read.value.operation, operationId, leaseId);
+              if (['succeeded', 'failed', 'blocked_unknown'].includes(op.status) || op.nextAction === 'inspect') continue;
+              if (op.nextAction !== 'advance') throw failure('INVALID_RESPONSE');
+              const advanceRoute = `/v1/operations/${operationId}/advance`;
+              const advanceBody = { expectedRevision: op.revision };
+              const advanced = await request('POST', advanceRoute, advanceBody, key(advanceRoute, advanceBody));
+              op = operation(advanced.value.operation, operationId, leaseId);
+              if (!['succeeded', 'failed', 'blocked_unknown'].includes(op.status) && op.nextAction !== 'inspect') await wait(advanced.wait);
+            }
+            throw failure('STEP_BUDGET_EXCEEDED');
+          }
+          try { await main(); }
+          catch (error) {
+            const code = typeof error?.code === 'string' && CODE.test(error.code) ? error.code : 'RELEASE_UNAVAILABLE';
+            console.error(`Cannele QA返却を停止しました (${code})。返却完了は未確認です。Actionsの再実行または正確な貸出IDによる明示的な再実行で確認してください。`);
+            process.exitCode = 1;
+          }
+          CANNELE_RELEASE_JS

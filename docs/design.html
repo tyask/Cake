@@ -533,6 +533,8 @@
           <p>貸出台帳はVercel Marketplaceの常設・独立したNeon管理DBを正本とする。接続情報はActionsのRepository secretsだけに保存する。管理DDLは<code>db/qa-registry/</code>で管理し、アプリのmigrationや<code>db:setup</code>から実行しない。状態はreserved/published/deleting/freeとし、条件付き予約、貸出IDとversionの照合、削除対象の記録で競合と古い処理を防ぐ。</p>
           <p>同一repositoryのPRをマージまたは未マージでcloseした場合、Actionsが対象leaseのalias・全Deployment・タスク専用DBをcleanupする。直接APIで消失を確認した後だけfreeにする。失敗や作成応答の不明は枠を保持し、別作業へ再貸出しない。台帳更新のためのGitHub Deployment作成は行わない。</p>
           <p>旧方式からは全貸出の返却とalias・Deployment・DBの消失を確認し、管理DDL初期化を成功させてから切り替える。mainへレビュー済みworkflowを導入するまでは、未導入機能を稼働済みと扱わない。設定・コマンド・認証・例外対応・旧方式の実測履歴は<a href="development-workflow.md">開発・QA運用手順</a>に集約する。</p>
+          <p>Cannele APIへの連携は導入準備中で、<code>cannele.config.json</code>は初期状態で無効とする。有効化後は固定revisionの共通CLIで予約・登録・公開をAPIへ依頼し、closed Actionsは返却APIのきっかけだけを担当する。管理DDLは共通Cannele repositoryで管理する。旧貸出の返却・資源不在・writer停止とclean-start移行、実環境の受入確認後に切り替える。詳細と現在の有効化条件は運用手順の「Canneleへの切替」を参照する。</p>
+          <p>旧台帳の互換停止は追加DDL <code>db/qa-registry/002_cannele_fence.sql</code>で準備する。maintenanceへ切り替えた後は、古いコードの予約・更新と既知テーブルへの書き込みをDB側でも拒否する。旧Cloud・PCの停止、資格情報の失効、実行・接続の排出は別途確認し、導入PRのマージだけで切替完了とは扱わない。</p>
           <p>本番はmainへのマージを検知するVercel Git連携で、ビルドと本番DB更新が成功した場合に公開する。公開中の旧版と互換性を保つmigrationを使う。手動のProductionデプロイは別の明示依頼時だけ行う。</p>
         </section>
 

@@ -53,6 +53,7 @@ jobs:
   registry:
     if: >-
       github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' &&
+      vars.CAKE_CANNELE_ENABLED != 'true' &&
       (vars.CAKE_QA_REGISTRY_ENABLED == 'true' ||
        (github.event_name == 'workflow_dispatch' && inputs.action == 'initialize')) &&
       (github.event_name == 'workflow_dispatch' ||

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { databaseConnectionString, previewDatabaseIdentity } from "../lib/database-environment";
+import { buildSteps } from "../scripts/vercel-build";
 
 const preview = {
   VERCEL_ENV: "preview", VERCEL_GIT_COMMIT_REF: "codex/feature", VERCEL_GIT_COMMIT_SHA: "a".repeat(40),
@@ -120,5 +121,91 @@ test("Production・Developmentに新しいQA host fingerprintが残っていれ�
     for (const CAKE_QA_DATABASE_HOST_SHA256 of [digest, ""]) {
       assert.throws(() => databaseConnectionString({ VERCEL_ENV, DATABASE_URL: "production-db", CAKE_QA_DATABASE_HOST_SHA256 }), /QA貸出とDBの照合/);
     }
+  }
+});
+
+const cannelePreview = { ...preview, AUTH_MODE: "test",
+  CANNELE_INSTANCE_ID: "10000000-0000-4000-8000-000000000001",
+  CANNELE_ATTEMPT_ID: "20000000-0000-4000-8000-000000000002", CANNELE_PHASE: "application" };
+
+test("Cannele QAのURLは全アプリ・build・migrationの共通選択時に接続先上書きを拒否する", () => {
+  const base = preview.CAKE_TEST_DATABASE_URL;
+  for (const suffix of ["?host=ep-production.invalid", "?hostaddr=127.0.0.1", "?options=-c%20search_path=other", "?service=other",
+    "?database=other", "?user=other", "?password=other", "?endpoint=other", "?sslmode=disable", "?channel_binding=disable",
+    "?sslmode=require&sslmode=require", "?channel_binding=require&channel_binding=require", "#fragment"]) {
+    for (const select of [databaseConnectionString, previewDatabaseIdentity]) {
+      assert.throws(() => select({ ...cannelePreview, CAKE_TEST_DATABASE_URL: base + suffix }), (error: unknown) => {
+        assert.match(String(error), /QA貸出とDBの照合/);
+        assert.doesNotMatch(String(error), /private|postgres|production\.invalid|search_path/);
+        return true;
+      });
+    }
+  }
+  for (const suffix of ["", "?sslmode=require", "?channel_binding=require", "?sslmode=require&channel_binding=require"]) {
+    assert.equal(databaseConnectionString({ ...cannelePreview, CAKE_TEST_DATABASE_URL: base + suffix }), base + suffix);
+  }
+  // Existing deployments without Cannele metadata keep their established mode.
+  assert.equal(databaseConnectionString({ ...preview, CAKE_TEST_DATABASE_URL: base + "?sslmode=require&connect_timeout=10" }), base + "?sslmode=require&connect_timeout=10");
+});
+
+test("一部だけのCannele metadata・不正phase・非テスト認証はDB client作成前に停止する", () => {
+  for (const change of [{ CANNELE_INSTANCE_ID: undefined }, { CANNELE_ATTEMPT_ID: undefined }, { CANNELE_PHASE: undefined },
+    { CANNELE_INSTANCE_ID: "broken" }, { CANNELE_ATTEMPT_ID: "other" }, { CANNELE_PHASE: "published" }, { AUTH_MODE: "google" },
+    { CAKE_QA_LEASE_TOKEN: undefined }, { CAKE_QA_SOURCE_SHA: "b".repeat(40) }]) {
+    assert.throws(() => databaseConnectionString({ ...cannelePreview, ...change }), /QA貸出とDBの照合/);
+  }
+  assert.throws(() => databaseConnectionString({ ...preview, CANNELE_API_ORIGIN: "https://api.example.invalid" }), /QA貸出とDBの照合/);
+  assert.equal(databaseConnectionString({ ...cannelePreview, CANNELE_PHASE: "provisioning" }), preview.CAKE_TEST_DATABASE_URL);
+});
+
+test("Cannele metadataをProductionやDevelopmentへ残した場合は通常DBにも接続しない", () => {
+  for (const VERCEL_ENV of ["production", "development", undefined]) {
+    for (const metadata of [{ CANNELE_INSTANCE_ID: cannelePreview.CANNELE_INSTANCE_ID },
+      { CANNELE_ATTEMPT_ID: cannelePreview.CANNELE_ATTEMPT_ID }, { CANNELE_PHASE: "application" }, { CANNELE_API_ORIGIN: "https://api.example.invalid" }]) {
+      assert.throws(() => databaseConnectionString({ VERCEL_ENV, DATABASE_URL: "production-db", ...metadata }), /QA貸出とDBの照合/);
+    }
+  }
+});
+
+const localCanneleConfiguration = { CANNELE_SOURCE_DIR: "/reviewed/cannele", CANNELE_STATE_DIR: "/private/cannele-state",
+  CANNELE_VERCEL_GLOBAL_CONFIG: "/private/vercel-profile" };
+
+test("Cloud/PCのCLI設定だけでは通常のDB選択とbuild手順をQAモードへ変えない", () => {
+  for (const configuration of [localCanneleConfiguration,
+    ...Object.entries(localCanneleConfiguration).map(([name, value]) => ({ [name]: value }))]) {
+    for (const VERCEL_ENV of [undefined, "development", "production"]) {
+      const environment = { ...configuration, VERCEL_ENV, DATABASE_URL: "local-test-db", AUTH_SECRET: "fixture-auth-secret",
+        CAKE_TEST_DATABASE_URL: "branch-db" };
+      assert.equal(databaseConnectionString(environment), "local-test-db");
+      assert.equal(previewDatabaseIdentity(environment), null);
+      assert.deepEqual(buildSteps(environment), VERCEL_ENV === "production" ? ["build", "db:setup"] : ["build"]);
+    }
+  }
+  const legacyUrl = preview.CAKE_TEST_DATABASE_URL + "?sslmode=require&connect_timeout=10";
+  assert.equal(databaseConnectionString({ ...preview, ...localCanneleConfiguration, CAKE_TEST_DATABASE_URL: legacyUrl }), legacyUrl);
+});
+
+test("CLI設定があっても一部の実Deployment metadataと未知のCannele変数は接続前に拒否する", () => {
+  for (const metadata of [{ CANNELE_INSTANCE_ID: cannelePreview.CANNELE_INSTANCE_ID },
+    { CANNELE_ATTEMPT_ID: cannelePreview.CANNELE_ATTEMPT_ID }, { CANNELE_PHASE: "application" },
+    { CANNELE_SOURCE_DIR_EXTRA: "/other/path" }, { CANNELE_UNKNOWN: "unknown" }]) {
+    assert.throws(() => databaseConnectionString({ ...preview, ...localCanneleConfiguration, ...metadata }), /QA貸出とDBの照合/);
+    for (const VERCEL_ENV of [undefined, "development", "production"]) {
+      assert.throws(() => databaseConnectionString({ ...localCanneleConfiguration, ...metadata, VERCEL_ENV,
+        DATABASE_URL: "local-test-db" }), /QA貸出とDBの照合/);
+    }
+  }
+});
+
+test("CLI設定の除外後も実Cannele QAの接続先・driver option照合を維持する", () => {
+  const environment = { ...cannelePreview, ...localCanneleConfiguration };
+  assert.equal(databaseConnectionString(environment), preview.CAKE_TEST_DATABASE_URL);
+  for (const suffix of ["?host=ep-production.invalid", "?options=-c%20search_path=other", "?password=other",
+    "?connect_timeout=10", "?sslmode=require&sslmode=require"]) {
+    assert.throws(() => databaseConnectionString({ ...environment,
+      CAKE_TEST_DATABASE_URL: preview.CAKE_TEST_DATABASE_URL + suffix }), /QA貸出とDBの照合/);
+  }
+  for (const VERCEL_ENV of [undefined, "development", "production"]) {
+    assert.throws(() => databaseConnectionString({ ...environment, VERCEL_ENV, DATABASE_URL: "local-test-db" }), /QA貸出とDBの照合/);
   }
 });

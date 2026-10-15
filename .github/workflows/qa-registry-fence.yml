@@ -1,0 +1,69 @@
+name: Install legacy QA registry compatibility fence
+run-name: Install QA compatibility fence from ${{ inputs.reviewed_revision }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Install once, or inspect an exact existing fence without mutation
+        required: true
+        default: install
+        type: choice
+        options:
+          - install
+          - inspect
+      reviewed_revision:
+        description: Reviewed full current Cake main commit SHA
+        required: true
+        type: string
+      confirm_legacy_drain:
+        description: All old Cloud/PC writers stopped; their credentials withdrawn and database sessions drained
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  install:
+    if: >-
+      github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' &&
+      vars.CAKE_CANNELE_ENABLED == 'true' && vars.CAKE_QA_POOL_ENABLED == 'false' &&
+      vars.CAKE_QA_REGISTRY_ENABLED == 'false' && inputs.confirm_legacy_drain
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: cake-qa-pool-writer
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tyask/Cake
+          ref: refs/heads/main
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install reviewed dependencies
+        run: npm ci
+      - name: Install the compatibility fence without changing legacy loans
+        run: |
+          export QA_TRUSTED_MAIN_SHA="$(git rev-parse HEAD)"
+          node --import tsx scripts/qa-registry-fence.ts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+          QA_FENCE_EXPECTED_REVISION: ${{ inputs.reviewed_revision }}
+          QA_FENCE_ACTION: ${{ inputs.action }}
+          QA_FENCE_DRAIN_CONFIRMED: ${{ inputs.confirm_legacy_drain }}
+          CAKE_CANNELE_ENABLED: ${{ vars.CAKE_CANNELE_ENABLED }}
+          CAKE_QA_REGISTRY_ENABLED: ${{ vars.CAKE_QA_REGISTRY_ENABLED }}
+          CAKE_QA_POOL_ENABLED: ${{ vars.CAKE_QA_POOL_ENABLED }}
+          CAKE_QA_REGISTRY_DATABASE_URL: ${{ secrets.CAKE_QA_REGISTRY_DATABASE_URL }}
+          CAKE_QA_REGISTRY_DATABASE_HOST: ${{ secrets.CAKE_QA_REGISTRY_DATABASE_HOST }}

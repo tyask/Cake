@@ -92,7 +92,7 @@ async function writeProof(cwd: string, proof: QaVerificationProof): Promise<void
   } finally { await rm(temporary, { force: true }); }
 }
 
-function browserOptions(environment: Readonly<Record<string, string | undefined>>): LaunchOptions {
+export function browserOptions(environment: Readonly<Record<string, string | undefined>>): LaunchOptions {
   if (environment.NODE_TLS_REJECT_UNAUTHORIZED === "0" || environment.DEBUG || environment.PWDEBUG) throw failure();
   const inherited: Record<string, string> = {};
   for (const [key, value] of Object.entries(environment)) {
@@ -174,7 +174,7 @@ async function contextSmoke(context: BrowserContext, origin: string, user: typeo
   if (new URL(page.url()).origin !== origin) throw failure();
 }
 
-async function browserSmoke(origin: string, token: string, options: LaunchOptions, launch: NonNullable<VerifyOptions["launch"]>, log: (message: string) => void,
+export async function browserSmoke(origin: string, token: string, options: LaunchOptions, launch: NonNullable<VerifyOptions["launch"]>, log: (message: string) => void,
   limits: { browserTimeoutMs: number; caseTimeoutMs: number; shutdownTimeoutMs: number; apiTimeoutMs: number }): Promise<void> {
   const deadline = Date.now() + limits.browserTimeoutMs;
   const budget = (limit: number) => Math.max(1, Math.min(limit, deadline - Date.now()));
