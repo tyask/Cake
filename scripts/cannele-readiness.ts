@@ -31,6 +31,18 @@ const object = (value: unknown): Object_ => value && typeof value === "object" &
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : fail("READINESS_RESPONSE_INVALID");
 const text = (value: unknown, pattern: RegExp): string => typeof value === "string" && value.length <= 1024 && pattern.test(value) ? value : fail("READINESS_RESPONSE_INVALID");
 const integer = (value: unknown): number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : fail("READINESS_RESPONSE_INVALID");
+type InventoryScope = "GITHUB_RUNS" | "VERCEL_DEPLOYMENTS" | "NEON_BRANCHES" | "NEON_ENDPOINTS";
+type InventoryReason = "RESPONSE_INVALID" | "ROWS_INVALID" | "ITEM_INVALID" | "ID_INVALID" | "DETAIL_INVALID" | "META_INVALID"
+  | "DUPLICATE_ID" | "TOTAL_INVALID" | "TOTAL_MISMATCH" | "STATUS_MISMATCH" | "PAGE_LIMIT"
+  | "PAGINATION_INVALID" | "PAGINATION_UNKNOWN_KEY" | "PAGINATION_NEXT_MISSING" | "PAGINATION_NEXT_INVALID"
+  | "PAGINATION_CURSOR_LOOP" | "PAGINATION_TOP_MARKER" | "PAGINATION_PRESENT" | "PAGINATION_FULL_UNMARKED"
+  | "PAGINATION_SORT_BY_MISMATCH" | "PAGINATION_SORT_ORDER_MISMATCH";
+const inventoryFail = (scope: InventoryScope, reason: InventoryReason): never => fail(`READINESS_INVENTORY_${scope}_${reason}`);
+const inventoryObject = (value: unknown, scope: InventoryScope, reason: InventoryReason): Object_ =>
+  value && typeof value === "object" && !Array.isArray(value) ? value as Object_ : inventoryFail(scope,reason);
+const inventoryRows = (value: unknown, scope: InventoryScope): unknown[] => Array.isArray(value) ? value : inventoryFail(scope,"ROWS_INVALID");
+const inventoryId = (value: unknown, pattern: RegExp, scope: InventoryScope): string =>
+  typeof value === "string" && value.length <= 1024 && pattern.test(value) ? value : inventoryFail(scope,"ID_INVALID");
 function stable(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stable);
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a],[b]) => a.localeCompare(b,"en")).map(([key,item]) => [key,stable(item)]));
@@ -103,12 +115,13 @@ export class ReadinessGateway extends HttpQaGateway {
     let active = 0;
     for (const workflow of LEGACY_WORKFLOWS) for (const status of ["queued","in_progress","waiting","requested","pending"]) {
       for (let page = 1; page <= 20; page++) {
-        const response = object(await this.get("github",`/repos/${QA_REPOSITORY}/actions/workflows/${workflow}/runs?status=${status}&per_page=100&page=${page}`));
-        const runs = array(response.workflow_runs); const total = integer(response.total_count);
-        if (runs.some(run => object(run).status !== status)) return fail("READINESS_INVENTORY_INCOMPLETE");
+        const response = inventoryObject(await this.get("github",`/repos/${QA_REPOSITORY}/actions/workflows/${workflow}/runs?status=${status}&per_page=100&page=${page}`),"GITHUB_RUNS","RESPONSE_INVALID");
+        const runs = inventoryRows(response.workflow_runs,"GITHUB_RUNS"); const total = response.total_count;
+        if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) return inventoryFail("GITHUB_RUNS","TOTAL_INVALID");
+        if (runs.some(run => inventoryObject(run,"GITHUB_RUNS","ITEM_INVALID").status !== status)) return inventoryFail("GITHUB_RUNS","STATUS_MISMATCH");
         active += runs.length;
-        if (runs.length < 100) { if ((page-1)*100+runs.length !== total) return fail("READINESS_INVENTORY_INCOMPLETE"); break; }
-        if (page === 20) return fail("READINESS_INVENTORY_INCOMPLETE");
+        if (runs.length < 100) { if ((page-1)*100+runs.length !== total) return inventoryFail("GITHUB_RUNS","TOTAL_MISMATCH"); break; }
+        if (page === 20) return inventoryFail("GITHUB_RUNS","PAGE_LIMIT");
       }
     }
     return { complete: true, active };
@@ -127,20 +140,24 @@ export class ReadinessGateway extends HttpQaGateway {
     const deployments: { id: string; production: boolean }[] = []; const seen = new Set<string>(); const cursors = new Set<number>();
     let until: number | undefined;
     for (let page = 0; page < 20; page++) {
-      const list = object(await this.get("vercel",`/v6/deployments?projectId=${QA_PROJECT_ID}&limit=100${until === undefined ? "" : `&until=${until}`}`));
-      for (const raw of array(list.deployments)) {
-        const id = text(object(raw).uid ?? object(raw).id,/^dpl_[A-Za-z0-9_-]+$/);
-        if (seen.has(id)) return fail("READINESS_INVENTORY_INCOMPLETE"); seen.add(id);
-        const deployment = object(await this.get("vercel",`/v13/deployments/${id}?withGitRepoInfo=true`));
+      const list = inventoryObject(await this.get("vercel",`/v6/deployments?projectId=${QA_PROJECT_ID}&limit=100${until === undefined ? "" : `&until=${until}`}`),"VERCEL_DEPLOYMENTS","RESPONSE_INVALID");
+      for (const raw of inventoryRows(list.deployments,"VERCEL_DEPLOYMENTS")) {
+        const item = inventoryObject(raw,"VERCEL_DEPLOYMENTS","ITEM_INVALID");
+        const id = inventoryId(item.uid ?? item.id,/^dpl_[A-Za-z0-9_-]+$/,"VERCEL_DEPLOYMENTS");
+        if (seen.has(id)) return inventoryFail("VERCEL_DEPLOYMENTS","DUPLICATE_ID"); seen.add(id);
+        const deployment = inventoryObject(await this.get("vercel",`/v13/deployments/${id}?withGitRepoInfo=true`),"VERCEL_DEPLOYMENTS","DETAIL_INVALID");
         if ((deployment.id ?? deployment.uid) !== id || deployment.projectId !== QA_PROJECT_ID
           || [deployment.teamId,deployment.accountId,deployment.ownerId].some(value => value !== undefined && value !== TEAM)) return fail("READINESS_PROVIDER_SCOPE_INVALID");
-        deployments.push({id,production:deployment.target === "production" && deployment.qaTagged !== true && !Object.keys(object(deployment.meta ?? {})).some(key => /^cakeQa|^cannele/.test(key))});
+        deployments.push({id,production:deployment.target === "production" && deployment.qaTagged !== true && !Object.keys(inventoryObject(deployment.meta ?? {},"VERCEL_DEPLOYMENTS","META_INVALID")).some(key => /^cakeQa|^cannele/.test(key))});
       }
-      const pagination = object(list.pagination);
-      if(Object.keys(pagination).some(key=>!["next","prev","count"].includes(key)) || !Object.hasOwn(pagination,"next")) return fail("READINESS_INVENTORY_INCOMPLETE");
+      const pagination = inventoryObject(list.pagination,"VERCEL_DEPLOYMENTS","PAGINATION_INVALID");
+      if(Object.keys(pagination).some(key=>!["next","prev","count"].includes(key))) return inventoryFail("VERCEL_DEPLOYMENTS","PAGINATION_UNKNOWN_KEY");
+      if(!Object.hasOwn(pagination,"next")) return inventoryFail("VERCEL_DEPLOYMENTS","PAGINATION_NEXT_MISSING");
       const next = pagination.next;
       if (next === null) break;
-      if (!Number.isSafeInteger(next) || Number(next)<0 || cursors.has(Number(next)) || page === 19) return fail("READINESS_INVENTORY_INCOMPLETE");
+      if (!Number.isSafeInteger(next) || Number(next)<0) return inventoryFail("VERCEL_DEPLOYMENTS","PAGINATION_NEXT_INVALID");
+      if (cursors.has(Number(next))) return inventoryFail("VERCEL_DEPLOYMENTS","PAGINATION_CURSOR_LOOP");
+      if (page === 19) return inventoryFail("VERCEL_DEPLOYMENTS","PAGE_LIMIT");
       until = Number(next); cursors.add(until);
     }
     let knownDeploymentsAbsent = 0;
@@ -172,24 +189,30 @@ export class ReadinessGateway extends HttpQaGateway {
         endpointCount:snapshot.endpoints.size,endpointAbsent:knownEndpointsAbsent,hostCount:snapshot.hosts.size,hostsAbsent: [...snapshot.hosts].filter(host=>!endpointDigests.includes(host)).length} };
   }
   private async neonInventory(kind: "branches" | "endpoints"): Promise<Object_[]> {
+    const scope = kind === "branches" ? "NEON_BRANCHES" : "NEON_ENDPOINTS";
     const items:Object_[]=[]; const ids=new Set<string>(); const cursors=new Set<string>(); let cursor:string|undefined;
     for(let page=0;page<20;page++) {
-      const body=object(await this.get("neon",`/projects/${QA_NEON_PROJECT_ID}/${kind}${kind === "branches" ? `?limit=100&sort_by=created_at&sort_order=asc${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}` : ""}`));
-      const rows=array(body[kind]);
-      for(const raw of rows){const item=object(raw);const id=text(item.id,kind === "branches" ? /^br-[a-z0-9-]+$/ : /^ep-[a-z0-9-]+$/);if(ids.has(id))return fail("READINESS_INVENTORY_INCOMPLETE");ids.add(id);items.push(item);}
-      if(body.next!==undefined||body.next_cursor!==undefined||body.cursor!==undefined)return fail("READINESS_INVENTORY_INCOMPLETE");
-      if(body.pagination === undefined){if(kind === "endpoints" || rows.length<100)return items;return fail("READINESS_INVENTORY_INCOMPLETE");}
-      const pagination=object(body.pagination);
-      if(kind === "endpoints" || Object.keys(pagination).some(key=>!["next","sort_by","sort_order"].includes(key))
-        || (pagination.sort_by!==undefined && pagination.sort_by!=="created_at") || (pagination.sort_order!==undefined && pagination.sort_order!=="asc"))return fail("READINESS_INVENTORY_INCOMPLETE");
+      const body=inventoryObject(await this.get("neon",`/projects/${QA_NEON_PROJECT_ID}/${kind}${kind === "branches" ? `?limit=100&sort_by=created_at&sort_order=asc${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}` : ""}`),scope,"RESPONSE_INVALID");
+      const rows=inventoryRows(body[kind],scope);
+      for(const raw of rows){const item=inventoryObject(raw,scope,"ITEM_INVALID");const id=inventoryId(item.id,kind === "branches" ? /^br-[a-z0-9-]+$/ : /^ep-[a-z0-9-]+$/,scope);if(ids.has(id))return inventoryFail(scope,"DUPLICATE_ID");ids.add(id);items.push(item);}
+      if(body.next!==undefined||body.next_cursor!==undefined||body.cursor!==undefined)return inventoryFail(scope,"PAGINATION_TOP_MARKER");
+      if(body.pagination === undefined){if(kind === "endpoints" || rows.length<100)return items;return inventoryFail(scope,"PAGINATION_FULL_UNMARKED");}
+      if(kind === "endpoints")return inventoryFail(scope,"PAGINATION_PRESENT");
+      const pagination=inventoryObject(body.pagination,scope,"PAGINATION_INVALID");
+      if(Object.keys(pagination).some(key=>!["next","sort_by","sort_order"].includes(key)))return inventoryFail(scope,"PAGINATION_UNKNOWN_KEY");
+      if(pagination.sort_by!==undefined && pagination.sort_by!=="created_at")return inventoryFail(scope,"PAGINATION_SORT_BY_MISMATCH");
+      if(pagination.sort_order!==undefined && pagination.sort_order!=="asc")return inventoryFail(scope,"PAGINATION_SORT_ORDER_MISMATCH");
       const next=pagination.next;
       // Neon documents next/sort_by/sort_order as optional. An absent next on
       // a short final branch page is complete even when optional echoes are absent.
       if(next===null || (next===undefined && rows.length<100))return items;
-      if(typeof next!=="string" || !next || next.length>2048 || cursors.has(next) || page===19)return fail("READINESS_INVENTORY_INCOMPLETE");
+      if(next===undefined)return inventoryFail(scope,"PAGINATION_NEXT_MISSING");
+      if(typeof next!=="string" || !next || next.length>2048)return inventoryFail(scope,"PAGINATION_NEXT_INVALID");
+      if(cursors.has(next))return inventoryFail(scope,"PAGINATION_CURSOR_LOOP");
+      if(page===19)return inventoryFail(scope,"PAGE_LIMIT");
       cursors.add(next);cursor=next;
     }
-    return fail("READINESS_INVENTORY_INCOMPLETE");
+    return inventoryFail(scope,"PAGE_LIMIT");
   }
 }
 
