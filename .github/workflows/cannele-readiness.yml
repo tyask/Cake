@@ -1,0 +1,37 @@
+name: Inspect Cannele onboarding readiness
+run-name: Cannele readiness ${{ inputs.request_id }} from ${{ inputs.reviewed_revision }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_revision:
+        description: Reviewed full current Cake main commit SHA
+        required: true
+        type: string
+      request_id:
+        description: Unique UUID for this read-only inspection
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  readiness:
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.repository == 'tyask/Cake' &&
+      github.ref == 'refs/heads/main' && github.actor == github.repository_owner &&
+      github.run_attempt == '1' && inputs.reviewed_revision == github.sha
+    uses: ./.github/workflows/cannele-readiness-run.yml
+    with:
+      reviewed_revision: ${{ inputs.reviewed_revision }}
+      request_id: ${{ inputs.request_id }}
+    secrets:
+      # Reusable-workflow secret inputs mask this existing Variable before any
+      # runner step logs its environment. No new repository Secret is created.
+      production_database_host: ${{ vars.CAKE_QA_PRODUCTION_DATABASE_HOST }}
+      registry_database_url: ${{ secrets.CAKE_QA_REGISTRY_DATABASE_URL }}
+      registry_database_host: ${{ secrets.CAKE_QA_REGISTRY_DATABASE_HOST }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
