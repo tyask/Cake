@@ -321,6 +321,8 @@ gh workflow run cannele-readiness.yml --repo tyask/Cake --ref main -f reviewed_r
 
 Environmentを指定しない専用jobでRepository Variablesを取得するため、Variables APIの403を停止済みと読み替えない。production比較hostはreusable workflowのsecretとして渡し、stepの環境変数表示前からmaskする。接続URL・host原文・role名・認証値・台帳snapshotはログやartifactへ出さず、固定されたID・digest・状態・件数・権限の判定だけを`result.json`へ保存する。結果は成功した初回attemptのowner/main/workflow/job・依頼ID・完全SHA・artifact digestを照合して使う。これは確認時点の読取結果であり、外部Cloud/PCの停止、資格情報の失効、接続sessionの排出や移行直前の再検査の代わりにはならない。
 
+providerの読取失敗は、`blockers`に`READINESS_PROVIDER_<provider>_<stage>_HTTP_<statusまたはNONE>_<reason>`として残す。例えば`READINESS_PROVIDER_NEON_READ_DATABASE_HTTP_403_HTTP_ERROR`はNeonの読取権限・対象scopeを確認する手掛かりで、`AUTH_MISSING`は資格情報不足、`TRANSPORT_ERROR`は通信結果不明を表す。inventoryの不成立は`READINESS_INVENTORY_<固定stage>_<固定reason>`で区別する。stageは`VERCEL_DEPLOYMENTS`・`NEON_BRANCHES`・`NEON_ENDPOINTS`・`GITHUB_RUNS`、reasonは例えば`PAGINATION_UNKNOWN_KEY`・`PAGINATION_NEXT_MISSING`・`PAGINATION_SORT_BY_MISMATCH`・`PAGINATION_PRESENT`・`DUPLICATE_ID`で、どの読取判定が不成立かを示す。出力は固定enumとHTTP statusだけで、未知のfield名・値、URL・host・token・応答本文・例外本文を含めない。失敗を空のinventoryや資源消失と扱わず、設定を確認して新しい読取runで再検査する。
+
 履歴にないPreview Deploymentや取得不能な資源があれば、readinessの実行成功だけで切替可能と扱わない。貸出に属する残存資源は旧方式で返却し、用途不明の公開先は対象を特定してから廃止の範囲を確認する。管理者接続はActionsに保持し、APIには別の限定LOGINだけを設定する。旧owner資格情報を失効する前に、移行と再送に使える管理者接続を確保する。GitHub Secrets書込APIが使えない場合は、利用者が新しい接続情報をActionsの設定画面へ直接登録し、Cloudやチャットへ渡さない。
 
 2026-10-15 JSTの[読取診断 run 38738969961](https://github.com/tyask/Cake/actions/runs/38738969961)は、Cake main `8af33b34d07f44b303a1b562ac78159a649072b5`からowner本人の初回attemptで成功した。qa1〜qa3の固定aliasは不在、QA用Neonは確認済み親branch `br-lively-frog-b3y2mauu`とendpoint `ep-autumn-pine-b3nii81c`だけで、子branchは0件だった。これは旧GitHub台帳も使う診断であり、現在のSQL台帳の3枠freeや管理DB切替の証拠にはしない。他のCloud/PC作業は停止済みと利用者から確認したが、資格情報の失効は未確認である。

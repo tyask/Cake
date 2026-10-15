@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import type { NeonQueryFunction, NeonQueryFunctionInTransaction, NeonQueryInTransaction } from "@neondatabase/serverless";
-import { collectReadiness, inspectReadinessDatabase, readinessContext, ReadinessGateway, type PrivateSnapshot, type ReadinessSource } from "../scripts/cannele-readiness";
+import { collectReadiness, inspectReadinessDatabase, readinessContext, ReadinessGateway, ReadinessError, type PrivateSnapshot, type ReadinessSource } from "../scripts/cannele-readiness";
 import type { QaTransport } from "../scripts/qa-pool-writer";
 import { registryDdlStatements } from "../scripts/qa-registry-ddl";
 import { registryFenceReceipt } from "../scripts/qa-registry-fence";
@@ -91,9 +91,93 @@ test("an untracked Preview or qaTagged Production is a blocker, with safe curren
 });
 
 test("partial or unknown provider pagination and malformed total counts never become empty-inventory proof",async()=>{
-  for(const options of [{vercelPagination:{next:null,cursor:"remaining"}},{neonPagination:{next:null,next_cursor:"remaining"}},{neonPagination:{},neonTopCursor:"remaining"},... [null,"",false].map(total=>({total}))]){
+  for(const [options,code] of [
+    [{vercelPagination:{next:null,cursor:"remaining"}},"READINESS_INVENTORY_VERCEL_DEPLOYMENTS_PAGINATION_UNKNOWN_KEY"],
+    [{neonPagination:{next:null,next_cursor:"remaining"}},"READINESS_INVENTORY_NEON_BRANCHES_PAGINATION_UNKNOWN_KEY"],
+    [{neonPagination:{},neonTopCursor:"remaining"},"READINESS_INVENTORY_NEON_BRANCHES_PAGINATION_TOP_MARKER"],
+    ...[null,"",false].map(total=>[{total},"READINESS_INVENTORY_GITHUB_RUNS_TOTAL_INVALID"] as const),
+  ] as const){
     const receipt=await collectReadiness(environment,{source,transport:transport(options),database:async()=>fixtureSnapshot()});
-    assert.equal(receipt.observedConditionsSatisfied,false);assert.ok(receipt.blockers.some(code=>["READINESS_RESPONSE_INVALID","READINESS_INVENTORY_INCOMPLETE"].includes(code)));
+    assert.equal(receipt.observedConditionsSatisfied,false);assert.ok(receipt.blockers.includes(code));
+  }
+});
+
+async function inventoryReceipt(path:string,response:(page:number)=>unknown){
+  let page=0;const base=transport();
+  return collectReadiness(environment,{source,database:async()=>fixtureSnapshot(),transport:async(method,address,token,body)=>{
+    assert.equal(method,"GET");assert.equal(body,undefined);
+    if(new URL(address).pathname===path)return{status:200,data:response(page++)};
+    return base(method,address,token,body);
+  }});
+}
+
+test("Vercel inventory failures distinguish response, pagination, duplicate, loop and page-limit causes without exposing fields",async()=>{
+  const privateValue="private-pagination-field postgresql://private-user:private-password@private-host/db";
+  const cases:[string,(page:number)=>unknown][]=[
+    ["RESPONSE_INVALID",()=>null],
+    ["ROWS_INVALID",()=>({deployments:false,pagination:{next:null}})],
+    ["ITEM_INVALID",()=>({deployments:[null],pagination:{next:null}})],
+    ["ID_INVALID",()=>({deployments:[{uid:privateValue}],pagination:{next:null}})],
+    ["PAGINATION_INVALID",()=>({deployments:[],pagination:null})],
+    ["PAGINATION_NEXT_MISSING",()=>({deployments:[],pagination:{}})],
+    ["PAGINATION_UNKNOWN_KEY",()=>({deployments:[],pagination:{next:null,[privateValue]:privateValue}})],
+    ...[false,-1,"next",1.5].map(next=>["PAGINATION_NEXT_INVALID",()=>({deployments:[],pagination:{next}})] as [string,()=>unknown]),
+    ["PAGINATION_CURSOR_LOOP",()=>({deployments:[],pagination:{next:1}})],
+    ["DUPLICATE_ID",()=>({deployments:[{uid:"dpl_production"},{uid:"dpl_production"}],pagination:{next:null}})],
+    ["PAGE_LIMIT",page=>({deployments:[],pagination:{next:page+1}})],
+  ];
+  for(const [reason,response] of cases){
+    const receipt=await inventoryReceipt("/v6/deployments",response);
+    assert.ok(receipt.blockers.includes(`READINESS_INVENTORY_VERCEL_DEPLOYMENTS_${reason}`),reason);
+    assert.equal(receipt.observedConditionsSatisfied,false);assert.equal(receipt.providers,null);
+    assert.doesNotMatch(JSON.stringify(receipt),/private-pagination-field|private-user|private-password|private-host/);
+  }
+});
+
+test("Neon branch inventory keeps strict pagination rules and identifies each safe failure reason",async()=>{
+  const branch={id:parent,project_id:neonProject,parent_id:null,name:"parent",default:true,protected:true};
+  const full=Array.from({length:100},(_,index)=>({...branch,id:`br-fixture-${index}`}));
+  const privateValue="private-pagination-field postgresql://private-user:private-password@private-host/db";
+  const cases:[string,(page:number)=>unknown][]=[
+    ["RESPONSE_INVALID",()=>null],
+    ["ROWS_INVALID",()=>({branches:false})],
+    ["ITEM_INVALID",()=>({branches:[null]})],
+    ["ID_INVALID",()=>({branches:[{id:privateValue}]})],
+    ["PAGINATION_TOP_MARKER",()=>({branches:[branch],next_cursor:false})],
+    ["PAGINATION_TOP_MARKER",()=>({branches:[branch],next:null})],
+    ["PAGINATION_INVALID",()=>({branches:[branch],pagination:null})],
+    ["PAGINATION_UNKNOWN_KEY",()=>({branches:[branch],pagination:{next:null,[privateValue]:privateValue}})],
+    ["PAGINATION_SORT_BY_MISMATCH",()=>({branches:[branch],pagination:{next:null,sort_by:false}})],
+    ["PAGINATION_SORT_ORDER_MISMATCH",()=>({branches:[branch],pagination:{next:null,sort_order:"desc"}})],
+    ["PAGINATION_FULL_UNMARKED",()=>({branches:full})],
+    ["PAGINATION_NEXT_MISSING",()=>({branches:full,pagination:{}})],
+    ...[false,"",2048.5,"x".repeat(2049)].map(next=>["PAGINATION_NEXT_INVALID",()=>({branches:[branch],pagination:{next}})] as [string,()=>unknown]),
+    ["PAGINATION_CURSOR_LOOP",()=>({branches:[],pagination:{next:"same-cursor"}})],
+    ["DUPLICATE_ID",()=>({branches:[branch,branch]})],
+    ["PAGE_LIMIT",page=>({branches:[],pagination:{next:`cursor-${page}`}})],
+  ];
+  for(const [reason,response] of cases){
+    const receipt=await inventoryReceipt(`/api/v2/projects/${neonProject}/branches`,response);
+    assert.ok(receipt.blockers.includes(`READINESS_INVENTORY_NEON_BRANCHES_${reason}`),reason);
+    assert.equal(receipt.observedConditionsSatisfied,false);assert.equal(receipt.providers,null);
+    assert.doesNotMatch(JSON.stringify(receipt),/private-pagination-field|private-user|private-password|private-host|same-cursor/);
+  }
+});
+
+test("Neon endpoint inventory rejects every pagination marker and reports only the closed endpoint stage",async()=>{
+  const endpoint={id:"ep-qa-parent",project_id:neonProject,branch_id:parent,host:"ep-qa-parent.mock.aws.neon.tech"};
+  const cases:[string,unknown][]=[
+    ["ROWS_INVALID",{endpoints:false}],
+    ["DUPLICATE_ID",{endpoints:[endpoint,endpoint]}],
+    ["PAGINATION_TOP_MARKER",{endpoints:[endpoint],next_cursor:false}],
+    ["PAGINATION_TOP_MARKER",{endpoints:[endpoint],cursor:"private-unknown-cursor"}],
+    ...[{},null,false,{next:null},{next:"private-unknown-cursor"}].map(pagination=>["PAGINATION_PRESENT",{endpoints:[endpoint],pagination}] as [string,unknown]),
+  ];
+  for(const [reason,response] of cases){
+    const receipt=await inventoryReceipt(`/api/v2/projects/${neonProject}/endpoints`,()=>response);
+    assert.ok(receipt.blockers.includes(`READINESS_INVENTORY_NEON_ENDPOINTS_${reason}`),reason);
+    assert.equal(receipt.observedConditionsSatisfied,false);assert.equal(receipt.providers,null);
+    assert.doesNotMatch(JSON.stringify(receipt),/private-unknown-cursor|ep-qa-parent\.mock/);
   }
 });
 
@@ -114,6 +198,45 @@ test("nonfree SQL slots and unconfirmed DB/provider reads remain blocked; old le
   assert.doesNotMatch(JSON.stringify(unknown),/private database|postgresql|secret@host/);
   assert.throws(()=>readinessContext({...environment,CAKE_QA_POOL_ENABLED:"FALSE"}));
   await assert.rejects(new ReadinessGateway(environment,transport()).providers(fixtureSnapshot(),readinessContext(environment)));
+});
+
+test("provider diagnostics retain only closed provider/stage/status/reason fields for missing auth, HTTP failures and transport errors",async()=>{
+  const privateValue="postgresql://private-role:private-password@ep-private.mock.aws.neon.tech/db private-token private-response";
+  const cases=[
+    {provider:"vercel",status:401,code:"READINESS_PROVIDER_VERCEL_READ_PROJECT_HTTP_401_HTTP_ERROR"},
+    {provider:"vercel",status:403,code:"READINESS_PROVIDER_VERCEL_READ_PROJECT_HTTP_403_HTTP_ERROR"},
+    {provider:"vercel",status:429,code:"READINESS_PROVIDER_VERCEL_READ_PROJECT_HTTP_429_HTTP_ERROR"},
+    {provider:"neon",status:403,code:"READINESS_PROVIDER_NEON_READ_DATABASE_HTTP_403_HTTP_ERROR"},
+    {provider:"vercel",status:null,code:"READINESS_PROVIDER_VERCEL_READ_PROJECT_HTTP_NONE_TRANSPORT_ERROR"},
+  ] as const;
+  for(const failure of cases){
+    const base=transport(),methods:string[]=[];
+    const request:QaTransport=async(method,address,token,body)=>{
+      methods.push(method);assert.equal(method,"GET");assert.equal(body,undefined);
+      if(new URL(address).hostname===(failure.provider==="vercel"?"api.vercel.com":"console.neon.tech")){
+        if(failure.status===null)throw new Error(privateValue,{cause:{message:privateValue,token:privateValue}});
+        return{status:failure.status,data:{error:{message:privateValue,url:privateValue,token:privateValue}}};
+      }
+      return base(method,address,token,body);
+    };
+    const receipt=await collectReadiness(environment,{source,transport:request,database:async()=>fixtureSnapshot()});
+    assert.ok(receipt.blockers.includes(failure.code));assert.equal(receipt.observedConditionsSatisfied,false);assert.equal(receipt.providers,null);
+    const output=JSON.stringify(receipt);for(const value of [privateValue,"private-role","private-password","ep-private","private-token","private-response"])
+      assert.equal(output.includes(value),false);
+    assert.ok(receipt.blockers.every(code=>/^[A-Z0-9_]+$/.test(code)));assert.ok(methods.length>0&&methods.every(method=>method==="GET"));
+  }
+  let providerCalls=0;
+  const noAuth=await collectReadiness({...environment,VERCEL_TOKEN:undefined},{source,transport:async(method,address,token,body)=>{
+    if(new URL(address).hostname!=="api.github.com")providerCalls++;return transport()(method,address,token,body);
+  },database:async()=>fixtureSnapshot()});
+  assert.ok(noAuth.blockers.includes("READINESS_PROVIDER_VERCEL_READ_PROJECT_HTTP_NONE_AUTH_MISSING"));assert.equal(providerCalls,0);
+});
+
+test("GitHub authorization failures keep safe diagnostics and never reach database or provider access",async()=>{
+  let db=0,calls=0;
+  await assert.rejects(collectReadiness({...environment,GITHUB_TOKEN:undefined},{source,transport:async()=>{calls++;throw new Error("private authorization body");},
+    database:async()=>{db++;return fixtureSnapshot();}}),error=>error instanceof ReadinessError&&error.code==="READINESS_PROVIDER_GITHUB_READ_GIT_HTTP_NONE_AUTH_MISSING");
+  assert.equal(db,0);assert.equal(calls,0);
 });
 
 const legacyDdl=readFileSync(new URL("../db/qa-registry/001_registry.sql",import.meta.url),"utf8"),fenceDdl=readFileSync(new URL("../db/qa-registry/002_cannele_fence.sql",import.meta.url),"utf8");
