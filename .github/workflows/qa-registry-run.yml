@@ -41,7 +41,7 @@ on:
 
 jobs:
   registry:
-    if: github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main'
+    if: github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' && vars.CAKE_CANNELE_ENABLED != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:

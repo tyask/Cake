@@ -4,7 +4,9 @@ Cakeの開発、PR作成、QA予約、デプロイ、検証、返却の手順を
 
 ## 適用状態と導入
 
-ここで定める新方式は、GitHub Actionsが常設の管理専用DBでQA枠を管理し、CodexがVercel CLIでデプロイ・テストする構成である。GitHub Deployments APIを貸出台帳や承認計画の保存に使う方式から移行する。文書・実装の変更だけで、管理DBの作成、Secrets設定、mainへの導入、既存資源の返却を完了したとは扱わない。
+現在の方式は、GitHub Actionsが常設の管理専用DBでQA枠を管理し、CodexがVercel CLIでデプロイ・テストする構成である。GitHub Deployments APIを貸出台帳や承認計画の保存に使う方式から移行する。文書・実装の変更だけで、管理DBの作成、Secrets設定、mainへの導入、既存資源の返却を完了したとは扱わない。
+
+Cannele APIへの連携は[「Canneleへの切替」](#canneleへの切替)の条件を満たしてから有効化する。初期設定は無効で、この切替までは以下のActions方式を使う。
 
 導入時は次を確認する。
 
@@ -246,6 +248,50 @@ Previewは`AUTH_MODE=test`とPreview用`AUTH_SECRET`を使い、Nativeが供給�
 Productionの手動デプロイは別途明示依頼された場合だけ行い、通常のDB更新を含むリモートbuildを使う。`--prebuilt`やPreviewの昇格でDB準備を省略しない。
 
 読取診断には`vercel list --environment=preview`、`vercel inspect <Deployment URL>`を使える。Vercel Development設定でローカル起動する場合は`vercel dev`を使い、停止・再起動は起動端末でCtrl+Cを押す。Development設定も本番DBの流用にならないように確認する。
+
+## Canneleへの切替
+
+Canneleは[tyask/cannele](https://github.com/tyask/cannele)で管理する共通QA API・CLIである。Cake連携は実装準備中・未有効化。連携用の設定・入口とruntime proofの導入だけでLive API、認証、管理DBの切替、QAの実環境検証を完了したとは扱わない。
+
+### 設定と共通クライアント
+
+`cannele.config.json`のprotocolは`cake-cannele/v1`。初期値は`enabled: false`、`profile: null`で、現行Actions方式を維持する。`sourceRevision`にはレビュー対象のCannele CLI commitを固定し、配置設定が未完了でも実行方式は切り替えない。設定を準備しても`enabled: false`なら切り替わらない。共通入口は取得し直した`origin/main`の設定を読み、作業ブランチ側の変更を実行方式の根拠にしない。
+
+有効化時の`sourceRevision`はレビュー済みCanneleの完全commit SHA、`profile`はAPI origin・instance・repository・provider ID・schema version・branch prefix・必要featureを固定する公開設定である。CLIはこれをAPIのcapabilitiesと照合する。管理DBの接続情報、Vercel/Neonの管理資格情報、session tokenをprofileやGitへ保存しない。
+
+CloudとローカルPCは同じCLI・手順を使う。`CANNELE_SOURCE_DIR`には`sourceRevision`と一致するcleanなCannele checkoutを指定し、同じrevisionの[共通操作手順](https://github.com/tyask/cannele/blob/main/docs/integration-guide.md)と[Skill](https://github.com/tyask/cannele/blob/main/skills/cannele/SKILL.md)を読む。リンクは文書の所在を示すもので、実行時の正本は固定revisionのcheckoutである。CLI更新もCakeの設定変更としてレビューする。
+
+Canneleの本人認証は`npm run cannele:auth -- login`でブラウザpairingを行う。確認と失効は`status` / `logout`。既存の`gh` tokenをCannele APIへ渡す認証方式ではない。端末鍵・短期session・再実行用のprivate stateはGit管理外に保存する。Cloudでは`CANNELE_STATE_DIR`に書込可能な専用領域を指定できる。Vercelの本人認証とDeployment Protectionは別に維持し、必要に応じて`CANNELE_VERCEL_GLOBAL_CONFIG`で専用CLI profileを選ぶ。資格情報を環境間でコピーしたり、チャット・引数・PRへ出したりしない。
+
+### 有効化後の通常手順
+
+1. 最新mainの専用worktreeで開発し、lint・test・buildを実施してdraft PRを作る。
+2. QAデプロイ直前に`npm run deploy:preview`を実行する。共通CLIがCannele APIへ原子的な予約を依頼し、貸出・attemptのreceiptを確定してからVercel CLIのGitSource経路で作成する。予約だけの入口は`qa:reserve`、状態は`qa:status`、枠一覧は`qa:slots`。
+3. 満枠なら資源を作らずdraftで作業を終了する。利用者からの再依頼時にCodexが再予約する。定期監視・待ち行列による自動再開は設けない。
+4. 初回はprovisioningからNative DBを発見・登録し、確認済みhost digestでapplicationを配置する。登録・finalize・status・公開はAPIを直接呼ぶ。同PRの追加commitは同じ貸出とNative DBを使い、既存の固定URLは次の公開が確定するまで前の配置を保持する。
+5. 固有URLで`qa:verify`のPC/mobile・A/Bの実ブラウザスモークと変更箇所固有の画面・APIテストを行う。`qa:publish`で確認済みDeploymentを公開し、固定URLでも同じ検証を行う。
+6. 現在HEADのCIと両URLの証拠を確認し、`npm run task:pr -- --title '<タイトル>' --verification-file <検証報告>`でPR本文を更新してReadyへ進める。公開コマンドだけではReadyにしない。APIの資源照合やruntime proofはブラウザ操作・変更箇所の動作確認の代わりにはならない。
+7. 利用者がマージまたはcloseすると、mainの`cannele-release.yml`がGitHub OIDCでCannele返却APIを呼ぶ。checkoutやアプリ管理資格情報を使わず、APIがalias UID・全Deployment・Native branch・全endpointの消失を確認してから枠を返す。
+
+APIの202は未完了を示す。`nextAction: advance`に対して、依頼中のCLI/Actionsが上限付きで明示POSTを続ける。GETは処理を進めず、バックグラウンド監視もない。`blocked_unknown` / `inspect`や不明な作成・公開結果では枠を保持して停止し、再依頼時に同じ貸出・保存済みoperationを読み直す。timeoutや空の資源一覧だけで空きと扱わない。
+
+### runtime proofとDBの安全境界
+
+`GET /api/qa/cannele?nonce=<256bit base64url>`は`AUTH_MODE=test`かつVercel Previewだけの読取入口。実アプリと同じ`db()` clientで、QA identity markerのslot・PR・lease・branch・host・DB名と`current_database()`、行数1件を照合するSELECTを実行する。nonce、Vercel system Deployment ID・SHA、Cannele instance/attempt、貸出識別情報と接続先digestだけを`no-store`で返す。業務データの読取・更新、guard初期化、migration、seedは行わない。
+
+`CANNELE_INSTANCE_ID` / `CANNELE_ATTEMPT_ID` / `CANNELE_PHASE`と既存`CAKE_QA_*` guardを配置時に渡す。ローカルCLI設定の`CANNELE_SOURCE_DIR` / `CANNELE_STATE_DIR` / `CANNELE_VERCEL_GLOBAL_CONFIG`を除き、Cannele metadataが一つでもあれば、共通DB選択処理が完全な識別情報とPreview/test modeを確認し、URLの接続先上書き・重複query parameterをDB client作成前に拒否する。許可するURL queryは`sslmode=require`と`channel_binding=require`のみ。接続URL・host原文・SQL・driver errorをproofへ出さない。旧QAに新しいtagがない場合は503で、旧配置のmetadataからproofを補わない。
+
+これは許可されたrepositoryのCakeコードを信頼した実行時報告であり、任意のfeatureコードに対する暗号学的attestationではない。Canneleは報告されたID・SHA・digestをGitHub/Vercel/Neonの証拠と再照合する。Cakeのアプリ認証とVercel Deployment Protectionを弱めず、API側の保護通過資格情報は固定されたDeployment originへの読取に限る。
+
+### 実際の切替と残作業
+
+Live Cannele APIの公開設定、アプリ専用GitHub App・本人pairing・Actions OIDC認可、Cakeのprovider binding、DB writer fenceとclean-start移行、実環境の受入検証は切替時に実施する。共通管理DDLの正本はCanneleの`db/migrations/`、業務DDLの正本は引き続きCakeの`db/migrations/`である。
+
+切替前に旧QA clientを止め、旧方式で全貸出を返却する。旧Actionsの待機・実行が0件で、全alias・Deployment・Native branch・endpointが不在であることを読み直してから、レビュー済みの管理DB移行を実行する。Cakeの旧台帳履歴は引き継がず、新しいinstance・generation・branch prefixとPR作成時刻cutoffで共通台帳を開始する。旧履歴の削除はこの実移行で行い、業務DBや親DBには適用しない。
+
+`cannele.config.json`の有効化とRepository variable `CAKE_CANNELE_ENABLED=true`を、確認済みのAPI・profile・切替状態に合わせる。後者は旧QA Actionsをskipし、新しいclosed返却workflowを許可する実行gateであり、DB writer fenceを実施した証拠ではない。古いcheckoutや既に起動したrunも含め、台帳writerを移行処理で止める。flagsだけを変更して空台帳へ切り替えない。
+
+切替後の試験PRで予約・Native作成・runtime proof・固有/固定URLの画面/API・Ready・close後の全資源消失とfreeを確認して、実測結果を記録する。それまではこの節を運用完了の記録として使わない。
 
 ## 旧方式の運用・検証記録
 
