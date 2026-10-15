@@ -62,11 +62,11 @@ PR #47のmain導入後、初回の[initialize run 38581479595](https://github.co
 
 適用前に、今回の旧workflow停止guardを含むmainをレビューして導入する。`CAKE_CANNELE_ENABLED=true`は旧`qa-pool.yml` / `qa-private-run.yml` / `qa-registry.yml` / `qa-registry-run.yml`のQA操作jobを停止する。`CAKE_QA_POOL_ENABLED=false`、`CAKE_QA_REGISTRY_ENABLED=false`も維持する。この段階のflagは旧job停止を表し、Cannele APIの稼働やCloud/PCクライアントの移行完了を証明しない。二つの旧flagだけをfalseへ変更すると旧`qa-pool.yml`のclosedイベント処理が動き得るため、Cannele停止guardを省略しない。
 
-使用中の旧貸出がある場合は、旧方式でcleanupを確認してからglobal停止guardを有効にする。停止後に旧cleanup jobが動くことを前提としない。owner本人は、4つの旧workflowのqueued / in-progress / waitingなどのrunがすべて終了したことに加え、旧コードを使うCloud・PC・別の自動処理を止め、旧認証の撤去と管理DB接続sessionのdrainを確認する。Actions一覧やDB内のfenceだけでは、古いowner資格情報を使う外部処理の停止・権限失効を保証できない。確認できない状態では適用しない。
+使用中の旧貸出がある場合は、旧方式でcleanupを確認してからglobal停止guardを有効にする。停止後に旧cleanup jobが動くことを前提としない。owner本人は、4つの旧workflowのqueued / in-progress / waitingなどのrunがすべて終了したことに加え、旧コードを使うCloud・PC・別の自動処理を止め、旧管理DB/owner資格情報の撤去と管理DB接続sessionのdrainを確認する。provider tokenを保持する場合も旧actor・送信中writer・不明な作成intentが残らないことを確認し、保持方針を移行JSONへ明示する。Actions一覧やDB内のfenceだけでは、古いowner資格情報を使う外部処理の停止・権限失効を保証できない。確認できない状態では適用しない。
 
 互換installerとreadinessも、新しい`CANNELE_REGISTRY_ADMIN_DATABASE_URL` / `_HOST`だけを使う。既存objectの実ownerとして接続できる新しい資格情報を別名へ確保し、旧password・旧Secret名を失効・撤去して接続sessionを終了してから002を導入する。SQL roleを変える場合は既存objectのownership要件を確認し、旧Secret名へ新passwordを入れ直さない。
 
-レビューした現在のmainの完全なSHAを指定して、専用workflowを依頼する。`confirm_legacy_drain=true`は上述の外部停止・認証・session確認を完了したownerの明示確認であり、installerが外部停止を自動的に証明する値ではない。
+レビューした現在のmainの完全なSHAを指定して、専用workflowを依頼する。`confirm_legacy_drain=true`は上述の旧actor停止・旧管理DB/owner資格情報撤去・DB session排出を完了したownerの明示確認であり、provider token失効済みという意味ではない。installerが外部停止を自動的に証明する値でもない。
 
 ```text
 gh workflow run qa-registry-fence.yml --repo tyask/Cake --ref main -f action=install -f reviewed_revision=<レビュー済み現在mainの40桁SHA> -f confirm_legacy_drain=true
@@ -331,6 +331,19 @@ providerの読取失敗は、`blockers`に`READINESS_PROVIDER_<provider>_<stage>
 
 PR #57のマージ後の[readiness run 38744829643](https://github.com/tyask/Cake/actions/runs/38744829643)は、main `0ef3daaecfa860d354bda763ac28d0de94af40a2`・owner本人・初回attempt・専用helper・全job成功を確認した。artifact `11978330490`のZIP全体のSHA-256 `ae0d93edc13e913d567d73e9074a0e0b9d43b100e51bc42ccf1f57f8b85d491f`、依頼UUID、実行元とworkflow blobを照合して読んだ。管理DBはPostgreSQL 18.6、専用identityと001 catalogが一致し、qa1/version44・qa2/version13・qa3/version13がすべてfree、履歴70件・requests・leasesは解決済み、他のDB接続0件、旧未完了workflow 0件だった。002は未適用。providerの一覧検証は`READINESS_INVENTORY_INCOMPLETE`で未確定だったため、このrunだけで全資源不在や切替可能とは扱わない。実効flagは当時POOL/REGISTRYともtrue・CANNELE未設定だった。利用者の変更後、[readiness run 38749502912](https://github.com/tyask/Cake/actions/runs/38749502912)でも同じsource・owner・初回attempt・全job成功を確認した。artifact `11979914628`のZIP SHA-256 `41369548502b324e6eca3f7ceb1d92e86c11784f5fa57bfdfecb02b9c73ace5c`と依頼・source blobを照合し、POOL=false・REGISTRY=true・CANNELE未設定、3枠free・履歴状態不変・他session 0・旧未完了run 0を確認した。provider一覧は引き続き未確定で、global停止や002適用はまだ行っていない。
 
+その後、利用者が停止flagsを変更した。[readiness run 38761274463](https://github.com/tyask/Cake/actions/runs/38761274463)のsourceはmain `22f367310fbac20a9de48a9fb4de30f40b92561c`、確認時刻は2026-10-16 00:33:45.704 JST（`checkedAt: 2026-10-15T15:33:45.704Z`）。artifact `11985024672`のZIP全体のSHA-256 `b3057d73ea7c3b3b65223df73f00fc756a1f581dc0eb6cb374a184b34170dbf5`を照合して、次の読取結果を確認した。
+
+- 実効flagsは`CAKE_CANNELE_ENABLED=true`・`CAKE_QA_REGISTRY_ENABLED=false`・`CAKE_QA_POOL_ENABLED=false`。旧workflowの未完了runは0件だった。
+- qa1〜qa3はすべてfree、requests・leases・履歴70件は解決済み。他のDB接続は0件だった。
+- provider inventoryは完全取得でき、固定alias 3件は不在。Vercel Deploymentは31件すべてProductionで、QA扱いの配置は0件。QA用Neonは確認済み親branch 1件とそのendpoint 1件だけで、子branchは0件だった。
+- 履歴内のDeployment 11件・branch 5件・endpoint 5件・host 5件はすべて不在を確認した。
+
+このrunの残るblockerは`LEGACY_FENCE_REQUIRED`のみで、002は未適用だった。外部actor・資格情報の停止判定は`unconfirmed`、Cannele APIも無効のままであり、切替完了の証拠にはしない。旧管理DB/owner資格情報の更新・失効と接続排出を利用者が確認した後に、レビュー済み手順で002を導入し、移行直前に再検査する。
+
+利用者から管理DB passwordの更新、新ADMIN URLの保存、旧4Secretsの撤去が完了したとの回答後、[readiness run 38765120650](https://github.com/tyask/Cake/actions/runs/38765120650)で再確認した。同じmainのowner本人・初回attempt・専用workflow/helperと全job成功、依頼UUID、artifact `11988291564`のZIP全体のSHA-256 `9ac83c376db1b9f0632be640562e7efa4d39a8a4a76ae9fd95d62d1eb503505f`を照合した。確認時刻は2026-10-16 01:00:30.111 JST（`checkedAt: 2026-10-15T16:00:30.111Z`）。新ADMIN接続は成功し、専用identity・001 catalog・台帳stateは不変、停止3flags・他session 0・旧未完了run 0・全QA資源不在も確認した。旧providerキーと旧CLI認証は対象を特定できておらず、失効は未確認である。readiness成功やSecret撤去をその失効証拠に代用せず、002導入・移行はまだ実行していない。
+
+その後、利用者はprovider tokenと既存CLI認証を現状のまま保持する方針を明示した。移行admissionではprovider資格情報の失効をfalse、保持の明示受入をtrueとして記録する。旧管理DB/owner資格情報の無効化・旧actor停止・DB接続排出と完全な資源再検査は引き続き必要で、保持方針を失効済みと読み替えない。
+
 PostgreSQL 18ではNOT NULL制約がcatalogへ追加されるため、Canneleの移行helperは17/18それぞれの完全な固定hashで照合する。17.10と18.4の使い捨てDBで検証し、実18.6も移行前に同じhashと一致することを確認する。Neonのbranch一覧は最初の応答の`sort_order`が`asc`・`desc`・`ASC`・`DESC`なら小文字へ正規化し、次ページのGETへ引き継ぐ。2ページ目以降の順序変更や未知の値は拒否し、`sort_by=created_at`を維持する。最終branchページの`next`とsort echoは省略され得て、`next`の空文字もnullと同じ終端として扱う。短い最終ページでの省略を受け入れつつ、false・0、不明なcursor・未知field・重複ID・未完了ページは引き続き拒否する。
 
 ### Actionsからの管理操作
@@ -343,14 +356,14 @@ PostgreSQL 18ではNOT NULL制約がcatalogへ追加されるため、Canneleの
 | `transition` | レビューしたJSONをそのまま渡し、既存の一つのtransactionで旧fenceをmaintenanceへ進め、freshな完全provider証跡を照合してから旧6tables/functionsの削除とCannele初期化を行う。失敗時はrollbackする。 |
 | `provision-runtime` | 事前に作成した専用LOGINへ固定ACLを設定し、別の実ログインでcontext・最小権限を検証する。admin/runtimeのhost・port・DB、明示したroleとの一致を権限付与前に確認する。 |
 
-全actionにglobal停止gateのtrueと旧2flagsのfalseが必要である。外部停止・資格情報撤去・session drainを実際に完了するまで、`confirm_credential_drain=true`やadmissionの6項目をtrueで補わない。002 installerにも同じ新しい管理者Secret名を使う。新しい管理者接続を確立してから旧資格情報を失効させ、002を導入する。同じ管理roleのpassword更新でも、旧passwordの無効化と旧接続の終了、fresh loginを確認する。
+全actionにglobal停止gateのtrueと旧2flagsのfalseが必要である。`confirm_credential_drain=true`は旧actor停止・旧管理DB/owner資格情報撤去・DB session排出の確認を意味する。provider資格情報の方針はadmissionへ別途記録し、保持する場合に失効をtrueで補わない。002 installerにも同じ新しい管理者Secret名を使う。新しい管理者接続を確立してから旧管理DB/owner資格情報を失効させ、002を導入する。同じ管理roleのpassword更新でも、旧passwordの無効化と旧接続の終了、fresh loginを確認する。
 
 新しい接続・provider資格情報は次のRepository Secretsへ登録する。値は設定画面へ直接入力し、Cloud・チャット・JSON引数・artifactへ渡さない。
 
 | Repository Secret | 用途 |
 | --- | --- |
 | `CANNELE_REGISTRY_ADMIN_DATABASE_URL` / `CANNELE_REGISTRY_ADMIN_DATABASE_HOST` | 切替とreceipt再確認に使う、更新済み管理者接続。APIへ登録しない。 |
-| `CANNELE_TRANSITION_VERCEL_TOKEN` / `CANNELE_TRANSITION_NEON_API_KEY` | readinessと旧資格情報撤去後の移行用read-only API確認。旧`VERCEL_TOKEN` / `NEON_API_KEY`名へ新しい値を入れ直さない。 |
+| `CANNELE_TRANSITION_VERCEL_TOKEN` / `CANNELE_TRANSITION_NEON_API_KEY` | readinessと移行用read-only API確認。provider tokenの保持・失効方針はadmissionへ明示する。旧`VERCEL_TOKEN` / `NEON_API_KEY`名へ新しい値を入れ直さない。 |
 | `CANNELE_REGISTRY_DATABASE_URL` / `CANNELE_REGISTRY_DATABASE_HOST` | runtime権限確認用の専用LOGIN接続。HOSTはURLの実hostnameと完全一致させる。 |
 
 旧`CAKE_QA_REGISTRY_DATABASE_URL` / `_HOST`は新管理者接続を確保してから、002導入前に撤去する。新しい管理者接続を旧Secret名へ入れ直すと、古いworkflowが新しい資格情報を取得できるため避ける。別の管理者接続を確保しないまま旧資格情報だけを消さない。
@@ -362,7 +375,11 @@ CREATE ROLE cannele_runtime LOGIN PASSWORD '<専用の乱数password>'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 ```
 
-`transition_json`はCanneleの`LegacyTransitionInput`に従う公開JSONで、管理DB接続先のdigest、完全な旧state/footprint、固定scope、新instance・未使用prefix・受付開始時刻をレビューして指定する。`source.cakeRevision`は保存済み002 fence receiptの導入SHA、`reviewed_revision`と`admission.trustedMainRevision`は今回の現在mainを表す。両者を同じ値に書き換えない。commit結果不明時はUUIDや時刻を再生成せず、同じJSONを新しいworkflow runへ渡す。coreの同一receipt再送はprovider資格情報を要求せず、schemaや枠をresetしない。
+`transition_json`はCanneleの`LegacyTransitionInput`に従う公開JSONで、管理DB接続先のdigest、完全な旧state/footprint、固定scope、新instance・未使用prefix・受付開始時刻をレビューして指定する。
+
+provider資格情報を失効した場合は`oldProviderCreationCredentialsRevoked: true`として`providerCredentialRetentionAccepted`を省略する。保持する場合は`oldProviderCreationCredentialsRevoked: false`と`providerCredentialRetentionAccepted: true`を明示する。片方だけのfalse、曖昧な値、失効trueと保持受入の併記は拒否する。他の5確認項目（Cloud/PC停止・旧管理DB/owner資格情報無効化・送信中writerなし・不明な作成intentなし）は常にtrueが必要である。保持したtokenは旧provider書込み権限を残すため、DB fenceはprovider API呼出しまで遮断しない。保持を受け入れた場合だけ、実core receiptと照合した`providerCredentialRetentionAccepted: true`を公開resultにも保存する。失効済みの既存receipt/resultはこのfieldを追加せず維持する。
+
+`source.cakeRevision`は保存済み002 fence receiptの導入SHA、`reviewed_revision`と`admission.trustedMainRevision`は今回の現在mainを表す。両者を同じ値に書き換えない。commit結果不明時はUUIDや時刻を再生成せず、同じJSONを新しいworkflow runへ渡す。coreの同一receipt再送はprovider資格情報を要求せず、schemaや枠をresetしない。
 
 `runtime_context_json`はinstanceId・repositoryId・bindingDigest・writerEpoch・schemaVersion・schemaChecksumの6項目で、初期化receiptと照合する。`runtime_role_name`は上記の明示した専用roleである。結果はrequest UUID付きの単一`result.json` artifactから、実行元・owner・全job・依頼・digestを照合して取得する。
 

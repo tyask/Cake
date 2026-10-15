@@ -17,7 +17,7 @@ on:
         required: true
         type: string
       confirm_legacy_drain:
-        description: All old Cloud/PC writers stopped; their credentials withdrawn and database sessions drained
+        description: Old actors stopped; old management DB/owner credentials withdrawn and DB sessions drained; provider keys may be retained
         required: true
         default: false
         type: boolean

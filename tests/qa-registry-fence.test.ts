@@ -226,6 +226,7 @@ test("main admin workflow carries only the registry connection and all legacy jo
   const workflow=readFileSync(new URL("../.github/workflows/qa-registry-fence.yml",import.meta.url),"utf8");
   assert.match(workflow,/workflow_dispatch:/);assert.doesNotMatch(workflow,/pull_request|schedule:|VERCEL_TOKEN|NEON_API_KEY|upload-artifact|secrets: inherit/);
   assert.match(workflow,/confirm_legacy_drain:/);assert.match(workflow,/CAKE_QA_REGISTRY_DATABASE_HOST/);
+  assert.match(workflow,/description: Old actors stopped; old management DB\/owner credentials withdrawn and DB sessions drained; provider keys may be retained/);
   assert.match(workflow,/secrets\.CANNELE_REGISTRY_ADMIN_DATABASE_URL/);
   assert.match(workflow,/secrets\.CANNELE_REGISTRY_ADMIN_DATABASE_HOST/);
   assert.doesNotMatch(workflow,/secrets\.CAKE_QA_REGISTRY_DATABASE_(?:URL|HOST)/);

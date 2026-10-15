@@ -36,6 +36,7 @@ const transition=()=>JSON.stringify({source:{cakeRevision:revision,canneleRevisi
 test('owner/main first-attempt dispatcher binds a same-commit reusable helper with only read permissions',()=>{
   assert.match(dispatcher,/options: \[inspect, transition, provision-runtime\]/);
   assert.match(dispatcher,/confirm_credential_drain:[\s\S]*?required: true\s+default: false\s+type: boolean/);
+  for(const source of [dispatcher,runner])assert.match(source,/description: Old actors stopped[^\n]*old management DB\/owner credentials[^\n]*provider policy in transition JSON/);
   for(const source of [dispatcher,runner]) {
     assert.match(source,/github\.event_name == 'workflow_dispatch'/);assert.match(source,/github\.repository == 'tyask\/Cake'/);
     assert.match(source,/github\.ref == 'refs\/heads\/main'/);assert.match(source,/github\.actor == github\.repository_owner/);
