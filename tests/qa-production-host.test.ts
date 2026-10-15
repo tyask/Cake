@@ -25,15 +25,15 @@ test("本番host Variableはrunner起動前のworkflow-call secretとしてだ�
     assert.doesNotMatch(call.slice(0, call.indexOf("    secrets:")), /CAKE_QA_PRODUCTION_DATABASE_HOST/);
   }
   const directory = new URL("../.github/workflows/", import.meta.url);
-  let bindings = 0;
+  const bindings: string[] = [];
   for (const name of readdirSync(directory).filter((v) => /\.ya?ml$/.test(v))) {
     const source = readWorkflow(name);
     for (const line of source.split("\n").filter((v) => v.includes(variable))) {
       assert.equal(line, `      production_database_host: ${variable}`);
-      bindings++;
+      bindings.push(name);
     }
   }
-  assert.equal(bindings, 4);
+  assert.deepEqual(bindings.sort(), ["cannele-readiness.yml", "qa-diagnostics.yml", "qa-pool.yml", "qa-pool.yml", "qa-registry.yml"]);
 });
 
 test("secretを本番比較guardの同じ環境名へ渡し、runtime権限追加を使わない", () => {
