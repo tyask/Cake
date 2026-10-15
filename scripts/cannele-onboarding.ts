@@ -21,8 +21,40 @@ const ADMISSION_FIELDS = ["protocol", "reviewId", "reviewerGitHubId", "stoppedAt
 type Env = Readonly<Record<string, string | undefined>>;
 type Object_ = Record<string, unknown>;
 export type OnboardingAction = "inspect" | "transition" | "provision-runtime";
+const STAGES = ["UNKNOWN", "CONFIG", "ADMIN_CONNECT", "INSPECT_BEGIN", "INSPECT_LOCK_LEGACY", "INSPECT_LOCK_CONTROL",
+  "INSPECT_SEARCH_PATH", "INSPECT_VERSION", "INSPECT_CORE", "INSPECT_COMMIT", "INSPECT_ROLLBACK", "TRANSITION",
+  "RUNTIME_CONFIG", "RUNTIME_PROVISION", "RUNTIME_CONNECT", "RUNTIME_VERIFY", "RUNTIME_RELEASE", "RUNTIME_POOL_END", "ADMIN_RELEASE", "ADMIN_POOL_END"] as const;
+const REASONS = ["UNKNOWN", "VALIDATION", "CORE_REJECTED", "AUTHENTICATION", "PERMISSION", "PROTOCOL", "UNSUPPORTED",
+  "UNDEFINED_COLUMN", "UNDEFINED_FUNCTION", "UNDEFINED_TABLE", "UNDEFINED_OBJECT", "SYNTAX", "DATATYPE", "TIMEOUT", "DNS", "CONNECT", "RESET", "TLS"] as const;
+type Stage = typeof STAGES[number];
+type Reason = typeof REASONS[number];
+const ERROR_REASONS: ReadonlyMap<string, Reason> = new Map([
+  ["28000", "AUTHENTICATION"], ["28P01", "AUTHENTICATION"], ["42501", "PERMISSION"], ["08P01", "PROTOCOL"], ["0A000", "UNSUPPORTED"],
+  ["42703", "UNDEFINED_COLUMN"], ["42883", "UNDEFINED_FUNCTION"], ["42P01", "UNDEFINED_TABLE"], ["42704", "UNDEFINED_OBJECT"], ["42601", "SYNTAX"],
+  ["42804", "DATATYPE"], ["22P02", "DATATYPE"], ["22023", "DATATYPE"], ["57014", "TIMEOUT"], ["ETIMEDOUT", "TIMEOUT"], ["ERR_CONNECTION_TIMEOUT", "TIMEOUT"],
+  ["ENOTFOUND", "DNS"], ["EAI_AGAIN", "DNS"], ["ECONNREFUSED", "CONNECT"], ["EHOSTUNREACH", "CONNECT"], ["ENETUNREACH", "CONNECT"],
+  ...["08000", "08001", "08003", "08004", "08006", "08007", "53300", "57P01", "57P02", "57P03"].map(code => [code, "CONNECT"] as const),
+  ["ECONNRESET", "RESET"], ["EPIPE", "RESET"],
+  ...["ERR_TLS_CERT_ALTNAME_INVALID", "SELF_SIGNED_CERT_IN_CHAIN", "DEPTH_ZERO_SELF_SIGNED_CERT", "CERT_HAS_EXPIRED", "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+    "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE", "ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION"].map(code => [code, "TLS"] as const),
+]);
 export class OnboardingError extends Error {
-  constructor(readonly code: string) { super("Cannele onboarding could not be verified; private details suppressed."); }
+  constructor(readonly code: string, readonly stage: Stage = "UNKNOWN", readonly reason: Reason = "VALIDATION") {
+    super("Cannele onboarding could not be verified; private details suppressed.");
+  }
+}
+function diagnose(error: unknown, stage: Stage, core?: OnboardingCore): OnboardingError {
+  if (error instanceof OnboardingError) return error.stage === "UNKNOWN" ? new OnboardingError(error.code, stage, error.reason) : error;
+  const providerCode = error && typeof error === "object" ? Object.getOwnPropertyDescriptor(error, "code")?.value : undefined;
+  const reason = typeof providerCode === "string" ? ERROR_REASONS.get(providerCode) ?? "UNKNOWN" : "UNKNOWN";
+  const code = core?.errorCode(error);
+  return new OnboardingError(code && /^[A-Z][A-Z0-9_]{1,79}$/.test(code) ? code : "ONBOARDING_DEPENDENCY_FAILED", stage, reason === "UNKNOWN" && code ? "CORE_REJECTED" : reason);
+}
+/** Only closed diagnostic fields leave the CLI; no original error or driver code. */
+export function onboardingFailure(error: unknown): { ok: false; code: string; stage: Stage; reason: Reason } {
+  if (!(error instanceof OnboardingError)) return { ok: false, code: "ONBOARDING_FAILED", stage: "CONFIG", reason: "UNKNOWN" };
+  return { ok: false, code: /^[A-Z][A-Z0-9_]{1,79}$/.test(error.code) ? error.code : "ONBOARDING_FAILED",
+    stage: STAGES.includes(error.stage) && error.stage !== "UNKNOWN" ? error.stage : "CONFIG", reason: REASONS.includes(error.reason) ? error.reason : "UNKNOWN" };
 }
 const fail = (code: string): never => { throw new OnboardingError(code); };
 const object = (value: unknown): Object_ => value && typeof value === "object" && !Array.isArray(value) ? value as Object_ : fail("ONBOARDING_INPUT_INVALID");
@@ -144,74 +176,89 @@ export type OnboardingReceipt = { protocol: "cake-cannele-onboarding-result/v1";
 /** Administrative helpers receive credentials only after the actual trusted
  * owner/main workflow and both source blobs have been independently checked. */
 export async function runOnboarding(environment: Env, dependencies: { source: OnboardingSource; transport?: QaTransport; core: () => Promise<OnboardingCore> }): Promise<OnboardingReceipt> {
-  const { source } = dependencies, gateway = new OnboardingGateway(environment, dependencies.transport);
-  const run = await gateway.authorize(source);
-  const action = environment.CANNELE_ONBOARDING_ACTION;
-  if (action !== "inspect" && action !== "transition" && action !== "provision-runtime") return fail("ONBOARDING_ACTION_INVALID");
-  const input = action === "transition" ? transitionInput(environment, source) : null;
-  const context = action === "provision-runtime" ? runtimeContext(json(environment.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON)) : null;
-  const roleName = action === "provision-runtime" ? text(environment.CANNELE_ONBOARDING_RUNTIME_ROLE_NAME, /^[a-z][a-z0-9_]{0,62}$/) : null;
-  if ((action !== "transition" && environment.CANNELE_ONBOARDING_TRANSITION_JSON)
-    || (action !== "provision-runtime" && (environment.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON || environment.CANNELE_ONBOARDING_RUNTIME_ROLE_NAME))) return fail("ONBOARDING_INPUT_INVALID");
-  const core = await dependencies.core();
-  try {
-    const connection = core.connection({ CANNELE_REGISTRY_DATABASE_URL: secret(environment, "CANNELE_REGISTRY_ADMIN_DATABASE_URL"),
+  let core: OnboardingCore | undefined, firstFailure: OnboardingError | undefined;
+  const capture = (error: unknown, stage: Stage): OnboardingError => {
+    const failure = diagnose(error, stage, core); firstFailure ??= failure; return failure;
+  };
+  const at = async <T>(stage: Stage, work: () => T | Promise<T>): Promise<T> => {
+    try { return await work(); } catch (error) { throw capture(error, stage); }
+  };
+  const cleanup = async (stage: Stage, work: () => unknown | Promise<unknown>): Promise<void> => {
+    try { await work(); } catch (error) { if (!firstFailure) throw capture(error, stage); }
+  };
+  return at("CONFIG", async () => {
+    const { source } = dependencies, gateway = new OnboardingGateway(environment, dependencies.transport);
+    const run = await gateway.authorize(source);
+    const action = environment.CANNELE_ONBOARDING_ACTION;
+    if (action !== "inspect" && action !== "transition" && action !== "provision-runtime") return fail("ONBOARDING_ACTION_INVALID");
+    const input = action === "transition" ? transitionInput(environment, source) : null;
+    const context = action === "provision-runtime" ? runtimeContext(json(environment.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON)) : null;
+    const roleName = action === "provision-runtime" ? text(environment.CANNELE_ONBOARDING_RUNTIME_ROLE_NAME, /^[a-z][a-z0-9_]{0,62}$/) : null;
+    if ((action !== "transition" && environment.CANNELE_ONBOARDING_TRANSITION_JSON)
+      || (action !== "provision-runtime" && (environment.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON || environment.CANNELE_ONBOARDING_RUNTIME_ROLE_NAME))) return fail("ONBOARDING_INPUT_INVALID");
+    const loaded = await dependencies.core(); core = loaded;
+    const connection = loaded.connection({ CANNELE_REGISTRY_DATABASE_URL: secret(environment, "CANNELE_REGISTRY_ADMIN_DATABASE_URL"),
       CANNELE_REGISTRY_DATABASE_HOST: secret(environment, "CANNELE_REGISTRY_ADMIN_DATABASE_HOST") });
     const database = { name: connection.database, hostDigest: hash(connection.host) };
-    const pool = core.pool(connection);
+    const pool = loaded.pool(connection);
     let result: Object_;
     try {
-      const client = await pool.connect();
+      const client = await at("ADMIN_CONNECT", () => pool.connect());
       try {
         if (action === "inspect") {
-          await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+          await at("INSPECT_BEGIN", () => client.query("BEGIN ISOLATION LEVEL READ COMMITTED"));
           try {
-            await client.query("SELECT pg_advisory_xact_lock(hashtext('cake:qa-registry:v1'))");
-            await client.query("SELECT pg_advisory_xact_lock(hashtextextended('cannele_registry:control',0))");
-            await client.query("SET LOCAL search_path=pg_catalog");
-            const version = await client.query("SELECT current_setting('server_version_num')::integer / 10000 AS major");
-            const postgresMajor = number(version.rows[0]?.major);
-            const snapshot = await core.inspect(client), identity = snapshot.identity;
-            if (identity.protocol !== "cake-qa-registry/v1" || identity.databaseName !== connection.database || identity.writerMode !== "legacy" || identity.writerEpoch !== 1) return fail("ONBOARDING_LEGACY_IDENTITY_INVALID");
-            result = { stateDigest: text(snapshot.stateDigest, DIGEST), footprintDigest: text(snapshot.footprintDigest, DIGEST), writerMode: "legacy", writerEpoch: 1, postgresMajor,
-              fenceRevision: text(identity.fenceReceipt.revision, SHA) };
-            await client.query("COMMIT");
-          } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
+            await at("INSPECT_LOCK_LEGACY", () => client.query("SELECT pg_advisory_xact_lock(hashtext('cake:qa-registry:v1'))"));
+            await at("INSPECT_LOCK_CONTROL", () => client.query("SELECT pg_advisory_xact_lock(hashtextextended('cannele_registry:control',0))"));
+            await at("INSPECT_SEARCH_PATH", () => client.query("SET LOCAL search_path=pg_catalog"));
+            const postgresMajor = await at("INSPECT_VERSION", async () => number((await client.query("SELECT current_setting('server_version_num')::integer / 10000 AS major")).rows[0]?.major));
+            result = await at("INSPECT_CORE", async () => {
+              const snapshot = await loaded.inspect(client), identity = snapshot.identity;
+              if (identity.protocol !== "cake-qa-registry/v1" || identity.databaseName !== connection.database || identity.writerMode !== "legacy" || identity.writerEpoch !== 1) return fail("ONBOARDING_LEGACY_IDENTITY_INVALID");
+              return { stateDigest: text(snapshot.stateDigest, DIGEST), footprintDigest: text(snapshot.footprintDigest, DIGEST), writerMode: "legacy", writerEpoch: 1, postgresMajor,
+                fenceRevision: text(identity.fenceReceipt.revision, SHA) };
+            });
+            await at("INSPECT_COMMIT", () => client.query("COMMIT"));
+          } catch (error) {
+            await cleanup("INSPECT_ROLLBACK", () => client.query("ROLLBACK")); throw error;
+          }
         } else if (action === "transition") {
-          const migrations = await core.migrations();
-          const transitioned = await core.transition(client, migrations, input!, { connectedHostDigest: database.hostDigest,
-            verify: request => core.verify(gateway.variableTransport(core.transport({ githubToken: secret(environment, "GITHUB_TOKEN"),
-              vercelToken: secret(environment, "CANNELE_TRANSITION_VERCEL_TOKEN"), neonApiKey: secret(environment, "CANNELE_TRANSITION_NEON_API_KEY") })), request) });
-          const receipt = object(transitioned.transition);
-          if (typeof transitioned.replayed !== "boolean") return fail("ONBOARDING_RESULT_INVALID");
-          const retained = object(input!.admission).oldProviderCreationCredentialsRevoked === false;
-          const hasRetention = Object.hasOwn(receipt, "providerCredentialRetentionAccepted");
-          if (retained ? !hasRetention || receipt.providerCredentialRetentionAccepted !== true : hasRetention) return fail("ONBOARDING_RESULT_INVALID");
-          result = { transitionId: text(receipt.transitionId, UUID), replayed: transitioned.replayed, schemaVersion: number(transitioned.schemaVersion),
-            schemaChecksum: text(transitioned.schemaChecksum, DIGEST), evidenceDigest: text(receipt.evidenceDigest, DIGEST),
-            ...(hasRetention ? { providerCredentialRetentionAccepted: true } : {}) };
+          result = await at("TRANSITION", async () => {
+            const migrations = await loaded.migrations();
+            const transitioned = await loaded.transition(client, migrations, input!, { connectedHostDigest: database.hostDigest,
+              verify: request => loaded.verify(gateway.variableTransport(loaded.transport({ githubToken: secret(environment, "GITHUB_TOKEN"),
+                vercelToken: secret(environment, "CANNELE_TRANSITION_VERCEL_TOKEN"), neonApiKey: secret(environment, "CANNELE_TRANSITION_NEON_API_KEY") })), request) });
+            const receipt = object(transitioned.transition);
+            if (typeof transitioned.replayed !== "boolean") return fail("ONBOARDING_RESULT_INVALID");
+            const retained = object(input!.admission).oldProviderCreationCredentialsRevoked === false;
+            const hasRetention = Object.hasOwn(receipt, "providerCredentialRetentionAccepted");
+            if (retained ? !hasRetention || receipt.providerCredentialRetentionAccepted !== true : hasRetention) return fail("ONBOARDING_RESULT_INVALID");
+            return { transitionId: text(receipt.transitionId, UUID), replayed: transitioned.replayed, schemaVersion: number(transitioned.schemaVersion),
+              schemaChecksum: text(transitioned.schemaChecksum, DIGEST), evidenceDigest: text(receipt.evidenceDigest, DIGEST),
+              ...(hasRetention ? { providerCredentialRetentionAccepted: true } : {}) };
+          });
         } else {
-          const runtime = core.connection({ CANNELE_REGISTRY_DATABASE_URL: secret(environment, "CANNELE_REGISTRY_DATABASE_URL"),
-            CANNELE_REGISTRY_DATABASE_HOST: secret(environment, "CANNELE_REGISTRY_DATABASE_HOST") });
-          if (runtime.host !== connection.host || runtime.port !== connection.port || runtime.database !== connection.database
-            || runtime.user !== roleName || runtime.user === connection.user) return fail("ONBOARDING_RUNTIME_TARGET_INVALID");
-          await core.provision(client, { roleName: roleName!, context: context! });
-          const runtimePool = core.pool(runtime);
+          const runtime = await at("RUNTIME_CONFIG", () => {
+            const configured = loaded.connection({ CANNELE_REGISTRY_DATABASE_URL: secret(environment, "CANNELE_REGISTRY_DATABASE_URL"),
+              CANNELE_REGISTRY_DATABASE_HOST: secret(environment, "CANNELE_REGISTRY_DATABASE_HOST") });
+            if (configured.host !== connection.host || configured.port !== connection.port || configured.database !== connection.database
+              || configured.user !== roleName || configured.user === connection.user) return fail("ONBOARDING_RUNTIME_TARGET_INVALID");
+            return configured;
+          });
+          await at("RUNTIME_PROVISION", () => loaded.provision(client, { roleName: roleName!, context: context! }));
+          const runtimePool = await at("RUNTIME_CONFIG", () => loaded.pool(runtime));
           try {
-            const runtimeClient = await runtimePool.connect();
-            try { await core.assertRuntime(runtimeClient, context!); } finally { runtimeClient.release(); }
-          } finally { await runtimePool.end(); }
+            const runtimeClient = await at("RUNTIME_CONNECT", () => runtimePool.connect());
+            try { await at("RUNTIME_VERIFY", () => loaded.assertRuntime(runtimeClient, context!)); }
+            finally { await cleanup("RUNTIME_RELEASE", () => runtimeClient.release()); }
+          } finally { await cleanup("RUNTIME_POOL_END", () => runtimePool.end()); }
           result = { schemaVersion: context!.schemaVersion, instanceId: context!.instanceId, bindingDigest: context!.bindingDigest, writerEpoch: context!.writerEpoch, runtimeLoginVerified: true };
         }
-      } finally { client.release(); }
-    } finally { await pool.end(); }
+      } finally { await cleanup("ADMIN_RELEASE", () => client.release()); }
+    } finally { await cleanup("ADMIN_POOL_END", () => pool.end()); }
     return { protocol: "cake-cannele-onboarding-result/v1", requestId: environment.CANNELE_ONBOARDING_REQUEST_ID!, action,
       source: { cakeRevision: source.cakeRevision, canneleRevision: source.canneleRevision, workflowBlobSha: source.workflowBlobSha, helperBlobSha: source.helperBlobSha }, run, database, result };
-  } catch (error) {
-    if (error instanceof OnboardingError) throw error;
-    const code = core.errorCode(error);
-    return fail(code && /^[A-Z][A-Z0-9_]{1,79}$/.test(code) ? code : "ONBOARDING_DEPENDENCY_FAILED");
-  }
+  });
 }
 
 /** Local Git reads only; the workflow performs fixed-repository checkout and
@@ -294,7 +341,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     await output(process.env, receipt);
     console.log(JSON.stringify({ ok: true, action: receipt.action, requestId: receipt.requestId }));
   })().catch(error => {
-    console.error(JSON.stringify({ ok: false, code: error instanceof OnboardingError ? error.code : "ONBOARDING_FAILED" }));
+    console.error(JSON.stringify(onboardingFailure(error)));
     process.exitCode = 1;
   });
 }
