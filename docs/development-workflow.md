@@ -311,6 +311,22 @@ APIの202は未完了を示す。`nextAction: advance`に対して、依頼中�
 
 Cake専用Cannele APIのProduction healthと、GitHub App用Secret・暗号化キーのSensitive/Production限定設定は確認済み。本人pairing・Actions OIDC認可、Cakeのprovider binding、管理DB接続とruntime role、DB writer fenceとclean-start移行、実QAの受入検証は未完了である。共通管理DDLの正本はCanneleの`db/migrations/`、業務DDLの正本は引き続きCakeの`db/migrations/`である。
 
+切替前の読取確認には、mainへ導入した`cannele-readiness.yml`を使う。旧`qa:inspect`のGitHub Deployments台帳は現在のSQL台帳の全枠状態を証明しない。専用のreadinessは、既存の管理DB・provider資格情報をActions内だけで使い、現在の3枠、未完了request、履歴の解決状態、既知schema、管理者権限、全QA資源を読み取る。DBは読取専用transaction、providerはGETだけとし、DDL、資源の削除、flag・環境変数の変更、Canneleへの切替は行わない。
+
+owner本人が、レビューした現在mainの完全SHAと新しい依頼UUIDを指定する。
+
+```text
+gh workflow run cannele-readiness.yml --repo tyask/Cake --ref main -f reviewed_revision=<現在mainの40桁SHA> -f request_id=<新しいUUID>
+```
+
+Environmentを指定しない専用jobでRepository Variablesを取得するため、Variables APIの403を停止済みと読み替えない。production比較hostはreusable workflowのsecretとして渡し、stepの環境変数表示前からmaskする。接続URL・host原文・role名・認証値・台帳snapshotはログやartifactへ出さず、固定されたID・digest・状態・件数・権限の判定だけを`result.json`へ保存する。結果は成功した初回attemptのowner/main/workflow/job・依頼ID・完全SHA・artifact digestを照合して使う。これは確認時点の読取結果であり、外部Cloud/PCの停止、資格情報の失効、接続sessionの排出や移行直前の再検査の代わりにはならない。
+
+履歴にないPreview Deploymentや取得不能な資源があれば、readinessの実行成功だけで切替可能と扱わない。貸出に属する残存資源は旧方式で返却し、用途不明の公開先は対象を特定してから廃止の範囲を確認する。管理者接続はActionsに保持し、APIには別の限定LOGINだけを設定する。旧owner資格情報を失効する前に、移行と再送に使える管理者接続を確保する。GitHub Secrets書込APIが使えない場合は、利用者が新しい接続情報をActionsの設定画面へ直接登録し、Cloudやチャットへ渡さない。
+
+2026-10-15 JSTの[読取診断 run 38738969961](https://github.com/tyask/Cake/actions/runs/38738969961)は、Cake main `8af33b34d07f44b303a1b562ac78159a649072b5`からowner本人の初回attemptで成功した。qa1〜qa3の固定aliasは不在、QA用Neonは確認済み親branch `br-lively-frog-b3y2mauu`とendpoint `ep-autumn-pine-b3nii81c`だけで、子branchは0件だった。これは旧GitHub台帳も使う診断であり、現在のSQL台帳の3枠freeや管理DB切替の証拠にはしない。他のCloud/PC作業は停止済みと利用者から確認したが、資格情報の失効は未確認である。
+
+同日のVercel完全一覧にはProduction 27件と、旧`preview`枝のDeployment `dpl_73xdiLE19fEvEUNdW1X7hMoiB8HE`が1件残っていた。利用者がその廃止を承認したため、project・完全SHA `c974c1bb7ca12b244098f6770085de38875d77df`・alias・現在Productionとの不一致を再照合し、`cake-preview-fumin1.vercel.app`の割当とこのDeploymentだけを削除した。両対象の直接GETで404を確認し、Production `dpl_EPZaDYkkbx1s89zUsWXTthnB6Qd2`が変わっていないことを読み直した。DB操作、flags・Secrets変更は行っていない。移行直前にも全資源を再取得する。
+
 切替前に旧QA clientを止め、旧方式で全貸出を返却する。旧Actionsの待機・実行が0件で、全alias・Deployment・Native branch・endpointが不在であることを読み直してから、レビュー済みの管理DB移行を実行する。Cakeの旧台帳履歴は引き継がず、新しいinstance・generation・branch prefixとPR作成時刻cutoffで共通台帳を開始する。旧履歴の削除はこの実移行で行い、業務DBや親DBには適用しない。
 
 `cannele.config.json`の有効化とRepository variable `CAKE_CANNELE_ENABLED=true`を、確認済みのAPI・profile・切替状態に合わせる。後者は旧QA Actionsをskipし、新しいclosed返却workflowを許可する実行gateであり、DB writer fenceを実施した証拠ではない。古いcheckoutや既に起動したrunも含め、台帳writerを移行処理で止める。flagsだけを変更して空台帳へ切り替えない。
