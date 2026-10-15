@@ -64,6 +64,8 @@ PR #47のmain導入後、初回の[initialize run 38581479595](https://github.co
 
 使用中の旧貸出がある場合は、旧方式でcleanupを確認してからglobal停止guardを有効にする。停止後に旧cleanup jobが動くことを前提としない。owner本人は、4つの旧workflowのqueued / in-progress / waitingなどのrunがすべて終了したことに加え、旧コードを使うCloud・PC・別の自動処理を止め、旧認証の撤去と管理DB接続sessionのdrainを確認する。Actions一覧やDB内のfenceだけでは、古いowner資格情報を使う外部処理の停止・権限失効を保証できない。確認できない状態では適用しない。
 
+この互換installerに使うActions内の管理DB owner接続Secretは、002導入まで保持する。旧Cloud・PCが保持する資格情報と混同しない。002導入後、切替とreceipt再確認に使う別の管理者接続を確保してから、旧owner接続情報も失効・撤去し、全接続を終了してCanneleの移行を実行する。
+
 レビューした現在のmainの完全なSHAを指定して、専用workflowを依頼する。`confirm_legacy_drain=true`は上述の外部停止・認証・session確認を完了したownerの明示確認であり、installerが外部停止を自動的に証明する値ではない。
 
 ```text
@@ -224,7 +226,7 @@ PR本文へ固定QA URL、Deployment固有URL、完全SHA、貸出ID、資源ID�
 npm run task:pr -- --title '変更内容を表すタイトル' --verification-file /tmp/cake-verification.md
 ```
 
-CIはNode.js 24.19.0に固定して`npm ci`、lint、test、buildを行う。24系の最新版へ自動追従させない。Node.js 24.21.0のCIではPGliteの実SQLテスト中にプロセスが異常終了したため、Cloudと同じ版へ揃える暫定対策である。`corrupted size vs. prev_size`やV8の内部assertによる停止をSQLのアサーション失敗と扱わず、DBテストは省略しない。ランタイムを更新するときは、SQLテストと全体のlint/test/buildを新しい版で確認してからCIの固定値を変更する。mainのRulesetはPR経由と必須`ci`の成功、最新mainへの追従を要求する。Codexはマージ・自動マージ設定を行わない。利用者が差分、検証結果、QA画面を確認してマージする。
+CIはNode.js 24.19.0に固定して`npm ci`、lint、test、buildを行う。QA台帳fenceの競合検証には使い捨てPostgreSQL17を用意し、`CAKE_REGISTRY_FENCE_REQUIRE_DATABASE_TESTS=true`でDB検証のskipを拒否する。24系の最新版へ自動追従させない。Node.js 24.21.0のCIではPGliteの実SQLテスト中にプロセスが異常終了したため、Cloudと同じ版へ揃える暫定対策である。`corrupted size vs. prev_size`やV8の内部assertによる停止をSQLのアサーション失敗と扱わず、DBテストは省略しない。ランタイムを更新するときは、SQLテストと全体のlint/test/buildを新しい版で確認してからCIの固定値を変更する。mainのRulesetはPR経由と必須`ci`の成功、最新mainへの追従を要求する。Codexはマージ・自動マージ設定を行わない。利用者が差分、検証結果、QA画面を確認してマージする。
 
 ## 台帳と競合防止
 
@@ -307,7 +309,7 @@ APIの202は未完了を示す。`nextAction: advance`に対して、依頼中�
 
 ### 実際の切替と残作業
 
-Live Cannele APIの公開設定、アプリ専用GitHub App・本人pairing・Actions OIDC認可、Cakeのprovider binding、DB writer fenceとclean-start移行、実環境の受入検証は切替時に実施する。共通管理DDLの正本はCanneleの`db/migrations/`、業務DDLの正本は引き続きCakeの`db/migrations/`である。
+Cake専用Cannele APIのProduction healthと、GitHub App用Secret・暗号化キーのSensitive/Production限定設定は確認済み。本人pairing・Actions OIDC認可、Cakeのprovider binding、管理DB接続とruntime role、DB writer fenceとclean-start移行、実QAの受入検証は未完了である。共通管理DDLの正本はCanneleの`db/migrations/`、業務DDLの正本は引き続きCakeの`db/migrations/`である。
 
 切替前に旧QA clientを止め、旧方式で全貸出を返却する。旧Actionsの待機・実行が0件で、全alias・Deployment・Native branch・endpointが不在であることを読み直してから、レビュー済みの管理DB移行を実行する。Cakeの旧台帳履歴は引き継がず、新しいinstance・generation・branch prefixとPR作成時刻cutoffで共通台帳を開始する。旧履歴の削除はこの実移行で行い、業務DBや親DBには適用しない。
 

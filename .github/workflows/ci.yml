@@ -33,8 +33,8 @@ jobs:
           --health-cmd "pg_isready -U cannele_test -d cannele_test"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      CANNELE_TEST_DATABASE_URL: postgresql://cannele_test:cannele_test@127.0.0.1:5432/cannele_test
-      CANNELE_REQUIRE_DATABASE_TESTS: 'true'
+      CAKE_REGISTRY_FENCE_TEST_DATABASE_URL: postgresql://cannele_test:cannele_test@127.0.0.1:5432/cannele_test
+      CAKE_REGISTRY_FENCE_REQUIRE_DATABASE_TESTS: 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -7,8 +7,8 @@ import type { NeonQueryFunction, NeonQueryFunctionInTransaction, NeonQueryInTran
 import { applyRegistryFence, expectedLegacyCatalog, inspectRegistryFence, legacyCatalogSql } from "../scripts/qa-registry-fence";
 import { applyRegistryDdl } from "../scripts/qa-registry-ddl";
 
-const databaseUrl=process.env.CANNELE_TEST_DATABASE_URL;
-if (!databaseUrl && process.env.CANNELE_REQUIRE_DATABASE_TESTS === "true") throw new Error("Disposable PostgreSQL fixture is required for the Cake fence installer.");
+const databaseUrl=process.env.CAKE_REGISTRY_FENCE_TEST_DATABASE_URL;
+if (!databaseUrl && process.env.CAKE_REGISTRY_FENCE_REQUIRE_DATABASE_TESTS === "true") throw new Error("Disposable PostgreSQL fixture is required for the Cake fence installer.");
 const legacyDdl=readFileSync(new URL("../db/qa-registry/001_registry.sql",import.meta.url),"utf8");
 const fenceDdl=readFileSync(new URL("../db/qa-registry/002_cannele_fence.sql",import.meta.url),"utf8");
 

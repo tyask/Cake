@@ -20,8 +20,8 @@ const input = (pr = 1) => ({
   now: "2026-10-15T00:00:00.000Z", slot: "qa1",
 });
 const fingerprint = "c".repeat(64);
-const databaseUrl = process.env.CANNELE_TEST_DATABASE_URL;
-if (!databaseUrl && process.env.CANNELE_REQUIRE_DATABASE_TESTS === "true") {
+const databaseUrl = process.env.CAKE_REGISTRY_FENCE_TEST_DATABASE_URL;
+if (!databaseUrl && process.env.CAKE_REGISTRY_FENCE_REQUIRE_DATABASE_TESTS === "true") {
   throw new Error("Disposable PostgreSQL fixture is required for Cake QA fence tests.");
 }
 
