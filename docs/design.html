@@ -536,6 +536,7 @@
           <p>Cannele APIへの連携は導入準備中で、<code>cannele.config.json</code>は初期状態で無効とする。有効化後は固定revisionの共通CLIで予約・登録・公開をAPIへ依頼し、closed Actionsは返却APIのきっかけだけを担当する。管理DDLは共通Cannele repositoryで管理する。旧貸出の返却・資源不在・writer停止とclean-start移行、実環境の受入確認後に切り替える。詳細と現在の有効化条件は運用手順の「Canneleへの切替」を参照する。</p>
           <p>旧台帳の互換停止は追加DDL <code>db/qa-registry/002_cannele_fence.sql</code>で準備する。maintenanceへ切り替えた後は、古いコードの予約・更新と既知テーブルへの書き込みをDB側でも拒否する。旧Cloud・PCの停止、資格情報の失効、実行・接続の排出は別途確認し、導入PRのマージだけで切替完了とは扱わない。</p>
           <p>切替前の状態確認はowner/main限定の<code>cannele-readiness.yml</code>で、実管理DBの全枠と履歴・provider資源を読取専用で照合する。接続情報はActions内に保持し、安全なID・digest・判定だけを返す。旧GitHub Deployments台帳や読取runの成功だけで、切替可能・資格情報失効済みと判断しない。</p>
+          <p>実際の移行とruntime権限設定は<code>cannele-onboarding.yml</code>から固定SHAの共通helperを呼ぶ。新しい管理者・providerの資格情報は旧workflowが使わないSecret名へ分離し、APIには専用非owner LOGINだけを設定する。旧停止と実資格情報失効を明示確認してから原子的な移行を実行し、source導入だけで運用有効化済みとしない。</p>
           <p>本番はmainへのマージを検知するVercel Git連携で、ビルドと本番DB更新が成功した場合に公開する。公開中の旧版と互換性を保つmigrationを使う。手動のProductionデプロイは別の明示依頼時だけ行う。</p>
         </section>
 
