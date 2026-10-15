@@ -309,7 +309,7 @@ APIの202は未完了を示す。`nextAction: advance`に対して、依頼中�
 
 ### 実際の切替と残作業
 
-Cake専用Cannele APIのProduction healthと、GitHub App用Secret・暗号化キーのSensitive/Production限定設定は確認済み。本人pairing・Actions OIDC認可、Cakeのprovider binding、管理DB接続とruntime role、DB writer fenceとclean-start移行、実QAの受入検証は未完了である。共通管理DDLの正本はCanneleの`db/migrations/`、業務DDLの正本は引き続きCakeの`db/migrations/`である。
+Cake専用Cannele APIのProduction healthと、GitHub App用Secret・暗号化キーのSensitive/Production限定設定は確認済み。旧管理DBの002互換fence導入も確認した。本人pairing・Actions OIDC認可、Cakeのprovider binding、APIからの管理DB接続とruntime role、writerのmaintenance切替とclean-start移行、実QAの受入検証は未完了である。共通管理DDLの正本はCanneleの`db/migrations/`、業務DDLの正本は引き続きCakeの`db/migrations/`である。
 
 切替前の読取確認には、mainへ導入した`cannele-readiness.yml`を使う。旧`qa:inspect`のGitHub Deployments台帳は現在のSQL台帳の全枠状態を証明しない。専用のreadinessは、新しい`CANNELE_REGISTRY_ADMIN_*`・`CANNELE_TRANSITION_*`の資格情報をActions内だけで使い、現在の3枠、未完了request、履歴の解決状態、既知schema、管理者権限、全QA資源を読み取る。DBは読取専用transaction、providerはGETだけとし、DDL、資源の削除、flag・環境変数の変更、Canneleへの切替は行わない。
 
@@ -343,6 +343,10 @@ PR #57のマージ後の[readiness run 38744829643](https://github.com/tyask/Cak
 利用者から管理DB passwordの更新、新ADMIN URLの保存、旧4Secretsの撤去が完了したとの回答後、[readiness run 38765120650](https://github.com/tyask/Cake/actions/runs/38765120650)で再確認した。同じmainのowner本人・初回attempt・専用workflow/helperと全job成功、依頼UUID、artifact `11988291564`のZIP全体のSHA-256 `9ac83c376db1b9f0632be640562e7efa4d39a8a4a76ae9fd95d62d1eb503505f`を照合した。確認時刻は2026-10-16 01:00:30.111 JST（`checkedAt: 2026-10-15T16:00:30.111Z`）。新ADMIN接続は成功し、専用identity・001 catalog・台帳stateは不変、停止3flags・他session 0・旧未完了run 0・全QA資源不在も確認した。旧providerキーと旧CLI認証は対象を特定できておらず、失効は未確認である。readiness成功やSecret撤去をその失効証拠に代用せず、002導入・移行はまだ実行していない。
 
 その後、利用者はprovider tokenと既存CLI認証を現状のまま保持する方針を明示した。移行admissionではprovider資格情報の失効をfalse、保持の明示受入をtrueとして記録する。旧管理DB/owner資格情報の無効化・旧actor停止・DB接続排出と完全な資源再検査は引き続き必要で、保持方針を失効済みと読み替えない。
+
+移行準備PRのマージ後、main `025b09976e9bee4095e6ef70f38353f94d9193af`の[readiness run 38780461871](https://github.com/tyask/Cake/actions/runs/38780461871)を再確認した。確認時刻は2026-10-16 02:50:05.897 JST（`checkedAt: 2026-10-15T17:50:05.897Z`）。artifact `11994928958`のZIP SHA-256 `17f662ffd8775ff8743867058eeb71f982f5cf07beb6a5aee3115864a5d9ec04`を照合し、PostgreSQL 18.6の専用identity・001 catalog、3枠free・履歴70件とrequests/leases解決済み、他session 0、停止3flags・旧未完了run 0を確認した。完全provider inventoryはDeployment 32件すべてProduction・QA 0件、固定alias 3件不在、Neonは親branchとそのendpointだけだった。履歴内のDeployment 11件・branch 5件・endpoint 5件・host 5件もすべて不在だった。
+
+続く[002 installer run 38780876011](https://github.com/tyask/Cake/actions/runs/38780876011)は、owner本人・同じ現在main・初回attemptのjob `116580440297`が成功した。2026-10-16 02:52:42.8008963 JST（`2026-10-15T17:52:42.8008963Z`）にversion 2・writerEpoch 1・上記sourceの互換fence導入を確認し、既存履歴を保持した。これはlegacyモードの互換導入であり、maintenanceへの切替やCannele台帳への移行、API有効化はまだ行っていない。後続のonboarding `inspect`は[run 38781120504](https://github.com/tyask/Cake/actions/runs/38781120504)のjob `116581275195`で`ONBOARDING_DEPENDENCY_FAILED`により停止した。読取だけの再確認[run 38782009506](https://github.com/tyask/Cake/actions/runs/38782009506)のjob `116584360725`も、2026-10-16 03:01:06.847 JST（`2026-10-15T18:01:06.847Z`）に同じ失敗となった。当時は失敗stage・reasonを保存していないため原因は未確定で、未検証のまま移行を進めていない。
 
 PostgreSQL 18ではNOT NULL制約がcatalogへ追加されるため、Canneleの移行helperは17/18それぞれの完全な固定hashで照合する。17.10と18.4の使い捨てDBで検証し、実18.6も移行前に同じhashと一致することを確認する。Neonのbranch一覧は最初の応答の`sort_order`が`asc`・`desc`・`ASC`・`DESC`なら小文字へ正規化し、次ページのGETへ引き継ぐ。2ページ目以降の順序変更や未知の値は拒否し、`sort_by=created_at`を維持する。最終branchページの`next`とsort echoは省略され得て、`next`の空文字もnullと同じ終端として扱う。短い最終ページでの省略を受け入れつつ、false・0、不明なcursor・未知field・重複ID・未完了ページは引き続き拒否する。
 
@@ -382,6 +386,8 @@ provider資格情報を失効した場合は`oldProviderCreationCredentialsRevok
 `source.cakeRevision`は保存済み002 fence receiptの導入SHA、`reviewed_revision`と`admission.trustedMainRevision`は今回の現在mainを表す。両者を同じ値に書き換えない。commit結果不明時はUUIDや時刻を再生成せず、同じJSONを新しいworkflow runへ渡す。coreの同一receipt再送はprovider資格情報を要求せず、schemaや枠をresetしない。
 
 `runtime_context_json`はinstanceId・repositoryId・bindingDigest・writerEpoch・schemaVersion・schemaChecksumの6項目で、初期化receiptと照合する。`runtime_role_name`は上記の明示した専用roleである。結果はrequest UUID付きの単一`result.json` artifactから、実行元・owner・全job・依頼・digestを照合して取得する。
+
+onboardingの失敗JSONは、既存の安全な`code`に加え、固定された`stage`と`reason`を返す。例えば`ADMIN_CONNECT`と`PROTOCOL`は接続時の既知protocolエラー、`INSPECT_CORE`と`UNDEFINED_COLUMN`はcore読取時の既知columnエラーを示し、SQLや例外本文を見ずに停止箇所を切り分けられる。既知のPostgreSQL SQLSTATE・Node通信/TLS codeだけを固定reasonへ変換し、未知の値やcauseは`UNKNOWN`とする。URL・host・token・SQL・応答や例外本文・stack・未知code原文は出さず、rollbackや接続解放が後から失敗しても最初の失敗を保持する。診断の追加で接続設定や移行条件は変更しない。
 
 この入口はrole/passwordの生成やVercelへのSecret転送、DB writerやAPI flagの有効化を行わない。限定runtime接続とprovider用SecretをVercel `cannele-cake`のSensitive/Productionへ登録し、bindingと権限を確認してからAPIの再配置・本人認証・運用有効化へ進む。管理者接続をAPIへ置かず、既存のGitHub App用Secretと暗号化キーを作り直さない。
 

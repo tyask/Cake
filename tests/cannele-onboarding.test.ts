@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OnboardingGateway, onboardingSource, runOnboarding, type OnboardingCore, type OnboardingSource } from "../scripts/cannele-onboarding";
+import { OnboardingError, OnboardingGateway, onboardingFailure, onboardingSource, runOnboarding, type OnboardingCore, type OnboardingSource } from "../scripts/cannele-onboarding";
 import type { QaTransport } from "../scripts/qa-pool-writer";
 
 const revision = "a".repeat(40), canneleRevision = "b".repeat(40), requestId = randomUUID(), instanceId = randomUUID();
@@ -111,6 +111,74 @@ test("inspect takes ordered transaction locks and emits only closed core facts; 
   const failed = coreFixture({ inspect: async () => { throw new Error("raw PostgreSQL password and query detail"); } });
   await assert.rejects(runOnboarding(environment, { source, transport: transport(), core: async () => failed.core }), { code: "ONBOARDING_DEPENDENCY_FAILED" });
   assert.ok(failed.events.includes("ROLLBACK")); assert.equal(failed.events.includes("COMMIT"), false); assert.ok(failed.events.at(-1)?.startsWith("end:"));
+});
+
+const privateDiagnostic = "postgresql://private-role:private-password@ep-private.mock.aws.neon.tech/db SELECT private_column private-token";
+async function expectDiagnostic(work: Promise<unknown>, expected: { code: string; stage: string; reason: string }): Promise<void> {
+  await assert.rejects(work, error => {
+    assert.ok(error instanceof OnboardingError);
+    const projected = onboardingFailure(error);
+    assert.deepEqual(projected, { ok: false, ...expected });
+    assert.doesNotMatch(JSON.stringify(projected), /private-|postgresql|SELECT|sqlstate|cause|query|password/i);
+    assert.equal(error.message, "Cannele onboarding could not be verified; private details suppressed.");
+    assert.deepEqual(Object.keys(projected), ["ok", "code", "stage", "reason"]);
+    return true;
+  });
+}
+
+test("administrative connection diagnostics classify only known PostgreSQL and Node codes and still close the pool", async () => {
+  for (const [code, reason] of [["28P01", "AUTHENTICATION"], ["42501", "PERMISSION"], ["08P01", "PROTOCOL"], ["0A000", "UNSUPPORTED"],
+    ["08006", "CONNECT"], ["ENOTFOUND", "DNS"], ["ECONNREFUSED", "CONNECT"], ["ECONNRESET", "RESET"], ["ETIMEDOUT", "TIMEOUT"],
+    ["ERR_TLS_CERT_ALTNAME_INVALID", "TLS"], [privateDiagnostic, "UNKNOWN"], ["PRIVATE_CREDENTIAL_ERROR", "UNKNOWN"]]) {
+    let connects = 0, ends = 0;
+    const error = Object.assign(new Error(privateDiagnostic, { cause: { code: "08P01", message: privateDiagnostic } }), { code, query: privateDiagnostic });
+    const fixture = coreFixture({ pool: () => ({ connect: async () => { connects++; throw error; }, end: async () => { ends++; } }) });
+    await expectDiagnostic(runOnboarding(environment, { source, transport: transport(), core: async () => fixture.core }),
+      { code: "ONBOARDING_DEPENDENCY_FAILED", stage: "ADMIN_CONNECT", reason });
+    assert.equal(connects, 1); assert.equal(ends, 1); assert.equal(fixture.events.includes("inspect"), false);
+  }
+});
+
+test("inspect diagnostics retain the original read failure even when rollback, release and pool cleanup also fail", async () => {
+  for (const [code, reason] of [["42703", "UNDEFINED_COLUMN"], ["42883", "UNDEFINED_FUNCTION"], ["42P01", "UNDEFINED_TABLE"],
+    ["42601", "SYNTAX"], ["42804", "DATATYPE"], ["57014", "TIMEOUT"], ["private-unknown-sqlstate", "UNKNOWN"]]) {
+    const events: string[] = [];
+    const primary = Object.assign(new Error(privateDiagnostic), { code });
+    const secondary = Object.assign(new Error(privateDiagnostic), { code: "ECONNRESET" });
+    const fixture = coreFixture({
+      inspect: async () => { events.push("inspect"); throw primary; },
+      pool: () => ({ connect: async () => ({ query: async sql => {
+        events.push(sql); if (sql === "ROLLBACK") throw secondary;
+        return { rows: sql.includes("server_version_num") ? [{ major: 18 }] : [] };
+      }, release: () => { events.push("release"); throw secondary; } }), end: async () => { events.push("end"); throw secondary; } }),
+    });
+    await expectDiagnostic(runOnboarding(environment, { source, transport: transport(), core: async () => fixture.core }),
+      { code: "ONBOARDING_DEPENDENCY_FAILED", stage: "INSPECT_CORE", reason });
+    assert.deepEqual(events.slice(-3), ["ROLLBACK", "release", "end"]); assert.equal(events.includes("COMMIT"), false);
+  }
+});
+
+test("version and standalone cleanup failures identify their stage while known core rejections keep their code", async () => {
+  const version = coreFixture({ pool: () => ({ connect: async () => ({ query: async sql => {
+    if (sql.includes("server_version_num")) throw Object.assign(new Error(privateDiagnostic), { code: "42501" });
+    return { rows: [] };
+  }, release: () => {} }), end: async () => {} }) });
+  await expectDiagnostic(runOnboarding(environment, { source, transport: transport(), core: async () => version.core }),
+    { code: "ONBOARDING_DEPENDENCY_FAILED", stage: "INSPECT_VERSION", reason: "PERMISSION" });
+  const known = coreFixture({ inspect: async () => { throw new Error(privateDiagnostic); }, errorCode: () => "LEGACY_REGISTRY_SHAPE_UNSUPPORTED" });
+  await expectDiagnostic(runOnboarding(environment, { source, transport: transport(), core: async () => known.core }),
+    { code: "LEGACY_REGISTRY_SHAPE_UNSUPPORTED", stage: "INSPECT_CORE", reason: "CORE_REJECTED" });
+  const cleanup = coreFixture(); const original = cleanup.core.pool;
+  cleanup.core.pool = connection => ({ ...original(connection), end: async () => { throw Object.assign(new Error(privateDiagnostic), { code: "ECONNRESET" }); } });
+  await expectDiagnostic(runOnboarding(environment, { source, transport: transport(), core: async () => cleanup.core }),
+    { code: "ONBOARDING_DEPENDENCY_FAILED", stage: "ADMIN_POOL_END", reason: "RESET" });
+});
+
+test("CLI failure output never serializes arbitrary error properties, nested causes or invalid diagnostic fields", () => {
+  const raw = Object.assign(new Error(privateDiagnostic, { cause: { code: "28P01", message: privateDiagnostic } }), { code: privateDiagnostic, query: privateDiagnostic });
+  assert.deepEqual(onboardingFailure(raw), { ok: false, code: "ONBOARDING_FAILED", stage: "CONFIG", reason: "UNKNOWN" });
+  const invalid = new OnboardingError(privateDiagnostic, privateDiagnostic as never, privateDiagnostic as never);
+  assert.deepEqual(onboardingFailure(invalid), { ok: false, code: "ONBOARDING_FAILED", stage: "CONFIG", reason: "UNKNOWN" });
 });
 
 test("transition requires a real explicit drain admission, preserves request bytes and obtains proof inside core transaction", async () => {
