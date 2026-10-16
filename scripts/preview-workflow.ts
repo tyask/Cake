@@ -3,6 +3,9 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, object, uuid } from './preview-model';
 import { PreviewService } from './preview-service';
+export function missingPreviewCredentials(env: Readonly<Record<string, string | undefined>>): string[] {
+  return ['VERCEL_TOKEN','NEON_API_KEY'].filter(name => !env[name]?.trim());
+}
 export async function runPreviewWorkflow(env = process.env, service = new PreviewService()): Promise<void> {
   if (env.GITHUB_REPOSITORY !== config.repository || env.GITHUB_REF !== 'refs/heads/main'
     || env.GITHUB_WORKFLOW_REF !== `${config.repository}/.github/workflows/preview.yml@refs/heads/main`
@@ -20,6 +23,12 @@ export async function runPreviewWorkflow(env = process.env, service = new Previe
     pr = Number(inputs.pr); action = String(inputs.action); operation = String(inputs.operation); sha = String(inputs.sha);
     if (!uuid(operation)) throw new Error('PREVIEW_INVALID_OPERATION');
   } else throw new Error('PREVIEW_UNTRUSTED_EVENT');
+  const missing = missingPreviewCredentials(env);
+  if (missing.length) {
+    // Only configured names are logged, never credential values or provider responses.
+    console.error(`Cake: Repository secrets未設定: ${missing.join(', ')}。既存の資格情報をGitHubのSecrets設定で登録してください。値をチャットやログへ出さないでください。`);
+    throw new Error('PREVIEW_CREDENTIALS_MISSING');
+  }
   const source = await service.provider.pr(pr);
   if (source.sha !== sha || !['deploy','status','cleanup'].includes(action)) throw new Error('PREVIEW_PR_CHANGED');
   const receipt = action === 'deploy' ? await service.deploy(source, operation!, Number(env.GITHUB_RUN_ATTEMPT) > 1)
