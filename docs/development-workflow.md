@@ -8,7 +8,7 @@ CakeはCanneleを使用せず、PR単位のVercel Preview固有URLでQAする。
 
 Cloud/PCのコマンドはmainの `.github/workflows/preview.yml` を明示的にdispatchし、同じPRの操作をActionsのconcurrencyで直列化する。main上のスクリプトだけがprovider管理資格情報を使う。`pull_request_target` はclosedイベントだけで、PRコードをcheckout・実行しない。Vercelは指定したGitSourceのコードを、Preview DBの権限でリモートビルドする。
 
-Actionsには既存のRepository secrets `VERCEL_TOKEN` と `NEON_API_KEY` が必要。GitHub読取は最小権限の `github.token` を使う。Cannele用Secret名を暗黙に代用しない。設定不足なら停止し、新規資格情報・DB・deploymentを代わりに作らない。CLIは既存gh本人認証を使い、Vercel保護へのブラウザアクセスは別に確認する。
+Actionsには既存のRepository secrets `VERCEL_TOKEN` と `NEON_API_KEY` が必要。GitHub読取は最小権限の `github.token` を使う。Cannele用Secret名を暗黙に代用しない。設定不足なら両Secret名を資格情報の値なしで報告し、providerの読取・作成・削除を始める前に停止する。新規資格情報・DB・deploymentを代わりに作らない。旧Cannele名のSecretだけでは使えないため、既存資格情報をGitHub Repository Settings → Secrets and variables → Actionsでこの2名に登録する。値をチャットへ送らない。CLIは既存gh本人認証を使い、Vercel保護へのブラウザアクセスは別に確認する。
 
 ## 開発とdraft PR
 
@@ -34,7 +34,7 @@ npm run deploy:preview
 npm run qa:status
 ```
 
-現在のOPEN PR・専用ブランチ・完全SHAを照合してからdispatchする。CLIは対象operation UUID、main SHA、workflow、run attempt 1、success、receiptのPR/HEADを検証する。完了確認は呼出し内の有限時間だけで、定期監視は行わない。receiptは非秘密情報だけの30日artifact、ローカルはGit外の `.cake/preview.json` に保存する。資源の正本はVercel/Neonで、artifactの消失を資源消失と扱わない。
+現在のOPEN PR・専用ブランチ・完全SHAを照合してからdispatchする。CLIは対象operation UUID、main SHA、workflow、REST APIの `run_attempt: 1`、success、receiptのPR/HEADを検証する。`gh run list --json attempt` はCLIによって未対応のため使用しない。失敗時は対応するActions run URLを報告する。完了確認は呼出し内の有限時間だけで、定期監視は行わない。receiptは非秘密情報だけの30日artifact、ローカルはGit外の `.cake/preview.json` に保存する。資源の正本はVercel/Neonで、artifactの消失を資源消失と扱わない。
 
 初回はVercel REST GitSourceでNative用のprovisioning deploymentを作る。このbuildは確認済みendpoint情報がないためDB接続前に停止する。その後、Native branchの正確な名前、親branch、作成時刻、所属、read-write endpointをlistと直接GETで照合する。application deploymentには確認済みIDとhost digestだけを渡し、接続文字列はNativeに供給させる。
 

@@ -23,24 +23,30 @@ export async function requestReceipt(action: 'deploy' | 'status' | 'cleanup', ex
     await commandOutput(execute,'gh',['api',`repos/${config.repository}/actions/workflows/preview.yml/dispatches`,'--method','POST','--input',file],cwd);
     let run: Record<string,unknown> | undefined;
     for (let i=0;i<300;i++) {
-      const runs = JSON.parse(await commandOutput(execute,'gh',['run','list','--repo',config.repository,'--workflow','preview.yml','--branch','main','--event','workflow_dispatch','--limit','100','--json','databaseId,displayTitle,headSha,status,conclusion,url,event,createdAt,attempt'],cwd));
+      const runs = object(await api('actions/workflows/preview.yml/runs?event=workflow_dispatch&branch=main&per_page=100')).workflow_runs;
       if (!Array.isArray(runs)) throw new Error('PREVIEW_RUN_UNAVAILABLE');
-      const matches = runs.filter(r => r.displayTitle === `Preview ${action} PR ${expected.pr} ${operation}`);
+      const matches = runs.filter(r => r.display_title === `Preview ${action} PR ${expected.pr} ${operation}`);
       if (matches.length > 1) throw new Error('PREVIEW_RUN_AMBIGUOUS');
       if (matches.length) {
         run = matches[0];
-        if (run!.headSha !== mainSha || run!.event !== 'workflow_dispatch' || run!.attempt !== 1) throw new Error('PREVIEW_RUN_CHANGED');
+        if (run!.head_sha !== mainSha || run!.event !== 'workflow_dispatch' || run!.run_attempt !== 1 || run!.path !== '.github/workflows/preview.yml') throw new Error('PREVIEW_RUN_CHANGED');
+        if (!Number.isSafeInteger(run!.id) || Number(run!.id) < 1) throw new Error('PREVIEW_RUN_CHANGED');
+        if (i === 0) log(`Cake: Actions https://github.com/${config.repository}/actions/runs/${run!.id}`);
         if (run!.status === 'completed') break;
       }
       if (i % 6 === 0) log(`Cake: Preview ${action} の完了を確認しています。request ${operation}`);
       await wait(5000);
     }
-    if (!run || run.status !== 'completed' || run.conclusion !== 'success') throw new Error('PREVIEW_RUN_INCOMPLETE');
-    await commandOutput(execute,'gh',['run','download',String(run.databaseId),'--repo',config.repository,'--name',`preview-${run.databaseId}`,'--dir',directory],cwd);
+    if (!run || run.status !== 'completed') throw new Error('PREVIEW_RUN_INCOMPLETE');
+    if (run.conclusion !== 'success') {
+      log(`Cake: Preview ${action} は失敗しました。https://github.com/${config.repository}/actions/runs/${run.id}`);
+      throw new Error('PREVIEW_RUN_FAILED');
+    }
+    await commandOutput(execute,'gh',['run','download',String(run.id),'--repo',config.repository,'--name',`preview-${run.id}`,'--dir',directory],cwd);
     const resultPath = join(directory,'preview-result.json'), metadata = await lstat(resultPath);
     if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 65_536) throw new Error('PREVIEW_RECEIPT_INVALID');
     const receipt = JSON.parse(await readFile(resultPath,'utf8'));
-    if (receipt.protocol !== protocol || receipt.success !== true || receipt.action !== action || receipt.operation !== operation || receipt.runId !== String(run.databaseId)
+    if (receipt.protocol !== protocol || receipt.success !== true || receipt.action !== action || receipt.operation !== operation || receipt.runId !== String(run.id)
       || receipt.controlSha !== mainSha || JSON.stringify(receipt.source) !== JSON.stringify(expected) || !Number.isFinite(Date.parse(receipt.checkedAt))) throw new Error('PREVIEW_RECEIPT_INVALID');
     if (receipt.deployment) {
       const d = receipt.deployment;
