@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createRuntimeHandoff, runtimeHandoffMarker, RuntimeHandoffError } from '../scripts/cannele-runtime-handoff';
+import { createRuntimeHandoff, runtimeHandoffMarker, RuntimeHandoffError, safeHandoffDiagnostic, type HandoffDiagnostic } from '../scripts/cannele-runtime-handoff';
 
 const projectId = 'prj_EgVvFUE4gXVZnMTuw69lQ3mIGYVN';
 const teamId = 'team_D1Mcx2TdFWPKcypfu8KzNMub';
@@ -37,6 +37,13 @@ function safeFailure(code?: string) {
   };
 }
 
+function diagnosed(code: string, expected: HandoffDiagnostic) {
+  return (error: unknown): boolean => {
+    safeFailure(code)(error); assert.ok(error instanceof RuntimeHandoffError);
+    assert.deepEqual(error.diagnostic, expected); return true;
+  };
+}
+
 function fixture() {
   const marker = runtimeHandoffMarker(context, roleName);
   const envs: Env[] = [
@@ -53,7 +60,7 @@ function fixture() {
   const calls: Call[] = []; const values = new Map<string, string>(); let sequence = 0;
   const state = {
     envs, calls, values, marker,
-    before: undefined as ((call: Call) => Response | undefined) | undefined,
+    before: undefined as ((call: Call, init: RequestInit | undefined) => Response | undefined) | undefined,
     afterWrite: undefined as ((call: Call, row: Env) => void) | undefined,
     project: { id: projectId, name: 'cannele-cake', accountId: teamId },
     metadata: undefined as (() => unknown) | undefined,
@@ -68,7 +75,7 @@ function fixture() {
     assert.equal(init?.redirect, 'manual'); assert.ok(init?.signal instanceof AbortSignal);
     assert.equal(new Headers(init?.headers).get('authorization'), `Bearer ${vercelToken}`);
     assert.ok(![databaseUrl, vercelToken, neonApiKey].some(value => url.href.includes(value)));
-    const overridden = state.before?.(call); if (overridden) return overridden;
+    const overridden = state.before?.(call, init); if (overridden) return overridden;
     if (method === 'GET' && url.pathname === `/v9/projects/${projectId}`) return response(state.project);
     if (method === 'GET' && url.pathname === `/v10/projects/${projectId}/env`) {
       assert.equal(url.searchParams.get('decrypt'), 'false');
@@ -206,7 +213,9 @@ test('queued PATCH responses cannot acknowledge secret values or advance to anot
   const f = fixture(); for (const key of keys) f.envs.push(f.own(key));
   f.before = call => call.method === 'PATCH' ? response({ state: 'QUEUED', jobId: 'fixture-async-job', value: privateDiagnostic }, 202) : undefined;
   const handoff = f.factory(); await handoff.preflight();
-  await assert.rejects(handoff.publish({ databaseUrl, databaseHost }), safeFailure('WRITE_UNKNOWN'));
+  await assert.rejects(handoff.publish({ databaseUrl, databaseHost }), diagnosed('WRITE_UNKNOWN', {
+    method: 'PATCH', endpoint: 'SECRET_UPDATE', status: 202, reason: 'HTTP',
+  }));
   const attempts = writes(f.calls); assert.equal(attempts.length, 3);
   assert.ok(attempts.every(call => call.method === 'PATCH' && call.url.pathname === attempts[0]!.url.pathname));
   assert.ok(attempts.every(call => call.body?.value === attempts[0]!.body!.value));
@@ -319,4 +328,122 @@ test('handoff markers have a stable ordered context identity and change when the
   assert.notEqual(runtimeHandoffMarker(context, `${roleName}_other`), first);
   assert.throws(() => runtimeHandoffMarker({ ...context, unexpectedCredential: privateDiagnostic }, roleName), safeFailure('INPUT_INVALID'));
   assert.throws(() => runtimeHandoffMarker(context, 'unsafe;role'), safeFailure('INPUT_INVALID'));
+});
+
+test('each read failure reports only its fixed GET phase and HTTP status', async () => {
+  const phases: Array<{ path: string; endpoint: HandoffDiagnostic['endpoint']; status: number }> = [
+    { path: `/v9/projects/${projectId}`, endpoint: 'PROJECT', status: 403 },
+    { path: `/v10/projects/${projectId}/env`, endpoint: 'ENV_METADATA', status: 401 },
+    { path: `/v1/projects/${projectId}/env/env_binding`, endpoint: 'PUBLIC_BINDING', status: 500 },
+    { path: `/v1/projects/${projectId}/env/env_origin`, endpoint: 'PUBLIC_ORIGIN', status: 404 },
+    { path: `/v1/projects/${projectId}/env/env_mutations`, endpoint: 'PUBLIC_MUTATIONS', status: 429 },
+    { path: `/v1/projects/${projectId}/env/env_provider`, endpoint: 'PUBLIC_PROVIDER', status: 503 },
+  ];
+  for (const phase of phases) {
+    const f = fixture(); f.before = call => call.url.pathname === phase.path
+      ? response({ error: { message: privateDiagnostic, token: vercelToken, databaseUrl } }, phase.status) : undefined;
+    await assert.rejects(f.factory().preflight(), diagnosed('REQUEST_FAILED', {
+      method: 'GET', endpoint: phase.endpoint, status: phase.status, reason: 'HTTP',
+    }));
+    assert.equal(writes(f.calls).length, 0); assert.equal(f.calls.at(-1)!.url.pathname, phase.path);
+  }
+});
+
+test('transport, redirect, empty and invalid response diagnostics never copy provider messages or bodies', async () => {
+  const cases: Array<{ code: string; diagnostic: HandoffDiagnostic; before: (call: Call) => Response | undefined }> = [
+    { code: 'REQUEST_FAILED', diagnostic: { method: 'GET', endpoint: 'PUBLIC_BINDING', status: null, reason: 'TRANSPORT' },
+      before: call => { if (call.url.pathname.endsWith('/env_binding')) {
+        const error = new Error(`${privateDiagnostic} ${databaseUrl} ${vercelToken}`); error.name = 'TimeoutError'; throw error;
+      } return undefined; } },
+    { code: 'REQUEST_FAILED', diagnostic: { method: 'GET', endpoint: 'ENV_METADATA', status: 307, reason: 'REDIRECT' },
+      before: call => call.url.pathname === `/v10/projects/${projectId}/env`
+        ? new Response(null, { status: 307, headers: { location: `https://foreign.invalid/${privateDiagnostic}` } }) : undefined },
+    { code: 'REQUEST_FAILED', diagnostic: { method: 'GET', endpoint: 'PROJECT', status: 200, reason: 'EMPTY_BODY' },
+      before: () => new Response(null, { status: 200 }) },
+    { code: 'RESPONSE_INVALID', diagnostic: { method: 'GET', endpoint: 'PROJECT', status: 200, reason: 'INVALID_RESPONSE' },
+      before: () => new Response(privateDiagnostic, { status: 200 }) },
+    { code: 'RESPONSE_INVALID', diagnostic: { method: 'GET', endpoint: 'PROJECT', status: 200, reason: 'INVALID_RESPONSE' },
+      before: () => new Response(privateDiagnostic.repeat(100_000), { status: 200 }) },
+  ];
+  for (const value of cases) {
+    const f = fixture(); f.before = value.before;
+    await assert.rejects(f.factory().preflight(), diagnosed(value.code, value.diagnostic));
+    assert.equal(writes(f.calls).length, 0);
+  }
+});
+
+test('an actually aborted request is classified as a timeout without waiting for a real deadline', async t => {
+  t.mock.method(AbortSignal, 'timeout', () => AbortSignal.abort(new Error(privateDiagnostic)));
+  const f = fixture(); f.before = (_call, init) => { assert.ok(init?.signal?.aborted); init.signal.throwIfAborted(); return undefined; };
+  await assert.rejects(f.factory().preflight(), diagnosed('REQUEST_FAILED', {
+    method: 'GET', endpoint: 'PROJECT', status: null, reason: 'TIMEOUT',
+  }));
+  assert.equal(writes(f.calls).length, 0);
+});
+
+test('bounded unknown writes retain the last safe POST or PATCH diagnostic and do not advance', async () => {
+  for (const method of ['POST', 'PATCH'] as const) {
+    const f = fixture(); if (method === 'PATCH') for (const key of keys) f.envs.push(f.own(key));
+    let attempts = 0;
+    f.before = call => {
+      if (call.method !== method) return undefined;
+      attempts++;
+      if (method === 'PATCH' && attempts === 2) throw new Error(privateDiagnostic);
+      return response({ error: { message: privateDiagnostic, token: neonApiKey } }, attempts === 3 ? 503 : 403);
+    };
+    const handoff = f.factory(); await handoff.preflight();
+    await assert.rejects(handoff.publish({ databaseUrl, databaseHost }), diagnosed('WRITE_UNKNOWN', {
+      method, endpoint: method === 'POST' ? 'SECRET_CREATE' : 'SECRET_UPDATE', status: 503, reason: 'HTTP',
+    }));
+    const mutations = writes(f.calls); assert.equal(attempts, 3); assert.equal(mutations.length, 3);
+    assert.ok(mutations.every(call => call.method === method && call.url.pathname === mutations[0]!.url.pathname));
+    assert.ok(mutations.every(call => call.body?.value === mutations[0]!.body!.value));
+    for (let index = 1; index < mutations.length; index++) {
+      assert.ok(f.calls.slice(f.calls.indexOf(mutations[index - 1]!) + 1, f.calls.indexOf(mutations[index]!))
+        .some(call => call.method === 'GET' && call.url.pathname === `/v10/projects/${projectId}/env`));
+    }
+  }
+});
+
+test('a metadata failure during write reconciliation keeps its GET diagnostic and stops further writes', async () => {
+  const f = fixture(); let attempted = false;
+  f.before = call => {
+    if (call.method === 'POST') { attempted = true; return response({ error: { message: privateDiagnostic } }, 503); }
+    if (attempted && call.url.pathname === `/v10/projects/${projectId}/env`) return response({ error: { message: privateDiagnostic } }, 401);
+    return undefined;
+  };
+  const handoff = f.factory(); await handoff.preflight();
+  await assert.rejects(handoff.publish({ databaseUrl, databaseHost }), diagnosed('REQUEST_FAILED', {
+    method: 'GET', endpoint: 'ENV_METADATA', status: 401, reason: 'HTTP',
+  }));
+  assert.equal(writes(f.calls).length, 1);
+});
+
+test('safe diagnostics are cloned from exact own scalar fields and reject untrusted values without running getters', () => {
+  const valid: HandoffDiagnostic = { method: 'GET', endpoint: 'PROJECT', status: 403, reason: 'HTTP' };
+  const clone = safeHandoffDiagnostic(valid); assert.deepEqual(clone, valid); assert.notEqual(clone, valid);
+  valid.status = 401; assert.equal(clone!.status, 403);
+  for (const [method, endpoint] of [
+    ['GET', 'PROJECT'], ['GET', 'ENV_METADATA'], ['GET', 'PUBLIC_BINDING'], ['GET', 'PUBLIC_ORIGIN'],
+    ['GET', 'PUBLIC_MUTATIONS'], ['GET', 'PUBLIC_PROVIDER'], ['POST', 'SECRET_CREATE'], ['PATCH', 'SECRET_UPDATE'],
+  ] as const) {
+    for (const status of [100, 599, null]) for (const reason of ['HTTP', 'REDIRECT', 'TIMEOUT', 'TRANSPORT', 'EMPTY_BODY', 'INVALID_RESPONSE'] as const) {
+      const value = { method, endpoint, status, reason }; assert.deepEqual(safeHandoffDiagnostic(value), value);
+    }
+  }
+  const invalid: unknown[] = [null, [], privateDiagnostic, { ...valid, method: 'DELETE' }, { ...valid, method: 'get' },
+    { ...valid, endpoint: privateDiagnostic }, { ...valid, reason: privateDiagnostic }, { ...valid, unexpected: privateDiagnostic },
+    Object.create(valid), Object.assign(Object.create({ reason: 'HTTP' }), { method: 'GET', endpoint: 'PROJECT', status: 403 }),
+    new Proxy({}, { ownKeys() { throw new Error(privateDiagnostic); } }),
+  ];
+  for (const status of [99, 600, 200.5, '403', undefined, NaN, Infinity]) invalid.push({ ...valid, status });
+  const hidden = { ...valid }; Object.defineProperty(hidden, 'privateValue', { value: privateDiagnostic }); invalid.push(hidden);
+  const symbol = { ...valid, [Symbol('private')]: privateDiagnostic }; invalid.push(symbol);
+  let getters = 0;
+  for (const key of ['method', 'endpoint', 'status', 'reason']) {
+    const accessor = { ...valid }; Object.defineProperty(accessor, key, { enumerable: true, get() { getters++; throw new Error(privateDiagnostic); } });
+    invalid.push(accessor);
+  }
+  for (const value of invalid) assert.equal(safeHandoffDiagnostic(value), undefined);
+  assert.equal(getters, 0);
 });

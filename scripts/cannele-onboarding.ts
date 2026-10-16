@@ -5,7 +5,7 @@ import { resolve, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { HttpQaGateway, type QaTransport } from "./qa-pool-writer";
 import { prepareRuntimeBootstrap, RuntimeBootstrapError } from "./cannele-runtime-bootstrap";
-import { createRuntimeHandoff, RuntimeHandoffError } from "./cannele-runtime-handoff";
+import { createRuntimeHandoff, RuntimeHandoffError, safeHandoffDiagnostic, type HandoffDiagnostic } from "./cannele-runtime-handoff";
 
 const REPOSITORY = "tyask/Cake";
 const REPOSITORY_ID = 1318171856;
@@ -42,23 +42,26 @@ const ERROR_REASONS: ReadonlyMap<string, Reason> = new Map([
     "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE", "ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION"].map(code => [code, "TLS"] as const),
 ]);
 export class OnboardingError extends Error {
-  constructor(readonly code: string, readonly stage: Stage = "UNKNOWN", readonly reason: Reason = "VALIDATION") {
+  constructor(readonly code: string, readonly stage: Stage = "UNKNOWN", readonly reason: Reason = "VALIDATION", readonly handoff?: HandoffDiagnostic) {
     super("Cannele onboarding could not be verified; private details suppressed.");
   }
 }
 function diagnose(error: unknown, stage: Stage, core?: OnboardingCore): OnboardingError {
-  if (error instanceof OnboardingError) return error.stage === "UNKNOWN" ? new OnboardingError(error.code, stage, error.reason) : error;
-  if (error instanceof RuntimeBootstrapError || error instanceof RuntimeHandoffError) return new OnboardingError(error.code, stage, "CORE_REJECTED");
+  if (error instanceof OnboardingError) return error.stage === "UNKNOWN" ? new OnboardingError(error.code, stage, error.reason, safeHandoffDiagnostic(error.handoff)) : error;
+  if (error instanceof RuntimeBootstrapError) return new OnboardingError(error.code, stage, "CORE_REJECTED");
+  if (error instanceof RuntimeHandoffError) return new OnboardingError(error.code, stage, "CORE_REJECTED", safeHandoffDiagnostic(error.diagnostic));
   const providerCode = error && typeof error === "object" ? Object.getOwnPropertyDescriptor(error, "code")?.value : undefined;
   const reason = typeof providerCode === "string" ? ERROR_REASONS.get(providerCode) ?? "UNKNOWN" : "UNKNOWN";
   const code = core?.errorCode(error);
   return new OnboardingError(code && /^[A-Z][A-Z0-9_]{1,79}$/.test(code) ? code : "ONBOARDING_DEPENDENCY_FAILED", stage, reason === "UNKNOWN" && code ? "CORE_REJECTED" : reason);
 }
 /** Only closed diagnostic fields leave the CLI; no original error or driver code. */
-export function onboardingFailure(error: unknown): { ok: false; code: string; stage: Stage; reason: Reason } {
+export function onboardingFailure(error: unknown): { ok: false; code: string; stage: Stage; reason: Reason; handoff?: HandoffDiagnostic } {
   if (!(error instanceof OnboardingError)) return { ok: false, code: "ONBOARDING_FAILED", stage: "CONFIG", reason: "UNKNOWN" };
+  const handoff = safeHandoffDiagnostic(error.handoff);
   return { ok: false, code: /^[A-Z][A-Z0-9_]{1,79}$/.test(error.code) ? error.code : "ONBOARDING_FAILED",
-    stage: STAGES.includes(error.stage) && error.stage !== "UNKNOWN" ? error.stage : "CONFIG", reason: REASONS.includes(error.reason) ? error.reason : "UNKNOWN" };
+    stage: STAGES.includes(error.stage) && error.stage !== "UNKNOWN" ? error.stage : "CONFIG", reason: REASONS.includes(error.reason) ? error.reason : "UNKNOWN",
+    ...(handoff ? { handoff } : {}) };
 }
 const fail = (code: string): never => { throw new OnboardingError(code); };
 const object = (value: unknown): Object_ => value && typeof value === "object" && !Array.isArray(value) ? value as Object_ : fail("ONBOARDING_INPUT_INVALID");
