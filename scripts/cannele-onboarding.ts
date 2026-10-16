@@ -248,6 +248,7 @@ export async function runOnboarding(environment: Env, dependencies: { source: On
           });
         } else if (action === "bootstrap-runtime") {
           const handoff = await at("RUNTIME_CONFIG", () => (dependencies.runtimeHandoff ?? createRuntimeHandoff)({
+            bootstrapVercelToken: secret(environment, "CANNELE_BOOTSTRAP_VERCEL_TOKEN"),
             vercelToken: secret(environment, "CANNELE_TRANSITION_VERCEL_TOKEN"), neonApiKey: secret(environment, "CANNELE_TRANSITION_NEON_API_KEY"),
             context: context!, roleName: roleName!,
           }));

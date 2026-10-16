@@ -94,6 +94,19 @@ test('bootstrap accepts only the existing reviewed context and role inputs, with
   assert.doesNotMatch(validate(bootstrap),/databaseUrl|password|private-token|https:\/\//);
 });
 
+test('the separate API-project management Secret is evaluated only for bootstrap-runtime',()=>{
+  const expression=dispatcher.match(/bootstrap_vercel_token: \$\{\{ ([^\n]+) \}\}/)?.[1];assert.ok(expression);
+  const mapping=new Script(`(${expression})`);
+  for(const action of ['inspect','transition','bootstrap-runtime','provision-runtime','unknown']){
+    let reads=0;
+    const secrets=Object.create(null,{CANNELE_BOOTSTRAP_VERCEL_TOKEN:{get:()=>{reads++;return'fixture-api-project-management-token';}}});
+    const value=mapping.runInNewContext({inputs:{action},secrets});
+    assert.equal(value,action==='bootstrap-runtime'?'fixture-api-project-management-token':'');
+    assert.equal(reads,action==='bootstrap-runtime'?1:0);
+  }
+  assert.match(runner,/bootstrap_vercel_token:\s+required: false/);
+});
+
 test('actual source preparation clones only the fixed public repository and rejects unmerged, dirty, or mismatched pins',()=>{
   function execute(mode='ok'){
     const calls:string[][]=[];const source='/runner/_temp/cannele-onboarding-source/'+requestId;
@@ -126,9 +139,12 @@ test('dependency installation and generated contracts precede Secrets; provider/
   assert.match(runtime,/if: inputs\.action == 'provision-runtime'/);assert.match(runtime,/CANNELE_REGISTRY_DATABASE_URL: \$\{\{ secrets\.runtime_database_url \}\}/);
   assert.doesNotMatch(runtime,/secrets\.transition_vercel_token|secrets\.transition_neon_api_key/);
   assert.match(bootstrap,/if: inputs\.action == 'bootstrap-runtime'/);
+  assert.match(bootstrap,/CANNELE_BOOTSTRAP_VERCEL_TOKEN: \$\{\{ secrets\.bootstrap_vercel_token \}\}/);
   assert.match(bootstrap,/CANNELE_TRANSITION_VERCEL_TOKEN: \$\{\{ secrets\.transition_vercel_token \}\}/);
   assert.match(bootstrap,/CANNELE_TRANSITION_NEON_API_KEY: \$\{\{ secrets\.transition_neon_api_key \}\}/);
   assert.doesNotMatch(bootstrap,/secrets\.runtime_database|CANNELE_REGISTRY_DATABASE_(?:URL|HOST)|GITHUB_OUTPUT|GITHUB_ENV|--token|password/);
+  for(const step of [inspect,transitionStep,runtime])assert.doesNotMatch(step,/CANNELE_BOOTSTRAP_VERCEL_TOKEN|secrets\.bootstrap_vercel_token/);
+  assert.equal((runner.match(/CANNELE_BOOTSTRAP_VERCEL_TOKEN: /g)??[]).length,1);
   for(const step of [inspect,transitionStep,bootstrap,runtime]) {
     assert.match(step,/CANNELE_REGISTRY_ADMIN_DATABASE_URL: \$\{\{ secrets\.admin_database_url \}\}/);
     assert.match(step,/CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN: \$\{\{ inputs\.confirm_credential_drain \}\}/);

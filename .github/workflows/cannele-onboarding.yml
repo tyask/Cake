@@ -64,5 +64,6 @@ jobs:
       admin_database_host: ${{ secrets.CANNELE_REGISTRY_ADMIN_DATABASE_HOST }}
       runtime_database_url: ${{ inputs.action == 'provision-runtime' && secrets.CANNELE_REGISTRY_DATABASE_URL || '' }}
       runtime_database_host: ${{ inputs.action == 'provision-runtime' && secrets.CANNELE_REGISTRY_DATABASE_HOST || '' }}
+      bootstrap_vercel_token: ${{ inputs.action == 'bootstrap-runtime' && secrets.CANNELE_BOOTSTRAP_VERCEL_TOKEN || '' }}
       transition_vercel_token: ${{ (inputs.action == 'transition' || inputs.action == 'bootstrap-runtime') && secrets.CANNELE_TRANSITION_VERCEL_TOKEN || '' }}
       transition_neon_api_key: ${{ (inputs.action == 'transition' || inputs.action == 'bootstrap-runtime') && secrets.CANNELE_TRANSITION_NEON_API_KEY || '' }}

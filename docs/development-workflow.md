@@ -362,6 +362,8 @@ runtime LOGINの作成・最小権限確認とruntime/provider SecretsのAPIへ�
 
 PR #63のマージ後、現在main `d0a99d76d1fe01c784f1f0a976f55f91389aea6f`からの[bootstrap run 38834840137](https://github.com/tyask/Cake/actions/runs/38834840137)は、SQL作成前の`RUNTIME_PREFLIGHT`で`RUNTIME_HANDOFF_REQUEST_FAILED`となった。同じcontext・roleの[再確認 run 38835661141](https://github.com/tyask/Cake/actions/runs/38835661141)も同じ段階・codeで停止した。両runともruntime LOGIN作成・権限設定・4件の登録には進んでいない。既存provider tokenは保持した。現行の失敗結果はAPI種類とHTTP statusを含まないため、token名やCloud側CLIの成功だけでActionsの失敗原因を断定しない。
 
+PR #64のマージ後、main `6100a9e1ffdf23870fb9ef9054f5ee08655b44d0`の[診断 run 38836488949](https://github.com/tyask/Cake/actions/runs/38836488949)は、`GET`・`PROJECT`・404・`HTTP`を記録した。SQL作成前の停止である。「Cake GitHub」の公開token metadataではCake project `prj_Z37vquodhpRd08ZTAtYnP0qa59jD`への限定を確認した。Cake操作用のtokenでCannele自身のproject設定も管理しようとしていたため、bootstrapの管理認証を別にする。既存Cake/Neon tokenの範囲・値・失効状態は変更しない。
+
 PostgreSQL 18ではNOT NULL制約がcatalogへ追加されるため、Canneleの移行helperは17/18それぞれの完全な固定hashで照合する。17.10と18.4の使い捨てDBで検証し、実18.6も移行前に同じhashと一致することを確認する。Neonのbranch一覧は最初の応答の`sort_order`が`asc`・`desc`・`ASC`・`DESC`なら小文字へ正規化し、次ページのGETへ引き継ぐ。2ページ目以降の順序変更や未知の値は拒否し、`sort_by=created_at`を維持する。最終branchページの`next`とsort echoは省略され得て、`next`の空文字もnullと同じ終端として扱う。短い最終ページでの省略を受け入れつつ、false・0、不明なcursor・未知field・重複ID・未完了ページは引き続き拒否する。
 
 ### Actionsからの管理操作
@@ -382,10 +384,13 @@ PostgreSQL 18ではNOT NULL制約がcatalogへ追加されるため、Canneleの
 | Repository Secret | 用途 |
 | --- | --- |
 | `CANNELE_REGISTRY_ADMIN_DATABASE_URL` / `CANNELE_REGISTRY_ADMIN_DATABASE_HOST` | 切替とreceipt再確認に使う、更新済み管理者接続。APIへ登録しない。 |
-| `CANNELE_TRANSITION_VERCEL_TOKEN` / `CANNELE_TRANSITION_NEON_API_KEY` | readiness・移行用API確認と、bootstrapの固定API projectへの直接handoffに使う既存資格情報。新しいtokenの作成や失効をこの操作で行わない。旧`VERCEL_TOKEN` / `NEON_API_KEY`名へ新しい値を入れ直さない。 |
+| `CANNELE_TRANSITION_VERCEL_TOKEN` / `CANNELE_TRANSITION_NEON_API_KEY` | readiness・移行のCake資源確認と、APIへ登録するruntime provider値に使う既存資格情報。Vercel tokenはCake project限定のまま維持し、Cannele projectの設定管理には使わない。旧`VERCEL_TOKEN` / `NEON_API_KEY`名へ入れ直さない。 |
+| `CANNELE_BOOTSTRAP_VERCEL_TOKEN` | bootstrapだけで使う、Cannele project限定の管理用token。固定API projectの読取・Production環境変数登録のBearer専用とし、転送値・runtime環境へ保存しない。 |
 | `CANNELE_REGISTRY_DATABASE_URL` / `CANNELE_REGISTRY_DATABASE_HOST` | 既存LOGINの`provision-runtime`を使う場合のみ。`bootstrap-runtime`には登録不要で、この既存値も渡さない。 |
 
 旧`CAKE_QA_REGISTRY_DATABASE_URL` / `_HOST`は新管理者接続を確保してから、002導入前に撤去する。新しい管理者接続を旧Secret名へ入れ直すと、古いworkflowが新しい資格情報を取得できるため避ける。別の管理者接続を確保しないまま旧資格情報だけを消さない。
+
+bootstrapの管理用tokenは、[Vercel Tokens](https://vercel.com/account/tokens)で対象team `fumin1`・project `cannele-cake`（`prj_EgVvFUE4gXVZnMTuw69lQ3mIGYVN`）に限定して作り、[Cake Repository Secrets](https://github.com/tyask/Cake/settings/secrets/actions)の`CANNELE_BOOTSTRAP_VERCEL_TOKEN`へ非公開で登録する。用途名は`Cannele bootstrap`などとし、有効期限はセットアップに必要な短期間（例：1日）にする。既存のCake用tokenを広いscopeへ変えたり、この管理tokenで置き換えたりしない。新しい管理用SecretがなければSQL前で停止し、旧tokenへのfallbackは行わない。管理用tokenはbootstrap実行stepだけに渡し、inspect・transition・provision-runtime・依存installには渡さない。
 
 今回の`bootstrap-runtime`管理workflow導入PRは、API未有効化の段階のsource管理変更としてQA配置なしでローカル検証・CI・ownerレビューを行う。実bootstrapはmain導入後の専用runで確認し、実行receiptを運用記録へ追加する。
 
