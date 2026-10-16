@@ -1,63 +1,56 @@
-name: Cake Preview
-run-name: Preview ${{ inputs.action || 'cleanup' }} PR ${{ inputs.pr || github.event.pull_request.number }} ${{ inputs.operation || github.run_id }}
+# Isolated notice transport test for codex/checks-receipt-probe only.
+# Do not merge this workflow variant into main.
+name: Cake Checks Notice Probe
+run-name: Checks notice probe ${{ inputs.operation }}
 on:
   workflow_dispatch:
     inputs:
       action:
-        type: choice
         required: true
+        type: choice
         options: [deploy, status, cleanup]
       pr:
-        type: string
+        description: Must be 0 for this isolated transport probe
         required: true
+        type: string
       sha:
-        type: string
+        description: Exact SHA of the reviewed isolated test branch
         required: true
+        type: string
       operation:
-        description: UUID identifying this exact request; rerun the same run after an uncertain response
-        type: string
+        description: Fresh UUID v4 for this transport test only
         required: true
-  pull_request_target:
-    branches: [main]
-    types: [closed]
+        type: string
 permissions: {}
-concurrency:
-  group: cake-preview-${{ inputs.pr || github.event.pull_request.number }}
-  cancel-in-progress: false
 jobs:
-  preview:
+  operation:
     if: >-
-      github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event.pull_request.head.repo.full_name == github.repository &&
-        startsWith(github.event.pull_request.head.ref, 'codex/')))
+      github.repository == 'tyask/Cake' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/codex/checks-receipt-probe' &&
+      github.sha == inputs.sha && inputs.action == 'status' && inputs.pr == '0'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    permissions:
-      contents: read
-      pull-requests: read
+    timeout-minutes: 3
+    permissions: {}
     steps:
-      - name: Check out trusted main only
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
-        with:
-          node-version: '24.19.0'
-          cache: npm
-      - run: npm ci --ignore-scripts
-      - name: Run the requested operation
+      - name: Emit one non-secret receipt as a standard notice annotation
         env:
-          GH_TOKEN: ${{ github.token }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-        run: node --import tsx scripts/preview-workflow.ts
-      - name: Save public operation receipt
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: preview-${{ github.run_id }}
-          path: preview-result.json
-          retention-days: 30
-          if-no-files-found: error
+          PROBE_OPERATION: ${{ inputs.operation }}
+        shell: bash
+        run: |
+          python3 - <<'PYNOTICE'
+          import datetime, json, os, uuid
+          operation = os.environ['PROBE_OPERATION']
+          assert str(uuid.UUID(operation, version=4)) == operation
+          assert os.environ['GITHUB_RUN_ATTEMPT'] == '1'
+          receipt = {'protocol':'cake-checks-notice-probe/v1','probeOnly':True,
+              'repository':'tyask/Cake','runId':int(os.environ['GITHUB_RUN_ID']),
+              'runAttempt':int(os.environ['GITHUB_RUN_ATTEMPT']),
+              'controlSha':os.environ['GITHUB_SHA'],'operation':operation,
+              'checkedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'message':'日本語を含む非機密の往復試験'}
+          text = json.dumps(receipt,ensure_ascii=False,separators=(',',':'))
+          assert len(text.encode()) <= 4096
+          escaped = text.replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+          print('::notice title=Cake public receipt v1::' + escaped)
+          PYNOTICE
