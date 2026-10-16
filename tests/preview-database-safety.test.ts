@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -12,11 +13,11 @@ import { seedTestUsers, testSeedSql } from "../scripts/seed-test-users";
 import { findTestUser, QA_TEST_USERS, TEST_USERS } from "../lib/test-users";
 
 const preview = {
-  VERCEL_ENV: "preview", VERCEL_GIT_COMMIT_REF: "codex/feature", VERCEL_GIT_COMMIT_SHA: "a".repeat(40),
-  CAKE_QA_SLOT: "qa1", CAKE_QA_PR: "34", CAKE_QA_LEASE_TOKEN: "00000000-0000-4000-8000-000000000001",
-  CAKE_QA_SOURCE_BRANCH: "codex/feature", CAKE_QA_SOURCE_SHA: "a".repeat(40),
+  VERCEL_ENV: "preview", AUTH_MODE: "test", VERCEL_GIT_COMMIT_REF: "codex/feature", VERCEL_GIT_COMMIT_SHA: "a".repeat(40),
+  CAKE_PREVIEW_REPOSITORY: "tyask/Cake", CAKE_PREVIEW_PHASE: "application", CAKE_PREVIEW_DATABASE_BRANCH_ID: "br-preview", CAKE_PREVIEW_PR: "34", CAKE_PREVIEW_GENERATION: "00000000-0000-4000-8000-000000000001",
+  CAKE_PREVIEW_SOURCE_BRANCH: "codex/feature", CAKE_PREVIEW_SOURCE_SHA: "a".repeat(40),
   CAKE_TEST_DATABASE_URL: "postgresql://user:private@ep-preview-pooler.ap-southeast-1.aws.neon.tech/cake",
-  CAKE_QA_DATABASE_HOST: "ep-preview.ap-southeast-1.aws.neon.tech", CAKE_QA_PRODUCTION_DATABASE_HOST: "ep-production.ap-southeast-1.aws.neon.tech",
+  CAKE_PREVIEW_DATABASE_HOST_SHA256: createHash('sha256').update('ep-preview.ap-southeast-1.aws.neon.tech').digest('hex'), CAKE_PREVIEW_PRODUCTION_HOST_SHA256: createHash('sha256').update('ep-production.ap-southeast-1.aws.neon.tech').digest('hex'),
 };
 
 test("空DB・PR identityの検査が失敗したらmigrationの作成・適用を開始しない", async () => {
@@ -25,7 +26,7 @@ test("空DB・PR identityの検査が失敗したらmigrationの作成・適用�
     queries.push(statement);
     throw new Error("private data and postgresql://credentials@host/db");
   } }) }), (error: unknown) => {
-    assert.match(String(error), /空状態・PR・lease照合/);
+    assert.match(String(error), /空状態・PR・DB世代照合/);
     assert.doesNotMatch(String(error), /private|postgresql:\/\//);
     return true;
   });
@@ -36,9 +37,9 @@ test("空DB・PR identityの検査が失敗したらmigrationの作成・適用�
 test("Neon endpoint未確認の初回provisionではsetupとseedがクライアントを生成しない", async () => {
   let clients = 0;
   const connect = () => { clients++; return { query: async () => [] }; };
-  const environment = { ...preview, CAKE_QA_DATABASE_HOST: undefined };
-  await assert.rejects(setupDatabase(environment, { connect }), /QA貸出とDBの照合/);
-  await assert.rejects(seedTestUsers(environment, connect), /QA貸出とDBの照合/);
+  const environment = { ...preview, CAKE_PREVIEW_DATABASE_HOST_SHA256: undefined };
+  await assert.rejects(setupDatabase(environment, { connect }), /PreviewとDBの照合/);
+  await assert.rejects(seedTestUsers(environment, connect), /PreviewとDBの照合/);
   assert.equal(clients, 0);
 });
 
@@ -46,13 +47,13 @@ test("固定fixture baseでも本番host比較が未確認・本番と同一な�
   let clients = 0;
   const connect = () => { clients++; return { query: async () => [] }; };
   for (const environment of [
-    { ...preview, CAKE_QA_PRODUCTION_DATABASE_HOST: undefined },
-    { ...preview, CAKE_QA_PRODUCTION_DATABASE_HOST: preview.CAKE_QA_DATABASE_HOST },
-    { ...preview, CAKE_QA_PRODUCTION_DATABASE_HOST: "ep-preview-pooler.ap-southeast-1.aws.neon.tech" },
+    { ...preview, CAKE_PREVIEW_PRODUCTION_HOST_SHA256: undefined },
+    { ...preview, CAKE_PREVIEW_PRODUCTION_HOST_SHA256: preview.CAKE_PREVIEW_DATABASE_HOST_SHA256 },
+    { ...preview, CAKE_PREVIEW_PRODUCTION_HOST_SHA256: createHash('sha256').update('ep-preview.ap-southeast-1.aws.neon.tech').digest('hex') },
     { ...preview, DATABASE_URL: preview.CAKE_TEST_DATABASE_URL },
   ]) {
-    await assert.rejects(setupDatabase(environment, { connect }), /QA貸出とDBの照合/);
-    await assert.rejects(seedTestUsers(environment, connect), /QA貸出とDBの照合/);
+    await assert.rejects(setupDatabase(environment, { connect }), /PreviewとDBの照合/);
+    await assert.rejects(seedTestUsers(environment, connect), /PreviewとDBの照合/);
   }
   assert.equal(clients, 0);
 });
@@ -135,7 +136,7 @@ test("番号migrationはそれぞれidentity確認と適用履歴を同一transa
   assert.match(queries[2], /CREATE TABLE IF NOT EXISTS app_users/);
 });
 
-test("setupとseedの直接起動でもlease未確認なら接続前に秘密を表示せず停止する", () => {
+test("setupとseedの直接起動でもDB世代未確認なら接続前に秘密を表示せず停止する", () => {
   const directory = mkdtempSync(join(tmpdir(), "cake-preview-db-startup-"));
   const loader = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
   try {
@@ -143,11 +144,11 @@ test("setupとseedの直接起動でもlease未確認なら接続前に秘密を
       const file = fileURLToPath(new URL(`../scripts/${name}`, import.meta.url));
       const result = spawnSync(process.execPath, [...(name.endsWith(".ts") ? ["--import", loader] : []), file], {
         cwd: directory, encoding: "utf8", timeout: 10_000,
-        env: { ...process.env, ...preview, NODE_ENV: "production", CAKE_QA_DATABASE_HOST: undefined, DATABASE_URL: undefined, __NEXT_PROCESSED_ENV: undefined },
+        env: { ...process.env, ...preview, NODE_ENV: "production", CAKE_PREVIEW_DATABASE_HOST_SHA256: undefined, DATABASE_URL: undefined, __NEXT_PROCESSED_ENV: undefined },
       });
       assert.ifError(result.error);
       assert.equal(result.status, 1);
-      assert.match(result.stderr, /QA貸出とDBの照合/);
+      assert.match(result.stderr, /PreviewとDBの照合/);
       assert.doesNotMatch(result.stdout + result.stderr, /private|postgresql:\/\//);
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
@@ -160,7 +161,7 @@ test("seedは初回判定と固定sample全体を一回のtransactionで登録�
   assert.match(queries[0], /seeded_at.*IS NOT NULL THEN\s+RETURN;/);
   assert.match(queries[0], /Cake Preview initial data is not empty/);
   assert.doesNotMatch(queries[0], /ON CONFLICT[^;]+DO UPDATE|UPDATE app_users|UPDATE workspaces|UPDATE workspace_members|TRUNCATE|DELETE FROM/);
-  const updated = { ...preview, VERCEL_GIT_COMMIT_SHA: "b".repeat(40), CAKE_QA_SOURCE_SHA: "b".repeat(40) };
+  const updated = { ...preview, VERCEL_GIT_COMMIT_SHA: "b".repeat(40), CAKE_PREVIEW_SOURCE_SHA: "b".repeat(40) };
   assert.equal(testSeedSql(updated), queries[0]);
 });
 
@@ -189,10 +190,10 @@ test("従来local seed・findTestUserは既存profileと非管理者を保つ", 
 
 test("QA identity未確認のseedはlegacy profileへfallbackせずクライアント作成前に拒否する", async () => {
   let clients = 0;
-  await assert.rejects(seedTestUsers({ ...preview, CAKE_QA_LEASE_TOKEN: undefined }, () => {
+  await assert.rejects(seedTestUsers({ ...preview, CAKE_PREVIEW_GENERATION: undefined }, () => {
     clients++;
     return { query: async () => [] };
-  }), /QA貸出とDBの照合/);
+  }), /PreviewとDBの照合/);
   assert.equal(clients, 0);
 });
 
@@ -207,19 +208,15 @@ test("Productionへのseed直接実行はDBクライアント生成前に拒否�
 
 test("Preview検査の権限・接続失敗を空DB扱いしない", async () => {
   let calls = 0;
-  await assert.rejects(guardPreviewDatabase({ query: async () => { calls++; throw { code: "42501", message: "private" }; } }, preview, true), /空状態・PR・lease照合/);
+  await assert.rejects(guardPreviewDatabase({ query: async () => { calls++; throw { code: "42501", message: "private" }; } }, preview, true), /空状態・PR・DB世代照合/);
   assert.equal(calls, 1);
 });
 
-// PGlite remains an optional external verification tool, never a repository
-// dependency. Supplying its absolute module path runs the actual SQL suite as
-// part of node:test; the subprocess only constructs temporary memory databases.
-test("一時メモリPostgreSQLで空DB・厳密fixture base・同PR保持・Productionの実SQLを検証する", {
-  skip: !process.env.CAKE_LOCAL_PGLITE_MODULE,
-}, () => {
+// Run the real guard, migrations and seed in disposable in-memory PostgreSQL.
+test("一時メモリPostgreSQLで空DB・厳密fixture base・同PR保持・Productionの実SQLを検証する", () => {
   const loader = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
   const script = fileURLToPath(new URL("../scripts/verify-preview-database-safety.mjs", import.meta.url));
-  const result = spawnSync(process.execPath, ["--import", loader, script, "--pglite-module", process.env.CAKE_LOCAL_PGLITE_MODULE!], {
+  const result = spawnSync(process.execPath, ["--import", loader, script, "--pglite-module", process.env.CAKE_LOCAL_PGLITE_MODULE ?? createRequire(import.meta.url).resolve("@electric-sql/pglite")], {
     cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8", timeout: 120_000,
   });
   assert.ifError(result.error);
@@ -240,8 +237,8 @@ test("一時メモリPostgreSQLで空DB・厳密fixture base・同PR保持・Pro
     "Fixture base with a changed guard revision rejects",
     "Fixture base with extension-owned data rejects",
     "Approved fixture claim and caller failure roll back the new marker atomically",
-    "Approved canonical fixture base claims a seeded lease without repairing inherited rows",
-    "A foreign lease cannot claim the canonical fixture base with an existing marker",
+    "Approved canonical fixture base claims a seeded Preview without repairing inherited rows",
+    "A foreign Preview generation cannot claim the canonical fixture base with an existing marker",
     "Claimed fixture base keeps disable, demotion, renamed fixtures and financial edits on same PR setup and seed",
     "Production setup retains the original bootstrap and seed refuses before a client is created",
   ]) assert.ok(report.outcomes.some((outcome) => outcome.name === name), `Missing SQL scenario: ${name}`);

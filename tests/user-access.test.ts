@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import test, { type TestContext } from "node:test";
 import { neonConfig } from "@neondatabase/serverless";
 import assert from "node:assert/strict";
@@ -41,11 +42,11 @@ function googleInput(email = admin.email) {
 
 const qaEnvironment = {
   VERCEL_GIT_COMMIT_REF: "codex/fixed-qa-pool", VERCEL_GIT_COMMIT_SHA: "a".repeat(40),
-  CAKE_QA_SLOT: "qa1", CAKE_QA_PR: "34", CAKE_QA_LEASE_TOKEN: "00000000-0000-4000-8000-000000000001",
-  CAKE_QA_SOURCE_BRANCH: "codex/fixed-qa-pool", CAKE_QA_SOURCE_SHA: "a".repeat(40),
-  CAKE_TEST_DATABASE_URL: "postgresql://fixture@ep-qa.ap-southeast-1.aws.neon.tech/cake",
-  CAKE_QA_DATABASE_HOST: "ep-qa.ap-southeast-1.aws.neon.tech",
-  CAKE_QA_PRODUCTION_DATABASE_HOST: "ep-production.ap-southeast-1.aws.neon.tech",
+  CAKE_PREVIEW_REPOSITORY: "tyask/Cake", CAKE_PREVIEW_PHASE: "application", CAKE_PREVIEW_DATABASE_BRANCH_ID: "br-preview", CAKE_PREVIEW_PR: "34", CAKE_PREVIEW_GENERATION: "00000000-0000-4000-8000-000000000001",
+  CAKE_PREVIEW_SOURCE_BRANCH: "codex/fixed-qa-pool", CAKE_PREVIEW_SOURCE_SHA: "a".repeat(40),
+  CAKE_TEST_DATABASE_URL: "postgresql://fixture:dummy@ep-qa.ap-southeast-1.aws.neon.tech/cake",
+  CAKE_PREVIEW_DATABASE_HOST_SHA256: createHash('sha256').update('ep-qa.ap-southeast-1.aws.neon.tech').digest('hex'),
+  CAKE_PREVIEW_PRODUCTION_HOST_SHA256: createHash('sha256').update('ep-production.ap-southeast-1.aws.neon.tech').digest('hex'),
 };
 
 async function withAuthMode(
@@ -54,7 +55,7 @@ async function withAuthMode(
 ) {
   const environment: Record<string, string | undefined> = {
     AUTH_MODE: mode, VERCEL_ENV: vercelEnvironment,
-    DATABASE_URL: "postgresql://fixture@ep-local.ap-southeast-1.aws.neon.tech/cake",
+    DATABASE_URL: "postgresql://fixture:dummy@ep-local.ap-southeast-1.aws.neon.tech/cake",
     DB_QUERY_LOG: "off",
     ...overrides,
   };
@@ -358,7 +359,7 @@ test("legacy fixtureの登録は従来どおり非管理者upsertに限定する
 test("Production・未guarded・profile不一致ではensureTestUserがDB問い合わせ前に拒否する", async (t) => {
   for (const [environment, overrides, users] of [
     ["preview", {}, [...TEST_USERS, ...QA_TEST_USERS]],
-    ["preview", { ...qaEnvironment, CAKE_QA_LEASE_TOKEN: undefined }, [...TEST_USERS, ...QA_TEST_USERS]],
+    ["preview", { ...qaEnvironment, CAKE_PREVIEW_GENERATION: undefined }, [...TEST_USERS, ...QA_TEST_USERS]],
     ["development", {}, QA_TEST_USERS],
     ["production", {}, [...TEST_USERS, ...QA_TEST_USERS]],
   ] as const) {

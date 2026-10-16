@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildSteps, runVercelBuild, type BuildStep } from "../scripts/vercel-build";
@@ -5,10 +6,10 @@ import { buildSteps, runVercelBuild, type BuildStep } from "../scripts/vercel-bu
 const previewEnvironment = {
   VERCEL_ENV: "preview", AUTH_MODE: "test", AUTH_SECRET: "test-secret",
   VERCEL_GIT_COMMIT_REF: "codex/feature", VERCEL_GIT_COMMIT_SHA: "a".repeat(40),
-  CAKE_QA_SLOT: "qa1", CAKE_QA_PR: "34", CAKE_QA_LEASE_TOKEN: "00000000-0000-4000-8000-000000000001",
-  CAKE_QA_SOURCE_BRANCH: "codex/feature", CAKE_QA_SOURCE_SHA: "a".repeat(40),
+  CAKE_PREVIEW_REPOSITORY: "tyask/Cake", CAKE_PREVIEW_PHASE: "application", CAKE_PREVIEW_DATABASE_BRANCH_ID: "br-preview", CAKE_PREVIEW_PR: "34", CAKE_PREVIEW_GENERATION: "00000000-0000-4000-8000-000000000001",
+  CAKE_PREVIEW_SOURCE_BRANCH: "codex/feature", CAKE_PREVIEW_SOURCE_SHA: "a".repeat(40),
   CAKE_TEST_DATABASE_URL: "postgresql://user:private@ep-preview-pooler.ap-southeast-1.aws.neon.tech/cake",
-  CAKE_QA_DATABASE_HOST: "ep-preview.ap-southeast-1.aws.neon.tech", CAKE_QA_PRODUCTION_DATABASE_HOST: "ep-production.ap-southeast-1.aws.neon.tech",
+  CAKE_PREVIEW_DATABASE_HOST_SHA256: createHash('sha256').update('ep-preview.ap-southeast-1.aws.neon.tech').digest('hex'), CAKE_PREVIEW_PRODUCTION_HOST_SHA256: createHash('sha256').update('ep-production.ap-southeast-1.aws.neon.tech').digest('hex'),
 };
 const productionEnvironment = { VERCEL_ENV: "production", AUTH_MODE: "google", AUTH_SECRET: "test-secret", DATABASE_URL: "production-db" };
 
@@ -17,7 +18,7 @@ test("Previewのテスト認証ではDB更新・テスト登録・ビルドの�
 });
 
 test("PreviewのGoogle認証ではDB更新を行い、テストユーザーを登録しない", () => {
-  assert.deepEqual(buildSteps({ ...previewEnvironment, AUTH_MODE: "google" }), ["db:setup", "build"]);
+  assert.throws(() => buildSteps({ ...previewEnvironment, AUTH_MODE: "google" }), /PreviewとDBの照合/);
 });
 
 test("Productionではビルド成功後にDB更新を行い、テストユーザーを登録しない", () => {
@@ -37,13 +38,13 @@ test("Development・ローカルではDB操作を行わない", () => {
   }
 });
 
-test("PreviewのleaseとDB比較情報が確認不能ならmigration・seed・buildをすべて止める", () => {
-  for (const changed of [{ CAKE_QA_SLOT: undefined }, { CAKE_QA_DATABASE_HOST: undefined }, { CAKE_QA_PRODUCTION_DATABASE_HOST: undefined }, { VERCEL_GIT_COMMIT_SHA: "b".repeat(40) }]) {
+test("Previewの所有権とDB比較情報が確認不能ならmigration・seed・buildをすべて止める", () => {
+  for (const changed of [{ CAKE_PREVIEW_REPOSITORY: undefined }, { CAKE_PREVIEW_DATABASE_HOST_SHA256: undefined }, { CAKE_PREVIEW_PRODUCTION_HOST_SHA256: undefined }, { VERCEL_GIT_COMMIT_SHA: "b".repeat(40) }]) {
     const executed: BuildStep[] = [];
     assert.throws(() => runVercelBuild({ ...previewEnvironment, ...changed }, (step) => {
       executed.push(step);
       return 0;
-    }), /QA貸出とDBの照合/);
+    }), /PreviewとDBの照合/);
     assert.deepEqual(executed, []);
   }
 });

@@ -77,7 +77,7 @@ async function main() {
     console.log("Cakeのデータベースへ未適用のマイグレーションを適用しました。");
   } catch (error) {
     // Never print raw Neon errors, which can contain credentials or row data.
-    console.error(error instanceof Error && /^(CAKE_TEST_DATABASE_URL|DATABASE_URL|QA貸出|Preview DB|Previewの初期管理者SQL|Previewの承認済み|マイグレーション名)/.test(error.message)
+    console.error(error instanceof Error && /^(CAKE_TEST_DATABASE_URL|DATABASE_URL|PreviewとDB|Preview DB|Previewの初期管理者SQL|Previewの承認済み|マイグレーション名)/.test(error.message)
       ? error.message : "DB更新に失敗しました。接続情報・DBエラー本文は表示しません。");
     process.exitCode = 1;
   }
