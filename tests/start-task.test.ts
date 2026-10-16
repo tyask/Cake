@@ -97,7 +97,7 @@ test("不正な引数・予約名をGit操作の前に拒否する", () => {
 test("reviewed main's real generation creates qa-acceptance and preserves the 15-character task budget", t => {
   const { cwd, remote, defaultWorktreeRoot } = repository(t);
   const prepared = JSON.parse(readFileSync(new URL("../cannele.config.json", import.meta.url), "utf8"));
-  assert.equal(prepared.enabled, false);
+  assert.equal(prepared.enabled, true);
   writeFileSync(join(remote, "cannele.config.json"), JSON.stringify({ ...prepared, enabled: true }));
   git(remote, "add", "cannele.config.json"); git(remote, "commit", "-m", "synthetic reviewed enabled main");
   writeFileSync(join(cwd, "cannele.config.json"), JSON.stringify({ ...prepared, enabled: false, profile: null }));

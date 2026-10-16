@@ -1,7 +1,7 @@
 {
   "protocol": "cake-cannele/v1",
-  "enabled": false,
-  "sourceRevision": "f9458d21405242433bf2877d14853a4b0a4db130",
+  "enabled": true,
+  "sourceRevision": "6e503be13a44a5f30c2b0aa0135aa062f270647c",
   "profile": {
     "origin": "https://cannele-cake.vercel.app",
     "instanceId": "34122771-e322-4478-bc7b-96ed363c6c41",

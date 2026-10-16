@@ -55,10 +55,10 @@ test('missing main configuration preserves legacy mode; fetch failure and invali
   });
 });
 
-test('the prepared public instance profile parses while disabled and when enabled in memory', () => {
+test('the enabled public instance profile also retains disabled parser compatibility', () => {
   const prepared = JSON.parse(readFileSync(new URL('../cannele.config.json', import.meta.url), 'utf8'));
-  assert.equal(prepared.enabled, false);
-  assert.equal(prepared.sourceRevision, 'f9458d21405242433bf2877d14853a4b0a4db130');
+  assert.equal(prepared.enabled, true);
+  assert.equal(prepared.sourceRevision, '6e503be13a44a5f30c2b0aa0135aa062f270647c');
   for (const enabled of [false, true]) {
     const config = parseCakeCanneleConfiguration({ ...prepared, enabled });
     assert.equal(config.enabled, enabled); assert.deepEqual(config.profile, prepared.profile);
@@ -198,10 +198,10 @@ test('task startup uses the reviewed main generation prefix while local configur
   assert.throws(() => runStartTask({ args: ['a'.repeat(60)], cwd, environment: {}, installDependencies: () => undefined, log: () => undefined, configurationGit }), /60文字以内/);
 });
 
-test('repository config remains disabled and package QA commands route through the reviewed configuration', () => {
+test('repository config enables the pinned client and package QA commands use reviewed configuration', () => {
   const root = new URL('../', import.meta.url);
   const config = parseCakeCanneleConfiguration(JSON.parse(readFileSync(new URL('cannele.config.json', root), 'utf8')));
-  assert.equal(config.enabled, false); assert.equal(config.profile?.appId, 'cake');
+  assert.equal(config.enabled, true); assert.equal(config.profile?.appId, 'cake');
   const pkg = JSON.parse(readFileSync(new URL('package.json', root), 'utf8'));
   for (const name of ['deploy:preview', 'task:pr', 'qa:reserve', 'qa:status', 'qa:publish', 'qa:release', 'qa:verify', 'qa:slots', 'cannele:auth']) assert.ok(pkg.scripts[name].includes('scripts/cannele-command.ts'));
 });
