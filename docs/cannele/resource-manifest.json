@@ -1,0 +1,45 @@
+{
+  "instanceId": "34122771-e322-4478-bc7b-96ed363c6c41",
+  "appId": "cake",
+  "repository": {
+    "id": 1318171856,
+    "ownerId": 16447050,
+    "fullName": "tyask/Cake",
+    "baseBranch": "main",
+    "controlBranch": "main",
+    "featureBranchPrefix": "codex/cannele-34122771-e322-4478-bc7b-96ed363c6c41/",
+    "acceptedPrCreatedAfter": "2026-10-15T23:12:46.565Z"
+  },
+  "providers": {
+    "vercelProjectId": "prj_Z37vquodhpRd08ZTAtYnP0qa59jD",
+    "vercelTeamId": "team_D1Mcx2TdFWPKcypfu8KzNMub",
+    "neonProjectId": "misty-meadow-88903426",
+    "neonParentBranchId": "br-lively-frog-b3y2mauu",
+    "productionHostDigest": "600033d07eb267fe31096a1bb98d0c1809be7a0ef7a895ad3bcbc6daabbbf0f6",
+    "databaseUrlEnvironmentKeys": [
+      "CAKE_TEST_DATABASE_URL"
+    ],
+    "runtimeProof": {
+      "protocol": "cannele-runtime-proof/v1",
+      "path": "/api/qa/cannele",
+      "appId": "cake"
+    }
+  },
+  "slots": [
+    {
+      "key": "qa1",
+      "position": 0,
+      "alias": "cake-qa1-fumin.vercel.app"
+    },
+    {
+      "key": "qa2",
+      "position": 1,
+      "alias": "cake-qa2-fumin.vercel.app"
+    },
+    {
+      "key": "qa3",
+      "position": 2,
+      "alias": "cake-qa3-fumin.vercel.app"
+    }
+  ]
+}

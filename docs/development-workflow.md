@@ -309,7 +309,7 @@ APIの202は未完了を示す。`nextAction: advance`に対して、依頼中�
 
 ### 実際の切替と残作業
 
-Cake専用Cannele APIのProduction healthと、GitHub App用Secret・暗号化キーのSensitive/Production限定設定は確認済み。旧管理DBの002互換fence導入も確認した。本人pairing・Actions OIDC認可、Cakeのprovider binding、APIからの管理DB接続とruntime role、writerのmaintenance切替とclean-start移行、実QAの受入検証は未完了である。共通管理DDLの正本はCanneleの`db/migrations/`、業務DDLの正本は引き続きCakeの`db/migrations/`である。
+Cake専用Cannele APIのProduction healthと、GitHub App用Secret・暗号化キーのSensitive/Production限定設定は確認済み。旧管理DBの002互換fence導入と、schema 4への原子的なclean-start移行のcommitも確認した。公開bindingはAPI projectのProduction Configへ登録済みだが、再配置前である。本人pairing・Actions OIDC認可、稼働Deploymentへのbinding反映、APIからの管理DB接続とruntime role、実QAの受入検証は未完了である。共通管理DDLの正本はCanneleの`db/migrations/`、業務DDLの正本は引き続きCakeの`db/migrations/`である。
 
 切替前の読取確認には、mainへ導入した`cannele-readiness.yml`を使う。旧`qa:inspect`のGitHub Deployments台帳は現在のSQL台帳の全枠状態を証明しない。専用のreadinessは、新しい`CANNELE_REGISTRY_ADMIN_*`・`CANNELE_TRANSITION_*`の資格情報をActions内だけで使い、現在の3枠、未完了request、履歴の解決状態、既知schema、管理者権限、全QA資源を読み取る。DBは読取専用transaction、providerはGETだけとし、DDL、資源の削除、flag・環境変数の変更、Canneleへの切替は行わない。
 
@@ -348,6 +348,18 @@ PR #57のマージ後の[readiness run 38744829643](https://github.com/tyask/Cak
 
 続く[002 installer run 38780876011](https://github.com/tyask/Cake/actions/runs/38780876011)は、owner本人・同じ現在main・初回attemptのjob `116580440297`が成功した。2026-10-16 02:52:42.8008963 JST（`2026-10-15T17:52:42.8008963Z`）にversion 2・writerEpoch 1・上記sourceの互換fence導入を確認し、既存履歴を保持した。これはlegacyモードの互換導入であり、maintenanceへの切替やCannele台帳への移行、API有効化はまだ行っていない。後続のonboarding `inspect`は[run 38781120504](https://github.com/tyask/Cake/actions/runs/38781120504)のjob `116581275195`で`ONBOARDING_DEPENDENCY_FAILED`により停止した。読取だけの再確認[run 38782009506](https://github.com/tyask/Cake/actions/runs/38782009506)のjob `116584360725`も、2026-10-16 03:01:06.847 JST（`2026-10-15T18:01:06.847Z`）に同じ失敗となった。当時は失敗stage・reasonを保存していないため原因は未確定で、未検証のまま移行を進めていない。
 
+Neon direct接続での[onboarding inspect run 38821474058](https://github.com/tyask/Cake/actions/runs/38821474058)は、Cake main `8181111538b8f5303e216091d1423e62f1911587`・Cannele helper `623520315b7b2c982e4b98ecdb72658252709d7c`から成功した。artifact `12012892153`のZIP SHA-256 `5807a9ec10e26211a1191431cbe89e4251f08b9234295409739fb31071911836`を照合し、PostgreSQL 18・legacy/epoch 1・保存済みfence revision `025b09976e9bee4095e6ef70f38353f94d9193af`を確認した。旧state digest `23a3f9dfb15e3a93629037d9aa337e51e7dc66cbffe7bbae4e880aca5e8db4b6`とfootprint digest `1989fcafc230b1b399cf8b50e2e8061a4e66fb0afaa5ba2814a6c0b2fe11d3fa`は、レビュー済み移行入力の期待値と一致した。
+
+続く[transition run 38822418113](https://github.com/tyask/Cake/actions/runs/38822418113)のartifact `12012802833`で、transition `86ee46a3-eb41-414e-85aa-d21e053d152d`の初回commit（`replayed: false`）を確認した。実入力のcanonical fingerprint `f61d5ab956926013633f206364382011205dc6c166bcbb0328bee3921fbfbc1c`はレビュー時の値と一致する。旧fenceを経た台帳の移行とCannele初期化は一つのtransactionで確定し、schema versionは4、checksumは`69d6b54f6ebc4e623876734bd5e0163050450d8136e29d898c2423ecf579fba8`、provider証跡digestは`74bf1a238faab178ccc887cb0882e9ef6e5803df933fd4eea52ce5b71372592f`だった。公開receiptの`providerCredentialRetentionAccepted: true`も確認した。provider資格情報は保持したままで、失効済みとして記録していない。
+
+新しい資源の公開定義は[Cannele resource manifest](cannele/resource-manifest.json)に保存する。instanceは`34122771-e322-4478-bc7b-96ed363c6c41`、feature branch prefixは`codex/cannele-34122771-e322-4478-bc7b-96ed363c6c41/`、新PRの受付cutoffは`2026-10-15T23:12:46.565Z`。manifestのJSON Canonicalization SchemeによるSHA-256は`fb847b478ed9e0c5b0eeb972657da0ec8b6205e71c095bfc742633bc2cc5685e`で、実runtime contextのbindingDigestと一致する。digest対象はinstanceId・appId・repository・providers・slotsで、認証値、GitHub App設定、ユーザー権限、cleanup/CI workflow設定、writerEpoch、schema情報は含めない。
+
+公開API bindingは、Vercel `fumin1/cannele-cake`の`CANNELE_BINDING_JSON`へConfig/Productionとして登録した。固定contextとownerの6 scopesをsource parserで照合した公開設定であり、DB・provider資格情報を含まない。現時点では再配置しておらず、稼働Production Deploymentへの反映やAPI接続の成功を確認したとは扱わない。
+
+利用者が承認したAPI projectの未使用汎用DB環境変数16件は、2026-10-16 08:46:50.895 JST（`2026-10-15T23:46:50.895227Z`）に設定から削除を完了し、全16件の不在を読み直した。Cannele用のbinding・暗号化鍵・GitHub App秘密鍵/OAuth secret・API origin・2 flagsの計7件は、存在・型・Production対象のmetadataを保持した。今回の設定整理ではprovider/CLI tokenの失効、DB操作、password変更は行っていない。
+
+runtime LOGINの作成・最小権限確認とruntime/provider SecretsのAPIへの登録は未完了、Cannele APIも無効のままである。Cakeの`cannele.config.json`は`enabled: false`・`profile: null`を維持する。以後の再配置・API接続・本人認証・OIDC返却・試験PRでの一連の受入が確認されるまで、通常開発がCanneleへ切り替わったとは扱わない。
+
 PostgreSQL 18ではNOT NULL制約がcatalogへ追加されるため、Canneleの移行helperは17/18それぞれの完全な固定hashで照合する。17.10と18.4の使い捨てDBで検証し、実18.6も移行前に同じhashと一致することを確認する。Neonのbranch一覧は最初の応答の`sort_order`が`asc`・`desc`・`ASC`・`DESC`なら小文字へ正規化し、次ページのGETへ引き継ぐ。2ページ目以降の順序変更や未知の値は拒否し、`sort_by=created_at`を維持する。最終branchページの`next`とsort echoは省略され得て、`next`の空文字もnullと同じ終端として扱う。短い最終ページでの省略を受け入れつつ、false・0、不明なcursor・未知field・重複ID・未完了ページは引き続き拒否する。
 
 ### Actionsからの管理操作
@@ -358,26 +370,30 @@ PostgreSQL 18ではNOT NULL制約がcatalogへ追加されるため、Canneleの
 | --- | --- |
 | `inspect` | 002導入済みの旧台帳を、legacy/controlの順のlock内で確認する。Cannele core形式のstate/footprint digest、実hostのdigest、DB名、PostgreSQL majorとfence revisionだけを返す。DDLや台帳更新は行わない。 |
 | `transition` | レビューしたJSONをそのまま渡し、既存の一つのtransactionで旧fenceをmaintenanceへ進め、freshな完全provider証跡を照合してから旧6tables/functionsの削除とCannele初期化を行う。失敗時はrollbackする。 |
-| `provision-runtime` | 事前に作成した専用LOGINへ固定ACLを設定し、別の実ログインでcontext・最小権限を検証する。admin/runtimeのhost・port・DB、明示したroleとの一致を権限付与前に確認する。 |
+| `bootstrap-runtime` | 新しい専用LOGINをSQLで作成し、fresh LOGIN・固定ACL・最小権限を確認してから、固定API projectのProduction Sensitiveへruntime/providerの4資格情報をActions内で直接登録する。 |
+| `provision-runtime` | 既存専用LOGINを使う場合の権限設定と確認。admin/runtimeのhost・port・DB、明示したroleを照合し、別の実ログインでcontext・最小権限を検証する。新規作成とSecret転送は行わない。 |
 
 全actionにglobal停止gateのtrueと旧2flagsのfalseが必要である。`confirm_credential_drain=true`は旧actor停止・旧管理DB/owner資格情報撤去・DB session排出の確認を意味する。provider資格情報の方針はadmissionへ別途記録し、保持する場合に失効をtrueで補わない。002 installerにも同じ新しい管理者Secret名を使う。新しい管理者接続を確立してから旧管理DB/owner資格情報を失効させ、002を導入する。同じ管理roleのpassword更新でも、旧passwordの無効化と旧接続の終了、fresh loginを確認する。
 
-新しい接続・provider資格情報は次のRepository Secretsへ登録する。値は設定画面へ直接入力し、Cloud・チャット・JSON引数・artifactへ渡さない。
+管理者接続と既存provider資格情報は次のRepository Secretsを使う。値をCloud・チャット・JSON引数・artifactへ渡さない。`bootstrap-runtime`では新しいruntime passwordをActions内で生成し、GitHubへruntime Secretsを追加登録せず、Vercelへ直接渡す。
 
 | Repository Secret | 用途 |
 | --- | --- |
 | `CANNELE_REGISTRY_ADMIN_DATABASE_URL` / `CANNELE_REGISTRY_ADMIN_DATABASE_HOST` | 切替とreceipt再確認に使う、更新済み管理者接続。APIへ登録しない。 |
-| `CANNELE_TRANSITION_VERCEL_TOKEN` / `CANNELE_TRANSITION_NEON_API_KEY` | readinessと移行用read-only API確認。provider tokenの保持・失効方針はadmissionへ明示する。旧`VERCEL_TOKEN` / `NEON_API_KEY`名へ新しい値を入れ直さない。 |
-| `CANNELE_REGISTRY_DATABASE_URL` / `CANNELE_REGISTRY_DATABASE_HOST` | runtime権限確認用の専用LOGIN接続。HOSTはURLの実hostnameと完全一致させる。 |
+| `CANNELE_TRANSITION_VERCEL_TOKEN` / `CANNELE_TRANSITION_NEON_API_KEY` | readiness・移行用API確認と、bootstrapの固定API projectへの直接handoffに使う既存資格情報。新しいtokenの作成や失効をこの操作で行わない。旧`VERCEL_TOKEN` / `NEON_API_KEY`名へ新しい値を入れ直さない。 |
+| `CANNELE_REGISTRY_DATABASE_URL` / `CANNELE_REGISTRY_DATABASE_HOST` | 既存LOGINの`provision-runtime`を使う場合のみ。`bootstrap-runtime`には登録不要で、この既存値も渡さない。 |
 
 旧`CAKE_QA_REGISTRY_DATABASE_URL` / `_HOST`は新管理者接続を確保してから、002導入前に撤去する。新しい管理者接続を旧Secret名へ入れ直すと、古いworkflowが新しい資格情報を取得できるため避ける。別の管理者接続を確保しないまま旧資格情報だけを消さない。
 
-runtime LOGINは管理専用DBのSQL editorなどで、次のreview済み形を使って事前に作る。passwordは専用の乱数を用意し、実値をGit・チャットへ書かない。既存roleの権限やpasswordを無条件に上書きしない。Neon UI/API作成roleの管理membershipをAPIに引き継がない。
+今回の`bootstrap-runtime`管理workflow導入PRは、API未有効化の段階のsource管理変更としてQA配置なしでローカル検証・CI・ownerレビューを行う。実bootstrapはmain導入後の専用runで確認し、実行receiptを運用記録へ追加する。
 
-```sql
-CREATE ROLE cannele_runtime LOGIN PASSWORD '<専用の乱数password>'
-  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+新しいruntime LOGINの作成は、owner本人・現在main・初回attemptの`bootstrap-runtime`から行う。利用者がSQLやpasswordをチャットへ渡したり、手動SQLを実行したりする手順は不要である。公開入力は初期化receiptと一致する6項目の`runtime_context_json`と明示した`runtime_role_name`だけとし、接続先・API project/team・passwordを入力で差し替えない。
+
+```text
+gh workflow run cannele-onboarding.yml --repo tyask/Cake --ref main -f action=bootstrap-runtime -f reviewed_revision=<レビュー済み現在mainの40桁SHA> -f request_id=<新しいUUID> -f runtime_context_json='<レビュー済み公開context JSON>' -f runtime_role_name=<専用role名> -f confirm_credential_drain=false
 ```
+
+Actionsは既存ADMIN接続と固定contextを照合し、管理権限やmembershipを持たない新しい専用roleを作成する。同じ管理者Secretとcontext・roleを維持して再実行すれば、同じ資格情報で継続できる。既存roleは管理markerと完全一致する場合だけ再利用し、別管理の既存roleやcontext不一致を拒否する。`ALTER ROLE`やpassword resetで既存roleを上書きしない。NeonのSQL role作成はhash済みpasswordを受け付けないため、passwordをTLS接続のbind parameterからtransaction内だけで渡す。Actionsから送るSQL本文や公開commentへ値を埋め込まず、Actionsログ・artifactにも出力しない。作成した資格情報でfresh LOGINした後に権限を設定・検証し、その後にだけVercelへ渡す。失敗・結果不明時もroleを削除せず、同じ管理者Secret・context・roleで再依頼する。
 
 `transition_json`はCanneleの`LegacyTransitionInput`に従う公開JSONで、管理DB接続先のdigest、完全な旧state/footprint、固定scope、新instance・未使用prefix・受付開始時刻をレビューして指定する。
 
@@ -385,11 +401,13 @@ provider資格情報を失効した場合は`oldProviderCreationCredentialsRevok
 
 `source.cakeRevision`は保存済み002 fence receiptの導入SHA、`reviewed_revision`と`admission.trustedMainRevision`は今回の現在mainを表す。両者を同じ値に書き換えない。commit結果不明時はUUIDや時刻を再生成せず、同じJSONを新しいworkflow runへ渡す。coreの同一receipt再送はprovider資格情報を要求せず、schemaや枠をresetしない。
 
-`runtime_context_json`はinstanceId・repositoryId・bindingDigest・writerEpoch・schemaVersion・schemaChecksumの6項目で、初期化receiptと照合する。`runtime_role_name`は上記の明示した専用roleである。結果はrequest UUID付きの単一`result.json` artifactから、実行元・owner・全job・依頼・digestを照合して取得する。
+`runtime_context_json`はinstanceId・repositoryId・bindingDigest・writerEpoch・schemaVersion・schemaChecksumの6項目で、初期化receiptと照合する。`runtime_role_name`は明示した専用roleである。結果はrequest UUID付きの単一`result.json` artifactから、実行元・owner・全job・依頼・digestを照合して取得する。
 
 onboardingの失敗JSONは、既存の安全な`code`に加え、固定された`stage`と`reason`を返す。例えば`ADMIN_CONNECT`と`PROTOCOL`は接続時の既知protocolエラー、`INSPECT_CORE`と`UNDEFINED_COLUMN`はcore読取時の既知columnエラーを示し、SQLや例外本文を見ずに停止箇所を切り分けられる。既知のPostgreSQL SQLSTATE・Node通信/TLS codeだけを固定reasonへ変換し、未知の値やcauseは`UNKNOWN`とする。URL・host・token・SQL・応答や例外本文・stack・未知code原文は出さず、rollbackや接続解放が後から失敗しても最初の失敗を保持する。診断の追加で接続設定や移行条件は変更しない。
 
-この入口はrole/passwordの生成やVercelへのSecret転送、DB writerやAPI flagの有効化を行わない。限定runtime接続とprovider用SecretをVercel `cannele-cake`のSensitive/Productionへ登録し、bindingと権限を確認してからAPIの再配置・本人認証・運用有効化へ進む。管理者接続をAPIへ置かず、既存のGitHub App用Secretと暗号化キーを作り直さない。
+`bootstrap-runtime`のhandoff先は固定のVercel `fumin1/cannele-cake`（project `prj_EgVvFUE4gXVZnMTuw69lQ3mIGYVN`、team `team_D1Mcx2TdFWPKcypfu8KzNMub`）だけである。runtime URL/HOSTとprovider 2件の計4環境変数をSensitive/Productionへ直接登録し、各4件のcommentにcontext・roleへ束縛したversion付きmarkerを付ける。5番目のConfig keyは作らず、既存値の所有marker・型・対象が不明なら上書きしない。password・URL・provider値をstep output・artifact・ログやCloudへ出さず、管理者接続もAPIへ渡さない。
+
+bootstrap完了は、role作成・fresh LOGIN/最小権限の確認と4件の登録までを示す。再配置、DB writerやAPI flagの有効化、Cake設定の有効化は行わない。bindingと権限を確認してから別工程でAPIの再配置・本人認証・運用有効化へ進む。既存のGitHub App用Secretと暗号化キーを作り直さない。
 
 切替前に旧QA clientを止め、旧方式で全貸出を返却する。旧Actionsの待機・実行が0件で、全alias・Deployment・Native branch・endpointが不在であることを読み直してから、レビュー済みの管理DB移行を実行する。Cakeの旧台帳履歴は引き継がず、新しいinstance・generation・branch prefixとPR作成時刻cutoffで共通台帳を開始する。旧履歴の削除はこの実移行で行い、業務DBや親DBには適用しない。
 

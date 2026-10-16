@@ -70,6 +70,86 @@ function coreFixture(changes: Partial<OnboardingCore> = {}) {
 }
 const transitionEnvironment = { ...environment, CANNELE_ONBOARDING_ACTION: "transition", CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN: "true", CANNELE_ONBOARDING_TRANSITION_JSON: JSON.stringify(request) };
 const runtimeEnvironment = { ...environment, CANNELE_ONBOARDING_ACTION: "provision-runtime", CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON: JSON.stringify(context), CANNELE_ONBOARDING_RUNTIME_ROLE_NAME: "cannele_runtime" };
+const bootstrapEnvironment = { ...runtimeEnvironment, CANNELE_ONBOARDING_ACTION: "bootstrap-runtime",
+  CANNELE_REGISTRY_DATABASE_URL: undefined, CANNELE_REGISTRY_DATABASE_HOST: undefined };
+
+function bootstrapFixture() {
+  const fixture = coreFixture(), events = fixture.events;
+  fixture.core.pool = configured => ({ connect: async () => {
+    events.push(`connect:${configured.user}`);
+    return { query: async () => ({ rows: [{ role_name: configured.user, session_role: configured.user, database_name: configured.database }] }),
+      release: () => { events.push(`release:${configured.user}`); } };
+  }, end: async () => { events.push(`end:${configured.user}`); } });
+  const runtimeBootstrap: NonNullable<Parameters<typeof runOnboarding>[1]["runtimeBootstrap"]> = async (_client, input) => {
+    events.push("create"); assert.equal(input.roleName, "cannele_runtime"); assert.deepEqual(input.context, context);
+    return { connection: { ...input.connection, user: input.roleName, password: "synthetic-bootstrap-password" },
+      databaseUrl: "postgresql://cannele_runtime:synthetic-bootstrap-password@ep-management.mock.aws.neon.tech/neondb?sslmode=require",
+      marker: "synthetic-public-provenance", roleCreated: true, transitionId: request.transitionId,
+      releaseControl: async () => { events.push("unlock"); } };
+  };
+  const runtimeHandoff: NonNullable<Parameters<typeof runOnboarding>[1]["runtimeHandoff"]> = input => {
+    assert.equal(input.vercelToken, environment.CANNELE_TRANSITION_VERCEL_TOKEN);
+    assert.equal(input.neonApiKey, environment.CANNELE_TRANSITION_NEON_API_KEY);
+    assert.deepEqual(input.context, context); assert.equal(input.roleName, "cannele_runtime");
+    return { preflight: async () => { events.push("preflight"); }, publish: async input => {
+      assert.equal(input.databaseHost, environment.CANNELE_REGISTRY_ADMIN_DATABASE_HOST);
+      assert.match(input.databaseUrl, /synthetic-bootstrap-password/); events.push("publish");
+    } };
+  };
+  return { ...fixture, runtimeBootstrap, runtimeHandoff };
+}
+
+test("bootstrap preflights before SQL and proves actual LOGIN before grants, then unlocks before final LOGIN and handoff", async () => {
+  const fixture = bootstrapFixture();
+  const receipt = await runOnboarding(bootstrapEnvironment, { source, transport: transport(), core: async () => fixture.core,
+    runtimeBootstrap: fixture.runtimeBootstrap, runtimeHandoff: fixture.runtimeHandoff });
+  assert.deepEqual(fixture.events.filter(event => ["preflight", "create", "provision", "unlock", "assertRuntime", "publish", "connect:cannele_runtime"].includes(event)),
+    ["preflight", "create", "connect:cannele_runtime", "provision", "unlock", "connect:cannele_runtime", "assertRuntime", "publish"]);
+  assert.equal(receipt.action, "bootstrap-runtime"); assert.equal(receipt.result.runtimeLoginVerified, true);
+  assert.equal(receipt.result.environmentWriteAcknowledged, true); assert.equal(receipt.result.roleCreated, true);
+  for (const value of ["postgresql:", "synthetic-bootstrap-password", "synthetic-vercel-token", "synthetic-neon-token", "synthetic-public-provenance", environment.CANNELE_REGISTRY_ADMIN_DATABASE_HOST]) assert.equal(JSON.stringify(receipt).includes(value), false);
+});
+
+test("bootstrap rejected preflight never reaches SQL creation; missing transition credentials fail before bootstrap", async () => {
+  for (const changes of [{}, { CANNELE_TRANSITION_VERCEL_TOKEN: "" }, { CANNELE_TRANSITION_NEON_API_KEY: "" }]) {
+    const fixture = bootstrapFixture();
+    await assert.rejects(runOnboarding({ ...bootstrapEnvironment, ...changes }, { source, transport: transport(), core: async () => fixture.core,
+      runtimeBootstrap: fixture.runtimeBootstrap, runtimeHandoff: input => ({ ...fixture.runtimeHandoff(input), preflight: async () => { throw new Error(privateDiagnostic); } }) }));
+    assert.equal(fixture.events.includes("create"), false); assert.equal(fixture.events.includes("provision"), false); assert.equal(fixture.events.includes("publish"), false);
+  }
+});
+
+test("bootstrap failed candidate LOGIN never grants or publishes and still releases the control lock", async () => {
+  const fixture = bootstrapFixture(), original = fixture.core.pool;
+  fixture.core.pool = configured => configured.user === "cannele_runtime" ? { connect: async () => { throw Object.assign(new Error(privateDiagnostic), { code: "28P01" }); }, end: async () => {} } : original(configured);
+  await expectDiagnostic(runOnboarding(bootstrapEnvironment, { source, transport: transport(), core: async () => fixture.core,
+    runtimeBootstrap: fixture.runtimeBootstrap, runtimeHandoff: fixture.runtimeHandoff }), { code: "ONBOARDING_DEPENDENCY_FAILED", stage: "RUNTIME_CONNECT", reason: "AUTHENTICATION" });
+  assert.ok(fixture.events.includes("unlock")); assert.equal(fixture.events.includes("provision"), false); assert.equal(fixture.events.includes("publish"), false);
+});
+
+test("bootstrap preserves a grant failure across unlock failure and never transfers unverified credentials", async () => {
+  const fixture = bootstrapFixture(); fixture.core.provision = async () => { throw Object.assign(new Error(privateDiagnostic), { code: "42501" }); };
+  await expectDiagnostic(runOnboarding(bootstrapEnvironment, { source, transport: transport(), core: async () => fixture.core,
+    runtimeBootstrap: async (client, input) => ({ ...await fixture.runtimeBootstrap(client, input), releaseControl: async () => { fixture.events.push("unlock"); throw new Error(privateDiagnostic); } }),
+    runtimeHandoff: fixture.runtimeHandoff }), { code: "ONBOARDING_DEPENDENCY_FAILED", stage: "RUNTIME_PROVISION", reason: "PERMISSION" });
+  assert.ok(fixture.events.includes("unlock")); assert.equal(fixture.events.includes("assertRuntime"), false); assert.equal(fixture.events.includes("publish"), false);
+});
+
+test("bootstrap final runtime proof failure prevents handoff and every credential remains behind owner/main authorization", async () => {
+  const fixture = bootstrapFixture(); fixture.core.assertRuntime = async () => { throw new Error(privateDiagnostic); };
+  await expectDiagnostic(runOnboarding(bootstrapEnvironment, { source, transport: transport(), core: async () => fixture.core,
+    runtimeBootstrap: fixture.runtimeBootstrap, runtimeHandoff: fixture.runtimeHandoff }), { code: "ONBOARDING_DEPENDENCY_FAILED", stage: "RUNTIME_VERIFY", reason: "UNKNOWN" });
+  assert.ok(fixture.events.includes("unlock")); assert.equal(fixture.events.includes("publish"), false);
+  let coreReads = 0, secretReads = 0, factoryCalls = 0;
+  const guarded = { ...bootstrapEnvironment };
+  for (const key of ["CANNELE_REGISTRY_ADMIN_DATABASE_URL", "CANNELE_REGISTRY_ADMIN_DATABASE_HOST", "CANNELE_TRANSITION_VERCEL_TOKEN", "CANNELE_TRANSITION_NEON_API_KEY"]) {
+    Object.defineProperty(guarded, key, { get: () => { secretReads++; throw new Error(privateDiagnostic); } });
+  }
+  await assert.rejects(runOnboarding(guarded, { source, transport: transport({ run: { run_attempt: 2 } }),
+    core: async () => { coreReads++; return fixture.core; }, runtimeBootstrap: fixture.runtimeBootstrap,
+    runtimeHandoff: input => { factoryCalls++; return fixture.runtimeHandoff(input); } }), { code: "ONBOARDING_RUN_UNTRUSTED" });
+  assert.equal(coreReads, 0); assert.equal(secretReads, 0); assert.equal(factoryCalls, 0);
+});
 
 test("foreign owner/main workflows, changed source and reruns never receive administrative credentials", async () => {
   for (const changes of [{ GITHUB_WORKFLOW_REF: "tyask/Cake/.github/workflows/foreign.yml@refs/heads/main" }, { GITHUB_REF: "refs/heads/codex/foreign" }, { GITHUB_WORKFLOW_SHA: "f".repeat(40) }]) {

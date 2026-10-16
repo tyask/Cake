@@ -4,6 +4,8 @@ import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { HttpQaGateway, type QaTransport } from "./qa-pool-writer";
+import { prepareRuntimeBootstrap, RuntimeBootstrapError } from "./cannele-runtime-bootstrap";
+import { createRuntimeHandoff, RuntimeHandoffError } from "./cannele-runtime-handoff";
 
 const REPOSITORY = "tyask/Cake";
 const REPOSITORY_ID = 1318171856;
@@ -20,10 +22,11 @@ const ADMISSION_FIELDS = ["protocol", "reviewId", "reviewerGitHubId", "stoppedAt
   "legacyWorkflowBlobShas", ...DRAIN_FIELDS, "oldProviderCreationCredentialsRevoked"] as const;
 type Env = Readonly<Record<string, string | undefined>>;
 type Object_ = Record<string, unknown>;
-export type OnboardingAction = "inspect" | "transition" | "provision-runtime";
+export type OnboardingAction = "inspect" | "transition" | "provision-runtime" | "bootstrap-runtime";
 const STAGES = ["UNKNOWN", "CONFIG", "ADMIN_CONNECT", "INSPECT_BEGIN", "INSPECT_LOCK_LEGACY", "INSPECT_LOCK_CONTROL",
   "INSPECT_SEARCH_PATH", "INSPECT_VERSION", "INSPECT_CORE", "INSPECT_COMMIT", "INSPECT_ROLLBACK", "TRANSITION",
-  "RUNTIME_CONFIG", "RUNTIME_PROVISION", "RUNTIME_CONNECT", "RUNTIME_VERIFY", "RUNTIME_RELEASE", "RUNTIME_POOL_END", "ADMIN_RELEASE", "ADMIN_POOL_END"] as const;
+  "RUNTIME_CONFIG", "RUNTIME_PREFLIGHT", "RUNTIME_CREATE", "RUNTIME_IDENTITY", "RUNTIME_UNLOCK", "RUNTIME_HANDOFF",
+  "RUNTIME_PROVISION", "RUNTIME_CONNECT", "RUNTIME_VERIFY", "RUNTIME_RELEASE", "RUNTIME_POOL_END", "ADMIN_RELEASE", "ADMIN_POOL_END"] as const;
 const REASONS = ["UNKNOWN", "VALIDATION", "CORE_REJECTED", "AUTHENTICATION", "PERMISSION", "PROTOCOL", "UNSUPPORTED",
   "UNDEFINED_COLUMN", "UNDEFINED_FUNCTION", "UNDEFINED_TABLE", "UNDEFINED_OBJECT", "SYNTAX", "DATATYPE", "TIMEOUT", "DNS", "CONNECT", "RESET", "TLS"] as const;
 type Stage = typeof STAGES[number];
@@ -45,6 +48,7 @@ export class OnboardingError extends Error {
 }
 function diagnose(error: unknown, stage: Stage, core?: OnboardingCore): OnboardingError {
   if (error instanceof OnboardingError) return error.stage === "UNKNOWN" ? new OnboardingError(error.code, stage, error.reason) : error;
+  if (error instanceof RuntimeBootstrapError || error instanceof RuntimeHandoffError) return new OnboardingError(error.code, stage, "CORE_REJECTED");
   const providerCode = error && typeof error === "object" ? Object.getOwnPropertyDescriptor(error, "code")?.value : undefined;
   const reason = typeof providerCode === "string" ? ERROR_REASONS.get(providerCode) ?? "UNKNOWN" : "UNKNOWN";
   const code = core?.errorCode(error);
@@ -80,7 +84,7 @@ type Provider = "github" | "vercel" | "neon";
 type ReadTransport = (provider: Provider, path: string, options: { signal: AbortSignal }) => Promise<{ status: number; data: unknown; redirected: boolean }>;
 type Client = { query(sql: string, values?: unknown[]): Promise<{ rows: Object_[] }>; release(): void };
 type Pool = { connect(): Promise<Client>; end(): Promise<void> };
-type Connection = { host: string; port: number; database: string; user: string };
+type Connection = { host: string; port: number; database: string; user: string; password?: string };
 type Snapshot = { identity: { protocol: string; databaseName: string; writerMode: string; writerEpoch: number; fenceReceipt: Object_ }; stateDigest: string; footprintDigest: string };
 export type OnboardingCore = {
   connection(environment: Env): Connection;
@@ -175,7 +179,8 @@ export type OnboardingReceipt = { protocol: "cake-cannele-onboarding-result/v1";
 
 /** Administrative helpers receive credentials only after the actual trusted
  * owner/main workflow and both source blobs have been independently checked. */
-export async function runOnboarding(environment: Env, dependencies: { source: OnboardingSource; transport?: QaTransport; core: () => Promise<OnboardingCore> }): Promise<OnboardingReceipt> {
+export async function runOnboarding(environment: Env, dependencies: { source: OnboardingSource; transport?: QaTransport; core: () => Promise<OnboardingCore>;
+  runtimeBootstrap?: typeof prepareRuntimeBootstrap; runtimeHandoff?: typeof createRuntimeHandoff }): Promise<OnboardingReceipt> {
   let core: OnboardingCore | undefined, firstFailure: OnboardingError | undefined;
   const capture = (error: unknown, stage: Stage): OnboardingError => {
     const failure = diagnose(error, stage, core); firstFailure ??= failure; return failure;
@@ -190,12 +195,13 @@ export async function runOnboarding(environment: Env, dependencies: { source: On
     const { source } = dependencies, gateway = new OnboardingGateway(environment, dependencies.transport);
     const run = await gateway.authorize(source);
     const action = environment.CANNELE_ONBOARDING_ACTION;
-    if (action !== "inspect" && action !== "transition" && action !== "provision-runtime") return fail("ONBOARDING_ACTION_INVALID");
+    if (action !== "inspect" && action !== "transition" && action !== "provision-runtime" && action !== "bootstrap-runtime") return fail("ONBOARDING_ACTION_INVALID");
+    const runtimeAction = action === "provision-runtime" || action === "bootstrap-runtime";
     const input = action === "transition" ? transitionInput(environment, source) : null;
-    const context = action === "provision-runtime" ? runtimeContext(json(environment.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON)) : null;
-    const roleName = action === "provision-runtime" ? text(environment.CANNELE_ONBOARDING_RUNTIME_ROLE_NAME, /^[a-z][a-z0-9_]{0,62}$/) : null;
+    const context = runtimeAction ? runtimeContext(json(environment.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON)) : null;
+    const roleName = runtimeAction ? text(environment.CANNELE_ONBOARDING_RUNTIME_ROLE_NAME, /^[a-z][a-z0-9_]{0,62}$/) : null;
     if ((action !== "transition" && environment.CANNELE_ONBOARDING_TRANSITION_JSON)
-      || (action !== "provision-runtime" && (environment.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON || environment.CANNELE_ONBOARDING_RUNTIME_ROLE_NAME))) return fail("ONBOARDING_INPUT_INVALID");
+      || (!runtimeAction && (environment.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON || environment.CANNELE_ONBOARDING_RUNTIME_ROLE_NAME))) return fail("ONBOARDING_INPUT_INVALID");
     const loaded = await dependencies.core(); core = loaded;
     const connection = loaded.connection({ CANNELE_REGISTRY_DATABASE_URL: secret(environment, "CANNELE_REGISTRY_ADMIN_DATABASE_URL"),
       CANNELE_REGISTRY_DATABASE_HOST: secret(environment, "CANNELE_REGISTRY_ADMIN_DATABASE_HOST") });
@@ -237,6 +243,41 @@ export async function runOnboarding(environment: Env, dependencies: { source: On
               schemaChecksum: text(transitioned.schemaChecksum, DIGEST), evidenceDigest: text(receipt.evidenceDigest, DIGEST),
               ...(hasRetention ? { providerCredentialRetentionAccepted: true } : {}) };
           });
+        } else if (action === "bootstrap-runtime") {
+          const handoff = await at("RUNTIME_CONFIG", () => (dependencies.runtimeHandoff ?? createRuntimeHandoff)({
+            vercelToken: secret(environment, "CANNELE_TRANSITION_VERCEL_TOKEN"), neonApiKey: secret(environment, "CANNELE_TRANSITION_NEON_API_KEY"),
+            context: context!, roleName: roleName!,
+          }));
+          // Resolve project access and foreign-variable conflicts before any SQL write.
+          await at("RUNTIME_PREFLIGHT", () => handoff.preflight());
+          const bootstrap = await at("RUNTIME_CREATE", async () => (dependencies.runtimeBootstrap ?? prepareRuntimeBootstrap)(client, {
+            connection, context: context!, roleName: roleName!, migrations: await loaded.migrations(),
+          }));
+          const login = async (verify: boolean): Promise<void> => {
+            const runtimePool = await at("RUNTIME_CONFIG", () => loaded.pool(bootstrap.connection));
+            try {
+              const runtimeClient = await at("RUNTIME_CONNECT", () => runtimePool.connect());
+              try {
+                if (verify) await at("RUNTIME_VERIFY", () => loaded.assertRuntime(runtimeClient, context!));
+                else await at("RUNTIME_IDENTITY", async () => {
+                  const proof = await runtimeClient.query("SELECT current_user AS role_name, session_user AS session_role, current_database() AS database_name");
+                  const identity = proof.rows[0];
+                  if (proof.rows.length !== 1 || identity?.role_name !== roleName || identity.session_role !== roleName || identity.database_name !== connection.database) fail("ONBOARDING_RUNTIME_IDENTITY_INVALID");
+                });
+              } finally { await cleanup("RUNTIME_RELEASE", () => runtimeClient.release()); }
+            } finally { await cleanup("RUNTIME_POOL_END", () => runtimePool.end()); }
+          };
+          try {
+            // A provenance comment alone cannot authorize grants to an existing role.
+            await login(false);
+            await at("RUNTIME_PROVISION", () => loaded.provision(client, { roleName: roleName!, context: context! }));
+          } finally { await cleanup("RUNTIME_UNLOCK", () => bootstrap.releaseControl()); }
+          // Runtime context verification takes its own shared control lock.
+          await login(true);
+          await at("RUNTIME_HANDOFF", () => handoff.publish({ databaseUrl: bootstrap.databaseUrl, databaseHost: connection.host }));
+          result = { schemaVersion: context!.schemaVersion, instanceId: context!.instanceId, bindingDigest: context!.bindingDigest,
+            writerEpoch: context!.writerEpoch, transitionId: bootstrap.transitionId, roleCreated: bootstrap.roleCreated,
+            runtimeLoginVerified: true, environmentWriteAcknowledged: true };
         } else {
           const runtime = await at("RUNTIME_CONFIG", () => {
             const configured = loaded.connection({ CANNELE_REGISTRY_DATABASE_URL: secret(environment, "CANNELE_REGISTRY_DATABASE_URL"),
