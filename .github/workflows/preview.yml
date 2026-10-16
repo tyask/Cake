@@ -6,7 +6,7 @@ on:
       action:
         type: choice
         required: true
-        options: [deploy, status, cleanup]
+        options: [deploy, status, cleanup, verify]
       pr:
         type: string
         required: true
@@ -21,6 +21,10 @@ on:
         description: UUID identifying this exact request; rerun the same run after an uncertain response
         type: string
         required: true
+      deploymentId:
+        description: Exact existing READY application Deployment ID (required for verify only)
+        type: string
+        required: false
   pull_request_target:
     branches: [main]
     types: [closed]
@@ -52,6 +56,9 @@ jobs:
           node-version: '24.19.0'
           cache: npm
       - run: npm ci --ignore-scripts
+      - name: Install the official Playwright browser for verification
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'verify'
+        run: npx playwright install --with-deps chromium
       - name: Run the requested operation
         env:
           GH_TOKEN: ${{ github.token }}
@@ -59,4 +66,5 @@ jobs:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: node --import tsx scripts/preview-workflow.ts
       - name: Publish public operation receipt notice
+        if: success() || (always() && github.event_name == 'workflow_dispatch' && inputs.action == 'verify')
         run: node --import tsx scripts/preview-workflow.ts --notice

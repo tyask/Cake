@@ -6,7 +6,9 @@ CakeはCanneleを使用せず、PR単位のVercel Preview固有URLでQAする。
 
 `preview.config.json`にrepository、Vercel project/team、Neon Preview project・親branch、本番endpointのSHA-256と`receiptTransport: "github-actions-notice/v1"`を固定する。現行対象はGitHub `tyask/Cake`、Vercel `fumin1/cake`、Neon Preview project `misty-meadow-88903426`。provider protocol `cake-preview/v1`とDB marker version 2は変更しない。本番の接続情報をPreviewへ渡さない。
 
-Cloud/PCのコマンドはmainの `.github/workflows/preview.yml` を明示的にdispatchし、同じPRの操作をActionsのconcurrencyで直列化する。main上のスクリプトだけがprovider管理資格情報を使う。`pull_request_target` はclosedイベントだけで、PRコードをcheckout・実行しない。Vercelは指定したGitSourceのコードを、Preview DBの権限でリモートビルドする。
+Actionsブラウザ検証のcapabilityは独立した `preview-verify.config.json` で宣言する。`protocol: "cake-preview-verify/v1"`、`workflow: ".github/workflows/preview.yml"`、`action: "verify"` をmainの完全SHAで照合し、未導入・不一致のmainへはdispatchしない。既存deploy/status/cleanupのwire・receipt title/schema・`preview.config.json`を変更して検証機能の有無を表さない。
+
+Cloud/PCのコマンドはmainの `.github/workflows/preview.yml` を明示的にdispatchし、同じPRの操作をActionsのconcurrencyで直列化する。Actionsのverifyもこのconcurrencyを使い、信頼済みmain上のスクリプトだけがprovider管理資格情報を使う。`pull_request_target` はclosedイベントだけで、PRコードをcheckout・実行しない。Vercelは指定したGitSourceのコードを、Preview DBの権限でリモートビルドする。
 
 Actionsには既存のRepository secrets `VERCEL_TOKEN` と `NEON_API_KEY` が必要。GitHub読取は最小権限の `github.token` を使う。Cannele用Secret名を暗黙に代用しない。設定不足なら両Secret名を資格情報の値なしで報告し、providerの読取・作成・削除を始める前に停止する。新規資格情報・DB・deploymentを代わりに作らない。旧Cannele名のSecretだけでは使えないため、既存資格情報をGitHub Repository Settings → Secrets and variables → Actionsでこの2名に登録する。値をチャットへ送らない。
 
@@ -62,20 +64,57 @@ DB内の `cake_preview_database_identity` version 2はrepository・PR・ブラ�
 
 Aはテスト管理者・共有OWNER、Bは一般・MEMBER。Productionのテストログインは禁止。本番buildは従来どおりbuild成功後にmigrationを行い、失敗時は公開を止める。既存のアプリmigrationは変更しない。
 
-## 実ブラウザ検証とReady
+画面確認のHTTP methodとDBの副作用は区別する。現在の `GET /api/app` は、ログインしたユーザーの所属workspaceが0件なら `workspaces` と `workspace_members` に初期の個人workspaceとOWNERをINSERTしてから返す。認証後のホーム表示もこのbootstrapを通る。ブラウザ検証で業務更新POSTを遮断しても、この既存GETの副作用は防止しない。検証対象のfixtureと許可されたDB書込範囲を確認し、DB完全無変更の検証として報告しない。
+
+## ローカル実ブラウザ検証とReady
 
 ```bash
 npm run qa:verify
 npm run task:pr -- --title '変更内容' --verification-file /path/report.md
 ```
 
-検証前後にActionsで現在HEAD・READY Deployment・DBを再照合する。固有URLのみを使い、任意URLやbranch aliasは受け付けない。PC/mobileでA/Bログイン、ダッシュボード、取引明細・設定・ホームの実クリック、session/app GETとruntime proofを確認する。読取スモークは認証callback以外の書込を送らない。変更箇所固有のテスト結果は報告書へ別途記載する。
+既存の `qa:verify` は対象PRのcleanなworktreeで実行し、ローカルブラウザを使う。検証前後にActionsで現在HEAD・READY Deployment・DBを再照合する。固有URLのみを使い、任意URLやbranch aliasは受け付けない。PC/mobileでA/Bログイン、ダッシュボード、取引明細・設定・ホームの計16実クリック、session/app GETとruntime proofを確認する。送信するHTTP methodはGET/HEAD/OPTIONSとテスト認証callbackのPOSTに制限するが、前節のbootstrap INSERTは起こり得る。変更箇所固有のテスト結果は報告書へ別途記載する。
 
 Vercel保護には同一project/team・development環境・期限内のOIDCを対象originだけへ付与する。既存 `VERCEL_OIDC_TOKEN` を優先し、なければ既存 `VERCEL_TOKEN` で同projectのdevelopment env取得APIからメモリ内へ取り込む。ユーザー照会の成功をproject単位操作の前提にしない。保護設定を弱めず、secretを新規発行しない。token・Cookie・生のprovider/browser例外をログ・artifact・スクリーンショットへ出さない。
 
-Cloudでは実効policyの `*.vercel.app` と提供CAを確認する。ChromiumはLinuxのNSS信頼ストアを利用する。Cloud提供の `NODE_EXTRA_CA_CERTS` の証明書と既存NSS登録を照合し、未登録なら提供CAを標準の `certutil -A -d sql:<NSS DB> -t 'C,,' -i <Cloud CA>` で登録する。NSS DBにはSQLiteが必要とするアクセス権が必要。検証用ブラウザは一時プロファイルを使い、セッションは終了時に破棄する。必要なら `CAKE_BROWSER_EXECUTABLE=/usr/bin/chromium` を指定する。`ignoreHTTPSErrors`、証明書無視フラグ、TLS検証無効化、`route.fetch`による画面通信の代替は使わない。
+Cloudでローカル検証を行う場合は、実効policyの `*.vercel.app` と提供CA・既存NSS登録を読み取り照合する。ChromiumはLinuxのNSS信頼ストアを利用し、NSS DBにはSQLiteが必要とするアクセス権が必要。CA不足や読み取り専用状態で失敗した場合は対象hostと段階を報告して停止し、承認なしにCA・権限・proxy・ネットワーク設定を変更しない。信頼ストアのコピーやHOME移動で読み取り専用制限を回避しない。検証用ブラウザは一時プロファイルを使い、セッションは終了時に破棄する。既存Chromiumを使う場合は `CAKE_BROWSER_EXECUTABLE=/usr/bin/chromium` を指定できる。`ignoreHTTPSErrors`、証明書無視フラグ、TLS検証無効化、`route.fetch`による画面通信の代替は使わない。次節のActions検証は公式Playwright Chromiumを使用し、Cloudの信頼設定を変更しない。
 
 `.cake/verification.json` に対象commit・Deployment・DB・case・クリック時刻・成否を記録し、画面画像も `.cake/` に保存する。失敗時は以前の成功証拠を無効にする。Readyには現在HEADのpush/PR CIの最新attempt成功と一致する検証証拠が必要。古い成功runで新しい失敗を隠さない。PR更新後にもHEADを再照合してdraftを解除し、mergeは利用者が行う。
+
+## Actionsによる既存Previewの実ブラウザ検証
+
+この機能が導入された最新mainとHEADが一致するcleanなcontrol checkoutから、既存のOPEN PR・完全HEAD SHA・READY application Deployment IDを明示する。対象PRのブランチへ移動して新CLIを実行する方式ではない。
+
+```bash
+npm run qa:verify:ci -- --pr <PR番号> --sha <完全SHA> --deployment <Deployment ID>
+```
+
+CLIは既存gh本人認証でPR、最新main、設定、verify capability、workflowを照合し、mainへ `action: verify` と対象Deployment ID・operation・controlShaを明示dispatchする。旧mainにverify capabilityがない場合はdispatch前に停止し、旧deploy/status/cleanupやローカル検証へ自動fallbackしない。dispatch後も対象PR/HEADとcontrol SHAを照合する。新CLIのために `preview.config.json` を変更しない。
+
+Actionsは信頼済みmainの完全SHAだけをcheckoutし、PRコードを管理資格情報付きで実行しない。verifyの場合だけ、資格情報を渡す前のstepで公式Playwright Chromiumをインストールする。既存の `VERCEL_TOKEN`・`NEON_API_KEY` と読取用 `github.token` だけを使い、新規secret・認証方式・security/network設定は作らない。provider管理APIはbodyなしGETだけを許す専用guardを通し、検証前のstatus → ブラウザ → 検証後のstatusを同一run内で行う。対象PR/完全SHA/Deployment/URL/DB世代/Native branch/endpointの一致が条件となる。deploy・再作成・migration・seed・direct SQLは実行しない。アプリのGETが起こすbootstrap INSERTは前節のとおり別の副作用であり、このguardでのDB無変更保証には含めない。
+
+PC/mobileのA/B、16クリック、session/app GET、runtime proofはローカルと同じブラウザhelperで検証する。各caseのruntime-before・session/app・runtime-afterの観測時刻を記録する。OIDCは既存 `VERCEL_TOKEN` で同projectのdevelopment env取得APIからメモリ内だけへ読み、project/team・environment・期限を確認して対象originだけへ付与する。redirect各hopもoriginを確認し、token/Cookieを別origin、ログ、receipt、artifactへ出さない。TLS検証を維持し、保護設定を弱めない。
+
+verify専用のnotice titleとreceipt protocolは `cake-preview-verify/v1`。成功・失敗とも公開可能なprojectionを厳密に検査し、compact JSONを4,096 UTF-8 bytes以下に制限する。失敗時は固定stage/codeと部分的な非秘密証拠だけを出し、provider/browserの生例外や秘密を含めない。CLIは既存notice受信と同じrun ID/初回attempt/operation/control SHA、workflow/job/CheckRun/CheckSuite/repository/GitHub Actions app、対象PR/HEAD/Deploymentを照合する。成功はrun/job/checkのsuccessと一致するものだけ受理し、failure receiptはrun/job/checkのfailureに一致する診断として読み、成功扱いしない。欠落・重複・不一致・マスク・切詰めでは停止する。artifact ZIP・外部relay・`checks: write`は不要で、Actionsの画面画像を結果取得経路に使わない。
+
+成功証拠は対象PRのworktreeではなくcontrol checkoutの `.cake/verify-<PR番号>.json` へ保存する。wrapper protocolは `cake-preview-remote-proof/v1` で、workflow IDと受理したverify receiptを保持する。失敗・未完了・不一致で以前の成功を再利用しない。このコマンド自体はPRを更新せず、Readyにも変更しない。
+
+検証成功後にReadyへ進める依頼がある場合は、対象PRの現在HEADと最新push/PR CIを確認し、新CLIを含む対象PRのcleanなworktreeから明示的にremote proofを渡す。`task:pr` は保存ファイルだけを信頼せず、そのActions run・noticeの来歴と現在の対象を再照合する。
+
+```bash
+npm run task:pr -- --title '変更内容' --verification-file /path/report.md --remote-proof /path/control-checkout/.cake/verify-<PR番号>.json
+```
+
+`--remote-proof` は任意で、省略時のローカル `.cake/verification.json` と既存 `task:pr` の動作は維持する。別PR、別HEAD、別Deployment、失敗receipt、古いattemptの証拠をReadyへ流用しない。
+
+PR #75のように対象ブランチの旧 `task:pr` が `--remote-proof` を持たない場合は、そのブランチを更新せず、最新mainのcontrol checkoutから `--target-worktree` を併用する。この指定は `--remote-proof` 必須で `--draft` と併用できない。controlのcleanなHEADと最新main・verify capabilityを照合した後、対象worktreeのcleanな専用branch・PR・完全HEADを照合する。対象ブランチのスクリプトやアプリコードは実行せず、信頼済みcontrol側の管理コードから対象のGit/gh操作を行う。
+
+```bash
+# CWDは更新済みmainのcontrol checkout。実QA成功・最新CI確認・Readyの依頼後だけ実行する。
+npm run task:pr -- --title '変更内容' --verification-file /absolute/path/target-report.md --remote-proof /absolute/path/control-checkout/.cake/verify-75.json --target-worktree /absolute/path/Cake-worktrees/notice-receipt-acceptance
+```
+
+報告書・remote proof・対象worktreeは絶対pathを推奨する。相対pathは実行元のcontrol checkoutを基準に解釈される。`--target-worktree` も省略時の既定動作を変えず、検証CLIの成功から自動でReady処理を始めることはない。
 
 ## PR終了時のcleanup
 
@@ -101,8 +140,22 @@ main導入後、試験PRで初回Native作成、アプリDB接続、追加commit
 
 正式な受信実装も同日にCloudの実APIへGETだけで照合し、既存[run 38896088643](https://github.com/tyask/Cake/actions/runs/38896088643)の正確なattempt/job/check/suiteを確認後、新noticeがない旧結果を拒否した。旧mainに対する`PREVIEW_NOT_INSTALLED_ON_MAIN`停止も実測し、dispatch・provider操作は0件だった。これは所属照合と導入前停止の確認であり、正式receiptの実機往復成功とは区別する。
 
-今回の`codex/notice-receipts`はローカル検証と実装draft PR作成までを対象とし、実資源を使う受入は未実施。PR段階の新CLIはtransport設定がない旧mainのdeploy/status/cleanupをdispatch前に拒否する。provider workflowもmain限定なので、非main branchへdispatchして正式receiptを検証した扱いにしない。main導入後は本実装PRがclosedになるため、受入には別のOPEN試験PR/branchが必要。試験PR番号は未発行であり、今回は作成しない。main導入と実機試験は別途承認の対象とし、導入後に最新workflowと試験PR/HEADを確認して、次の対象・影響の承認が揃ってから実機受入を行う。
+notice実装PR `codex/notice-receipts` の作業範囲はローカル検証と実装draft PR作成までで、その時点では実資源の受入と試験PR作成は未実施だった。PR段階のCLIはtransport設定がない旧mainのdeploy/status/cleanupをdispatch前に拒否する。provider workflowもmain限定なので、非main branchへdispatchして正式receiptを検証した扱いにしない。当時のmain導入後受入は、別のOPEN試験PR/branchについて次の対象・影響を承認してから進める計画とした。現在の実施範囲は次節に分ける。
 
 1. Vercel `fumin1/cake` とNeon Preview project `misty-meadow-88903426`（親branch `br-lively-frog-b3y2mauu`）で別のOPEN試験PRの初回Previewを作る。branch例は`codex/notice-receipt-acceptance`、Native branch候補は`preview/codex/notice-receipt-acceptance`。実行前にPR番号、完全HEAD、configのproject/親branch bindingを改めて提示する。初回はprovisioningとapplicationの最大2 Deployment、専用DB branch/read-write endpointの生成と初回migration/seedを予定する。生成されたID・世代を記録し、別PR・本番・旧資源には触れない。
 2. 正式receiptを既存Cloud gh認証で受領し、`qa:status`とPC/mobile A/Bの`qa:verify`を確認する。同じ試験PRの追加commitを配置し、Native branch/endpoint・DB世代と入力済みデータが保持されることを確認する。追加配置と検証に伴う書込も承認範囲を確認する。
 3. cleanupは対象Deployment ID・Neon branch/endpointと削除影響を改めて提示し、承認後にだけPRをclose/merge、またはclosed PRへ明示cleanupを実行する。削除後の全対象不在を直接GETで確認する。cleanupの承認前にPRを閉じない。
+
+## Actions verify実装PRの範囲と残る実環境受入
+
+2026-10-16の `codex/actions-preview-qa` は、Actions検証経路の実装、ローカル検証、draft PRと通常CIまでを対象とする。既存の受入PR #75 (`codex/notice-receipt-acceptance`、HEAD `a0e0aac6fa479040463a268182ea61b5fefd07e2`) とそのDeployment/DBは更新しない。この実装作業では実Actions QA dispatch、OIDCによるPreviewアクセス、DB書込、deploy、migration/seed、main merge、cleanupを行わない。ローカルのスタブ/契約テストと通常CIの成功を、実Actionsのブラウザ/OIDC成功として報告しない。
+
+mainへの導入は既存Production Git連携のdeployを起動し得るため、別途承認が必要。導入と対象の実環境検証が承認された後は、更新したmainのcontrol checkoutでPR #75の最新HEAD・Deployment・専用DBを改めて照合する。次は現在の対象を示す未実施のコマンド例で、実行時点の値が変わっていた場合は停止して確認する。
+
+```bash
+npm run qa:verify:ci -- --pr 75 --sha a0e0aac6fa479040463a268182ea61b5fefd07e2 --deployment dpl_8GpqT3jbuDqdLBMTWyvPwzjK1oDW
+```
+
+PR #75の旧管理CLIへ新flagsを渡さない。実Actions QA成功と最新CIを確認し、Readyへの依頼がある場合だけ、前節のcontrol checkoutから `--remote-proof .../verify-75.json --target-worktree .../notice-receipt-acceptance` を指定する。これは将来の手順であり、この実装PRではReady操作を実行しない。
+
+同DB更新後のデータ保持、非機密の識別データ投入、PRのReady化、merge/closeや資源cleanupはこの実装PRの検証完了に含めない。既存受入の初回配置予算は2/2消費済み、同DB更新は0/1のまま保持し、再作成しない。各段階の対象・影響・実測結果を確認してから、承認された範囲だけ進める。

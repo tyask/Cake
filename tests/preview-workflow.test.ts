@@ -8,6 +8,8 @@ import { PreviewService } from '../scripts/preview-service';
 import { PreviewProvider } from '../scripts/preview-provider';
 import { config, protocol, type Source } from '../scripts/preview-model';
 import { parseReceipt, receiptMaxBytes, receiptNoticeTitle } from '../scripts/preview-receipt';
+import { PreviewVerifyService } from '../scripts/preview-verify-service';
+import { parseVerifyReceipt, verifyReceiptNoticeTitle, verifyReceiptProtocol } from '../scripts/preview-verify-receipt';
 
 test('workflow refuses untrusted ref/event, fork PR and stale source before any provider write',async(t)=>{
   t.mock.method(console,'error',()=>{});
@@ -98,4 +100,78 @@ test('credential preflight reports both missing names without returning values',
   assert.deepEqual(missingPreviewCredentials({}),['VERCEL_TOKEN','NEON_API_KEY']);
   assert.deepEqual(missingPreviewCredentials({VERCEL_TOKEN:'private-value',NEON_API_KEY:' '}),['NEON_API_KEY']);
   assert.deepEqual(missingPreviewCredentials({VERCEL_TOKEN:'private-value',NEON_API_KEY:'private-neon'}),[]);
+});
+
+test('verify rejects untrusted targets and reruns before provider reads, and erases any stale success', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cake-verify-input-')), previous = process.cwd();
+  const eventPath = join(directory, 'event.json'), resultPath = join(directory, 'preview-result.json');
+  let calls = 0;
+  const verifier = new PreviewVerifyService(async () => { calls++; assert.fail('untrusted inputs must not read providers'); });
+  const env: NodeJS.ProcessEnv = { NODE_ENV: 'test', VERCEL_TOKEN: 'test-only', NEON_API_KEY: 'test-only', GITHUB_REPOSITORY: config.repository,
+    GITHUB_REF: 'refs/heads/main', GITHUB_WORKFLOW_REF: `${config.repository}/.github/workflows/preview.yml@refs/heads/main`, GITHUB_EVENT_PATH: eventPath,
+    GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: 'c'.repeat(40), GITHUB_EVENT_NAME: 'workflow_dispatch' };
+  const inputs = { action: 'verify', pr: '71', sha: 'a'.repeat(40), operation: '20000000-0000-4000-8000-000000000002', controlSha: env.GITHUB_SHA, deploymentId: 'dpl_Test' };
+  try {
+    process.chdir(directory);
+    for (const changes of [{ deploymentId: undefined }, { deploymentId: 'https://cake-test.vercel.app' }, { deploymentId: 'dpl_Test?other' },
+      { pr: '071' }, { pr: '-1' }, { pr: '9007199254740992' }, { sha: 'short' }, { controlSha: 'd'.repeat(40) }]) {
+      await writeFile(resultPath, 'stale-success');
+      await writeFile(eventPath, JSON.stringify({ repository: { full_name: config.repository }, inputs: { ...inputs, ...changes } }));
+      await assert.rejects(runPreviewWorkflow(env, undefined, verifier), /PREVIEW_(VERIFY_INVALID_TARGET|UNTRUSTED_WORKFLOW)/);
+      await assert.rejects(readFile(resultPath), /ENOENT/);
+    }
+    await writeFile(eventPath, JSON.stringify({ repository: { full_name: config.repository }, inputs }));
+    await assert.rejects(runPreviewWorkflow({ ...env, GITHUB_RUN_ATTEMPT: '2' }, undefined, verifier), /VERIFY_RERUN_UNSUPPORTED/);
+    await assert.rejects(runPreviewWorkflow({ ...env, GITHUB_REF: 'refs/heads/codex/untrusted' }, undefined, verifier), /UNTRUSTED_WORKFLOW/);
+    assert.equal(calls, 0);
+  } finally { process.chdir(previous); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('verify writes a failure receipt before failing the job, and notice is emitted by the credential-free step', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'cake-verify-failure-notice-')), previous = process.cwd();
+  const eventPath = join(directory, 'event.json'), summaryPath = join(directory, 'summary.md');
+  const head = 'a'.repeat(40), operation = '20000000-0000-4000-8000-000000000002';
+  const raw = { number: 71, state: 'open', created_at: '2026-10-16T00:00:00Z', head: { ref: 'codex/test', sha: head, repo: { full_name: config.repository } }, base: { ref: 'main', repo: { full_name: config.repository } } };
+  let verifies = 0;
+  const verifier = new PreviewVerifyService(async (provider, path, method = 'GET', body) => {
+    assert.equal(provider, 'github'); assert.match(path, /\/pulls\/71$/); assert.equal(method, 'GET'); assert.equal(body, undefined); return raw;
+  });
+  t.mock.method(verifier, 'verify', async (source: Source, expectedDeploymentId: string) => {
+    verifies++;
+    return { protocol: verifyReceiptProtocol, action: 'verify' as const, source, expectedDeploymentId, checkedAt: new Date().toISOString(), success: false,
+      failure: { stage: 'preflight' as const, code: 'PREVIEW_VERIFY_STATUS_FAILED' as const }, private: 'must-not-leak' };
+  });
+  const env: NodeJS.ProcessEnv = { NODE_ENV: 'test', VERCEL_TOKEN: 'test-only', NEON_API_KEY: 'test-only', GITHUB_REPOSITORY: config.repository,
+    GITHUB_REF: 'refs/heads/main', GITHUB_WORKFLOW_REF: `${config.repository}/.github/workflows/preview.yml@refs/heads/main`, GITHUB_EVENT_PATH: eventPath,
+    GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: 'c'.repeat(40), GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_STEP_SUMMARY: summaryPath };
+  try {
+    process.chdir(directory);
+    const inputs = { pr: '71', sha: head, action: 'verify', operation, controlSha: env.GITHUB_SHA, deploymentId: 'dpl_Test' };
+    await writeFile(eventPath, JSON.stringify({ repository: { full_name: config.repository }, inputs }));
+    await assert.rejects(runPreviewWorkflow(env, undefined, verifier), /PREVIEW_VERIFY_STATUS_FAILED/);
+    const text = await readFile(join(directory, 'preview-result.json'), 'utf8'), result = parseVerifyReceipt(text);
+    assert.equal(result.success, false); assert.equal(result.runAttempt, 1); assert.equal(result.controlSha, env.GITHUB_SHA);
+    assert.equal(result.expectedDeploymentId, 'dpl_Test'); assert.equal(result.operation, operation); assert.ok(!text.includes('must-not-leak'));
+    const notices: string[] = []; await emitPreviewReceipt(undefined, notice => notices.push(notice));
+    assert.deepEqual(notices, [`::notice title=${verifyReceiptNoticeTitle}::${text}`]);
+    assert.match(await readFile(summaryPath, 'utf8'), /verify: 失敗/);
+    await writeFile(eventPath, JSON.stringify({ repository: { full_name: config.repository }, inputs: { ...inputs, sha: 'b'.repeat(40) } }));
+    await assert.rejects(runPreviewWorkflow(env, undefined, verifier), /PR_CHANGED/);
+    assert.equal(verifies, 1); await assert.rejects(readFile(join(directory, 'preview-result.json')), /ENOENT/);
+  } finally { process.chdir(previous); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('verify workflow installs the official browser before secrets and preserves main-only permissions and receipt isolation', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/preview.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /options: \[deploy, status, cleanup, verify\]/);
+  assert.match(workflow, /deploymentId:[\s\S]*?required: false/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /permissions:\s*contents: read\s*pull-requests: read/);
+  assert.ok(!/id-token:|checks: write|pull_request:\s|\bpush:/.test(workflow));
+  assert.ok(workflow.indexOf('npx playwright install --with-deps chromium') < workflow.indexOf('GH_TOKEN:'));
+  const notice = workflow.slice(workflow.indexOf('- name: Publish public operation receipt notice'));
+  assert.match(notice, /if: success\(\) \|\| \(always\(\) && github\.event_name == 'workflow_dispatch' && inputs\.action == 'verify'\)/);
+  assert.ok(!notice.includes('env:')); assert.ok(!notice.includes('TOKEN')); assert.ok(!workflow.includes('upload-artifact'));
 });

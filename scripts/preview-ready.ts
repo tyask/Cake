@@ -4,6 +4,8 @@ import { browserCases, sameVerifiedDeployment, type BrowserProof } from './previ
 import { config, type Source } from './preview-model';
 import { commandOutput, type WorkflowExecutor } from './task-workflow';
 import { requestReceipt } from './preview-command';
+import { revalidateRemotePreviewProof } from './preview-remote-proof';
+import { exactDeploymentIdentity } from './preview-verify-receipt';
 export async function assertPreviewCi(s: Source, cwd: string, execute: WorkflowExecutor): Promise<void> {
   const pages = JSON.parse(await commandOutput(execute,'gh',['api','--paginate','--slurp',`repos/${config.repository}/actions/workflows/ci.yml/runs?head_sha=${s.sha}&per_page=100`],cwd));
   if (!Array.isArray(pages) || !pages.length || pages.some(p=>!Array.isArray(p.workflow_runs))) throw new Error('PREVIEW_CI_INCOMPLETE');
@@ -17,7 +19,18 @@ export async function assertPreviewCi(s: Source, cwd: string, execute: WorkflowE
     if (matches[0].status!=='completed'||matches[0].conclusion!=='success') throw new Error('PREVIEW_CI_NOT_SUCCESSFUL');
   }
 }
-export async function readyPreview(s: Source,cwd: string,execute: WorkflowExecutor): Promise<BrowserProof> {
+export async function readyPreview(s: Source,cwd: string,execute: WorkflowExecutor,remoteProofPath?: string): Promise<BrowserProof> {
+  if (remoteProofPath) {
+    const get = async (path: string) => {
+      try { return JSON.parse(await commandOutput(execute,'gh',['api',`repos/${config.repository}/${path}`],cwd)); }
+      catch { throw new Error('PREVIEW_API_UNAVAILABLE'); }
+    };
+    const proof = await revalidateRemotePreviewProof(resolve(cwd,remoteProofPath),s,get);
+    const current = await requestReceipt('status',s,cwd,execute);
+    if (!current.deployment || !exactDeploymentIdentity(proof.deployment,current.deployment)) throw new Error('PREVIEW_PROOF_STALE');
+    await assertPreviewCi(s,cwd,execute);
+    return proof;
+  }
   const path=resolve(cwd,'.cake/verification.json'), meta=await lstat(path);
   if (!meta.isFile()||meta.isSymbolicLink()||meta.size>100_000) throw new Error('PREVIEW_BROWSER_PROOF_REQUIRED');
   const proof:BrowserProof=JSON.parse(await readFile(path,'utf8'));

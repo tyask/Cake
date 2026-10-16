@@ -60,7 +60,7 @@ Previewには定期実行を期待せず、テストログイン中の `POST /ap
 
 画面上部に表示する共通の成功・エラーメッセージは2秒後に自動で消えます。再通知すると表示時間を数え直し、「×」で手動でも閉じられます。
 
-画面用データは、ワークスペース一覧・選択先・参加者・ルール・招待と、必要な明細・清算履歴を1つのSQLでまとめて取得します。通常のログイン済み`GET /api/app`では、従来どおり利用者の利用可否を1つのSQLで確認した後、画面用データを1つのSQLで取得するため、`full`・`metadata`ともに2 SQL・2回のNeon往復になります。`metadata`では明細・清算履歴の取得を省きます。初めてのワークスペース作成や選択先の変更に伴う再取得では、追加の処理が発生します。
+画面用データは、ワークスペース一覧・選択先・参加者・ルール・招待と、必要な明細・清算履歴を1つのSQLでまとめて取得します。通常のログイン済み`GET /api/app`では、従来どおり利用者の利用可否を1つのSQLで確認した後、画面用データを1つのSQLで取得するため、`full`・`metadata`ともに2 SQL・2回のNeon往復になります。`metadata`では明細・清算履歴の取得を省きます。所属ワークスペースが0件の場合は、このGETでも初期の個人ワークスペースと参加者レコードをINSERTしてから再取得します。選択先の変更に伴う再取得でも追加の処理が発生します。
 
 データの読込時には、ユーザーのプロフィールをDBへ書き戻しません。プロフィールの更新はログイン時や設定での変更時に行います。
 
@@ -178,7 +178,7 @@ QAのDB初回照合・fixture・migration/seed・同PR更新時のデータ保�
 
 ## 開発・QA運用手順
 
-CloudとローカルPCで共通の開発、draft PR作成、PR専用Preview、画面・APIテスト、cleanupの手順は [docs/development-workflow.md](docs/development-workflow.md) にまとめています。Actionsの結果は標準notice annotationを既存gh本人認証で読み取り、artifact取得や外部relayを使いません。
+CloudとローカルPCで共通の開発、draft PR作成、PR専用Preview、画面・APIテスト、cleanupの手順は [docs/development-workflow.md](docs/development-workflow.md) にまとめています。ローカルの `qa:verify` に加え、更新済みmainのcontrol checkoutから既存Previewを検証する `qa:verify:ci` を使えます。Actionsの結果は標準notice annotationを既存gh本人認証で読み取り、artifact取得や外部relayを使いません。
 
 実Deployment・DBの作成/更新・資源削除は、対象と影響が承認された範囲で行います。PRのmerge/closeでもcleanupによる削除が起動し得るため、draft PR作成の依頼だけで実行しません。作業開始前に運用手順と検証の実施範囲を確認してください。
 
@@ -254,6 +254,16 @@ npm run qa:verify
 npm run qa:release -- --pr <閉じたPR番号>
 ```
 
-テスト前に `npx playwright install chromium` でブラウザを用意します。Cloudに既存Chromiumがある場合は `CAKE_BROWSER_EXECUTABLE=/usr/bin/chromium` を指定できます。
+ローカルの `qa:verify` は対象PRのworktreeで実行します。テスト前に `npx playwright install chromium` でブラウザを用意し、既存Chromiumを使う場合は `CAKE_BROWSER_EXECUTABLE=/usr/bin/chromium` を指定できます。CA・権限・ネットワーク設定の変更やTLS検証の回避は、この操作に含めません。
 
-draft作成・Ready条件・認証・Cloud CA・失敗復旧・一括切替の手順は[開発・QA運用手順](docs/development-workflow.md)を参照してください。新方式の実環境作成・cleanup受入はmain導入後に別途行います。
+Actionsで検証する場合は、この機能を導入した最新mainとHEADが一致するcleanなcontrol checkoutから、対象PRの完全SHAと既存Deployment IDを指定します。
+
+```bash
+npm run qa:verify:ci -- --pr <PR番号> --sha <完全SHA> --deployment <Deployment ID>
+```
+
+信頼済みmain上の処理がproviderをGETだけで検証前後に照合し、公式Playwright ChromiumでPC/mobileのA/Bを操作します。Vercel保護には既存資格情報から取得する期限付きOIDCを対象originだけへ付与します。`GET /api/app` の初期workspace作成を含め、画面側のDB副作用は別途考慮が必要です。結果はcontrol checkoutの `.cake/verify-<PR番号>.json` に保存し、検証だけではPRをReadyにしません。
+
+Readyへ進める際、対象PRに新しい管理CLIがない場合は、更新済みmainのcontrol checkoutから `task:pr --remote-proof <証拠の絶対path> --target-worktree <対象worktreeの絶対path>` を使えます。`--target-worktree` はremote proof必須・非draft専用で、対象の旧コードを実行しません。検証報告書の `--verification-file` も絶対pathを推奨します。
+
+draft作成・Ready条件・任意の `--remote-proof`／`--target-worktree`・認証・失敗復旧・導入範囲は[開発・QA運用手順](docs/development-workflow.md)を参照してください。Actions上の実QA/OIDC、同DB更新後の保持、cleanupの受入は個別に実施状況を確認します。mainへの導入は既存Production Git連携のdeployを起動し得るため、実装draft PRの作成とは別に承認を得ます。
