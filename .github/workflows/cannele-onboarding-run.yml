@@ -37,6 +37,8 @@ on:
         required: false
       runtime_database_host:
         required: false
+      bootstrap_vercel_token:
+        required: false
       transition_vercel_token:
         required: false
       transition_neon_api_key:
@@ -224,6 +226,7 @@ jobs:
           CAKE_QA_REGISTRY_ENABLED: ${{ vars.CAKE_QA_REGISTRY_ENABLED }}
           CANNELE_REGISTRY_ADMIN_DATABASE_URL: ${{ secrets.admin_database_url }}
           CANNELE_REGISTRY_ADMIN_DATABASE_HOST: ${{ secrets.admin_database_host }}
+          CANNELE_BOOTSTRAP_VERCEL_TOKEN: ${{ secrets.bootstrap_vercel_token }}
           CANNELE_TRANSITION_VERCEL_TOKEN: ${{ secrets.transition_vercel_token }}
           CANNELE_TRANSITION_NEON_API_KEY: ${{ secrets.transition_neon_api_key }}
       - name: Grant and verify the existing dedicated runtime LOGIN

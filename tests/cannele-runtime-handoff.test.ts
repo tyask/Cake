@@ -5,6 +5,7 @@ import { createRuntimeHandoff, runtimeHandoffMarker, RuntimeHandoffError, safeHa
 const projectId = 'prj_EgVvFUE4gXVZnMTuw69lQ3mIGYVN';
 const teamId = 'team_D1Mcx2TdFWPKcypfu8KzNMub';
 const roleName = 'cannele_fixture_runtime';
+const bootstrapVercelToken = 'fixture-vercel-bootstrap-token';
 const vercelToken = 'fixture-vercel-runtime-token';
 const neonApiKey = 'fixture-neon-runtime-key';
 const databaseHost = 'ep-fixture.us-east-1.aws.neon.tech';
@@ -30,7 +31,7 @@ function safeFailure(code?: string) {
     assert.match(error.code, /^RUNTIME_HANDOFF_[A-Z_]+$/);
     if (code) assert.equal(error.code, `RUNTIME_HANDOFF_${code}`);
     assert.equal(error.cause, undefined);
-    for (const privateValue of [privateDiagnostic, databaseUrl, databaseHost, vercelToken, neonApiKey, 'fixture-password']) {
+    for (const privateValue of [privateDiagnostic, databaseUrl, databaseHost, bootstrapVercelToken, vercelToken, neonApiKey, 'fixture-password']) {
       assert.equal(`${error.message}\n${error.stack}\n${JSON.stringify(error)}`.includes(privateValue), false);
     }
     return true;
@@ -65,7 +66,7 @@ function fixture() {
     project: { id: projectId, name: 'cannele-cake', accountId: teamId },
     metadata: undefined as (() => unknown) | undefined,
     own(key: string): Env { return { id: `env_owned_${++sequence}`, key, type: 'sensitive', target: ['production'], comment: marker }; },
-    factory: () => createRuntimeHandoff({ vercelToken, neonApiKey, context, roleName, request }),
+    factory: () => createRuntimeHandoff({ bootstrapVercelToken, vercelToken, neonApiKey, context, roleName, request }),
   };
   const request: typeof fetch = async (input, init) => {
     const url = new URL(String(input)); const method = init?.method ?? 'GET';
@@ -73,8 +74,8 @@ function fixture() {
     const call = { url, method, ...(body ? { body } : {}) }; calls.push(call);
     assert.equal(url.origin, 'https://api.vercel.com'); assert.equal(url.searchParams.get('teamId'), teamId);
     assert.equal(init?.redirect, 'manual'); assert.ok(init?.signal instanceof AbortSignal);
-    assert.equal(new Headers(init?.headers).get('authorization'), `Bearer ${vercelToken}`);
-    assert.ok(![databaseUrl, vercelToken, neonApiKey].some(value => url.href.includes(value)));
+    assert.equal(new Headers(init?.headers).get('authorization'), `Bearer ${bootstrapVercelToken}`);
+    assert.ok(![databaseUrl, bootstrapVercelToken, vercelToken, neonApiKey].some(value => url.href.includes(value)));
     const overridden = state.before?.(call, init); if (overridden) return overridden;
     if (method === 'GET' && url.pathname === `/v9/projects/${projectId}`) return response(state.project);
     if (method === 'GET' && url.pathname === `/v10/projects/${projectId}/env`) {
@@ -122,6 +123,8 @@ function assertPublished(f: ReturnType<typeof fixture>): void {
   for (const call of writes(f.calls)) {
     assert.ok(call.body); assert.equal(call.body.type, 'sensitive'); assert.deepEqual(call.body.target, ['production']);
     assert.equal(call.body.comment, f.marker); assert.ok(Object.values(expectedValues).includes(String(call.body.value)));
+    assert.ok(keys.includes(String(call.body.key)));
+    assert.equal(JSON.stringify(call.body).includes(bootstrapVercelToken), false);
   }
 }
 
@@ -154,6 +157,22 @@ test('publication requires preflight and rejects unsafe runtime connection input
     await assert.rejects(handoff.publish({ databaseUrl, databaseHost, ...change }), safeFailure('INPUT_INVALID'));
     assert.equal(writes(f.calls).length, 0);
   }
+});
+
+test('bootstrap authorization is required independently of the runtime token and invalid credentials stop before requests', () => {
+  let calls = 0;
+  const request: typeof fetch = async () => { calls++; throw new Error(privateDiagnostic); };
+  const valid = { bootstrapVercelToken, vercelToken, neonApiKey, context, roleName, request };
+  type Options = Parameters<typeof createRuntimeHandoff>[0];
+  for (const value of [undefined, null, false, true, 0, '', ' ', ' token ', '\n']) {
+    assert.throws(() => createRuntimeHandoff({ ...valid, bootstrapVercelToken: value } as unknown as Options), safeFailure('INPUT_INVALID'));
+  }
+  const missing = { ...valid } as Record<string, unknown>; delete missing.bootstrapVercelToken;
+  assert.throws(() => createRuntimeHandoff(missing as unknown as Options), safeFailure('INPUT_INVALID'));
+  for (const value of [undefined, null, false, '', ' ']) {
+    assert.throws(() => createRuntimeHandoff({ ...valid, vercelToken: value } as unknown as Options), safeFailure('INPUT_INVALID'));
+  }
+  assert.equal(calls, 0);
 });
 
 test('a new factory can resume a partial handoff using owned rows and fresh metadata without creating duplicates', async () => {
@@ -341,7 +360,7 @@ test('each read failure reports only its fixed GET phase and HTTP status', async
   ];
   for (const phase of phases) {
     const f = fixture(); f.before = call => call.url.pathname === phase.path
-      ? response({ error: { message: privateDiagnostic, token: vercelToken, databaseUrl } }, phase.status) : undefined;
+      ? response({ error: { message: privateDiagnostic, token: vercelToken, bootstrapToken: bootstrapVercelToken, databaseUrl } }, phase.status) : undefined;
     await assert.rejects(f.factory().preflight(), diagnosed('REQUEST_FAILED', {
       method: 'GET', endpoint: phase.endpoint, status: phase.status, reason: 'HTTP',
     }));
@@ -353,7 +372,7 @@ test('transport, redirect, empty and invalid response diagnostics never copy pro
   const cases: Array<{ code: string; diagnostic: HandoffDiagnostic; before: (call: Call) => Response | undefined }> = [
     { code: 'REQUEST_FAILED', diagnostic: { method: 'GET', endpoint: 'PUBLIC_BINDING', status: null, reason: 'TRANSPORT' },
       before: call => { if (call.url.pathname.endsWith('/env_binding')) {
-        const error = new Error(`${privateDiagnostic} ${databaseUrl} ${vercelToken}`); error.name = 'TimeoutError'; throw error;
+        const error = new Error(`${privateDiagnostic} ${databaseUrl} ${bootstrapVercelToken} ${vercelToken}`); error.name = 'TimeoutError'; throw error;
       } return undefined; } },
     { code: 'REQUEST_FAILED', diagnostic: { method: 'GET', endpoint: 'ENV_METADATA', status: 307, reason: 'REDIRECT' },
       before: call => call.url.pathname === `/v10/projects/${projectId}/env`

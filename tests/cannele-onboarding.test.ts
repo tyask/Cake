@@ -21,7 +21,8 @@ const environment = { EVENT_NAME: "workflow_dispatch", GITHUB_TOKEN: "synthetic-
   CANNELE_REGISTRY_ADMIN_DATABASE_HOST: "ep-management.mock.aws.neon.tech",
   CANNELE_REGISTRY_DATABASE_URL: "postgresql://cannele_runtime:synthetic-runtime-password@ep-management.mock.aws.neon.tech/neondb?sslmode=require",
   CANNELE_REGISTRY_DATABASE_HOST: "ep-management.mock.aws.neon.tech",
-  CANNELE_TRANSITION_VERCEL_TOKEN: "synthetic-vercel-token", CANNELE_TRANSITION_NEON_API_KEY: "synthetic-neon-token" };
+  CANNELE_TRANSITION_VERCEL_TOKEN: "synthetic-vercel-token", CANNELE_TRANSITION_NEON_API_KEY: "synthetic-neon-token",
+  CANNELE_BOOTSTRAP_VERCEL_TOKEN: "synthetic-bootstrap-admin-token" };
 const run = { id: 123, repository: { full_name: "tyask/Cake" }, head_repository: { full_name: "tyask/Cake" }, actor: { id: 16447050, type: "User" }, triggering_actor: { id: 16447050, type: "User" },
   path: ".github/workflows/cannele-onboarding.yml", head_branch: "main", head_sha: revision, run_attempt: 1, event: "workflow_dispatch", status: "in_progress",
   referenced_workflows: [{ path: "tyask/Cake/.github/workflows/cannele-onboarding-run.yml@refs/heads/main", sha: revision }] };
@@ -89,6 +90,7 @@ function bootstrapFixture() {
       releaseControl: async () => { events.push("unlock"); } };
   };
   const runtimeHandoff: NonNullable<Parameters<typeof runOnboarding>[1]["runtimeHandoff"]> = input => {
+    assert.equal(input.bootstrapVercelToken, environment.CANNELE_BOOTSTRAP_VERCEL_TOKEN);
     assert.equal(input.vercelToken, environment.CANNELE_TRANSITION_VERCEL_TOKEN);
     assert.equal(input.neonApiKey, environment.CANNELE_TRANSITION_NEON_API_KEY);
     assert.deepEqual(input.context, context); assert.equal(input.roleName, "cannele_runtime");
@@ -108,16 +110,25 @@ test("bootstrap preflights before SQL and proves actual LOGIN before grants, the
     ["preflight", "create", "connect:cannele_runtime", "provision", "unlock", "connect:cannele_runtime", "assertRuntime", "publish"]);
   assert.equal(receipt.action, "bootstrap-runtime"); assert.equal(receipt.result.runtimeLoginVerified, true);
   assert.equal(receipt.result.environmentWriteAcknowledged, true); assert.equal(receipt.result.roleCreated, true);
-  for (const value of ["postgresql:", "synthetic-bootstrap-password", "synthetic-vercel-token", "synthetic-neon-token", "synthetic-public-provenance", environment.CANNELE_REGISTRY_ADMIN_DATABASE_HOST]) assert.equal(JSON.stringify(receipt).includes(value), false);
+  for (const value of ["postgresql:", "synthetic-bootstrap-password", "synthetic-vercel-token", "synthetic-neon-token", "synthetic-bootstrap-admin-token", "synthetic-public-provenance", environment.CANNELE_REGISTRY_ADMIN_DATABASE_HOST]) assert.equal(JSON.stringify(receipt).includes(value), false);
 });
 
 test("bootstrap rejected preflight never reaches SQL creation; missing transition credentials fail before bootstrap", async () => {
-  for (const changes of [{}, { CANNELE_TRANSITION_VERCEL_TOKEN: "" }, { CANNELE_TRANSITION_NEON_API_KEY: "" }]) {
+  for (const changes of [{}, { CANNELE_TRANSITION_VERCEL_TOKEN: "" }, { CANNELE_TRANSITION_NEON_API_KEY: "" }, { CANNELE_BOOTSTRAP_VERCEL_TOKEN: "" }]) {
     const fixture = bootstrapFixture();
     await assert.rejects(runOnboarding({ ...bootstrapEnvironment, ...changes }, { source, transport: transport(), core: async () => fixture.core,
       runtimeBootstrap: fixture.runtimeBootstrap, runtimeHandoff: input => ({ ...fixture.runtimeHandoff(input), preflight: async () => { throw new Error(privateDiagnostic); } }) }));
     assert.equal(fixture.events.includes("create"), false); assert.equal(fixture.events.includes("provision"), false); assert.equal(fixture.events.includes("publish"), false);
   }
+});
+
+test("bootstrap requires its separate administration credential before selecting any HTTP transport or creating roles", async () => {
+  const fixture = bootstrapFixture(); let selected = 0;
+  await expectDiagnostic(runOnboarding({ ...bootstrapEnvironment, CANNELE_BOOTSTRAP_VERCEL_TOKEN: "" }, {
+    source, transport: transport(), core: async () => fixture.core, runtimeBootstrap: fixture.runtimeBootstrap,
+    runtimeHandoff: input => { selected++; return fixture.runtimeHandoff(input); },
+  }), { code: "ONBOARDING_CREDENTIAL_REQUIRED", stage: "RUNTIME_CONFIG", reason: "VALIDATION" });
+  assert.equal(selected, 0); assert.equal(fixture.events.includes("create"), false); assert.equal(fixture.events.includes("publish"), false);
 });
 
 test("bootstrap handoff diagnostics project only closed HTTP facts and never reach role creation", async () => {
@@ -160,7 +171,7 @@ test("bootstrap final runtime proof failure prevents handoff and every credentia
   assert.ok(fixture.events.includes("unlock")); assert.equal(fixture.events.includes("publish"), false);
   let coreReads = 0, secretReads = 0, factoryCalls = 0;
   const guarded = { ...bootstrapEnvironment };
-  for (const key of ["CANNELE_REGISTRY_ADMIN_DATABASE_URL", "CANNELE_REGISTRY_ADMIN_DATABASE_HOST", "CANNELE_TRANSITION_VERCEL_TOKEN", "CANNELE_TRANSITION_NEON_API_KEY"]) {
+  for (const key of ["CANNELE_REGISTRY_ADMIN_DATABASE_URL", "CANNELE_REGISTRY_ADMIN_DATABASE_HOST", "CANNELE_TRANSITION_VERCEL_TOKEN", "CANNELE_TRANSITION_NEON_API_KEY", "CANNELE_BOOTSTRAP_VERCEL_TOKEN"]) {
     Object.defineProperty(guarded, key, { get: () => { secretReads++; throw new Error(privateDiagnostic); } });
   }
   await assert.rejects(runOnboarding(guarded, { source, transport: transport({ run: { run_attempt: 2 } }),

@@ -102,11 +102,11 @@ function manualProduction(env: EnvRow): boolean {
     && (env.system === undefined || env.system === false) && env.contentHint == null && env.edgeConfigId == null && env.edgeConfigTokenId == null;
 }
 
-export function createRuntimeHandoff(options: { vercelToken: string; neonApiKey: string; context: Record<string, unknown>; roleName: string; request?: typeof fetch }): {
+export function createRuntimeHandoff(options: { bootstrapVercelToken: string; vercelToken: string; neonApiKey: string; context: Record<string, unknown>; roleName: string; request?: typeof fetch }): {
   preflight(): Promise<void>; publish(input: { databaseUrl: string; databaseHost: string }): Promise<void>;
 } {
   const context = checkedContext(options.context), roleName = role(options.roleName);
-  const vercelToken = token(options.vercelToken), neonApiKey = token(options.neonApiKey);
+  const bootstrapVercelToken = token(options.bootstrapVercelToken), vercelToken = token(options.vercelToken), neonApiKey = token(options.neonApiKey);
   const marker = runtimeHandoffMarker(context, roleName), request = options.request ?? fetch;
   let prepared = false;
   const path = (version: number, suffix = "", extra = "") => `/v${version}/projects/${PROJECT}${suffix}?teamId=${TEAM}${extra}`;
@@ -117,7 +117,7 @@ export function createRuntimeHandoff(options: { vercelToken: string; neonApiKey:
     try {
       const response = await request(new URL(endpoint, ORIGIN), { method, redirect: "manual", cache: "no-store",
         signal: requestSignal,
-        headers: { authorization: `Bearer ${vercelToken}`, "content-type": "application/json" },
+        headers: { authorization: `Bearer ${bootstrapVercelToken}`, "content-type": "application/json" },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
       if (response.redirected || response.status >= 300 && response.status < 400) {
         await response.body?.cancel().catch(() => undefined); return fail("REQUEST_FAILED", diagnostic(method, phase, response.status, "REDIRECT"));
