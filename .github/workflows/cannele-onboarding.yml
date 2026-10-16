@@ -9,7 +9,7 @@ on:
         required: true
         default: inspect
         type: choice
-        options: [inspect, transition, bootstrap-runtime, provision-runtime]
+        options: [inspect, transition, bootstrap-runtime, provision-runtime, activate-runtime]
       reviewed_revision:
         description: Reviewed full current Cake main commit SHA
         required: true
@@ -24,12 +24,12 @@ on:
         default: ""
         type: string
       runtime_context_json:
-        description: Reviewed public runtime context JSON; bootstrap-runtime or provision-runtime only
+        description: Reviewed public runtime context JSON; bootstrap-runtime, provision-runtime, or activate-runtime only
         required: false
         default: ""
         type: string
       runtime_role_name:
-        description: Dedicated LOGIN role; bootstrap-runtime creates it, provision-runtime verifies an existing role
+        description: Dedicated LOGIN role; bootstrap-runtime or provision-runtime only, empty for activate-runtime
         required: false
         default: ""
         type: string
