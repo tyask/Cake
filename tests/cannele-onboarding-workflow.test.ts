@@ -34,7 +34,9 @@ function validate(overrides:Record<string,string|undefined>={},options:{config?:
 const transition=()=>JSON.stringify({source:{cakeRevision:revision,canneleRevision:sourceRevision},admission:{oldProviderCreationCredentialsRevoked:true}});
 
 test('owner/main first-attempt dispatcher binds a same-commit reusable helper with only read permissions',()=>{
-  assert.match(dispatcher,/options: \[inspect, transition, provision-runtime\]/);
+  assert.match(dispatcher,/options: \[inspect, transition, bootstrap-runtime, provision-runtime\]/);
+  assert.deepEqual([...dispatcher.matchAll(/^      ([a-z_]+):$/gm)].map(match=>match[1]),
+    ['action','reviewed_revision','request_id','transition_json','runtime_context_json','runtime_role_name','confirm_credential_drain']);
   assert.match(dispatcher,/confirm_credential_drain:[\s\S]*?required: true\s+default: false\s+type: boolean/);
   for(const source of [dispatcher,runner])assert.match(source,/description: Old actors stopped[^\n]*old management DB\/owner credentials[^\n]*provider policy in transition JSON/);
   for(const source of [dispatcher,runner]) {
@@ -76,6 +78,22 @@ test('actual input validator binds action, UUID, immutable regular config blob, 
   assert.equal(validate().includes('do-not-log'),false);
 });
 
+test('bootstrap accepts only the existing reviewed context and role inputs, without transition or credential payloads',()=>{
+  const context=JSON.stringify({instanceId:'00000000-0000-4000-8000-000000000043',repositoryId:1318171856,bindingDigest:'d'.repeat(64),
+    writerEpoch:1,schemaVersion:4,schemaChecksum:'e'.repeat(64)});
+  const bootstrap={CANNELE_ONBOARDING_ACTION:'bootstrap-runtime',CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON:context,CANNELE_ONBOARDING_RUNTIME_ROLE_NAME:'cannele_runtime'};
+  assert.doesNotThrow(()=>validate(bootstrap));
+  for(const changes of [
+    {CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN:'true'}, {CANNELE_ONBOARDING_TRANSITION_JSON:transition()},
+    {CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON:''}, {CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON:'[]'},
+    {CANNELE_ONBOARDING_RUNTIME_ROLE_NAME:''}, {CANNELE_ONBOARDING_RUNTIME_ROLE_NAME:'runtime; ALTER ROLE owner'},
+    {CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON:'{"databaseUrl":"postgresql://private:password@private/db"}'},
+    {CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON:'{"apiOrigin":"https://foreign.invalid"}'},
+    {CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON:'{"token":"private-token"}'},
+  ])assert.throws(()=>validate({...bootstrap,...changes}),/public inputs or source pin are invalid/);
+  assert.doesNotMatch(validate(bootstrap),/databaseUrl|password|private-token|https:\/\//);
+});
+
 test('actual source preparation clones only the fixed public repository and rejects unmerged, dirty, or mismatched pins',()=>{
   function execute(mode='ok'){
     const calls:string[][]=[];const source='/runner/_temp/cannele-onboarding-source/'+requestId;
@@ -98,19 +116,27 @@ test('dependency installation and generated contracts precede Secrets; provider/
   assert.match(prefix,/Install reviewed Cake dependencies[\s\S]*?run: npm ci/);
   assert.match(prefix,/Install pinned Cannele dependencies[\s\S]*?working-directory: \$\{\{ steps\.public\.outputs\.source_dir \}\}\s+run: npm ci/);
   assert.match(prefix,/Generate pinned Cannele contracts[\s\S]*?run: node --import tsx scripts\/generate-contracts\.ts/);
-  const transitionStart=runner.indexOf('      - name: Run the explicitly confirmed'),runtimeStart=runner.indexOf('      - name: Grant and verify'),uploadStart=runner.indexOf('      - name: Upload strict');
-  const inspect=runner.slice(adminStart,transitionStart),transitionStep=runner.slice(transitionStart,runtimeStart),runtime=runner.slice(runtimeStart,uploadStart);
+  const transitionStart=runner.indexOf('      - name: Run the explicitly confirmed'),bootstrapStart=runner.indexOf('      - name: Create and verify runtime access'),
+    runtimeStart=runner.indexOf('      - name: Grant and verify'),uploadStart=runner.indexOf('      - name: Upload strict');
+  assert.ok(transitionStart<bootstrapStart&&bootstrapStart<runtimeStart);
+  const inspect=runner.slice(adminStart,transitionStart),transitionStep=runner.slice(transitionStart,bootstrapStart),bootstrap=runner.slice(bootstrapStart,runtimeStart),runtime=runner.slice(runtimeStart,uploadStart);
   assert.doesNotMatch(inspect,/secrets\.transition_vercel_token|secrets\.transition_neon_api_key|secrets\.runtime_database/);
   assert.match(transitionStep,/if: inputs\.action == 'transition'/);assert.match(transitionStep,/CANNELE_TRANSITION_VERCEL_TOKEN: \$\{\{ secrets\.transition_vercel_token \}\}/);
   assert.match(transitionStep,/CANNELE_TRANSITION_NEON_API_KEY: \$\{\{ secrets\.transition_neon_api_key \}\}/);assert.doesNotMatch(transitionStep,/secrets\.runtime_database/);
   assert.match(runtime,/if: inputs\.action == 'provision-runtime'/);assert.match(runtime,/CANNELE_REGISTRY_DATABASE_URL: \$\{\{ secrets\.runtime_database_url \}\}/);
   assert.doesNotMatch(runtime,/secrets\.transition_vercel_token|secrets\.transition_neon_api_key/);
-  for(const step of [inspect,transitionStep,runtime]) {
+  assert.match(bootstrap,/if: inputs\.action == 'bootstrap-runtime'/);
+  assert.match(bootstrap,/CANNELE_TRANSITION_VERCEL_TOKEN: \$\{\{ secrets\.transition_vercel_token \}\}/);
+  assert.match(bootstrap,/CANNELE_TRANSITION_NEON_API_KEY: \$\{\{ secrets\.transition_neon_api_key \}\}/);
+  assert.doesNotMatch(bootstrap,/secrets\.runtime_database|CANNELE_REGISTRY_DATABASE_(?:URL|HOST)|GITHUB_OUTPUT|GITHUB_ENV|--token|password/);
+  for(const step of [inspect,transitionStep,bootstrap,runtime]) {
     assert.match(step,/CANNELE_REGISTRY_ADMIN_DATABASE_URL: \$\{\{ secrets\.admin_database_url \}\}/);
     assert.match(step,/CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN: \$\{\{ inputs\.confirm_credential_drain \}\}/);
     assert.match(step,/node --import tsx scripts\/cannele-onboarding\.ts/);
     for(const name of ['CAKE_CANNELE_ENABLED','CAKE_QA_POOL_ENABLED','CAKE_QA_REGISTRY_ENABLED'])assert.ok(step.includes(name+': ${{ vars.'+name+' }}'));
   }
+  for(const name of ['VERCEL_TOKEN','NEON_API_KEY'])assert.match(dispatcher,new RegExp(`\\(inputs\\.action == 'transition' \\|\\| inputs\\.action == 'bootstrap-runtime'\\) && secrets\\.CANNELE_TRANSITION_${name}`));
+  for(const suffix of ['url','host'])assert.match(dispatcher,new RegExp(`runtime_database_${suffix}: \\$\\{\\{ inputs\\.action == 'provision-runtime' && secrets\\.CANNELE_REGISTRY_DATABASE_`));
   assert.doesNotMatch(runner,/CAKE_QA_REGISTRY_DATABASE_URL|CAKE_QA_REGISTRY_DATABASE_HOST|env pull|vercel env|CREATE ROLE/);
 });
 
