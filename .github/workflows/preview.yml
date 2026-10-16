@@ -13,6 +13,10 @@ on:
       sha:
         type: string
         required: true
+      controlSha:
+        description: Exact trusted main SHA verified by the caller before dispatch
+        type: string
+        required: true
       operation:
         description: UUID identifying this exact request; rerun the same run after an uncertain response
         type: string
@@ -54,10 +58,5 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: node --import tsx scripts/preview-workflow.ts
-      - name: Save public operation receipt
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: preview-${{ github.run_id }}
-          path: preview-result.json
-          retention-days: 30
-          if-no-files-found: error
+      - name: Publish public operation receipt notice
+        run: node --import tsx scripts/preview-workflow.ts --notice

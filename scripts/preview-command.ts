@@ -1,25 +1,31 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile, lstat } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { cleanTaskHead, commandOutput, executeWorkflowCommand, previewUrl, taskPullRequests, type WorkflowExecutor } from './task-workflow';
-import { config, object, protocol, sameDatabase, source, uuid, type Source } from './preview-model';
+import { cleanTaskHead, commandOutput, executeWorkflowCommand, taskPullRequests, type WorkflowExecutor } from './task-workflow';
+import { config, object, source, type Source } from './preview-model';
 import { sameVerifiedDeployment, verifyBrowser } from './preview-browser';
+import { assertPreviewRun, previewWorkflow, readPreviewReceipt } from './preview-checks';
 import type { Receipt } from './preview-service';
 export async function requestReceipt(action: 'deploy' | 'status' | 'cleanup', expected: Source, cwd: string,
   execute = executeWorkflowCommand, wait: (ms: number) => Promise<void> = ms => new Promise(r => setTimeout(r,ms)), log = console.log): Promise<Receipt> {
-  const api = async (path: string) => JSON.parse(await commandOutput(execute,'gh',['api',`repos/${config.repository}/${path}`],cwd));
+  const api = async (path: string) => {
+    try { return JSON.parse(await commandOutput(execute,'gh',['api',`repos/${config.repository}/${path}`],cwd)); }
+    catch { throw new Error('PREVIEW_API_UNAVAILABLE'); }
+  };
   const current = source(await api(`pulls/${expected.pr}`));
   if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error('PREVIEW_PR_CHANGED');
   const main = object(await api('branches/main')), mainSha = object(main.commit).sha;
   if (typeof mainSha !== 'string' || !/^[a-f0-9]{40}$/.test(mainSha)) throw new Error('PREVIEW_MAIN_UNAVAILABLE');
   const remote = object(await api(`contents/preview.config.json?ref=${mainSha}`));
   if (remote.encoding !== 'base64' || JSON.stringify(JSON.parse(Buffer.from(String(remote.content),'base64').toString())) !== JSON.stringify(config)) throw new Error('PREVIEW_NOT_INSTALLED_ON_MAIN');
+  const workflow = await previewWorkflow(api);
   const operation = randomUUID(), directory = await mkdtemp(join(tmpdir(),'cake-preview-'));
+  const request = { action,source:expected,operation,controlSha:mainSha,workflowId:workflow.id };
   try {
     const file = join(directory,'request.json');
-    await writeFile(file,JSON.stringify({ ref:'main',inputs:{ action,pr:String(expected.pr),sha:expected.sha,operation } }),{ mode:0o600 });
+    await writeFile(file,JSON.stringify({ ref:'main',inputs:{ action,pr:String(expected.pr),sha:expected.sha,operation,controlSha:mainSha } }),{ mode:0o600 });
     await commandOutput(execute,'gh',['api',`repos/${config.repository}/actions/workflows/preview.yml/dispatches`,'--method','POST','--input',file],cwd);
     let run: Record<string,unknown> | undefined;
     for (let i=0;i<300;i++) {
@@ -28,9 +34,7 @@ export async function requestReceipt(action: 'deploy' | 'status' | 'cleanup', ex
       const matches = runs.filter(r => r.display_title === `Preview ${action} PR ${expected.pr} ${operation}`);
       if (matches.length > 1) throw new Error('PREVIEW_RUN_AMBIGUOUS');
       if (matches.length) {
-        run = matches[0];
-        if (run!.head_sha !== mainSha || run!.event !== 'workflow_dispatch' || run!.run_attempt !== 1 || run!.path !== '.github/workflows/preview.yml') throw new Error('PREVIEW_RUN_CHANGED');
-        if (!Number.isSafeInteger(run!.id) || Number(run!.id) < 1) throw new Error('PREVIEW_RUN_CHANGED');
+        run = assertPreviewRun(matches[0],request);
         if (i === 0) log(`Cake: Actions https://github.com/${config.repository}/actions/runs/${run!.id}`);
         if (run!.status === 'completed') break;
       }
@@ -42,20 +46,8 @@ export async function requestReceipt(action: 'deploy' | 'status' | 'cleanup', ex
       log(`Cake: Preview ${action} は失敗しました。https://github.com/${config.repository}/actions/runs/${run.id}`);
       throw new Error('PREVIEW_RUN_FAILED');
     }
-    await commandOutput(execute,'gh',['run','download',String(run.id),'--repo',config.repository,'--name',`preview-${run.id}`,'--dir',directory],cwd);
-    const resultPath = join(directory,'preview-result.json'), metadata = await lstat(resultPath);
-    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 65_536) throw new Error('PREVIEW_RECEIPT_INVALID');
-    const receipt = JSON.parse(await readFile(resultPath,'utf8'));
-    if (receipt.protocol !== protocol || receipt.success !== true || receipt.action !== action || receipt.operation !== operation || receipt.runId !== String(run.id)
-      || receipt.controlSha !== mainSha || JSON.stringify(receipt.source) !== JSON.stringify(expected) || !Number.isFinite(Date.parse(receipt.checkedAt))) throw new Error('PREVIEW_RECEIPT_INVALID');
-    if (receipt.deployment) {
-      const d = receipt.deployment;
-      if (d.url !== previewUrl(d.url) || !/^dpl_[A-Za-z0-9]+$/.test(d.id) || !uuid(d.generation) || !uuid(d.operation)
-        || d.pr !== expected.pr || d.branch !== expected.branch || d.sha !== expected.sha || d.state !== 'READY' || d.phase !== 'application'
-        || !d.database || !receipt.database || !sameDatabase(d.database,receipt.database)
-        || !/^br-[a-z0-9-]+$/.test(d.database.branchId) || !/^ep-[a-z0-9-]+$/.test(d.database.endpointId)
-        || !/^[a-f0-9]{64}$/.test(d.database.hostDigest) || d.database.hostDigest === config.productionHostDigest) throw new Error('PREVIEW_RECEIPT_INVALID');
-    }
+    const receipt = await readPreviewReceipt(api,Number(run.id),request);
+    if (JSON.stringify(source(await api(`pulls/${expected.pr}`))) !== JSON.stringify(expected)) throw new Error('PREVIEW_PR_CHANGED');
     return receipt;
   } finally { await rm(directory,{ recursive:true,force:true }); }
 }
