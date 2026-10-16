@@ -37,7 +37,6 @@ jobs:
           CANNELE_INSTANCE_ID: ${{ vars.CANNELE_INSTANCE_ID }}
           CANNELE_FEATURE_BRANCH_PREFIX: ${{ vars.CANNELE_FEATURE_BRANCH_PREFIX }}
           EVENT_NAME: ${{ github.event_name }}
-          EVENT_PATH: ${{ github.event_path }}
           REPOSITORY: ${{ github.repository }}
           CONTROL_REF: ${{ github.ref }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
@@ -186,7 +185,8 @@ jobs:
             if (configured.protocol !== 'https:' || configured.origin !== env.CANNELE_API_ORIGIN || configured.username || configured.password || configured.hash) throw failure('INVALID_BINDING');
             origin = configured.origin;
             let event;
-            try { event = object(JSON.parse(await readFile(env.EVENT_PATH, 'utf8'))); } catch { throw failure('INVALID_EVENT'); }
+            if (typeof env.GITHUB_EVENT_PATH !== 'string' || !env.GITHUB_EVENT_PATH) throw failure('INVALID_EVENT');
+            try { event = object(JSON.parse(await readFile(env.GITHUB_EVENT_PATH, 'utf8'))); } catch { throw failure('INVALID_EVENT'); }
             if (object(event.repository).full_name !== env.REPOSITORY) throw failure('INVALID_EVENT');
             let route, body, expectedLease;
             if (env.EVENT_NAME === 'pull_request_target') {

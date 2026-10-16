@@ -37,12 +37,14 @@ interface Call { url: URL; method: string; headers: Headers; body: unknown }
 interface HarnessOptions {
   env?: Record<string, string | undefined>;
   event?: unknown;
+  eventContents?: string;
+  eventReadFailure?: boolean;
   api?: (call: Call, calls: Call[], advanceClock: (milliseconds: number) => void) => Response | Promise<Response>;
 }
 async function execute(options: HarnessOptions = {}) {
   const env: Record<string, string | undefined> = {
     CAKE_CANNELE_ENABLED: 'true', CANNELE_API_ORIGIN: 'https://cannele.example.invalid', CANNELE_INSTANCE_ID: instanceId,
-    CANNELE_FEATURE_BRANCH_PREFIX: prefix, EVENT_NAME: 'pull_request_target', EVENT_PATH: '/event.json',
+    CANNELE_FEATURE_BRANCH_PREFIX: prefix, EVENT_NAME: 'pull_request_target', GITHUB_EVENT_PATH: '/event.json',
     REPOSITORY: 'tyask/Cake', CONTROL_REF: 'refs/heads/main', WORKFLOW_REF: 'tyask/Cake/.github/workflows/cannele-release.yml@refs/heads/main',
     RUN_ID: '12345', RUN_ATTEMPT: '1', INPUT_LEASE_ID: leaseId, GITHUB_STEP_SUMMARY: '/summary.md',
     ACTIONS_ID_TOKEN_REQUEST_URL: 'https://run-actions.githubusercontent.com/fixed/job/idtoken?api-version=2.0',
@@ -50,6 +52,7 @@ async function execute(options: HarnessOptions = {}) {
   };
   const process = { env, exitCode: 0 };
   const calls: Call[] = [], logs: string[] = [], summaries: string[] = [], waits: number[] = [], timeouts: number[] = [];
+  const eventPaths: unknown[] = [];
   let clock = 0, tokens = 0;
   class ClockDate extends Date { static override now() { return clock; } }
   const fetcher = async (input: string | URL, init: RequestInit) => {
@@ -66,7 +69,11 @@ async function execute(options: HarnessOptions = {}) {
     return options.api ? options.api(call, calls, milliseconds => { clock += milliseconds; }) : json({ operation: op(5, 'succeeded') });
   };
   const script = new Script(`(async () => {\n${inline}\n})()`, { filename: 'cannele-release-inline.mjs' });
-  await script.runInNewContext({ process, fetch: fetcher, readFile: async () => JSON.stringify(options.event ?? event()),
+  await script.runInNewContext({ process, fetch: fetcher, readFile: async (path: unknown, encoding: unknown) => {
+    eventPaths.push(path);
+    if (path !== '/event.json' || encoding !== 'utf8' || options.eventReadFailure) throw new Error('private-event-read-error');
+    return options.eventContents ?? JSON.stringify(options.event ?? event());
+  },
     appendFile: async (_path: string, value: string) => { summaries.push(value); }, createHash,
     delay: async (milliseconds: number) => { waits.push(milliseconds); clock += milliseconds; },
     Date: ClockDate, URL, Response, Headers, Buffer, TextDecoder,
@@ -79,9 +86,38 @@ async function execute(options: HarnessOptions = {}) {
     assert.ok(!output.includes('private-runner-request-credential'));
     assert.ok(!output.includes('mock_signature_'));
     assert.ok(!output.includes('private-provider-error'));
+    assert.ok(!output.includes('private-event-read-error'));
   }
-  return { process, calls, logs, summaries, waits, tokens, clock };
+  return { process, calls, logs, summaries, waits, tokens, clock, eventPaths };
 }
+
+test('the actual inline workflow reads the runner event file for closed and dispatch events without an EVENT_PATH alias', async () => {
+  assert.doesNotMatch(workflow, /^\s+EVENT_PATH:/m);
+  for (const name of ['pull_request_target', 'workflow_dispatch']) {
+    const result = await execute({ env: { EVENT_NAME: name } });
+    assert.equal(result.process.exitCode, 0);
+    assert.deepEqual(result.eventPaths, ['/event.json']);
+    assert.equal(result.calls.length, 1);
+    assert.ok(result.logs.at(-1)?.includes('返却済み'));
+  }
+});
+
+test('missing, empty, unavailable and malformed runner event files fail closed before OIDC or API requests', async () => {
+  for (const options of [
+    { env: { GITHUB_EVENT_PATH: undefined, EVENT_PATH: '/event.json' } },
+    { env: { GITHUB_EVENT_PATH: '', EVENT_PATH: '/event.json' } },
+    { env: { GITHUB_EVENT_PATH: '/wrong-event.json', EVENT_PATH: '/event.json' } },
+    { eventReadFailure: true },
+    { eventContents: '{' },
+    { eventContents: 'null' },
+  ]) {
+    const result = await execute(options);
+    assert.equal(result.process.exitCode, 1);
+    assert.equal(result.tokens, 0);
+    assert.equal(result.calls.length, 0);
+    assert.ok(result.logs.at(-1)?.includes('(INVALID_EVENT)'));
+  }
+});
 
 test('the actual inline workflow retries an unknown advance response with the same key and refreshes OIDC per request', async () => {
   let advanced = 0;
