@@ -303,6 +303,12 @@ NODE_USE_ENV_PROXY=1 npm run cannele:auth -- login
 
 closed返却用のRepository variables `CANNELE_API_ORIGIN`・`CANNELE_INSTANCE_ID`・`CANNELE_FEATURE_BRANCH_PREFIX`は、利用者がUIで公開profileと同じ値へ設定したと確認した。Variables管理APIの403によりこちらからのAPI読取検証は行っておらず、closedイベントの実行成功もまだ確認していない。
 
+2026-10-16 14:18 JSTのPR #69マージ後、[closed run 38855058209](https://github.com/tyask/Cake/actions/runs/38855058209)は`INVALID_EVENT`で停止した。step環境の`EVENT_PATH`が空で、イベントJSONを読めず、返却APIの呼出し前に失敗した。確認時点のqa1の貸出`7ea58fe0-b800-493a-b23f-07c6f36231ce`は`published`・version 4を保持しており、削除・返却成功とは扱わない。
+
+返却workflowはrunnerが供給する`GITHUB_EVENT_PATH`を直接読み、独自の`EVENT_PATH`やcontextからの代替値を使わない。未設定・空・読取不能・不正JSONではOIDC/API呼出し前に停止し、PR・repository・branch・SHA・close時刻の照合は維持する。修正版のworkflow blobをAPIの許可リストへ反映しても、署名されたmainのworkflow ref・SHA・祖先関係・実際のblob照合を通るまでは実行を許可しない。
+
+修正PRは通常のdraft作成・qa2予約・配置・固有/固定URLでの画面確認を経て、利用者のマージ後にclosed返却を実測する予定である。qa1は保持したままにする。修正版がmainへ導入された後、同workflowの`workflow_dispatch`へ保存済みのqa1の`lease_id`を指定して同じ貸出を回復する。元の失敗runを再実行するだけでは修正版へ切り替わらない。この回復と全資源の消失・`free`の確認はまだ完了していない。
+
 ### 有効化後の通常手順
 
 1. 最新mainの専用worktreeで開発し、lint・test・buildを実施してdraft PRを作る。
