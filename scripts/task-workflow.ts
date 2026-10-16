@@ -7,6 +7,7 @@ import { MAX_GIT_CONFIG_BYTES, assertMainOnlyGitConfig, decodeGitConfigFile } fr
 import { QA_ENVIRONMENT, QA_NEON_PROJECT_ID, QA_TASK, SLOTS, qaAlias, replayDeployments, type Slot } from "../lib/qa-pool";
 import type { OwnerApprovalState } from "../lib/qa-owner-approval";
 import { HttpOwnerApprovalStore } from "./qa-owner-store";
+import canneleManifest from "../docs/cannele/resource-manifest.json";
 
 export const CAKE_REPOSITORY = "tyask/Cake";
 export const CAKE_VERCEL_PROJECT = "prj_Z37vquodhpRd08ZTAtYnP0qa59jD";
@@ -85,9 +86,15 @@ async function commandText(
 }
 
 export function validTaskBranch(branch: unknown): branch is string {
-  if (typeof branch !== "string" || !/^codex\/[a-z0-9]+(?:-[a-z0-9]+)*$/.test(branch)) return false;
+  if (typeof branch !== "string" || !branch.startsWith("codex/")) return false;
   const name = branch.slice("codex/".length);
-  return name.length <= 60 && !["main", "preview", "production"].includes(name);
+  if (name.length > 60) return false;
+  // Only this repository's reviewed instance may introduce a path segment.
+  // Other generations and recursive paths cannot enter draft/source/Ready flows.
+  const task = name.includes("/")
+    ? branch.startsWith(canneleManifest.repository.featureBranchPrefix) ? branch.slice(canneleManifest.repository.featureBranchPrefix.length) : ""
+    : name;
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(task) && !/[\r\n]/.test(task) && !["main", "preview", "production"].includes(task);
 }
 
 export async function cleanTaskHead(cwd: string, execute: WorkflowExecutor): Promise<TaskHead> {
@@ -95,7 +102,7 @@ export async function cleanTaskHead(cwd: string, execute: WorkflowExecutor): Pro
     "CakeのGitリポジトリ内で実行してください。");
   const branch = await commandOutput(execute, "git", ["rev-parse", "--abbrev-ref", "HEAD"], root,
     "Gitブランチを確認できませんでした。");
-  if (!validTaskBranch(branch)) throw new Error("タスク専用の codex/<task-name> ブランチで実行してください。");
+  if (!validTaskBranch(branch)) throw new Error("タスク専用の codex/<task-name> または現在のCannele世代のブランチで実行してください。");
   const status = await commandOutput(execute, "git", ["status", "--porcelain=v1", "--untracked-files=all"], root,
     "未コミット変更を確認できませんでした。");
   if (status) throw new Error("未コミット変更があります。検証対象の変更をコミットしてから実行してください。");

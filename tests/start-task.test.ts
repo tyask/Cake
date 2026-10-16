@@ -5,6 +5,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runStartTask } from "../scripts/start-task";
+import { executeConfigurationGit, type ConfigurationGit } from "../scripts/cannele-config";
+import { validTaskBranch } from "../scripts/task-workflow";
 
 function git(cwd: string, ...args: string[]): string {
   const result = spawnSync("git", ["-c", "user.name=Cake Test", "-c", "user.email=test@cake.local",
@@ -86,10 +88,30 @@ test("CAKE_WORKTREE_ROOTの相対パスは元リポジトリ基準で解決す�
 test("不正な引数・予約名をGit操作の前に拒否する", () => {
   const invalidArgs = [[], ["one", "two"], ["main"], ["preview"], ["production"], ["Upper"],
     ["../escape"], ["bad/name"], ["-leading"], ["trailing-"], ["double--dash"], ["two words"],
-    ["$(touch secret)"], ["a".repeat(61)]];
+    ["$(touch secret)"], ["task\n"], ["task\r"], ["a".repeat(61)]];
   for (const args of invalidArgs) {
     assert.throws(() => runStartTask({ args, cwd: "/nonexistent-cake-repository", log: silent }), /タスク名/);
   }
+});
+
+test("reviewed main's real generation creates qa-acceptance and preserves the 15-character task budget", t => {
+  const { cwd, remote, defaultWorktreeRoot } = repository(t);
+  const prepared = JSON.parse(readFileSync(new URL("../cannele.config.json", import.meta.url), "utf8"));
+  assert.equal(prepared.enabled, true);
+  writeFileSync(join(remote, "cannele.config.json"), JSON.stringify({ ...prepared, enabled: true }));
+  git(remote, "add", "cannele.config.json"); git(remote, "commit", "-m", "synthetic reviewed enabled main");
+  writeFileSync(join(cwd, "cannele.config.json"), JSON.stringify({ ...prepared, enabled: false, profile: null }));
+  const configurationGit: ConfigurationGit = (directory, args) => args[0] === "remote"
+    ? { status: 0, stdout: "https://github.com/tyask/Cake.git" } : executeConfigurationGit(directory, args);
+  const start = (name: string) => runStartTask({ args: [name], cwd, environment: {}, configurationGit, installDependencies: silent, log: silent });
+  const task = start("qa-acceptance"), prefix = prepared.profile.featureBranchPrefix;
+  assert.equal(task.branch, `${prefix}qa-acceptance`); assert.equal(validTaskBranch(task.branch), true);
+  assert.equal(git(task.worktreePath, "branch", "--show-current"), task.branch);
+  assert.equal(git(task.worktreePath, "rev-parse", "HEAD"), git(remote, "rev-parse", "HEAD"));
+  assert.equal(validTaskBranch(start("a".repeat(15)).branch), true);
+  assert.throws(() => start("a".repeat(16)), /60文字以内/);
+  assert.equal(existsSync(join(defaultWorktreeRoot, "a".repeat(16))), false);
+  assert.equal(JSON.parse(readFileSync(join(cwd, "cannele.config.json"), "utf8")).enabled, false, "Local configuration must not select the branch mode.");
 });
 
 test("既存のローカルブランチを上書きしない", (t) => {

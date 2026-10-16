@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { runTaskPr } from "../scripts/task-pr";
 import { QA_ENVIRONMENT, QA_NEON_PROJECT_ID, QA_TASK, type QaLeaseRecord } from "../lib/qa-pool";
 import { CAKE_VERCEL_PROJECT, previewRecordPath, type TaskPreviewRecord, type WorkflowExecutor, type WorkflowCommandResult, type PreviewProviderReader } from "../scripts/task-workflow";
+import manifest from "../docs/cannele/resource-manifest.json";
 
 const branch = "codex/test-pr";
 const sha = "a".repeat(40);
@@ -36,7 +37,8 @@ const isPatch = (call: { command: string; args: readonly string[] }) => call.com
 const project = { id: CAKE_VERCEL_PROJECT, name: "cake", accountId: "team_D1Mcx2TdFWPKcypfu8KzNMub",
   previewDeploymentsDisabled: false, link: { type: "github", org: "tyask", repo: "Cake", productionBranch: "main" } };
 
-async function fixture(t: TestContext) {
+async function fixture(t: TestContext, currentBranch = branch) {
+  const branch = currentBranch;
   const cwd = await mkdtemp(join(tmpdir(), "cake-task-pr-test-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   await mkdir(join(cwd, ".cake"));
@@ -129,6 +131,19 @@ test("同じPR/HEADとlive貸出の検証証拠で既存draft本文を更新し�
   assert.equal(f.calls.some((c) => c.args[1] === "edit"), false);
   assert.equal(f.calls.some((c) => c.args.includes("ready") || c.args.includes("merge") || c.args.includes("--auto") || c.args.includes("--body")), false);
   await assert.rejects(() => readFile(f.state.bodyFile), /ENOENT/);
+});
+
+test("draft PR creation pushes the actual generation branch without QA calls and rejects another generation before pushing", async t => {
+  const currentBranch = `${manifest.repository.featureBranchPrefix}qa-acceptance`, f = await fixture(t, currentBranch);
+  f.state.listed = commandResult("[]"); f.state.remote = "";
+  await runTaskPr({ ...f.options, args: [...f.options.args, "--draft"] });
+  const created = f.calls.find(call => call.command === "gh" && call.args[0] === "pr" && call.args[1] === "create");
+  assert.ok(created); assert.equal(created.args[created.args.indexOf("--head") + 1], currentBranch); assert.ok(created.args.includes("--draft"));
+  assert.ok(f.calls.some(call => call.command === "git" && call.args[0] === "push" && call.args[2] === `${sha}:refs/heads/${currentBranch}`));
+  assert.equal(f.calls.some(call => call.command === "npx" || call.args.includes("ready") || call.args.includes("merge")), false);
+  const other = await fixture(t, "codex/cannele-00000000-0000-4000-8000-000000000001/qa-acceptance");
+  await assert.rejects(runTaskPr({ ...other.options, args: [...other.options.args, "--draft"] }));
+  assert.equal(other.calls.some(call => call.command === "gh" || call.args[0] === "push"), false);
 });
 
 test("Preview未実施でも--draftでPRを作成し、未検証を本文へ明記する", async (t) => {
