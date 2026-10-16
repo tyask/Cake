@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { OnboardingError, OnboardingGateway, onboardingFailure, onboardingSource, runOnboarding, type OnboardingCore, type OnboardingSource } from "../scripts/cannele-onboarding";
 import type { QaTransport } from "../scripts/qa-pool-writer";
 import { RuntimeHandoffError, type HandoffDiagnostic } from "../scripts/cannele-runtime-handoff";
+import { RuntimeActivationError, runtimeActivationContext } from "../scripts/cannele-runtime-activation";
 
 const revision = "a".repeat(40), canneleRevision = "b".repeat(40), requestId = randomUUID(), instanceId = randomUUID();
 const caller = Buffer.from("name: synthetic onboarding caller\n"), helper = Buffer.from("name: synthetic onboarding runner\n");
@@ -74,6 +75,49 @@ const transitionEnvironment = { ...environment, CANNELE_ONBOARDING_ACTION: "tran
 const runtimeEnvironment = { ...environment, CANNELE_ONBOARDING_ACTION: "provision-runtime", CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON: JSON.stringify(context), CANNELE_ONBOARDING_RUNTIME_ROLE_NAME: "cannele_runtime" };
 const bootstrapEnvironment = { ...runtimeEnvironment, CANNELE_ONBOARDING_ACTION: "bootstrap-runtime",
   CANNELE_REGISTRY_DATABASE_URL: undefined, CANNELE_REGISTRY_DATABASE_HOST: undefined };
+const activationEnvironment = { ...environment, CANNELE_ONBOARDING_ACTION: "activate-runtime", CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN: "false",
+  CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON: JSON.stringify(runtimeActivationContext) };
+
+test("activation uses only the administrative connection after actual owner/main authorization and never reads runtime/provider/bootstrap secrets", async () => {
+  const fixture = coreFixture(), guarded = { ...activationEnvironment };
+  for (const key of ["CANNELE_REGISTRY_DATABASE_URL", "CANNELE_REGISTRY_DATABASE_HOST", "CANNELE_TRANSITION_VERCEL_TOKEN", "CANNELE_TRANSITION_NEON_API_KEY", "CANNELE_BOOTSTRAP_VERCEL_TOKEN"]) {
+    Object.defineProperty(guarded, key, { get: () => assert.fail("Activation read a forbidden credential") });
+  }
+  const receipt = await runOnboarding(guarded, { source, transport: transport(), core: async () => fixture.core,
+    runtimeBootstrap: async () => assert.fail("Activation called bootstrap"), runtimeHandoff: () => assert.fail("Activation selected HTTP handoff"),
+    runtimeActivation: async (_client, input) => {
+      fixture.events.push("activate"); assert.deepEqual(input.context, runtimeActivationContext); assert.deepEqual(input.migrations, [1, 2, 3, 4]);
+      assert.equal(input.connection.user, "synthetic_owner");
+      return { writerMode: "api", writerEpoch: 1, alreadyEnabled: false, transitionId: "86ee46a3-eb41-414e-85aa-d21e053d152d",
+        instanceId: runtimeActivationContext.instanceId, bindingDigest: runtimeActivationContext.bindingDigest, schemaVersion: 4, schemaChecksum: runtimeActivationContext.schemaChecksum };
+    } });
+  assert.deepEqual(fixture.events, ["connection", "connect:synthetic_owner", "migrations", "activate", "release:synthetic_owner", "end:synthetic_owner"]);
+  assert.equal(receipt.action, "activate-runtime"); assert.equal(receipt.result.writerMode, "api");
+  for (const value of ["postgresql:", "synthetic-admin-password", environment.CANNELE_REGISTRY_ADMIN_DATABASE_HOST]) assert.equal(JSON.stringify(receipt).includes(value), false);
+});
+
+test("activation rejects wrong context and action-specific inputs before core or admin credentials, and untrusted runs before all secret access", async () => {
+  for (const change of [{ CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON: JSON.stringify({ ...runtimeActivationContext, instanceId: randomUUID() }) },
+    { CANNELE_ONBOARDING_RUNTIME_ROLE_NAME: "cannele_runtime" }, { CANNELE_ONBOARDING_TRANSITION_JSON: "{}" }, { CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN: "true" }]) {
+    let loads = 0;
+    const guarded = { ...activationEnvironment, ...change };
+    Object.defineProperty(guarded, "CANNELE_REGISTRY_ADMIN_DATABASE_URL", { get: () => assert.fail("Rejected activation read credentials") });
+    await assert.rejects(runOnboarding(guarded, { source, transport: transport(), core: async () => { loads++; return coreFixture().core; } }));
+    assert.equal(loads, 0);
+  }
+  const guarded = { ...activationEnvironment };
+  Object.defineProperty(guarded, "CANNELE_REGISTRY_ADMIN_DATABASE_URL", { get: () => assert.fail("Untrusted activation read credentials") });
+  await assert.rejects(runOnboarding(guarded, { source, transport: transport({ run: { run_attempt: 2 } }), core: async () => assert.fail("Untrusted activation loaded core") }),
+    { code: "ONBOARDING_RUN_UNTRUSTED" });
+});
+
+test("activation sanitizes its unknown-commit failure and preserves it through administrative cleanup errors", async () => {
+  const fixture = coreFixture({ pool: () => ({ connect: async () => ({ query: async () => ({ rows: [] }), release: () => { throw new Error(privateDiagnostic); } }),
+    end: async () => { throw new Error(privateDiagnostic); } }) });
+  await expectDiagnostic(runOnboarding(activationEnvironment, { source, transport: transport(), core: async () => fixture.core,
+    runtimeActivation: async () => { throw new RuntimeActivationError("RUNTIME_ACTIVATION_COMMIT_UNKNOWN"); } }),
+    { code: "RUNTIME_ACTIVATION_COMMIT_UNKNOWN", stage: "RUNTIME_ACTIVATE", reason: "CORE_REJECTED" });
+});
 
 function bootstrapFixture() {
   const fixture = coreFixture(), events = fixture.events;

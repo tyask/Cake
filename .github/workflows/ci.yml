@@ -53,11 +53,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check out immutable Cannele SQL for disposable PostgreSQL tests
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tyask/cannele
+          ref: 623520315b7b2c982e4b98ecdb72658252709d7c
+          path: node_modules/.cache/cannele-schema-source
+          persist-credentials: false
+          sparse-checkout: db/migrations
+
       - name: Lint
         run: npm run lint
 
       - name: Test
         run: npm test
+        env:
+          CAKE_CANNELE_TEST_MIGRATIONS_DIR: ${{ github.workspace }}/node_modules/.cache/cannele-schema-source/db/migrations
 
       - name: Build
         run: npm run build

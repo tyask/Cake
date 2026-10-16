@@ -85,7 +85,7 @@ jobs:
           const invalid = () => { throw new Error('Onboarding public inputs or source pin are invalid.'); };
           const env = process.env, action = env.CANNELE_ONBOARDING_ACTION;
           const revision = env.CANNELE_ONBOARDING_EXPECTED_REVISION, requestId = env.CANNELE_ONBOARDING_REQUEST_ID;
-          if (!['inspect', 'transition', 'bootstrap-runtime', 'provision-runtime'].includes(action) || !/^[a-f0-9]{40}$/.test(revision ?? '') || revision !== env.GITHUB_SHA ||
+          if (!['inspect', 'transition', 'bootstrap-runtime', 'provision-runtime', 'activate-runtime'].includes(action) || !/^[a-f0-9]{40}$/.test(revision ?? '') || revision !== env.GITHUB_SHA ||
               !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(requestId ?? '') || !isAbsolute(env.RUNNER_TEMP ?? '')) invalid();
           const parsePublic = (raw) => {
             if (!raw || Buffer.byteLength(raw) > 131072) invalid();
@@ -108,6 +108,15 @@ jobs:
           if (action === 'inspect' && (transition || context || role || drain !== 'false')) invalid();
           if (action === 'transition') { if (context || role || drain !== 'true') invalid(); transitionValue = parsePublic(transition); }
           if (['bootstrap-runtime', 'provision-runtime'].includes(action)) { if (transition || drain !== 'false' || !/^[a-z][a-z0-9_]{0,62}$/.test(role)) invalid(); parsePublic(context); }
+          if (action === 'activate-runtime') {
+            if (transition || role || drain !== 'false') invalid();
+            const value = parsePublic(context);
+            if (Object.keys(value).sort().join(',') !== 'bindingDigest,instanceId,repositoryId,schemaChecksum,schemaVersion,writerEpoch' ||
+                typeof value.instanceId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.instanceId) ||
+                value.repositoryId !== 1318171856 || value.writerEpoch !== 1 || value.schemaVersion !== 4 ||
+                typeof value.bindingDigest !== 'string' || !/^[a-f0-9]{64}$/.test(value.bindingDigest) ||
+                typeof value.schemaChecksum !== 'string' || !/^[a-f0-9]{64}$/.test(value.schemaChecksum)) invalid();
+          }
           const file = 'cannele-onboarding.config.json', stat = lstatSync(file);
           if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 16384) invalid();
           const git = (args, encoding = 'utf8') => execFileSync('git', args, { encoding, maxBuffer: 262144 });
@@ -253,6 +262,26 @@ jobs:
           CANNELE_REGISTRY_ADMIN_DATABASE_HOST: ${{ secrets.admin_database_host }}
           CANNELE_REGISTRY_DATABASE_URL: ${{ secrets.runtime_database_url }}
           CANNELE_REGISTRY_DATABASE_HOST: ${{ secrets.runtime_database_host }}
+      - name: Activate the reviewed runtime writer without provider credentials
+        if: inputs.action == 'activate-runtime'
+        run: |
+          export QA_TRUSTED_MAIN_SHA="$(git rev-parse HEAD)"
+          node --import tsx scripts/cannele-onboarding.ts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CANNELE_ONBOARDING_ACTION: ${{ inputs.action }}
+          CANNELE_ONBOARDING_EXPECTED_REVISION: ${{ inputs.reviewed_revision }}
+          CANNELE_ONBOARDING_REQUEST_ID: ${{ inputs.request_id }}
+          CANNELE_ONBOARDING_RESULT_PATH: ${{ steps.public.outputs.result_path }}
+          CANNELE_ONBOARDING_SOURCE_DIR: ${{ steps.public.outputs.source_dir }}
+          CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON: ${{ inputs.runtime_context_json }}
+          CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN: ${{ inputs.confirm_credential_drain }}
+          CAKE_CANNELE_ENABLED: ${{ vars.CAKE_CANNELE_ENABLED }}
+          CAKE_QA_POOL_ENABLED: ${{ vars.CAKE_QA_POOL_ENABLED }}
+          CAKE_QA_REGISTRY_ENABLED: ${{ vars.CAKE_QA_REGISTRY_ENABLED }}
+          CANNELE_REGISTRY_ADMIN_DATABASE_URL: ${{ secrets.admin_database_url }}
+          CANNELE_REGISTRY_ADMIN_DATABASE_HOST: ${{ secrets.admin_database_host }}
       - name: Upload strict public onboarding receipt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

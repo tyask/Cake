@@ -56,7 +56,7 @@ function validate(input: { connection: BootstrapConnection; context: Object_; ro
 
 // Same dedicated-database boundary as the initializer: extension objects may
 // exist, but application objects and legacy schemas may not coexist with Cannele.
-const INVENTORY = `WITH user_schemas AS (
+export const runtimeManagementInventorySql = `WITH user_schemas AS (
   SELECT oid,nspname FROM pg_catalog.pg_namespace WHERE NOT starts_with(nspname,'pg_') AND nspname<>'information_schema'
 ), allowed_schemas AS (
   SELECT 'public'::text AS name UNION SELECT 'cannele_registry'
@@ -137,7 +137,7 @@ export async function prepareRuntimeBootstrap<C extends BootstrapConnection>(cli
     if (owner.rows.length !== 1 || !admin || admin.database_name !== connection.database || admin.role_name !== connection.user
       || admin.session_role !== connection.user || admin.owns_database !== true || admin.owns_schema !== true
       || admin.login !== true || admin.create_role !== true) return fail("RUNTIME_BOOTSTRAP_DATABASE_UNSAFE");
-    if ((await client.query(INVENTORY)).rows[0]?.safe !== true) return fail("RUNTIME_BOOTSTRAP_DATABASE_UNSAFE");
+    if ((await client.query(runtimeManagementInventorySql)).rows[0]?.safe !== true) return fail("RUNTIME_BOOTSTRAP_DATABASE_UNSAFE");
     const controls = await client.query("SELECT to_jsonb(c) AS identity FROM cannele_registry.instance_control c FOR UPDATE");
     if (controls.rows.length !== 1) return fail("RUNTIME_BOOTSTRAP_CONTEXT_MISMATCH");
     const identity = object(controls.rows[0].identity), receipt = object(identity.initialization_receipt), transition = object(receipt.legacyTransition);

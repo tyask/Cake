@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { HttpQaGateway, type QaTransport } from "./qa-pool-writer";
 import { prepareRuntimeBootstrap, RuntimeBootstrapError } from "./cannele-runtime-bootstrap";
 import { createRuntimeHandoff, RuntimeHandoffError, safeHandoffDiagnostic, type HandoffDiagnostic } from "./cannele-runtime-handoff";
+import { activateRuntimeWriter, RuntimeActivationError, validateRuntimeActivationContext } from "./cannele-runtime-activation";
 
 const REPOSITORY = "tyask/Cake";
 const REPOSITORY_ID = 1318171856;
@@ -22,11 +23,11 @@ const ADMISSION_FIELDS = ["protocol", "reviewId", "reviewerGitHubId", "stoppedAt
   "legacyWorkflowBlobShas", ...DRAIN_FIELDS, "oldProviderCreationCredentialsRevoked"] as const;
 type Env = Readonly<Record<string, string | undefined>>;
 type Object_ = Record<string, unknown>;
-export type OnboardingAction = "inspect" | "transition" | "provision-runtime" | "bootstrap-runtime";
+export type OnboardingAction = "inspect" | "transition" | "provision-runtime" | "bootstrap-runtime" | "activate-runtime";
 const STAGES = ["UNKNOWN", "CONFIG", "ADMIN_CONNECT", "INSPECT_BEGIN", "INSPECT_LOCK_LEGACY", "INSPECT_LOCK_CONTROL",
   "INSPECT_SEARCH_PATH", "INSPECT_VERSION", "INSPECT_CORE", "INSPECT_COMMIT", "INSPECT_ROLLBACK", "TRANSITION",
   "RUNTIME_CONFIG", "RUNTIME_PREFLIGHT", "RUNTIME_CREATE", "RUNTIME_IDENTITY", "RUNTIME_UNLOCK", "RUNTIME_HANDOFF",
-  "RUNTIME_PROVISION", "RUNTIME_CONNECT", "RUNTIME_VERIFY", "RUNTIME_RELEASE", "RUNTIME_POOL_END", "ADMIN_RELEASE", "ADMIN_POOL_END"] as const;
+  "RUNTIME_PROVISION", "RUNTIME_ACTIVATE", "RUNTIME_CONNECT", "RUNTIME_VERIFY", "RUNTIME_RELEASE", "RUNTIME_POOL_END", "ADMIN_RELEASE", "ADMIN_POOL_END"] as const;
 const REASONS = ["UNKNOWN", "VALIDATION", "CORE_REJECTED", "AUTHENTICATION", "PERMISSION", "PROTOCOL", "UNSUPPORTED",
   "UNDEFINED_COLUMN", "UNDEFINED_FUNCTION", "UNDEFINED_TABLE", "UNDEFINED_OBJECT", "SYNTAX", "DATATYPE", "TIMEOUT", "DNS", "CONNECT", "RESET", "TLS"] as const;
 type Stage = typeof STAGES[number];
@@ -48,7 +49,7 @@ export class OnboardingError extends Error {
 }
 function diagnose(error: unknown, stage: Stage, core?: OnboardingCore): OnboardingError {
   if (error instanceof OnboardingError) return error.stage === "UNKNOWN" ? new OnboardingError(error.code, stage, error.reason, safeHandoffDiagnostic(error.handoff)) : error;
-  if (error instanceof RuntimeBootstrapError) return new OnboardingError(error.code, stage, "CORE_REJECTED");
+  if (error instanceof RuntimeBootstrapError || error instanceof RuntimeActivationError) return new OnboardingError(error.code, stage, "CORE_REJECTED");
   if (error instanceof RuntimeHandoffError) return new OnboardingError(error.code, stage, "CORE_REJECTED", safeHandoffDiagnostic(error.diagnostic));
   const providerCode = error && typeof error === "object" ? Object.getOwnPropertyDescriptor(error, "code")?.value : undefined;
   const reason = typeof providerCode === "string" ? ERROR_REASONS.get(providerCode) ?? "UNKNOWN" : "UNKNOWN";
@@ -183,7 +184,7 @@ export type OnboardingReceipt = { protocol: "cake-cannele-onboarding-result/v1";
 /** Administrative helpers receive credentials only after the actual trusted
  * owner/main workflow and both source blobs have been independently checked. */
 export async function runOnboarding(environment: Env, dependencies: { source: OnboardingSource; transport?: QaTransport; core: () => Promise<OnboardingCore>;
-  runtimeBootstrap?: typeof prepareRuntimeBootstrap; runtimeHandoff?: typeof createRuntimeHandoff }): Promise<OnboardingReceipt> {
+  runtimeBootstrap?: typeof prepareRuntimeBootstrap; runtimeHandoff?: typeof createRuntimeHandoff; runtimeActivation?: typeof activateRuntimeWriter }): Promise<OnboardingReceipt> {
   let core: OnboardingCore | undefined, firstFailure: OnboardingError | undefined;
   const capture = (error: unknown, stage: Stage): OnboardingError => {
     const failure = diagnose(error, stage, core); firstFailure ??= failure; return failure;
@@ -198,13 +199,17 @@ export async function runOnboarding(environment: Env, dependencies: { source: On
     const { source } = dependencies, gateway = new OnboardingGateway(environment, dependencies.transport);
     const run = await gateway.authorize(source);
     const action = environment.CANNELE_ONBOARDING_ACTION;
-    if (action !== "inspect" && action !== "transition" && action !== "provision-runtime" && action !== "bootstrap-runtime") return fail("ONBOARDING_ACTION_INVALID");
+    if (action !== "inspect" && action !== "transition" && action !== "provision-runtime" && action !== "bootstrap-runtime" && action !== "activate-runtime") return fail("ONBOARDING_ACTION_INVALID");
     const runtimeAction = action === "provision-runtime" || action === "bootstrap-runtime";
+    const activation = action === "activate-runtime", contextAction = runtimeAction || activation;
     const input = action === "transition" ? transitionInput(environment, source) : null;
-    const context = runtimeAction ? runtimeContext(json(environment.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON)) : null;
+    const context = contextAction ? runtimeContext(json(environment.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON)) : null;
     const roleName = runtimeAction ? text(environment.CANNELE_ONBOARDING_RUNTIME_ROLE_NAME, /^[a-z][a-z0-9_]{0,62}$/) : null;
     if ((action !== "transition" && environment.CANNELE_ONBOARDING_TRANSITION_JSON)
-      || (!runtimeAction && (environment.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON || environment.CANNELE_ONBOARDING_RUNTIME_ROLE_NAME))) return fail("ONBOARDING_INPUT_INVALID");
+      || (!contextAction && environment.CANNELE_ONBOARDING_RUNTIME_CONTEXT_JSON)
+      || (!runtimeAction && environment.CANNELE_ONBOARDING_RUNTIME_ROLE_NAME)
+      || (activation && environment.CANNELE_ONBOARDING_CONFIRM_LEGACY_DRAIN !== "false")) return fail("ONBOARDING_INPUT_INVALID");
+    if (activation) validateRuntimeActivationContext(context!);
     const loaded = await dependencies.core(); core = loaded;
     const connection = loaded.connection({ CANNELE_REGISTRY_DATABASE_URL: secret(environment, "CANNELE_REGISTRY_ADMIN_DATABASE_URL"),
       CANNELE_REGISTRY_DATABASE_HOST: secret(environment, "CANNELE_REGISTRY_ADMIN_DATABASE_HOST") });
@@ -246,6 +251,10 @@ export async function runOnboarding(environment: Env, dependencies: { source: On
               schemaChecksum: text(transitioned.schemaChecksum, DIGEST), evidenceDigest: text(receipt.evidenceDigest, DIGEST),
               ...(hasRetention ? { providerCredentialRetentionAccepted: true } : {}) };
           });
+        } else if (activation) {
+          result = await at("RUNTIME_ACTIVATE", async () => (dependencies.runtimeActivation ?? activateRuntimeWriter)(client, {
+            connection, context: context!, migrations: await loaded.migrations(),
+          }));
         } else if (action === "bootstrap-runtime") {
           const handoff = await at("RUNTIME_CONFIG", () => (dependencies.runtimeHandoff ?? createRuntimeHandoff)({
             bootstrapVercelToken: secret(environment, "CANNELE_BOOTSTRAP_VERCEL_TOKEN"),
