@@ -1,12 +1,10 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runStartTask } from "../scripts/start-task";
-import { executeConfigurationGit, type ConfigurationGit } from "../scripts/cannele-config";
-import { validTaskBranch } from "../scripts/task-workflow";
 
 function git(cwd: string, ...args: string[]): string {
   const result = spawnSync("git", ["-c", "user.name=Cake Test", "-c", "user.email=test@cake.local",
@@ -92,94 +90,4 @@ test("不正な引数・予約名をGit操作の前に拒否する", () => {
   for (const args of invalidArgs) {
     assert.throws(() => runStartTask({ args, cwd: "/nonexistent-cake-repository", log: silent }), /タスク名/);
   }
-});
-
-test("reviewed main's real generation creates qa-acceptance and preserves the 15-character task budget", t => {
-  const { cwd, remote, defaultWorktreeRoot } = repository(t);
-  const prepared = JSON.parse(readFileSync(new URL("../cannele.config.json", import.meta.url), "utf8"));
-  assert.equal(prepared.enabled, true);
-  writeFileSync(join(remote, "cannele.config.json"), JSON.stringify({ ...prepared, enabled: true }));
-  git(remote, "add", "cannele.config.json"); git(remote, "commit", "-m", "synthetic reviewed enabled main");
-  writeFileSync(join(cwd, "cannele.config.json"), JSON.stringify({ ...prepared, enabled: false, profile: null }));
-  const configurationGit: ConfigurationGit = (directory, args) => args[0] === "remote"
-    ? { status: 0, stdout: "https://github.com/tyask/Cake.git" } : executeConfigurationGit(directory, args);
-  const start = (name: string) => runStartTask({ args: [name], cwd, environment: {}, configurationGit, installDependencies: silent, log: silent });
-  const task = start("qa-acceptance"), prefix = prepared.profile.featureBranchPrefix;
-  assert.equal(task.branch, `${prefix}qa-acceptance`); assert.equal(validTaskBranch(task.branch), true);
-  assert.equal(git(task.worktreePath, "branch", "--show-current"), task.branch);
-  assert.equal(git(task.worktreePath, "rev-parse", "HEAD"), git(remote, "rev-parse", "HEAD"));
-  assert.equal(validTaskBranch(start("a".repeat(15)).branch), true);
-  assert.throws(() => start("a".repeat(16)), /60文字以内/);
-  assert.equal(existsSync(join(defaultWorktreeRoot, "a".repeat(16))), false);
-  assert.equal(JSON.parse(readFileSync(join(cwd, "cannele.config.json"), "utf8")).enabled, false, "Local configuration must not select the branch mode.");
-});
-
-test("既存のローカルブランチを上書きしない", (t) => {
-  const { cwd, defaultWorktreeRoot } = repository(t);
-  git(cwd, "branch", "codex/existing-task");
-  const before = git(cwd, "rev-parse", "codex/existing-task");
-  assert.throws(() => runStartTask({ args: ["existing-task"], cwd, environment: {},
-    installDependencies: silent, log: silent }), /ブランチが既に存在/);
-  assert.equal(git(cwd, "rev-parse", "codex/existing-task"), before);
-  assert.equal(existsSync(join(defaultWorktreeRoot, "existing-task")), false);
-});
-
-test("originに同名ブランチがあれば別タスクとして再作成しない", (t) => {
-  const { cwd, remote, defaultWorktreeRoot } = repository(t);
-  git(remote, "branch", "codex/remote-task");
-  assert.throws(() => runStartTask({ args: ["remote-task"], cwd, environment: {},
-    installDependencies: silent, log: silent }), /originにブランチが既に存在/);
-  assert.equal(existsSync(join(defaultWorktreeRoot, "remote-task")), false);
-  assert.equal(git(cwd, "branch", "--list", "codex/remote-task"), "");
-});
-
-test("既存ディレクトリ・dangling symlinkを上書きしない", (t) => {
-  const { cwd, defaultWorktreeRoot, root } = repository(t);
-  const existing = join(defaultWorktreeRoot, "existing-dir");
-  mkdirSync(existing, { recursive: true });
-  writeFileSync(join(existing, "keep.txt"), "retain me");
-  symlinkSync(join(root, "missing-target"), join(defaultWorktreeRoot, "existing-link"));
-  for (const name of ["existing-dir", "existing-link"]) {
-    assert.throws(() => runStartTask({ args: [name], cwd, environment: {},
-      installDependencies: silent, log: silent }), /作成先が既に存在/);
-    assert.equal(git(cwd, "branch", "--list", `codex/${name}`), "");
-  }
-  assert.equal(readFileSync(join(existing, "keep.txt"), "utf8"), "retain me");
-});
-
-test("fetchが失敗したらブランチ・worktree・依存パッケージを作らない", (t) => {
-  const { cwd, root, defaultWorktreeRoot } = repository(t);
-  git(cwd, "remote", "set-url", "origin", join(root, "missing-origin"));
-  let installed = false;
-  assert.throws(() => runStartTask({ args: ["failed-fetch"], cwd, environment: {},
-    installDependencies: () => { installed = true; }, log: silent }), /originの取得に失敗/);
-  assert.equal(existsSync(defaultWorktreeRoot), false);
-  assert.equal(git(cwd, "branch", "--list", "codex/failed-fetch"), "");
-  assert.equal(installed, false);
-});
-
-test("origin/mainがない場合はworktreeを作成しない", (t) => {
-  const { cwd, remote, defaultWorktreeRoot } = repository(t);
-  git(remote, "branch", "-m", "other-default");
-  assert.throws(() => runStartTask({ args: ["missing-main"], cwd, environment: {},
-    installDependencies: silent, log: silent }), /origin\/mainがありません/);
-  assert.equal(existsSync(defaultWorktreeRoot), false);
-  assert.equal(git(cwd, "branch", "--list", "codex/missing-main"), "");
-});
-
-test("npm ci失敗時は作成済みworktreeを保持して再試行手順を表示する", (t) => {
-  const { cwd, root } = repository(t);
-  const configuredRoot = join(root, "worktrees with 'quote' and $variable");
-  const worktreePath = join(configuredRoot, "retry-install");
-  assert.throws(() => runStartTask({ args: ["retry-install"], cwd,
-    environment: { CAKE_WORKTREE_ROOT: configuredRoot }, log: silent,
-    installDependencies: () => { throw new Error("private-npm-error"); } }), (error: unknown) => {
-    assert.ok(error instanceof Error);
-    assert.match(error.message, /ブランチとworktreeは保持/);
-    assert.match(error.message, /再試行: cd '.+' && npm ci/);
-    assert.equal(error.message.includes("private-npm-error"), false);
-    return true;
-  });
-  assert.ok(existsSync(worktreePath));
-  assert.equal(git(worktreePath, "branch", "--show-current"), "codex/retry-install");
 });

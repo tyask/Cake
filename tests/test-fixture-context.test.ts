@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -17,14 +18,14 @@ const qaEnvironment: Environment = Object.freeze({
   VERCEL_ENV: "preview",
   VERCEL_GIT_COMMIT_REF: "codex/fixture-context",
   VERCEL_GIT_COMMIT_SHA: "a".repeat(40),
-  CAKE_QA_SLOT: "qa1",
-  CAKE_QA_PR: "34",
-  CAKE_QA_LEASE_TOKEN: "00000000-0000-4000-8000-000000000001",
-  CAKE_QA_SOURCE_BRANCH: "codex/fixture-context",
-  CAKE_QA_SOURCE_SHA: "a".repeat(40),
+  CAKE_PREVIEW_REPOSITORY: "tyask/Cake", CAKE_PREVIEW_PHASE: "application", CAKE_PREVIEW_DATABASE_BRANCH_ID: "br-preview",
+  CAKE_PREVIEW_PR: "34",
+  CAKE_PREVIEW_GENERATION: "00000000-0000-4000-8000-000000000001",
+  CAKE_PREVIEW_SOURCE_BRANCH: "codex/fixture-context",
+  CAKE_PREVIEW_SOURCE_SHA: "a".repeat(40),
   CAKE_TEST_DATABASE_URL: "postgresql://fixture:dummy@ep-fixture-preview-pooler.ap-southeast-1.aws.neon.tech/cake_fixture",
-  CAKE_QA_DATABASE_HOST: "ep-fixture-preview.ap-southeast-1.aws.neon.tech",
-  CAKE_QA_PRODUCTION_DATABASE_HOST: "ep-fixture-production.ap-southeast-1.aws.neon.tech",
+  CAKE_PREVIEW_DATABASE_HOST_SHA256: createHash('sha256').update('ep-fixture-preview.ap-southeast-1.aws.neon.tech').digest('hex'),
+  CAKE_PREVIEW_PRODUCTION_HOST_SHA256: createHash('sha256').update('ep-fixture-production.ap-southeast-1.aws.neon.tech').digest('hex'),
 });
 
 function registeredUser(
@@ -36,13 +37,13 @@ function registeredUser(
 
 const invalidQaEnvironments: ReadonlyArray<{ label: string; environment: Environment }> = [
   { label: "未guarded Preview", environment: { AUTH_MODE: "test", VERCEL_ENV: "preview" } },
-  { label: "lease未確認", environment: { ...qaEnvironment, CAKE_QA_LEASE_TOKEN: undefined } },
+  { label: "DB世代未確認", environment: { ...qaEnvironment, CAKE_PREVIEW_GENERATION: undefined } },
   { label: "feature枝の不一致", environment: { ...qaEnvironment, VERCEL_GIT_COMMIT_REF: "codex/other" } },
   { label: "SHAの不一致", environment: { ...qaEnvironment, VERCEL_GIT_COMMIT_SHA: "b".repeat(40) } },
-  { label: "endpoint未確認", environment: { ...qaEnvironment, CAKE_QA_DATABASE_HOST: undefined } },
-  { label: "endpointの不一致", environment: { ...qaEnvironment, CAKE_QA_DATABASE_HOST: "ep-fixture-other.ap-southeast-1.aws.neon.tech" } },
-  { label: "Production endpointとの同一性", environment: { ...qaEnvironment, CAKE_QA_PRODUCTION_DATABASE_HOST: qaEnvironment.CAKE_QA_DATABASE_HOST } },
-  { label: "本番hostの比較証拠なし", environment: { ...qaEnvironment, CAKE_QA_PRODUCTION_DATABASE_HOST: undefined } },
+  { label: "endpoint未確認", environment: { ...qaEnvironment, CAKE_PREVIEW_DATABASE_HOST_SHA256: undefined } },
+  { label: "endpointの不一致", environment: { ...qaEnvironment, CAKE_PREVIEW_DATABASE_HOST_SHA256: createHash('sha256').update('ep-fixture-other.ap-southeast-1.aws.neon.tech').digest('hex') } },
+  { label: "Production endpointとの同一性", environment: { ...qaEnvironment, CAKE_PREVIEW_PRODUCTION_HOST_SHA256: qaEnvironment.CAKE_PREVIEW_DATABASE_HOST_SHA256 } },
+  { label: "本番hostの比較証拠なし", environment: { ...qaEnvironment, CAKE_PREVIEW_PRODUCTION_HOST_SHA256: undefined } },
   { label: "ローカルへのQA metadata混入", environment: { ...qaEnvironment, VERCEL_ENV: undefined } },
   { label: "ProductionへのQA metadata混入", environment: { ...qaEnvironment, VERCEL_ENV: "production" } },
 ];
@@ -96,7 +97,7 @@ test("active identityは両環境の同一ID/emailを受け入れ、未知メー
 
 test("QA guard失敗はactive profileで例外を伝え、identityと管理者判定ではfail closedする", () => {
   for (const { label, environment } of invalidQaEnvironments) {
-    assert.throws(() => activeTestUsers(environment), /QA貸出とDBの照合/, label);
+    assert.throws(() => activeTestUsers(environment), /PreviewとDBの照合/, label);
     for (const user of [...TEST_USERS, ...QA_TEST_USERS]) {
       assert.equal(isActiveTestIdentity(user, environment), false, label);
       assert.equal(canUseAdministratorRole(registeredUser(user), environment), false, label);

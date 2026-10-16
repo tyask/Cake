@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -23,11 +24,11 @@ const db = new PGlite({ extensions: { pgcrypto } });
 let memoryDatabases = 1;
 const databaseName = (await db.query('SELECT current_database() AS name')).rows[0].name;
 const environment = {
-  VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'codex/sql-review', VERCEL_GIT_COMMIT_SHA: 'a'.repeat(40),
-  CAKE_QA_SLOT: 'qa1', CAKE_QA_PR: '34', CAKE_QA_LEASE_TOKEN: '00000000-0000-4000-8000-000000000001',
-  CAKE_QA_SOURCE_BRANCH: 'codex/sql-review', CAKE_QA_SOURCE_SHA: 'a'.repeat(40),
-  CAKE_QA_DATABASE_HOST: 'ep-test.ap-southeast-1.aws.neon.tech',
-  CAKE_QA_PRODUCTION_DATABASE_HOST: 'ep-production.ap-southeast-1.aws.neon.tech',
+  VERCEL_ENV: 'preview', AUTH_MODE: 'test', VERCEL_GIT_COMMIT_REF: 'codex/sql-review', VERCEL_GIT_COMMIT_SHA: 'a'.repeat(40),
+  CAKE_PREVIEW_REPOSITORY: "tyask/Cake", CAKE_PREVIEW_PHASE: "application", CAKE_PREVIEW_DATABASE_BRANCH_ID: "br-preview", CAKE_PREVIEW_PR: '34', CAKE_PREVIEW_GENERATION: '00000000-0000-4000-8000-000000000001',
+  CAKE_PREVIEW_SOURCE_BRANCH: 'codex/sql-review', CAKE_PREVIEW_SOURCE_SHA: 'a'.repeat(40),
+  CAKE_PREVIEW_DATABASE_HOST_SHA256: createHash('sha256').update('ep-test.ap-southeast-1.aws.neon.tech').digest('hex'),
+  CAKE_PREVIEW_PRODUCTION_HOST_SHA256: createHash('sha256').update('ep-production.ap-southeast-1.aws.neon.tech').digest('hex'),
   CAKE_TEST_DATABASE_URL: `postgresql://fake:fake@ep-test.ap-southeast-1.aws.neon.tech/${databaseName}`,
 };
 const identity = previewDatabaseIdentity(environment);
@@ -122,9 +123,9 @@ try {
   for (const [name, change] of [
     ['Copied marker rejects endpoint mismatch', { databaseHost: 'ep-other.ap-southeast-1.aws.neon.tech' }],
     ['DB name mismatch rejects', { databaseName: 'other' }],
-    ['Slot mismatch rejects', { slot: 'qa2' }],
+    ['Repository mismatch rejects', { repository: 'other/repo' }],
     ['PR mismatch rejects', { pr: 35 }],
-    ['Lease mismatch rejects', { leaseToken: '00000000-0000-4000-8000-000000000002' }],
+    ['Generation mismatch rejects', { generation: '00000000-0000-4000-8000-000000000002' }],
     ['Source branch mismatch rejects', { sourceBranch: 'codex/other' }],
   ]) {
     await check(name, async () => { await assert.rejects(db.query(previewDatabaseGuardSql({ ...identity, ...change }, false)), /identity mismatch/); });
@@ -175,7 +176,7 @@ try {
       INSERT INTO transactions (workspace_id,occurred_at,merchant,method,type,amount_yen,actor_user_id,expense_class,external_id,created_by,updated_by,split_weights)
       SELECT id,now(),'edited transaction','cash','PAYMENT',123,'test-user-a','SHARED','review-preserved','test-user-a','test-user-a','{"test-user-a":7,"test-user-b":1}'::jsonb FROM workspaces`);
     const before = await fixtureSnapshot();
-    const redeploy = { ...environment, CAKE_QA_SOURCE_SHA: 'b'.repeat(40), VERCEL_GIT_COMMIT_SHA: 'b'.repeat(40) };
+    const redeploy = { ...environment, CAKE_PREVIEW_SOURCE_SHA: 'b'.repeat(40), VERCEL_GIT_COMMIT_SHA: 'b'.repeat(40) };
     await setupDatabase(redeploy, { connect: () => ({ query: (sql) => db.query(sql) }) });
     await db.query(testSeedSql(redeploy));
     assert.equal(await fixtureSnapshot(), before);
@@ -219,7 +220,7 @@ try {
     });
   } finally { await localDb.close(); }
   // Model the approved Native parent through the actual migrations and QA seed,
-  // then remove the lease-only marker. Revision 4 is the read-only observed
+  // then remove the Preview marker. Revision 4 is the read-only observed
   // parent value; a fresh empty database keeps its original revision 0 path.
   const inheritedDb = new PGlite({ extensions: { pgcrypto } });
   memoryDatabases += 1;
@@ -297,21 +298,21 @@ try {
         await rejectedWithoutChanges(inheritedDb, previewDatabaseGuardSql(inheritedIdentity, true, "RAISE EXCEPTION 'review claim rollback';"), /review claim rollback/);
       } finally { await inheritedDb.exec('ROLLBACK'); }
     });
-    await check('Approved canonical fixture base claims a seeded lease without repairing inherited rows', async () => {
+    await check('Approved canonical fixture base claims a seeded Preview without repairing inherited rows', async () => {
       const before = await databaseSnapshot(inheritedDb, true);
       await setupDatabase(inheritedEnvironment, { connect: () => ({ query: (sql) => inheritedDb.query(sql) }) });
       await inheritedDb.query(testSeedSql(inheritedEnvironment));
       assert.equal(await databaseSnapshot(inheritedDb, true), before);
       assert.equal(await scalar('SELECT COUNT(*)::int FROM cake_preview_database_identity', inheritedDb), 1);
       assert.equal(await scalar('SELECT seeded_at IS NOT NULL FROM cake_preview_database_identity', inheritedDb), true);
-      assert.deepEqual((await inheritedDb.query('SELECT version,slot,pr,source_branch,lease_token,database_host,database_name FROM cake_preview_database_identity')).rows, [{
-        version: 1, slot: inheritedIdentity.slot, pr: inheritedIdentity.pr, source_branch: inheritedIdentity.sourceBranch,
-        lease_token: inheritedIdentity.leaseToken, database_host: inheritedIdentity.databaseHost, database_name: inheritedIdentity.databaseName,
+      assert.deepEqual((await inheritedDb.query('SELECT version,repository,pr,source_branch,generation,branch_id,database_host,database_name FROM cake_preview_database_identity')).rows, [{
+        version: 2, repository: inheritedIdentity.repository, pr: inheritedIdentity.pr, source_branch: inheritedIdentity.sourceBranch,
+        generation: inheritedIdentity.generation, branch_id: inheritedIdentity.branchId, database_host: inheritedIdentity.databaseHost, database_name: inheritedIdentity.databaseName,
       }]);
     });
-    await check('A foreign lease cannot claim the canonical fixture base with an existing marker', async () => {
+    await check('A foreign Preview generation cannot claim the canonical fixture base with an existing marker', async () => {
       const before = await databaseSnapshot(inheritedDb);
-      await assert.rejects(inheritedDb.query(previewDatabaseGuardSql({ ...inheritedIdentity, leaseToken: '00000000-0000-4000-8000-000000000002' }, true)), /identity mismatch/);
+      await assert.rejects(inheritedDb.query(previewDatabaseGuardSql({ ...inheritedIdentity, generation: '00000000-0000-4000-8000-000000000002' }, true)), /identity mismatch/);
       assert.equal(await databaseSnapshot(inheritedDb), before);
     });
     await check('Claimed fixture base keeps disable, demotion, renamed fixtures and financial edits on same PR setup and seed', async () => {
@@ -322,7 +323,7 @@ try {
         SELECT id,now(),'edited base transaction','cash','PAYMENT',456,'test-user-a','SHARED','base-preserved','test-user-a','test-user-a','{"test-user-a":7,"test-user-b":1}'::jsonb FROM workspaces;
         UPDATE transactions SET amount_yen=789,memo='QA edit' WHERE external_id='base-preserved'`);
       const before = await databaseSnapshot(inheritedDb);
-      const redeploy = { ...inheritedEnvironment, CAKE_QA_SOURCE_SHA: 'c'.repeat(40), VERCEL_GIT_COMMIT_SHA: 'c'.repeat(40) };
+      const redeploy = { ...inheritedEnvironment, CAKE_PREVIEW_SOURCE_SHA: 'c'.repeat(40), VERCEL_GIT_COMMIT_SHA: 'c'.repeat(40) };
       await setupDatabase(redeploy, { connect: () => ({ query: (sql) => inheritedDb.query(sql) }) });
       await inheritedDb.query(testSeedSql(redeploy));
       await inheritedDb.query(testSeedSql(redeploy));

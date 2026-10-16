@@ -4,12 +4,13 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CAKE_REPOSITORY, assertTaskGitGate, cleanTaskHead, commandOutput, executeWorkflowCommand, pullRequestUrl,
-  readPreviewRecord, readyQaPreview, taskPullRequests, type WorkflowExecutor,
-  type PreviewProviderReader,
+  taskPullRequests, type WorkflowExecutor,
 } from "./task-workflow";
+import { source } from "./preview-model";
+import { readyPreview } from "./preview-ready";
 import { updateTaskPullRequest } from "./task-pr-update";
 
-type TaskPrOptions = { args?: readonly string[]; cwd?: string; execute?: WorkflowExecutor; log?: (message: string) => void; provider?: PreviewProviderReader };
+type TaskPrOptions = { args?: readonly string[]; cwd?: string; execute?: WorkflowExecutor; log?: (message: string) => void };
 
 function prArguments(args: readonly string[]): { title: string; verificationFile: string; draft: boolean } {
   const values = new Map<string, string>();
@@ -37,7 +38,7 @@ function prArguments(args: readonly string[]): { title: string; verificationFile
 }
 
 export async function runTaskPr({
-  args = [], cwd = process.cwd(), execute = executeWorkflowCommand, log = console.log, provider,
+  args = [], cwd = process.cwd(), execute = executeWorkflowCommand, log = console.log,
 }: TaskPrOptions = {}): Promise<{ url: string; existing: boolean }> {
   const { title, verificationFile, draft } = prArguments(args);
   const head = await cleanTaskHead(cwd, execute);
@@ -52,7 +53,7 @@ export async function runTaskPr({
     throw new Error("検証結果ファイルを読み込めませんでした。非空のテキストファイル（1MB以内）を指定してください。");
   }
   let existing = await taskPullRequests(head, execute);
-  if (draft && existing[0] && !existing[0].isDraft) throw new Error("既存PRはdraftではありません。固定QAを検証し、--draftなしで更新してください。");
+  if (draft && existing[0] && !existing[0].isDraft) throw new Error("既存PRはdraftではありません。Previewを検証し、--draftなしで更新してください。");
   let remote = await commandOutput(execute, "git", ["ls-remote", "--heads", "origin", `refs/heads/${head.branch}`], head.cwd,
     "originの検証対象コミットを確認できませんでした。Gitの接続と認証を確認してください。");
   if (remote !== `${head.sha}\trefs/heads/${head.branch}` && draft) {
@@ -69,30 +70,30 @@ export async function runTaskPr({
   let existingUrl: string | undefined;
   if (existing.length === 1) {
     if (existing[0].headRefOid !== head.sha) throw new Error("既存PRのコミットがPreviewの検証対象と一致しません。");
-    if (draft && !existing[0].isDraft) throw new Error("既存PRはdraftではありません。固定QAを検証し、--draftなしで更新してください。");
+    if (draft && !existing[0].isDraft) throw new Error("既存PRはdraftではありません。Previewを検証し、--draftなしで更新してください。");
     existingUrl = existing[0].url;
   }
 
   let evidence: string;
   if (draft) {
-    evidence = `## 固定QA\n\n未検証。開発・ローカル検証の後にdraft PRを作成し、デプロイ直前にActionsへQA枠を予約します。満枠時はdraftのまま終了し、再依頼時に再開します。現在HEADのDeployment固有URLと固定QA URLで画面/APIを確認してからReadyにします。\n\n- ブランチ: \`${head.branch}\`\n- 対象コミット: \`${head.sha}\`\n`;
+    evidence = `## Preview\n\n未検証。現在HEADの固有URLでPC/mobile・A/Bと変更箇所を検証してからReadyにします。\n\n- ブランチ: ${head.branch}\n- 対象コミット: ${head.sha}\n`;
   } else {
-    const preview = await readPreviewRecord(head.cwd);
-    if (preview.branch !== head.branch || preview.sha !== head.sha) {
-      throw new Error("Previewを検証したブランチ・コミットと現在のHEADが一致しません。deploy:previewから検証をやり直してください。");
-    }
-    if (!existing[0] || existing[0].number !== preview.prNumber) throw new Error("検証済み固定QAと同じPRがありません。先に--draftでPRを作成してください。");
-    const current = await readyQaPreview(head, preview.prNumber, execute, provider);
-    if (!current || !current.fixedUrl || current.slot !== preview.slot || current.leaseId !== preview.leaseId
-      || current.deploymentId !== preview.deploymentId || current.url !== preview.url
-      || (["projectId", "branchId", "endpointId", "host"] as const).some((key) => current.database[key] !== preview.database[key])) {
-      throw new Error("固定QAの貸出・Deployment・DBが検証記録と一致しません。deploy:previewから検証をやり直してください。");
-    }
-    evidence = `## Preview\n\n- 固定QA URL: ${current.fixedUrl}\n- 診断用Deployment URL: ${preview.url}\n- ブランチ: \`${head.branch}\`\n- 検証コミット: \`${head.sha}\`\n- Deployment: \`${preview.deploymentId}\`\n- QA枠: \`${preview.slot}\` / PR #${preview.prNumber}\n- 貸出ID: \`${preview.leaseId}\`\n- 台帳Deployment: \`${current.ledgerRecordId}\`\n- DB: 本番から分離したNeon Previewプロジェクト \`${preview.database.projectId}\` / branch \`${preview.database.branchId}\` / endpoint \`${preview.database.endpointId}\`。\n`;
+    if (!existing[0]) throw new Error("先にdraft PRを作成してください。");
+    const current = source(JSON.parse(await commandOutput(execute, "gh", ["api", `repos/${CAKE_REPOSITORY}/pulls/${existing[0].number}`], head.cwd)));
+    if (current.sha !== head.sha || current.branch !== head.branch || current.state !== 'open') throw new Error('Previewの現在PRが一致しません。');
+    const proof = await readyPreview(current, head.cwd, execute);
+    evidence = `## Preview\n\n- URL: ${proof.deployment.url}\n- ブランチ: ${head.branch}\n- 検証commit: ${head.sha}\n- Deployment: ${proof.deployment.id}\n- DB branch: ${proof.deployment.database!.branchId}\n- DB endpoint: ${proof.deployment.database!.endpointId}\n- 画面確認: ${proof.cases.join(', ')}\n- 実クリック: ${proof.clicks.length}回\n`;
   }
   const body = `## 変更内容\n\n${title}\n\n${evidence}\n## 検証結果\n\n${verification}\n`;
   if (existingUrl) {
     await updateTaskPullRequest(head, existing[0].number, title, body, execute);
+    if (!draft && existing[0].isDraft) {
+      const latestHead = await cleanTaskHead(head.cwd, execute);
+      if (latestHead.sha !== head.sha || latestHead.branch !== head.branch) throw new Error("HEADが変わりました。draftを解除しません。");
+      const requests = await taskPullRequests(head, execute);
+      if (requests[0]?.headRefOid !== head.sha) throw new Error('PR headが変わりました。draftを解除しません。');
+      await commandOutput(execute, 'gh', ['pr', 'ready', String(existing[0].number), '--repo', CAKE_REPOSITORY], head.cwd);
+    }
     log(`Cake: 既存のPRを最新の検証結果へ更新しました: ${existingUrl}`);
     return { url: existingUrl, existing: true };
   }
@@ -112,7 +113,7 @@ export async function runTaskPr({
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  void import("./task-pr-registry").then(({ runTaskPrRegistry }) => runTaskPrRegistry({ args: process.argv.slice(2) })).catch(() => {
+  void runTaskPr({ args: process.argv.slice(2) }).catch(() => {
     console.error("PR操作が失敗しました。認証情報や外部応答は表示しません。draftとQA検証状態を確認してください。");
     process.exitCode = 1;
   });

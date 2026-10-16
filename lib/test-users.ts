@@ -21,7 +21,7 @@ export type TestUser = {
   readonly isAdmin?: boolean;
 };
 
-// QA fixtures are selected only after validating the Preview lease identity.
+// QA fixtures are selected only after validating the Preview ownership identity.
 // The local test profile above remains unchanged.
 export const QA_TEST_USERS = [
   {

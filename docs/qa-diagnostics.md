@@ -1,3 +1,5 @@
+> 履歴資料：旧固定QA／台帳方式の記録です。現在のコマンド・手順は [開発・QA運用手順](development-workflow.md) を参照してください。ここに記載された旧スクリプトは撤去済みです。
+
 # QAのGET専用読取診断
 
 診断単体はQA poolを有効化せず、アプリ、DB、build、seedを実行しない。GETだけで設定不足と資源の識別情報を確認し、probe・返却の計画を表示する。貸出の取得・返却、deployment作成・削除、alias変更、DB接続、設定適用の実行入口は持たない。main/対象PRの完全SHAにあるGit設定を確認し、writerと通常CLIの生成前確認は [QA貸出運用](development-workflow.md) の別の契約に従う。

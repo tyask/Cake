@@ -76,9 +76,9 @@ test("Googleプロフィール更新は画像だけ更新し、設定済みの�
 test("テストユーザーの再ログインも保存済みのユーザー名を上書きしない", async () => {
   const environment: Record<string, string | undefined> = {
     AUTH_MODE: "test", VERCEL_ENV: "development",
-    CAKE_QA_SLOT: undefined, CAKE_QA_PR: undefined, CAKE_QA_LEASE_TOKEN: undefined,
-    CAKE_QA_SOURCE_BRANCH: undefined, CAKE_QA_SOURCE_SHA: undefined,
-    CAKE_QA_DATABASE_HOST: undefined, CAKE_QA_PRODUCTION_DATABASE_HOST: undefined,
+    CAKE_PREVIEW_REPOSITORY: undefined, CAKE_PREVIEW_PR: undefined, CAKE_PREVIEW_GENERATION: undefined,
+    CAKE_PREVIEW_SOURCE_BRANCH: undefined, CAKE_PREVIEW_SOURCE_SHA: undefined,
+    CAKE_PREVIEW_DATABASE_HOST_SHA256: undefined, CAKE_PREVIEW_PRODUCTION_HOST_SHA256: undefined,
   };
   const previous = new Map(Object.keys(environment).map((key) => [key, process.env[key]]));
   for (const [key, value] of Object.entries(environment)) {

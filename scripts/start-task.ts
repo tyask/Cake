@@ -2,7 +2,6 @@ import { spawnSync } from "node:child_process";
 import { lstatSync, mkdirSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadReviewedCanneleConfiguration, type ConfigurationGit } from "./cannele-config";
 
 type TaskEnvironment = Readonly<Record<string, string | undefined>>;
 type StartTaskOptions = {
@@ -11,7 +10,6 @@ type StartTaskOptions = {
   environment?: TaskEnvironment;
   installDependencies?: (cwd: string) => void;
   log?: (message: string) => void;
-  configurationGit?: ConfigurationGit;
 };
 export type StartedTask = { branch: string; worktreePath: string };
 
@@ -65,10 +63,9 @@ function installDependencies(cwd: string): void {
 export function runStartTask({
   args = [], cwd = process.cwd(), environment = process.env,
   installDependencies: install = installDependencies, log = console.log,
-  configurationGit,
 }: StartTaskOptions = {}): StartedTask {
   const name = taskName(args);
-  let branch = `codex/${name}`;
+  const branch = `codex/${name}`;
   const commonGitDirectory = git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"],
     "CakeのGitリポジトリ内で実行してください。");
   // Linked worktrees share this directory; the default is stable from any checkout.
@@ -92,11 +89,6 @@ export function runStartTask({
     "originの取得に失敗しました。worktreeは作成していません。Gitの接続と認証を確認してください。");
   if (!refExists(cwd, "refs/remotes/origin/main")) {
     throw new Error("origin/mainがありません。worktreeは作成していません。");
-  }
-  const configuration = loadReviewedCanneleConfiguration({ cwd, fetch: false, ...(configurationGit ? { git: configurationGit } : {}) });
-  if (configuration.enabled) {
-    branch = `${configuration.profile!.featureBranchPrefix}${name}`;
-    if (branch.slice('codex/'.length).length > 60) throw new Error('Canneleの世代prefixとタスク名の合計を60文字以内にしてください。worktreeは作成していません。');
   }
   if (refExists(cwd, `refs/heads/${branch}`)) {
     throw new Error(`ブランチが既に存在します: ${branch}`);

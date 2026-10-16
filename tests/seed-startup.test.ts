@@ -51,6 +51,6 @@ test("Vercelの環境変数が渡された実起動でも環境読み込みのTy
   });
   assert.ifError(result.error);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /QA貸出とDBの照合/);
+  assert.match(result.stderr, /PreviewとDBの照合/);
   assert.doesNotMatch(result.stderr, /TypeError|isolated-invalid-url|production-url-must-not-be-used/);
 });

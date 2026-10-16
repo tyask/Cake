@@ -241,6 +241,17 @@ npm run db:seed:test # テストユーザーA・Bと共有ワークスペース�
 
 差額が負の人から正の人へ、その絶対額を支払うよう表示します。清算完了はアプリ内のフラグ更新であり、実際の送金は行いません。
 
-## QA診断・移行
+## PR Preview
 
-現行方式の診断、管理専用DBへの移行条件、失敗時の対応は [開発・QA運用手順](docs/development-workflow.md) を参照してください。
+固定QA URLとCanneleは使用しません。CakeのコマンドでmainのActionsへ操作を依頼し、PRごとの固有Preview URLと専用Neon Native DBを使います。
+
+```bash
+npm run deploy:preview
+npm run qa:status
+npm run qa:verify
+npm run qa:release -- --pr <閉じたPR番号>
+```
+
+テスト前に `npx playwright install chromium` でブラウザを用意します。Cloudに既存Chromiumがある場合は `CAKE_BROWSER_EXECUTABLE=/usr/bin/chromium` を指定できます。
+
+draft作成・Ready条件・認証・Cloud CA・失敗復旧・一括切替の手順は[開発・QA運用手順](docs/development-workflow.md)を参照してください。新方式の実環境作成・cleanup受入はmain導入後に別途行います。
