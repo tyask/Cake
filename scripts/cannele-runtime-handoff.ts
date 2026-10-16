@@ -231,17 +231,19 @@ export function createRuntimeHandoff(options: { bootstrapVercelToken: string; ve
       const values = credentials(input), signal = AbortSignal.timeout(90_000);
       await inspect(signal);
       for (const [index, key] of SECRET_KEYS.entries()) {
-        const body = { key, value: values[index], type: "sensitive", target: ["production"], comment: marker, gitBranch: null, customEnvironmentIds: [] };
+        const body = { value: values[index], type: "sensitive", target: ["production"], comment: marker, gitBranch: null, customEnvironmentIds: [] };
         let done = false, lastDiagnostic: HandoffDiagnostic | undefined;
         const remember = (value: HandoffDiagnostic) => { lastDiagnostic = value; };
         for (let attempt = 0; attempt < 3 && !signal.aborted; attempt++) {
           let found = await metadata(signal), env = found.get(key);
           if (!env) {
-            await write("POST", path(10, "/env"), "SECRET_CREATE", body, signal, remember);
+            await write("POST", path(10, "/env"), "SECRET_CREATE", { key, ...body }, signal, remember);
             found = await metadata(signal); env = found.get(key); if (!env) continue;
           }
           // A POST response can be lost or contain a partial failure. Once an
           // exact owned row exists, require acknowledgement of the same PATCH.
+          // Sensitive keys are immutable: address the checked row by ID and
+          // omit key even when its value would be unchanged (Vercel CLI #16096).
           if (!await write("PATCH", path(9, `/env/${env.id}`), "SECRET_UPDATE", body, signal, remember)) { await metadata(signal); continue; }
           const confirmed = (await metadata(signal)).get(key);
           if (confirmed?.id === env.id) { done = true; break; }

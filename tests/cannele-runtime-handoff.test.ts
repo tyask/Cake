@@ -66,7 +66,14 @@ function fixture() {
     project: { id: projectId, name: 'cannele-cake', accountId: teamId },
     metadata: undefined as (() => unknown) | undefined,
     own(key: string): Env { return { id: `env_owned_${++sequence}`, key, type: 'sensitive', target: ['production'], comment: marker }; },
-    factory: () => createRuntimeHandoff({ bootstrapVercelToken, vercelToken, neonApiKey, context, roleName, request }),
+    factory: ({ legacyPatchKey = false }: { legacyPatchKey?: boolean } = {}) => createRuntimeHandoff({ bootstrapVercelToken, vercelToken, neonApiKey, context, roleName,
+      request: legacyPatchKey ? async (input, init) => {
+        if (init?.method === 'PATCH' && typeof init.body === 'string') {
+          const target = envs.find(row => row.id === new URL(String(input)).pathname.split('/').at(-1)); assert.ok(target);
+          return request(input, { ...init, body: JSON.stringify({ ...JSON.parse(init.body), key: target.key }) });
+        }
+        return request(input, init);
+      } : request }),
   };
   const request: typeof fetch = async (input, init) => {
     const url = new URL(String(input)); const method = init?.method ?? 'GET';
@@ -100,7 +107,8 @@ function fixture() {
     }
     if (method === 'PATCH' && url.pathname.startsWith(`/v9/projects/${projectId}/env/`)) {
       assert.ok(body); const row = envs.find(value => value.id === url.pathname.split('/').at(-1)); assert.ok(row);
-      if (body.key !== undefined) assert.equal(body.key, row.key);
+      // Sensitive keys cannot be renamed, including a PATCH with the same key.
+      if (Object.hasOwn(body, 'key')) return response({ error: { message: privateDiagnostic } }, 400);
       if (body.type !== undefined) row.type = String(body.type);
       if (body.target !== undefined) row.target = body.target as string[];
       if (body.comment !== undefined) row.comment = String(body.comment);
@@ -112,18 +120,24 @@ function fixture() {
   return state;
 }
 
-function writes(calls: Call[]): Call[] { return calls.filter(call => call.method === 'POST' || call.method === 'PATCH'); }
-function assertPublished(f: ReturnType<typeof fixture>): void {
+function writes(calls: readonly Call[]): Call[] { return calls.filter(call => call.method === 'POST' || call.method === 'PATCH'); }
+function assertPublished(f: ReturnType<typeof fixture>, calls: readonly Call[] = f.calls): void {
   const rows = f.envs.filter(row => keys.includes(row.key));
   assert.equal(rows.length, 4); assert.equal(new Set(rows.map(row => row.key)).size, 4);
   for (const row of rows) {
     assert.equal(row.type, 'sensitive'); assert.deepEqual(row.target, ['production']); assert.equal(row.comment, f.marker);
     assert.equal(f.values.get(row.key), expectedValues[row.key]);
   }
-  for (const call of writes(f.calls)) {
+  for (const call of writes(calls)) {
     assert.ok(call.body); assert.equal(call.body.type, 'sensitive'); assert.deepEqual(call.body.target, ['production']);
     assert.equal(call.body.comment, f.marker); assert.ok(Object.values(expectedValues).includes(String(call.body.value)));
-    assert.ok(keys.includes(String(call.body.key)));
+    let key: string;
+    if (call.method === 'POST') { assert.equal(Object.hasOwn(call.body, 'key'), true); key = String(call.body.key); }
+    else {
+      assert.equal(Object.hasOwn(call.body, 'key'), false);
+      const target = rows.find(row => row.id === call.url.pathname.split('/').at(-1)); assert.ok(target); key = target.key;
+    }
+    assert.ok(keys.includes(key)); assert.equal(call.body.value, expectedValues[key]);
     assert.equal(JSON.stringify(call.body).includes(bootstrapVercelToken), false);
   }
 }
@@ -187,6 +201,35 @@ test('a new factory can resume a partial handoff using owned rows and fresh meta
   f.before = undefined; const resumed = f.factory(); await resumed.preflight(); const start = f.calls.length;
   await resumed.publish({ databaseUrl, databaseHost }); assertPublished(f);
   assert.ok(f.calls.slice(start).some(call => call.method === 'PATCH'));
+});
+
+test('a new factory resumes one Sensitive value created before the legacy same-key PATCH 400 without duplicate or secret changes', async () => {
+  const f = fixture();
+  const protectedBefore = structuredClone(f.envs.filter(row => row.key.startsWith('CANNELE_GITHUB_') || row.key === 'CANNELE_AUTH_ENCRYPTION_KEY'));
+  assert.equal(protectedBefore.length, 3);
+  const legacy = f.factory({ legacyPatchKey: true }); await legacy.preflight();
+  await assert.rejects(legacy.publish({ databaseUrl, databaseHost }), diagnosed('WRITE_UNKNOWN', {
+    method: 'PATCH', endpoint: 'SECRET_UPDATE', status: 400, reason: 'HTTP',
+  }));
+  const created = f.envs.filter(row => keys.includes(row.key)); assert.equal(created.length, 1);
+  const first = created[0]!; assert.equal(first.key, keys[0]);
+  const post = f.calls.find(call => call.method === 'POST'); assert.ok(post?.body);
+  assert.equal(post.body.key, first.key); assert.equal(post.body.value, expectedValues[first.key]);
+  const rejected = f.calls.filter(call => call.method === 'PATCH'); assert.equal(rejected.length, 3);
+  assert.ok(rejected.every(call => call.body?.key === first.key && call.body?.value === post.body!.value));
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
+  const resumeStart = f.calls.length, resumed = f.factory(); await resumed.preflight();
+  await resumed.publish({ databaseUrl, databaseHost });
+  const resumedCalls = f.calls.slice(resumeStart); assertPublished(f, resumedCalls);
+  const updates = writes(resumedCalls); assert.equal(updates[0]?.method, 'PATCH');
+  assert.equal(updates[0]?.url.pathname.split('/').at(-1), first.id);
+  assert.equal(updates[0]?.body?.value, post.body.value);
+  const { key: omittedKey, ...sameFields } = post.body; assert.equal(omittedKey, first.key);
+  assert.deepEqual(updates[0]?.body, sameFields, 'PATCH preserves every creation field except the forbidden key');
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 4);
+  for (const key of keys) assert.equal(f.calls.filter(call => call.method === 'POST' && call.body?.key === key).length, 1);
+  assert.equal(f.envs.find(row => row.key === first.key)?.id, first.id);
+  assert.deepEqual(f.envs.filter(row => row.key.startsWith('CANNELE_GITHUB_') || row.key === 'CANNELE_AUTH_ENCRYPTION_KEY'), protectedBefore);
 });
 
 test('a lost POST receipt is resolved by owned metadata and an identical-value PATCH', async () => {
