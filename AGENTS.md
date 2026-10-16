@@ -6,6 +6,10 @@ QAはCake単体で運用する。PRごとのVercel Deployment固有URLとNeon Na
 
 Actionsの結果は専用stepの標準notice annotationから受け取り、artifact取得や外部relay、`checks: write`を必要としない。CloudとPCは既存gh本人認証と同じコマンドを使う。receiptの欠落・重複・不一致では停止する。
 
+ローカルの `qa:verify` は維持する。Actionsで既存Previewを検証する `qa:verify:ci` は、最新mainとHEADが一致するcleanなcontrol checkoutから対象PR・完全SHA・Deployment IDを明示し、独立した `preview-verify.config.json` capabilityを照合して実行する。信頼済みmainだけをcheckoutし、provider管理APIはGETだけに制限する。ブラウザの `GET /api/app` は所属workspaceが0件なら初期workspace・membershipをINSERTし得るため、HTTP GETだけを根拠にDB無変更と扱わない。
+
+Actions検証の成功だけではPRをReadyにしない。control側の `.cake/verify-<PR>.json` を `task:pr --remote-proof <path>` で再照合し、現在HEADのCIと検証証拠が一致することを確認する。新CLIを持たない古い対象PRには、最新mainのcleanなcontrol checkoutから任意の `--target-worktree <path>` を併用する。この指定はremote proof必須・非draft時だけ許可し、controlの最新main/capabilityと対象worktreeのcleanな専用branch/HEADを照合する。対象PRの旧コードは実行せず、Git/ghの管理操作だけを行う。既存のローカル証拠と `task:pr` の既定動作は変更しない。
+
 機能・UI・API・DBを変更する際は、関連する[基本設計](docs/design.html)と[詳細設計](docs/detail-design.html)を確認する。仕様・運用の変更はこれらと運用手順へ反映する。
 
 最新mainから `npm run task:start -- <task-name>` で専用worktreeを作る。利用者の依頼範囲を守り、未コミット変更を保持する。mainへのmergeとProductionの手動操作は利用者の明示依頼時だけ行う。

@@ -1,0 +1,5 @@
+{
+  "protocol": "cake-preview-verify/v1",
+  "workflow": ".github/workflows/preview.yml",
+  "action": "verify"
+}

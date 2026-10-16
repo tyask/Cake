@@ -9,10 +9,11 @@ import {
 import { source } from "./preview-model";
 import { readyPreview } from "./preview-ready";
 import { updateTaskPullRequest } from "./task-pr-update";
+import { assertVerificationControl, verificationApi } from "./preview-verify-command";
 
 type TaskPrOptions = { args?: readonly string[]; cwd?: string; execute?: WorkflowExecutor; log?: (message: string) => void };
 
-function prArguments(args: readonly string[]): { title: string; verificationFile: string; draft: boolean } {
+function prArguments(args: readonly string[]): { title: string; verificationFile: string; draft: boolean; remoteProofPath?: string; targetWorktree?: string } {
   const values = new Map<string, string>();
   let draft = false;
   for (let index = 0; index < args.length; index += 1) {
@@ -23,7 +24,7 @@ function prArguments(args: readonly string[]): { title: string; verificationFile
       continue;
     }
     const value = args[++index];
-    if (!["--title", "--verification-file"].includes(key) || values.has(key)
+    if (!["--title", "--verification-file", "--remote-proof", "--target-worktree"].includes(key) || values.has(key)
       || value === undefined || !value.trim() || value.startsWith("--")) {
       throw new Error("npm run task:pr -- --title '変更内容' --verification-file /path/report.md を指定してください。");
     }
@@ -31,17 +32,20 @@ function prArguments(args: readonly string[]): { title: string; verificationFile
   }
   const title = values.get("--title")?.trim();
   const verificationFile = values.get("--verification-file");
-  if (values.size !== 2 || !title || title.length > 240 || /[\r\n\0]/.test(title) || !verificationFile) {
+  if (values.size !== 2 + Number(values.has('--remote-proof')) + Number(values.has('--target-worktree')) || !title || title.length > 240 || /[\r\n\0]/.test(title) || !verificationFile
+    || draft && values.has('--remote-proof') || values.has('--target-worktree') && !values.has('--remote-proof')) {
     throw new Error("PRタイトルと検証結果ファイルを指定してください。タイトルは改行なしの240文字以内にしてください。");
   }
-  return { title, verificationFile, draft };
+  return { title, verificationFile, draft, remoteProofPath: values.get('--remote-proof'), targetWorktree: values.get('--target-worktree') };
 }
 
 export async function runTaskPr({
   args = [], cwd = process.cwd(), execute = executeWorkflowCommand, log = console.log,
 }: TaskPrOptions = {}): Promise<{ url: string; existing: boolean }> {
-  const { title, verificationFile, draft } = prArguments(args);
-  const head = await cleanTaskHead(cwd, execute);
+  const { title, verificationFile, draft, remoteProofPath, targetWorktree } = prArguments(args);
+  const proofPath = remoteProofPath ? resolve(cwd, remoteProofPath) : undefined;
+  if (targetWorktree) await assertVerificationControl(cwd, execute, verificationApi(cwd, execute));
+  const head = await cleanTaskHead(targetWorktree ? resolve(cwd, targetWorktree) : cwd, execute);
   let verification: string;
   try {
     const reportFile = resolve(cwd, verificationFile);
@@ -81,7 +85,7 @@ export async function runTaskPr({
     if (!existing[0]) throw new Error("先にdraft PRを作成してください。");
     const current = source(JSON.parse(await commandOutput(execute, "gh", ["api", `repos/${CAKE_REPOSITORY}/pulls/${existing[0].number}`], head.cwd)));
     if (current.sha !== head.sha || current.branch !== head.branch || current.state !== 'open') throw new Error('Previewの現在PRが一致しません。');
-    const proof = await readyPreview(current, head.cwd, execute);
+    const proof = await readyPreview(current, head.cwd, execute, proofPath);
     evidence = `## Preview\n\n- URL: ${proof.deployment.url}\n- ブランチ: ${head.branch}\n- 検証commit: ${head.sha}\n- Deployment: ${proof.deployment.id}\n- DB branch: ${proof.deployment.database!.branchId}\n- DB endpoint: ${proof.deployment.database!.endpointId}\n- 画面確認: ${proof.cases.join(', ')}\n- 実クリック: ${proof.clicks.length}回\n`;
   }
   const body = `## 変更内容\n\n${title}\n\n${evidence}\n## 検証結果\n\n${verification}\n`;

@@ -526,14 +526,16 @@
           <div class="warning">ローカル・Preview環境では <code>AUTH_MODE=test</code> により、固定IDを持つテストユーザーA/Bを選択して通常のAuth.jsセッションを発行できる。Vercel Productionではサーバー側で常に無効化し、Googleログインだけを提供する。</div>
           <h3>画面ごとのデータ取得</h3>
           <p>初回表示、ワークスペース切替、ホーム・取引明細・清算への移動は<code>full</code>で明細・清算・履歴まで取得する。取込・設定への移動と保存後は<code>metadata</code>でユーザー、ワークスペース一覧、招待、選択先、参加者、ルールを取得する。同じワークスペースでは取得済みの明細・清算・履歴を保持し、選択先が変われば全データを再取得する。</p>
-          <p>通常のログイン済み<code>GET /api/app</code>は利用可否確認と画面用の集約取得を各1 SQLで行い、<code>full</code>・<code>metadata</code>ともに2 SQL・2回のNeon往復となる。初めてのワークスペース作成などでは追加処理がある。読込ではプロフィールをDBへ書き戻さない。</p>
+          <p>通常のログイン済み<code>GET /api/app</code>は利用可否確認と画面用の集約取得を各1 SQLで行い、<code>full</code>・<code>metadata</code>ともに2 SQL・2回のNeon往復となる。所属workspaceが0件なら、このGETでも初期の個人workspaceとmembershipをINSERTしてから再取得する。読込ではプロフィールをDBへ書き戻さない。</p>
           <h3>開発・Preview・Productionの配置</h3>
           <p>CloudとPCでCake内のコマンドを使い、ローカル検証→draft PR→明示的Preview作成→固有URLでのPC/mobile・A/B実ブラウザ検証→現在HEADのCI確認→Readyの順で進める。mainのActionsがPR単位に操作を直列化し、Vercel GitSourceとNeon Nativeを使用する。全feature pushの自動Previewは停止する。</p>
           <p>Actionsの公開用receiptは専用stepの標準notice annotationで受け渡し、Cloud/PCの既存gh本人認証から同じAPIで読む。mainの設定に<code>receiptTransport: github-actions-notice/v1</code>が導入済みであることをdispatch前に照合する。対象run・初回attempt・job・CheckRun/CheckSuite・repository・main SHAと依頼を照合し、欠落・重複・不一致では停止する。artifact ZIP、外部relay、Checks書込権限への依存は設けない。provider protocolとDB markerは維持する。</p>
+          <p>既存のローカル<code>qa:verify</code>に加え、Actionsの<code>qa:verify:ci</code>を用意する。最新mainと一致するcleanなcontrol checkoutから、対象PR・完全HEAD SHA・既存Deployment IDを明示する。独立した<code>preview-verify.config.json</code> capabilityを照合し、未導入mainへのdispatchは停止する。既存deploy/status/cleanupのwireと<code>preview.config.json</code>は変えない。信頼済みmainのみをcheckoutし、provider管理APIをGETに制限してstatus前照合→公式Playwright ChromiumのPC/mobile A/B操作→status後照合を行う。直接SQL・migration・seed・deployは行わないが、アプリのGETによる初期workspace作成は起こり得る。</p>
+          <p>Actions検証は専用protocol/title <code>cake-preview-verify/v1</code>の成功・失敗noticeを4,096 UTF-8 bytes以下で返す。OIDCは既存資格情報からメモリ内へ取得し、対象originの各redirect hopだけへ付与する。失敗は安全なstage/codeとして扱い、成功証拠はcontrol側の<code>.cake/verify-&lt;PR&gt;.json</code>へ保存する。検証だけではReadyにせず、明示した<code>task:pr --remote-proof</code>が対象とActionsの来歴を再照合する。新CLIのない旧対象PRは、最新mainのcontrol checkoutから任意の<code>--target-worktree</code>を併用できる。remote proof必須・非draft専用で、controlと対象のcleanなHEADを検査し、旧対象コードは実行しない。既存のローカル証拠とReadyの既定動作は維持する。</p>
           <p>固定QA URL、QA枠、予約・貸出、Canneleと常設管理DBへの依存を廃止する。PR・完全SHA・Deployment ID・DB世代とNative branch/endpointを照合し、同PRのDBを維持する。本番DBへのfallbackと別PRのDB再利用は禁止する。</p>
           <p>初回Native provisioningはDB接続前に停止し、providerで専用endpointを照合したapplication配置だけがmigration・seedを行う。初回以降はQA入力済みデータを上書きしない。保護アクセスは同projectの短期development OIDCを対象originへ限定し、証明書検証を維持したChromiumを使用する。</p>
           <p>実Deployment・DBの作成/更新・削除は対象と影響が利用者に承認された範囲で行う。merge/close後は信頼済みmainのActionsが対象PRのDeployment・Neon branch/endpointを照合してcleanupするため、draft PR作成の依頼だけで無断close/mergeしない。応答不明や所属不明は停止し、読取調査で状態を確定する。旧方式との互換運用や台帳移行はせず、既存資源の整理と外部Cannele撤去は別作業にする。notice輸送の隔離試験と正式Previewの実機受入は分け、実施状況は<a href="development-workflow.md">運用手順</a>に記録する。</p>
-          <p>本番はmainへのmergeを検知するVercel Git連携でbuild後のDB更新が成功してから公開する。手動Production操作は別途明示依頼時だけ行う。</p>
+          <p>本番はmainへのmergeを検知するVercel Git連携でbuild後のDB更新が成功してから公開する。Actions検証機能をmainへ導入するmergeもこのProduction deployを起動し得るため、実装draft PR作成や検証の承認とは分ける。手動Production操作は別途明示依頼時だけ行う。</p>
         </section>
 
         <section id="requirements">
