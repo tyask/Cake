@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { runCakeCommand, runPinnedSharedCli } from '../scripts/cannele-command';
-import { CanneleIntegrationError, executeConfigurationGit, loadReviewedCanneleConfiguration, parseCakeCanneleConfiguration,
+import { CanneleIntegrationError, executeConfigurationGit, isCanneleFeatureBranchPrefix, loadReviewedCanneleConfiguration, parseCakeCanneleConfiguration,
   type CakeCanneleConfiguration, type ConfigurationGit } from '../scripts/cannele-config';
 import { runStartTask } from '../scripts/start-task';
 
@@ -53,6 +53,42 @@ test('missing main configuration preserves legacy mode; fetch failure and invali
   ]) assert.throws(() => parseCakeCanneleConfiguration(value), error => {
     assert.ok(error instanceof CanneleIntegrationError); assert.ok(!error.message.includes('private-credential')); return true;
   });
+});
+
+test('the prepared public instance profile parses while disabled and when enabled in memory', () => {
+  const prepared = JSON.parse(readFileSync(new URL('../cannele.config.json', import.meta.url), 'utf8'));
+  assert.equal(prepared.enabled, false);
+  assert.equal(prepared.sourceRevision, 'e1ef5058d1c3881ebb554ee8173d045cc7376f91');
+  for (const enabled of [false, true]) {
+    const config = parseCakeCanneleConfiguration({ ...prepared, enabled });
+    assert.equal(config.enabled, enabled); assert.deepEqual(config.profile, prepared.profile);
+    assert.equal(config.profile?.instanceId, '34122771-e322-4478-bc7b-96ed363c6c41');
+    assert.equal(config.profile?.featureBranchPrefix, 'codex/cannele-34122771-e322-4478-bc7b-96ed363c6c41/');
+  }
+});
+
+test('nested prefixes belong to exactly the lowercase profile instance and cannot introduce arbitrary paths', () => {
+  const instanceId = '34122771-e322-4478-bc7b-96ed363c6c41', featureBranchPrefix = `codex/cannele-${instanceId}/`;
+  const nested = { ...profile, instanceId, featureBranchPrefix };
+  assert.equal(isCanneleFeatureBranchPrefix(featureBranchPrefix, instanceId), true);
+  for (const value of [
+    { ...nested, instanceId: '34122771-e322-4478-bc7b-96ed363c6c42' },
+    { ...nested, instanceId: instanceId.toUpperCase(), featureBranchPrefix: `codex/cannele-${instanceId.toUpperCase()}/` },
+    ...[
+      `codex/cannele-${instanceId.toUpperCase()}/`, `Codex/cannele-${instanceId}/`, `codex/cannele-${instanceId}`,
+      `codex/cannele-${instanceId}//`, `codex/cannele-${instanceId}/nested/`, `codex/cannele-${instanceId}/../`,
+      `codex/cannele-${instanceId}%2f`, `codex/cannele-${instanceId}\\`, `codex/other-${instanceId}/`,
+      'codex/../../', `codex/${'a'.repeat(57)}-/`, `${featureBranchPrefix}\n`, 'codex/legacy-\n', null,
+    ].map(prefix => ({ ...nested, featureBranchPrefix: prefix })),
+  ]) {
+    assert.equal(isCanneleFeatureBranchPrefix(value.featureBranchPrefix, value.instanceId), false);
+    assert.throws(() => parseCakeCanneleConfiguration({ ...configured(), profile: value }), rejected('CANNELE_CONFIG_INVALID'));
+  }
+  for (const prefix of ['codex/cannele-v1-', `codex/${'a'.repeat(57)}-`]) {
+    assert.equal(isCanneleFeatureBranchPrefix(prefix, instanceId), true);
+    assert.equal(parseCakeCanneleConfiguration({ ...configured(), profile: { ...nested, featureBranchPrefix: prefix } }).profile?.featureBranchPrefix, prefix);
+  }
+  assert.equal(isCanneleFeatureBranchPrefix(`codex/${'a'.repeat(58)}-`, instanceId), false);
 });
 
 test('disabled routing preserves existing QA arguments while enabled routing and draft PR creation stay separate', async () => {
@@ -165,7 +201,7 @@ test('task startup uses the reviewed main generation prefix while local configur
 test('repository config remains disabled and package QA commands route through the reviewed configuration', () => {
   const root = new URL('../', import.meta.url);
   const config = parseCakeCanneleConfiguration(JSON.parse(readFileSync(new URL('cannele.config.json', root), 'utf8')));
-  assert.equal(config.enabled, false); assert.equal(config.profile, null);
+  assert.equal(config.enabled, false); assert.equal(config.profile?.appId, 'cake');
   const pkg = JSON.parse(readFileSync(new URL('package.json', root), 'utf8'));
   for (const name of ['deploy:preview', 'task:pr', 'qa:reserve', 'qa:status', 'qa:publish', 'qa:release', 'qa:verify', 'qa:slots', 'cannele:auth']) assert.ok(pkg.scripts[name].includes('scripts/cannele-command.ts'));
 });

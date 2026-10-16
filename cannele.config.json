@@ -1,6 +1,33 @@
 {
   "protocol": "cake-cannele/v1",
   "enabled": false,
-  "sourceRevision": "4d26c83049554f038b4ba8159a8ae62cea9a88c6",
-  "profile": null
+  "sourceRevision": "e1ef5058d1c3881ebb554ee8173d045cc7376f91",
+  "profile": {
+    "origin": "https://cannele-cake.vercel.app",
+    "instanceId": "34122771-e322-4478-bc7b-96ed363c6c41",
+    "appId": "cake",
+    "configDigest": "fb847b478ed9e0c5b0eeb972657da0ec8b6205e71c095bfc742633bc2cc5685e",
+    "repository": {
+      "id": 1318171856,
+      "fullName": "tyask/Cake"
+    },
+    "baseBranch": "main",
+    "vercelProjectId": "prj_Z37vquodhpRd08ZTAtYnP0qa59jD",
+    "vercelTeamId": "team_D1Mcx2TdFWPKcypfu8KzNMub",
+    "neonProjectId": "misty-meadow-88903426",
+    "registrySchemaVersion": 4,
+    "featureBranchPrefix": "codex/cannele-34122771-e322-4478-bc7b-96ed363c6c41/",
+    "acceptedPrCreatedAfter": "2026-10-15T23:12:46.565Z",
+    "requiredFeatures": [
+      "auth-pairing",
+      "ledger-read",
+      "reservation",
+      "verification",
+      "operation-read",
+      "deployment-record",
+      "publication",
+      "release",
+      "operation-advance"
+    ]
+  }
 }

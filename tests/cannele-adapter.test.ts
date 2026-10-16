@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import type { WorkflowCommandResult, WorkflowExecutor } from "../scripts/task-workflow";
+import manifest from "../docs/cannele/resource-manifest.json";
 
 type Profile = {
   instanceId: string; repository: { id: number; fullName: string }; baseBranch: string;
@@ -92,6 +93,17 @@ test("Cake adapter returns the clean pushed draft head only after main-only Git 
   const pr = f.calls.find(call => call.command === "gh" && call.args[0] === "pr");
   assert.ok(pr?.args.includes("tyask/Cake") && pr.args.includes("main") && pr.args.includes("open"));
   assert.ok(f.calls.every(call => call.cwd === cwd && call.command !== "npx"));
+});
+
+test("the actual reviewed generation reaches adapter.source while a different generation and recursive paths stop before PR/provider work", async () => {
+  const f = fixture(), actualBranch = `${manifest.repository.featureBranchPrefix}qa-acceptance`;
+  f.profile.instanceId = manifest.instanceId; f.profile.featureBranchPrefix = manifest.repository.featureBranchPrefix;
+  f.state.branch = actualBranch; f.source.branch = actualBranch;
+  const adapter = await f.adapter(); assert.deepEqual(await adapter.source(), f.source); await adapter.assertSource(f.source);
+  for (const invalid of [`codex/cannele-00000000-0000-4000-8000-000000000001/qa-acceptance`, `${actualBranch}/nested`, `${manifest.repository.featureBranchPrefix}${"a".repeat(16)}`]) {
+    f.state.branch = invalid; f.calls.length = 0; await assert.rejects(adapter.source());
+    assert.equal(f.calls.some(call => call.command === "gh" || call.command === "npx"), false);
+  }
 });
 
 test("wrong repository, base branch and provider bindings reject before any command", async () => {

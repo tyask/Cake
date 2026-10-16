@@ -148,7 +148,7 @@ npm run task:start -- feature-name
 cd ../Cake-worktrees/feature-name
 ```
 
-`task:start`は最新の`origin/main`から`codex/feature-name`と専用worktreeを作成し、`npm ci`を実行する。タスク名は60文字以内の英小文字・数字・ハイフン。既存ブランチやフォルダは上書きしない。作成先を変える場合は`CAKE_WORKTREE_ROOT`を指定する。インストールに失敗した場合は作成済みworktreeで`npm ci`を再実行する。
+`task:start`は最新の`origin/main`からタスク専用ブランチとworktreeを作成し、`npm ci`を実行する。Canneleが無効なら従来の`codex/feature-name`、有効ならレビュー済みmainのgeneration prefixにタスク名を続ける。タスク名は英小文字・数字・単一ハイフンの区切りで、`codex/`を除くブランチ全体を60文字以内にする。今回の固定prefixではタスク名は最大15文字で、`qa-acceptance`を使用できる。既存ブランチやフォルダは上書きしない。作成先を変える場合は`CAKE_WORKTREE_ROOT`を指定する。インストールに失敗した場合は作成済みworktreeで`npm ci`を再実行する。
 
 元のフォルダの未コミット変更、`.env.local`、`.vercel`、`node_modules`を新worktreeへコピーしない。アプリ一般の設定は[READMEのローカルセットアップ](../README.md#ローカルセットアップ)を参照する。対象タスクのテストDBを使い、本番の環境ファイルや`DATABASE_URL`を流用しない。まだQA枠を予約しない。
 
@@ -279,9 +279,13 @@ Canneleは[tyask/cannele](https://github.com/tyask/cannele)で管理する共通
 
 ### 設定と共通クライアント
 
-`cannele.config.json`のprotocolは`cake-cannele/v1`。初期値は`enabled: false`、`profile: null`で、現行Actions方式を維持する。`sourceRevision`にはレビュー対象のCannele CLI commitを固定し、配置設定が未完了でも実行方式は切り替えない。設定を準備しても`enabled: false`なら切り替わらない。共通入口は取得し直した`origin/main`の設定を読み、作業ブランチ側の変更を実行方式の根拠にしない。
+`cannele.config.json`のprotocolは`cake-cannele/v1`。`enabled: false`を維持したまま、公開profileとレビュー済みsource `e1ef5058d1c3881ebb554ee8173d045cc7376f91`を切替準備として登録した。配置設定が未完了でも実行方式は切り替えず、設定を準備しても`enabled: false`ならCanneleを使用しない。共通入口は取得し直した`origin/main`の設定を読み、作業ブランチ側の変更を実行方式の根拠にしない。
 
 有効化時の`sourceRevision`はレビュー済みCanneleの完全commit SHA、`profile`はAPI origin・instance・repository・provider ID・schema version・branch prefix・必要featureを固定する公開設定である。CLIはこれをAPIのcapabilitiesと照合する。管理DBの接続情報、Vercel/Neonの管理資格情報、session tokenをprofileやGitへ保存しない。
+
+今回のgeneration prefixはmanifestと同じ`codex/cannele-34122771-e322-4478-bc7b-96ed363c6c41/`である。設定parserはprofileのinstanceIdと完全一致する一段のgenerationだけを許可し、タスク側もmanifestの現在generationだけを許可する。別generationや再帰的なpath、予約名、改行、長すぎるtaskを拒否する。従来のflatブランチと末尾ハイフンのprefixは互換性を保つ。`task:start`・adapterのsource確認・draft PR作成・Readyは同じgenerationを扱うが、Readyには従来どおり現在HEADのCIと固有/固定URLの検証証拠が必要である。
+
+このクライアント準備だけで実切替を完了したとは扱わない。OAuth callback互換・短期OIDC proof対応の最終sourceと本人認証・APIの検証をそろえた後に、レビュー済みmainのrevision・profile・有効化設定を確定する。DB writerの有効化は後述の専用runで確認したが、実QAの予約・公開・close返却の受入は未実施である。
 
 CloudとローカルPCは同じCLI・手順を使う。`CANNELE_SOURCE_DIR`には`sourceRevision`と一致するcleanなCannele checkoutを指定し、同じrevisionの[共通操作手順](https://github.com/tyask/cannele/blob/main/docs/integration-guide.md)と[Skill](https://github.com/tyask/cannele/blob/main/skills/cannele/SKILL.md)を読む。リンクは文書の所在を示すもので、実行時の正本は固定revisionのcheckoutである。CLI更新もCakeの設定変更としてレビューする。
 
@@ -315,7 +319,7 @@ APIの202は未完了を示す。`nextAction: advance`に対して、依頼中�
 
 ### 実際の切替と残作業
 
-Cake専用Cannele APIのProduction healthと、GitHub App用Secret・暗号化キーのSensitive/Production限定設定は確認済み。旧管理DBの002互換fence導入と、schema 4への原子的なclean-start移行のcommit、runtime専用LOGINの接続・最小権限検査、runtime/provider資格情報4件のSensitive/Productionへの転送も確認した。公開binding登録後のAPI再配置と、runtime起動時の管理DB接続・ACL検査まで確認済みである。本人pairing・Actions OIDC認可、DB writerの有効化、実QAの受入検証は未完了である。共通管理DDLの正本はCanneleの`db/migrations/`、業務DDLの正本は引き続きCakeの`db/migrations/`である。
+Cake専用Cannele APIのProduction healthと、GitHub App用Secret・暗号化キーのSensitive/Production限定設定は確認済み。旧管理DBの002互換fence導入と、schema 4への原子的なclean-start移行のcommit、runtime専用LOGINの接続・最小権限検査、runtime/provider資格情報4件のSensitive/Productionへの転送も確認した。公開binding登録後のAPI再配置とruntime起動時の管理DB接続・ACL検査に続き、DB writerの`api`・epoch 1への有効化も専用runで確認済みである。API flagsとCake設定は無効を維持し、本人pairing・Actions OIDC認可・実QAの受入検証は未完了である。共通管理DDLの正本はCanneleの`db/migrations/`、業務DDLの正本は引き続きCakeの`db/migrations/`である。
 
 切替前の読取確認には、mainへ導入した`cannele-readiness.yml`を使う。旧`qa:inspect`のGitHub Deployments台帳は現在のSQL台帳の全枠状態を証明しない。専用のreadinessは、新しい`CANNELE_REGISTRY_ADMIN_*`・`CANNELE_TRANSITION_*`の資格情報をActions内だけで使い、現在の3枠、未完了request、履歴の解決状態、既知schema、管理者権限、全QA資源を読み取る。DBは読取専用transaction、providerはGETだけとし、DDL、資源の削除、flag・環境変数の変更、Canneleへの切替は行わない。
 
@@ -364,7 +368,7 @@ Neon direct接続での[onboarding inspect run 38821474058](https://github.com/t
 
 利用者が承認したAPI projectの未使用汎用DB環境変数16件は、2026-10-16 08:46:50.895 JST（`2026-10-15T23:46:50.895227Z`）に設定から削除を完了し、全16件の不在を読み直した。Cannele用のbinding・暗号化鍵・GitHub App秘密鍵/OAuth secret・API origin・2 flagsの計7件は、存在・型・Production対象のmetadataを保持した。今回の設定整理ではprovider/CLI tokenの失効、DB操作、password変更は行っていない。
 
-runtime LOGINの作成・最小権限確認とruntime/provider Secrets 4件のAPI projectへの登録は、後述のbootstrap runで完了した。DB writerの有効化はまだ実行しておらず、API flagsはfalse、Cakeの`cannele.config.json`は`enabled: false`・`profile: null`を維持する。再配置とruntime起動時のDB接続確認だけで通常開発がCanneleへ切り替わったとは扱わず、本人認証・OIDC返却・試験PRでの一連の受入を別途確認する。
+runtime LOGINの作成・最小権限確認とruntime/provider Secrets 4件のAPI projectへの登録は、後述のbootstrap runで完了した。DB writerは後述のactivation runで`api`・epoch 1へ変更済みだが、API flagsはfalse、Cakeの`cannele.config.json`は公開profileを準備したうえで`enabled: false`を維持する。これだけで通常開発がCanneleへ切り替わったとは扱わず、本人認証・OIDC返却・試験PRでの一連の受入を別途確認する。
 
 PR #63のマージ後、現在main `d0a99d76d1fe01c784f1f0a976f55f91389aea6f`からの[bootstrap run 38834840137](https://github.com/tyask/Cake/actions/runs/38834840137)は、SQL作成前の`RUNTIME_PREFLIGHT`で`RUNTIME_HANDOFF_REQUEST_FAILED`となった。同じcontext・roleの[再確認 run 38835661141](https://github.com/tyask/Cake/actions/runs/38835661141)も同じ段階・codeで停止した。両runともruntime LOGIN作成・権限設定・4件の登録には進んでいない。既存provider tokenは保持した。現行の失敗結果はAPI種類とHTTP statusを含まないため、token名やCloud側CLIの成功だけでActionsの失敗原因を断定しない。
 
@@ -447,9 +451,11 @@ gh workflow run cannele-onboarding.yml --repo tyask/Cake --ref main -f action=ac
 
 すでに`api`なら、固定context・schema・移行receipt・3枠の識別情報を照合して、`alreadyEnabled`として現在状態の読取結果を返す。QA利用後でも確認できるよう、この場合はfree・version 0・台帳未使用を要求しない。貸出・資源台帳をUPDATEしたり、返却・resetしたりしない。依頼UUIDの永続receiptをDBへ保存する方式ではなく、現在状態の一致を再確認する冪等性であり、過去の依頼UUIDやartifactを成功の再現根拠にしない。
 
-この操作はprovider API、API flags、role、password、schemaを変更しない。DB writerの有効化とAPI・Cakeクライアントの有効化は別工程である。API flagsをfalseに保った再配置・起動時の接続確認は完了したが、現時点で実writer有効化は未実行で、本人認証・OIDC返却・試験PRによる予約から返却までの受入は残作業である。
+この操作はprovider API、API flags、role、password、schemaを変更しない。DB writerの有効化とAPI・Cakeクライアントの有効化は別工程である。本人認証・OIDC返却・試験PRによる予約から返却までの受入は残作業である。
 
-今回のCI変更をマージした後、live API bindingの`development.allowedCiWorkflowBlobShas`を現行の`649b8d84296edb12bbf00b8572f8370128aa295f`から、新しい`.github/workflows/ci.yml`のblob `ecc3e1cfa2342442f162a3ac74457cfc15ce6db5`へ更新し、APIを再配置する。このlive binding更新は未実行の残作業である。`development`はbindingDigestの対象外なので、bindingDigest・固定context・writer epoch・runtime roleの所有markerは変更しない。cleanup workflowも変更しない。
+レビュー済みCake main `3ad42981ee3e5a6ef43ab8f34d6bd4deddb39188`の[activation run 38844161419](https://github.com/tyask/Cake/actions/runs/38844161419)は、2026-10-16 12:10:56 JSTに成功した。owner本人・初回attempt・専用caller/helper・固定Cannele source `623520315b7b2c982e4b98ecdb72658252709d7c`、artifact `12022925554`（ZIP 702 bytes・SHA-256 `c336053464387ae7204be8671b6d5327d028e64cfca7cfdd3aace9eade904198`）と固定context・移行receiptを照合し、`writerMode: api`・`writerEpoch: 1`・`alreadyEnabled: false`を確認した。初回の3枠free/version 0・QA台帳未使用を検査し、認証行を保持した。API flagsはfalseを維持しているためQA操作はまだ無効で、本人認証と実QA受入も未完了である。
+
+PR #67のマージ後、live API bindingの`development.allowedCiWorkflowBlobShas`へ`.github/workflows/ci.yml`のblob `ecc3e1cfa2342442f162a3ac74457cfc15ce6db5`を反映し、auth修正済みsource `e1ef5058d1c3881ebb554ee8173d045cc7376f91`のProduction Deployment `dpl_qvJNmN9AcqYAhFviJpkK5ac62wFT`へ両API flagsをfalseに保って再配置した。公開metadataとheadersは確認済みだが、CLIの本人承認と実切替は未完了である。`development`はbindingDigestの対象外なので、bindingDigest・固定context・writer epoch・runtime roleの所有markerは変更していない。cleanup workflowも変更していない。
 
 切替前に旧QA clientを止め、旧方式で全貸出を返却する。旧Actionsの待機・実行が0件で、全alias・Deployment・Native branch・endpointが不在であることを読み直してから、レビュー済みの管理DB移行を実行する。Cakeの旧台帳履歴は引き継がず、新しいinstance・generation・branch prefixとPR作成時刻cutoffで共通台帳を開始する。旧履歴の削除はこの実移行で行い、業務DBや親DBには適用しない。
 

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import test, { type TestContext } from "node:test";
 import { assertCanneleCi, runCanneleReady, type CanneleReadyOptions } from "../scripts/cannele-ready";
 import { CAKE_REPOSITORY, type WorkflowExecutor, type WorkflowCommandResult } from "../scripts/task-workflow";
+import manifest from "../docs/cannele/resource-manifest.json";
 
 const sha = "a".repeat(40), mainSha = "b".repeat(40), branch = "codex/verified-ready", prNumber = 71;
 const prUrl = `https://github.com/${CAKE_REPOSITORY}/pull/${prNumber}`;
@@ -21,7 +22,8 @@ function ci(event: string, id: number, changes: Partial<CiRun> = {}): CiRun {
     head_repository: { full_name: CAKE_REPOSITORY }, pull_requests: event === "pull_request" ? [{ number: prNumber }] : [], status: "completed", conclusion: "success", ...changes };
 }
 
-async function fixture(t: TestContext) {
+async function fixture(t: TestContext, currentBranch = branch) {
+  const branch = currentBranch;
   const cwd = await mkdtemp(join(tmpdir(), "cake-cannele-ready-")); t.after(() => rm(cwd, { recursive: true, force: true }));
   const verificationFile = join(cwd, "verification.md"); await writeFile(verificationFile, "- lint・test・build 成功\n- 固有・固定URLの画面操作、保存・readback・復元を確認\n");
   const leaseId = randomUUID();
@@ -35,7 +37,7 @@ async function fixture(t: TestContext) {
   };
   // Unique UI tests run before publication; the fixed tests run after its version increment.
   const unique = evidence("unique", 7), fixed = evidence("fixed", 8);
-  const state = { sha, status: "", pushedSha: sha, config: gitConfig as unknown, pages: [{ workflow_runs: [ci("push", 11)] }, { workflow_runs: [ci("pull_request", 12)] }],
+  const state = { sha, status: "", pushedSha: sha, config: gitConfig as unknown, pages: [{ workflow_runs: [ci("push", 11, { head_branch: branch })] }, { workflow_runs: [ci("pull_request", 12, { head_branch: branch })] }],
     body: "", title: "", isDraft: true, patchStatus: 0, readyStatus: 0, changeAfterPatch: false };
   const calls: { command: string; args: readonly string[] }[] = [];
   const execute: WorkflowExecutor = async (command, args) => {
@@ -81,6 +83,14 @@ test("Ready accepts pre-publication unique evidence and current fixed evidence, 
   const writes = mutations(f.calls); assert.equal(writes.length, 2); assert.ok(writes[0]!.args.includes("PATCH")); assert.equal(writes[1]!.args[1], "ready");
   const patchIndex = f.calls.indexOf(writes[0]!); const readyIndex = f.calls.indexOf(writes[1]!);
   assert.ok(f.calls.slice(patchIndex + 1, readyIndex).some(call => call.command === "git" && call.args[0] === "ls-remote"));
+});
+
+test("Ready consumes the actual reviewed generation and still rejects another generation before any mutation", async t => {
+  const current = await fixture(t, `${manifest.repository.featureBranchPrefix}qa-acceptance`);
+  await runCanneleReady(current.options);
+  assert.equal(current.state.isDraft, false); assert.ok(current.state.body.includes(current.options.source.branch));
+  const other = await fixture(t, "codex/cannele-00000000-0000-4000-8000-000000000001/qa-acceptance");
+  await assert.rejects(runCanneleReady(other.options)); assert.equal(mutations(other.calls).length, 0);
 });
 
 test("changed lease/deployment/version evidence and empty browser cases reject before any GitHub mutation", async t => {

@@ -16,7 +16,7 @@ type StartTaskOptions = {
 export type StartedTask = { branch: string; worktreePath: string };
 
 function taskName(args: readonly string[]): string {
-  if (args.length !== 1 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(args[0])
+  if (args.length !== 1 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(args[0]) || /[\r\n]/.test(args[0])
     || args[0].length > 60 || ["main", "preview", "production"].includes(args[0])) {
     throw new Error("npm run task:start -- <task-name> を指定してください。タスク名は60文字以内の英小文字・数字・ハイフンで、main・preview・production以外にしてください。");
   }

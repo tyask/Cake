@@ -35,6 +35,13 @@ function text(value: unknown, pattern: RegExp, maximum = 255): string {
 }
 function positive(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 1) return invalid(); return Number(value); }
 
+/** Legacy flat prefixes remain valid; a nested prefix identifies exactly one instance. */
+export function isCanneleFeatureBranchPrefix(value: unknown, instanceId: string): value is string {
+  if (typeof value !== 'string' || value.length > 64 || /[\r\n]/.test(value)) return false;
+  if (/^codex\/[a-z0-9]+(?:-[a-z0-9]+)*-$/.test(value)) return true;
+  return UUID.test(instanceId) && instanceId === instanceId.toLowerCase() && value === `codex/cannele-${instanceId}/`;
+}
+
 export function parseCakeCanneleConfiguration(value: unknown): CakeCanneleConfiguration {
   const config = object(value, ['protocol', 'enabled', 'sourceRevision', 'profile']);
   if (config.protocol !== 'cake-cannele/v1' || typeof config.enabled !== 'boolean') return invalid();
@@ -53,10 +60,12 @@ export function parseCakeCanneleConfiguration(value: unknown): CakeCanneleConfig
     if (acceptedPrCreatedAfter !== null && !Number.isFinite(Date.parse(acceptedPrCreatedAfter))) return invalid();
     const features = p.requiredFeatures;
     if (!Array.isArray(features) || features.length < 1 || features.length > 32 || new Set(features).size !== features.length) return invalid();
-    profile = { origin, instanceId: text(p.instanceId, UUID), appId: text(p.appId, /^[a-z0-9-]+$/, 64), configDigest: text(p.configDigest, /^[0-9a-f]{64}$/),
+    const instanceId = text(p.instanceId, UUID), featureBranchPrefix = p.featureBranchPrefix;
+    if (!isCanneleFeatureBranchPrefix(featureBranchPrefix, instanceId)) return invalid();
+    profile = { origin, instanceId, appId: text(p.appId, /^[a-z0-9-]+$/, 64), configDigest: text(p.configDigest, /^[0-9a-f]{64}$/),
       repository: { id: positive(repository.id), fullName: 'tyask/Cake' }, baseBranch: 'main', vercelProjectId: String(p.vercelProjectId), vercelTeamId: String(p.vercelTeamId),
       neonProjectId: String(p.neonProjectId), registrySchemaVersion: positive(p.registrySchemaVersion),
-      featureBranchPrefix: text(p.featureBranchPrefix, /^codex\/[a-z0-9]+(?:-[a-z0-9]+)*-$/, 64), acceptedPrCreatedAfter,
+      featureBranchPrefix, acceptedPrCreatedAfter,
       requiredFeatures: features.map(feature => text(feature, /^[a-z][a-z0-9_-]*$/, 64)) };
   }
   if (config.enabled && (!sourceRevision || !profile)) return invalid();
