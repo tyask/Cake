@@ -14,12 +14,47 @@ type Object_ = Record<string, unknown>;
 type Context = { instanceId: string; repositoryId: number; bindingDigest: string; writerEpoch: number; schemaVersion: number; schemaChecksum: string };
 type Code = "INPUT_INVALID" | "PREFLIGHT_REQUIRED" | "PROJECT_MISMATCH" | "NOT_DISABLED" | "CONTEXT_MISMATCH" | "ENV_CONFLICT" | "RESPONSE_INVALID" | "REQUEST_FAILED" | "WRITE_UNKNOWN";
 
+export type HandoffDiagnostic = {
+  method: "GET" | "POST" | "PATCH";
+  endpoint: "PROJECT" | "ENV_METADATA" | "PUBLIC_BINDING" | "PUBLIC_ORIGIN" | "PUBLIC_MUTATIONS" | "PUBLIC_PROVIDER" | "SECRET_CREATE" | "SECRET_UPDATE";
+  status: number | null;
+  reason: "HTTP" | "REDIRECT" | "TIMEOUT" | "TRANSPORT" | "EMPTY_BODY" | "INVALID_RESPONSE";
+};
+
+/** Only fixed classifications cross the provider boundary; never copy provider properties. */
+export function safeHandoffDiagnostic(value: unknown): HandoffDiagnostic | undefined {
+  try {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const keys = Reflect.ownKeys(value);
+    if (keys.length !== 4 || keys.some(key => typeof key !== "string" || !["method", "endpoint", "status", "reason"].includes(key))) return undefined;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (Object.values(descriptors).some(descriptor => !("value" in descriptor))) return undefined;
+    const method: unknown = descriptors.method?.value, endpoint: unknown = descriptors.endpoint?.value;
+    const status: unknown = descriptors.status?.value, reason: unknown = descriptors.reason?.value;
+    if (typeof method !== "string" || !["GET", "POST", "PATCH"].includes(method)
+      || typeof endpoint !== "string" || !["PROJECT", "ENV_METADATA", "PUBLIC_BINDING", "PUBLIC_ORIGIN", "PUBLIC_MUTATIONS", "PUBLIC_PROVIDER", "SECRET_CREATE", "SECRET_UPDATE"].includes(endpoint)
+      || status !== null && (typeof status !== "number" || !Number.isInteger(status) || status < 100 || status > 599)
+      || typeof reason !== "string" || !["HTTP", "REDIRECT", "TIMEOUT", "TRANSPORT", "EMPTY_BODY", "INVALID_RESPONSE"].includes(reason)) return undefined;
+    return { method, endpoint, status, reason } as HandoffDiagnostic;
+  } catch { return undefined; }
+}
+
 export class RuntimeHandoffError extends Error {
   readonly code: string;
-  constructor(code: Code) { super("Runtime credential handoff could not be verified."); this.code = `RUNTIME_HANDOFF_${code}`; }
+  readonly diagnostic?: HandoffDiagnostic;
+  constructor(code: Code, diagnostic?: HandoffDiagnostic) {
+    super("Runtime credential handoff could not be verified."); this.code = `RUNTIME_HANDOFF_${code}`;
+    const checked = safeHandoffDiagnostic(diagnostic); if (checked) this.diagnostic = checked;
+  }
 }
-const fail = (code: Code): never => { throw new RuntimeHandoffError(code); };
+const fail = (code: Code, diagnostic?: HandoffDiagnostic): never => { throw new RuntimeHandoffError(code, diagnostic); };
 const object = (value: unknown): Object_ => value && typeof value === "object" && !Array.isArray(value) ? value as Object_ : fail("RESPONSE_INVALID");
+const PUBLIC_ENDPOINTS = { CANNELE_BINDING_JSON: "PUBLIC_BINDING", CANNELE_API_ORIGIN: "PUBLIC_ORIGIN",
+  CANNELE_API_MUTATIONS_ENABLED: "PUBLIC_MUTATIONS", CANNELE_PROVIDER_OPERATIONS_ENABLED: "PUBLIC_PROVIDER" } as const;
+function diagnostic(method: HandoffDiagnostic["method"], endpoint: HandoffDiagnostic["endpoint"], status: number | null,
+  reason: HandoffDiagnostic["reason"]): HandoffDiagnostic {
+  return { method, endpoint, status: status !== null && Number.isInteger(status) && status >= 100 && status <= 599 ? status : null, reason };
+}
 
 function checkedContext(value: Record<string, unknown>): Context {
   const keys = ["instanceId", "repositoryId", "bindingDigest", "writerEpoch", "schemaVersion", "schemaChecksum"];
@@ -76,34 +111,47 @@ export function createRuntimeHandoff(options: { vercelToken: string; neonApiKey:
   let prepared = false;
   const path = (version: number, suffix = "", extra = "") => `/v${version}/projects/${PROJECT}${suffix}?teamId=${TEAM}${extra}`;
 
-  async function send(endpoint: string, method: "GET" | "POST" | "PATCH", signal: AbortSignal, body?: Object_): Promise<Response> {
+  async function send(endpoint: string, method: HandoffDiagnostic["method"], phase: HandoffDiagnostic["endpoint"], signal: AbortSignal,
+    body?: Object_): Promise<{ response: Response; requestSignal: AbortSignal }> {
+    const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
     try {
       const response = await request(new URL(endpoint, ORIGIN), { method, redirect: "manual", cache: "no-store",
-        signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+        signal: requestSignal,
         headers: { authorization: `Bearer ${vercelToken}`, "content-type": "application/json" },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
       if (response.redirected || response.status >= 300 && response.status < 400) {
-        await response.body?.cancel().catch(() => undefined); return fail("REQUEST_FAILED");
+        await response.body?.cancel().catch(() => undefined); return fail("REQUEST_FAILED", diagnostic(method, phase, response.status, "REDIRECT"));
       }
-      return response;
-    } catch { return fail("REQUEST_FAILED"); }
+      return { response, requestSignal };
+    } catch (error) {
+      if (error instanceof RuntimeHandoffError) throw error;
+      return fail("REQUEST_FAILED", diagnostic(method, phase, null, requestSignal.aborted ? "TIMEOUT" : "TRANSPORT"));
+    }
   }
-  async function json(endpoint: string, signal: AbortSignal): Promise<unknown> {
-    const response = await send(endpoint, "GET", signal);
-    if (!response.ok || !response.body) { await response.body?.cancel().catch(() => undefined); return fail("REQUEST_FAILED"); }
+  async function json(endpoint: string, phase: HandoffDiagnostic["endpoint"], signal: AbortSignal): Promise<unknown> {
+    const { response, requestSignal } = await send(endpoint, "GET", phase, signal);
+    if (!response.ok || !response.body) {
+      await response.body?.cancel().catch(() => undefined);
+      return fail("REQUEST_FAILED", diagnostic("GET", phase, response.status, response.ok ? "EMPTY_BODY" : "HTTP"));
+    }
     const reader = response.body.getReader(); let bytes = 0; const chunks: Uint8Array[] = [];
     try {
       while (true) {
         const next = await reader.read(); if (next.done) break;
-        bytes += next.value.byteLength; if (bytes > MAX_BYTES) { await reader.cancel().catch(() => undefined); return fail("RESPONSE_INVALID"); }
+        bytes += next.value.byteLength; if (bytes > MAX_BYTES) {
+          await reader.cancel().catch(() => undefined); return fail("RESPONSE_INVALID", diagnostic("GET", phase, response.status, "INVALID_RESPONSE"));
+        }
         chunks.push(next.value);
       }
       return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
-    } catch (error) { if (error instanceof RuntimeHandoffError) throw error; return fail("RESPONSE_INVALID"); }
+    } catch (error) {
+      if (error instanceof RuntimeHandoffError) throw error;
+      return fail("RESPONSE_INVALID", diagnostic("GET", phase, response.status, requestSignal.aborted ? "TIMEOUT" : "INVALID_RESPONSE"));
+    }
     finally { reader.releaseLock(); }
   }
   async function metadata(signal: AbortSignal): Promise<Map<string, EnvRow>> {
-    const body = object(await json(path(10, "/env", "&decrypt=false"), signal));
+    const body = object(await json(path(10, "/env", "&decrypt=false"), "ENV_METADATA", signal));
     if (!Array.isArray(body.envs) || body.envs.length > 10_000 || body.hiddenProductionEnvCount !== undefined && body.hiddenProductionEnvCount !== 0
       || ["next", "next_cursor", "cursor"].some(key => body[key] !== undefined)) return fail("RESPONSE_INVALID");
     if (body.pagination !== undefined) {
@@ -124,7 +172,7 @@ export function createRuntimeHandoff(options: { vercelToken: string; neonApiKey:
     return found;
   }
   async function inspect(signal: AbortSignal): Promise<Map<string, EnvRow>> {
-    const project = object(await json(path(9), signal));
+    const project = object(await json(path(9), "PROJECT", signal));
     if (project.id !== PROJECT || project.name !== "cannele-cake" || project.accountId !== TEAM) return fail("PROJECT_MISMATCH");
     const found = await metadata(signal), values = new Map<string, string>();
     // All four metadata rows are verified before the first public-value GET.
@@ -134,7 +182,7 @@ export function createRuntimeHandoff(options: { vercelToken: string; neonApiKey:
     }
     for (const key of PUBLIC_KEYS) {
       const env = found.get(key)!;
-      const body = object(await json(path(1, `/env/${env.id}`), signal)), current = row(body);
+      const body = object(await json(path(1, `/env/${env.id}`), PUBLIC_ENDPOINTS[key], signal)), current = row(body);
       if (current.id !== env.id || current.key !== key || !manualProduction(current) || !["plain", "encrypted"].includes(String(current.type))
         || current.visibility !== undefined && current.visibility !== "config") return fail("ENV_CONFLICT");
       if (typeof body.value !== "string") return fail(key.endsWith("_ENABLED") ? "NOT_DISABLED" : "CONTEXT_MISMATCH");
@@ -147,13 +195,20 @@ export function createRuntimeHandoff(options: { vercelToken: string; neonApiKey:
       || !binding.repository || typeof binding.repository !== "object" || Array.isArray(binding.repository) || (binding.repository as Object_).id !== context.repositoryId) return fail("CONTEXT_MISMATCH");
     return found;
   }
-  async function write(method: "POST" | "PATCH", endpoint: string, body: Object_, signal: AbortSignal): Promise<boolean> {
+  async function write(method: "POST" | "PATCH", endpoint: string, phase: "SECRET_CREATE" | "SECRET_UPDATE", body: Object_, signal: AbortSignal,
+    remember: (diagnostic: HandoffDiagnostic) => void): Promise<boolean> {
     try {
-      const response = await send(endpoint, method, signal, body);
+      const { response } = await send(endpoint, method, phase, signal, body);
       // Provider write bodies may contain values; neither parse nor expose them.
       await response.body?.cancel().catch(() => undefined);
-      return response.status === 200 || method === "POST" && response.status === 201;
-    } catch { return false; }
+      const acknowledged = response.status === 200 || method === "POST" && response.status === 201;
+      if (!acknowledged) remember(diagnostic(method, phase, response.status, "HTTP"));
+      return acknowledged;
+    } catch (error) {
+      const checked = error instanceof RuntimeHandoffError ? safeHandoffDiagnostic(error.diagnostic) : undefined;
+      remember(checked ?? diagnostic(method, phase, null, signal.aborted ? "TIMEOUT" : "TRANSPORT"));
+      return false;
+    }
   }
   function credentials(input: { databaseUrl: string; databaseHost: string }): string[] {
     try {
@@ -177,20 +232,21 @@ export function createRuntimeHandoff(options: { vercelToken: string; neonApiKey:
       await inspect(signal);
       for (const [index, key] of SECRET_KEYS.entries()) {
         const body = { key, value: values[index], type: "sensitive", target: ["production"], comment: marker, gitBranch: null, customEnvironmentIds: [] };
-        let done = false;
+        let done = false, lastDiagnostic: HandoffDiagnostic | undefined;
+        const remember = (value: HandoffDiagnostic) => { lastDiagnostic = value; };
         for (let attempt = 0; attempt < 3 && !signal.aborted; attempt++) {
           let found = await metadata(signal), env = found.get(key);
           if (!env) {
-            await write("POST", path(10, "/env"), body, signal);
+            await write("POST", path(10, "/env"), "SECRET_CREATE", body, signal, remember);
             found = await metadata(signal); env = found.get(key); if (!env) continue;
           }
           // A POST response can be lost or contain a partial failure. Once an
           // exact owned row exists, require acknowledgement of the same PATCH.
-          if (!await write("PATCH", path(9, `/env/${env.id}`), body, signal)) { await metadata(signal); continue; }
+          if (!await write("PATCH", path(9, `/env/${env.id}`), "SECRET_UPDATE", body, signal, remember)) { await metadata(signal); continue; }
           const confirmed = (await metadata(signal)).get(key);
           if (confirmed?.id === env.id) { done = true; break; }
         }
-        if (!done) return fail("WRITE_UNKNOWN");
+        if (!done) return fail("WRITE_UNKNOWN", lastDiagnostic);
       }
       const confirmed = await inspect(signal);
       if (SECRET_KEYS.some(key => !confirmed.has(key))) return fail("WRITE_UNKNOWN");

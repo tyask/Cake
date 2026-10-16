@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OnboardingError, OnboardingGateway, onboardingFailure, onboardingSource, runOnboarding, type OnboardingCore, type OnboardingSource } from "../scripts/cannele-onboarding";
 import type { QaTransport } from "../scripts/qa-pool-writer";
+import { RuntimeHandoffError, type HandoffDiagnostic } from "../scripts/cannele-runtime-handoff";
 
 const revision = "a".repeat(40), canneleRevision = "b".repeat(40), requestId = randomUUID(), instanceId = randomUUID();
 const caller = Buffer.from("name: synthetic onboarding caller\n"), helper = Buffer.from("name: synthetic onboarding runner\n");
@@ -116,6 +117,23 @@ test("bootstrap rejected preflight never reaches SQL creation; missing transitio
     await assert.rejects(runOnboarding({ ...bootstrapEnvironment, ...changes }, { source, transport: transport(), core: async () => fixture.core,
       runtimeBootstrap: fixture.runtimeBootstrap, runtimeHandoff: input => ({ ...fixture.runtimeHandoff(input), preflight: async () => { throw new Error(privateDiagnostic); } }) }));
     assert.equal(fixture.events.includes("create"), false); assert.equal(fixture.events.includes("provision"), false); assert.equal(fixture.events.includes("publish"), false);
+  }
+});
+
+test("bootstrap handoff diagnostics project only closed HTTP facts and never reach role creation", async () => {
+  const handoff: HandoffDiagnostic = { method: "GET", endpoint: "PUBLIC_BINDING", status: 403, reason: "HTTP" };
+  const fixture = bootstrapFixture();
+  await assert.rejects(runOnboarding(bootstrapEnvironment, { source, transport: transport(), core: async () => fixture.core,
+    runtimeBootstrap: fixture.runtimeBootstrap, runtimeHandoff: input => ({ ...fixture.runtimeHandoff(input), preflight: async () => {
+      throw Object.assign(new RuntimeHandoffError("REQUEST_FAILED", handoff), { query: "private-value", response: "private-value", cause: { token: "private-value" } });
+    } }) }), error => {
+      assert.deepEqual(onboardingFailure(error), { ok: false, code: "RUNTIME_HANDOFF_REQUEST_FAILED", stage: "RUNTIME_PREFLIGHT", reason: "CORE_REJECTED", handoff });
+      assert.equal(JSON.stringify(onboardingFailure(error)).includes("private-value"), false); return true;
+    });
+  assert.equal(fixture.events.includes("create"), false);
+  for (const malformed of [{ ...handoff, status: 999 }, { ...handoff, endpoint: "private-url" }, { ...handoff, response: "private-value" }]) {
+    assert.deepEqual(onboardingFailure(new OnboardingError("RUNTIME_HANDOFF_REQUEST_FAILED", "RUNTIME_PREFLIGHT", "CORE_REJECTED", malformed as HandoffDiagnostic)),
+      { ok: false, code: "RUNTIME_HANDOFF_REQUEST_FAILED", stage: "RUNTIME_PREFLIGHT", reason: "CORE_REJECTED" });
   }
 });
 

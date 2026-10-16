@@ -360,6 +360,8 @@ Neon direct接続での[onboarding inspect run 38821474058](https://github.com/t
 
 runtime LOGINの作成・最小権限確認とruntime/provider SecretsのAPIへの登録は未完了、Cannele APIも無効のままである。Cakeの`cannele.config.json`は`enabled: false`・`profile: null`を維持する。以後の再配置・API接続・本人認証・OIDC返却・試験PRでの一連の受入が確認されるまで、通常開発がCanneleへ切り替わったとは扱わない。
 
+PR #63のマージ後、現在main `d0a99d76d1fe01c784f1f0a976f55f91389aea6f`からの[bootstrap run 38834840137](https://github.com/tyask/Cake/actions/runs/38834840137)は、SQL作成前の`RUNTIME_PREFLIGHT`で`RUNTIME_HANDOFF_REQUEST_FAILED`となった。同じcontext・roleの[再確認 run 38835661141](https://github.com/tyask/Cake/actions/runs/38835661141)も同じ段階・codeで停止した。両runともruntime LOGIN作成・権限設定・4件の登録には進んでいない。既存provider tokenは保持した。現行の失敗結果はAPI種類とHTTP statusを含まないため、token名やCloud側CLIの成功だけでActionsの失敗原因を断定しない。
+
 PostgreSQL 18ではNOT NULL制約がcatalogへ追加されるため、Canneleの移行helperは17/18それぞれの完全な固定hashで照合する。17.10と18.4の使い捨てDBで検証し、実18.6も移行前に同じhashと一致することを確認する。Neonのbranch一覧は最初の応答の`sort_order`が`asc`・`desc`・`ASC`・`DESC`なら小文字へ正規化し、次ページのGETへ引き継ぐ。2ページ目以降の順序変更や未知の値は拒否し、`sort_by=created_at`を維持する。最終branchページの`next`とsort echoは省略され得て、`next`の空文字もnullと同じ終端として扱う。短い最終ページでの省略を受け入れつつ、false・0、不明なcursor・未知field・重複ID・未完了ページは引き続き拒否する。
 
 ### Actionsからの管理操作
@@ -403,7 +405,7 @@ provider資格情報を失効した場合は`oldProviderCreationCredentialsRevok
 
 `runtime_context_json`はinstanceId・repositoryId・bindingDigest・writerEpoch・schemaVersion・schemaChecksumの6項目で、初期化receiptと照合する。`runtime_role_name`は明示した専用roleである。結果はrequest UUID付きの単一`result.json` artifactから、実行元・owner・全job・依頼・digestを照合して取得する。
 
-onboardingの失敗JSONは、既存の安全な`code`に加え、固定された`stage`と`reason`を返す。例えば`ADMIN_CONNECT`と`PROTOCOL`は接続時の既知protocolエラー、`INSPECT_CORE`と`UNDEFINED_COLUMN`はcore読取時の既知columnエラーを示し、SQLや例外本文を見ずに停止箇所を切り分けられる。既知のPostgreSQL SQLSTATE・Node通信/TLS codeだけを固定reasonへ変換し、未知の値やcauseは`UNKNOWN`とする。URL・host・token・SQL・応答や例外本文・stack・未知code原文は出さず、rollbackや接続解放が後から失敗しても最初の失敗を保持する。診断の追加で接続設定や移行条件は変更しない。
+onboardingの失敗JSONは、既存の安全な`code`に加え、固定された`stage`と`reason`を返す。例えば`ADMIN_CONNECT`と`PROTOCOL`は接続時の既知protocolエラー、`INSPECT_CORE`と`UNDEFINED_COLUMN`はcore読取時の既知columnエラーを示し、SQLや例外本文を見ずに停止箇所を切り分けられる。既知のPostgreSQL SQLSTATE・Node通信/TLS codeだけを固定reasonへ変換し、未知の値やcauseは`UNKNOWN`とする。URL・host・token・SQL・応答や例外本文・stack・未知code原文は出さず、rollbackや接続解放が後から失敗しても最初の失敗を保持する。診断の追加で接続設定や移行条件は変更しない。Vercel handoffの既知の失敗には、検証済みの`handoff`を付ける。method、固定endpoint分類、HTTP statusまたはnull、固定reasonだけを含め、例えば`PUBLIC_BINDING`・`GET`・403・`HTTP`なら公開bindingの読取で拒否されたことを示す。URL・環境変数ID・key/value・応答本文・例外本文は含めない。通信不明・redirect・空応答も固定reasonで区別し、診断が未知の形なら追加情報を省略する。処理順・再試行回数・所有marker条件・SQL作成やSecret転送の条件は変えない。
 
 `bootstrap-runtime`のhandoff先は固定のVercel `fumin1/cannele-cake`（project `prj_EgVvFUE4gXVZnMTuw69lQ3mIGYVN`、team `team_D1Mcx2TdFWPKcypfu8KzNMub`）だけである。runtime URL/HOSTとprovider 2件の計4環境変数をSensitive/Productionへ直接登録し、各4件のcommentにcontext・roleへ束縛したversion付きmarkerを付ける。5番目のConfig keyは作らず、既存値の所有marker・型・対象が不明なら上書きしない。password・URL・provider値をstep output・artifact・ログやCloudへ出さず、管理者接続もAPIへ渡さない。
 
