@@ -58,7 +58,7 @@ test('missing main configuration preserves legacy mode; fetch failure and invali
 test('the prepared public instance profile parses while disabled and when enabled in memory', () => {
   const prepared = JSON.parse(readFileSync(new URL('../cannele.config.json', import.meta.url), 'utf8'));
   assert.equal(prepared.enabled, false);
-  assert.equal(prepared.sourceRevision, 'e1ef5058d1c3881ebb554ee8173d045cc7376f91');
+  assert.equal(prepared.sourceRevision, 'f9458d21405242433bf2877d14853a4b0a4db130');
   for (const enabled of [false, true]) {
     const config = parseCakeCanneleConfiguration({ ...prepared, enabled });
     assert.equal(config.enabled, enabled); assert.deepEqual(config.profile, prepared.profile);

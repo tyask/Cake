@@ -279,13 +279,13 @@ Canneleは[tyask/cannele](https://github.com/tyask/cannele)で管理する共通
 
 ### 設定と共通クライアント
 
-`cannele.config.json`のprotocolは`cake-cannele/v1`。`enabled: false`を維持したまま、公開profileとレビュー済みsource `e1ef5058d1c3881ebb554ee8173d045cc7376f91`を切替準備として登録した。配置設定が未完了でも実行方式は切り替えず、設定を準備しても`enabled: false`ならCanneleを使用しない。共通入口は取得し直した`origin/main`の設定を読み、作業ブランチ側の変更を実行方式の根拠にしない。
+`cannele.config.json`のprotocolは`cake-cannele/v1`。`enabled: false`を維持したまま、公開profileとCannele PR #12でレビュー・マージされたsource `f9458d21405242433bf2877d14853a4b0a4db130`を切替準備として登録した。配置設定が未完了でも実行方式は切り替えず、設定を準備しても`enabled: false`ならCanneleを使用しない。共通入口は取得し直した`origin/main`の設定を読み、作業ブランチ側の変更を実行方式の根拠にしない。
 
 有効化時の`sourceRevision`はレビュー済みCanneleの完全commit SHA、`profile`はAPI origin・instance・repository・provider ID・schema version・branch prefix・必要featureを固定する公開設定である。CLIはこれをAPIのcapabilitiesと照合する。管理DBの接続情報、Vercel/Neonの管理資格情報、session tokenをprofileやGitへ保存しない。
 
 今回のgeneration prefixはmanifestと同じ`codex/cannele-34122771-e322-4478-bc7b-96ed363c6c41/`である。設定parserはprofileのinstanceIdと完全一致する一段のgenerationだけを許可し、タスク側もmanifestの現在generationだけを許可する。別generationや再帰的なpath、予約名、改行、長すぎるtaskを拒否する。従来のflatブランチと末尾ハイフンのprefixは互換性を保つ。`task:start`・adapterのsource確認・draft PR作成・Readyは同じgenerationを扱うが、Readyには従来どおり現在HEADのCIと固有/固定URLの検証証拠が必要である。
 
-このクライアント準備だけで実切替を完了したとは扱わない。OAuth callback互換・短期OIDC proof対応の最終sourceと本人認証・APIの検証をそろえた後に、レビュー済みmainのrevision・profile・有効化設定を確定する。DB writerの有効化は後述の専用runで確認したが、実QAの予約・公開・close返却の受入は未実施である。
+このクライアント準備だけで実切替を完了したとは扱わない。固定したsourceはOAuth callback互換・短期OIDC proofに対応するが、実配置・本人認証・APIの検証をそろえた後に、レビュー済みmainのprofile・有効化設定を確定する。DB writerの有効化は後述の専用runで確認したが、実QAの予約・公開・close返却の受入は未実施である。
 
 CloudとローカルPCは同じCLI・手順を使う。`CANNELE_SOURCE_DIR`には`sourceRevision`と一致するcleanなCannele checkoutを指定し、同じrevisionの[共通操作手順](https://github.com/tyask/cannele/blob/main/docs/integration-guide.md)と[Skill](https://github.com/tyask/cannele/blob/main/skills/cannele/SKILL.md)を読む。リンクは文書の所在を示すもので、実行時の正本は固定revisionのcheckoutである。CLI更新もCakeの設定変更としてレビューする。
 
