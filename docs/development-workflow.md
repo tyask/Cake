@@ -4,11 +4,15 @@ CakeはCanneleを使用せず、PR単位のVercel Preview固有URLでQAする。
 
 ## 構成と権限
 
-`preview.config.json`にrepository、Vercel project/team、Neon Preview project・親branch、本番endpointのSHA-256を固定する。現行対象はGitHub `tyask/Cake`、Vercel `fumin1/cake`、Neon Preview project `misty-meadow-88903426`。本番の接続情報をPreviewへ渡さない。
+`preview.config.json`にrepository、Vercel project/team、Neon Preview project・親branch、本番endpointのSHA-256と`receiptTransport: "github-actions-notice/v1"`を固定する。現行対象はGitHub `tyask/Cake`、Vercel `fumin1/cake`、Neon Preview project `misty-meadow-88903426`。provider protocol `cake-preview/v1`とDB marker version 2は変更しない。本番の接続情報をPreviewへ渡さない。
 
 Cloud/PCのコマンドはmainの `.github/workflows/preview.yml` を明示的にdispatchし、同じPRの操作をActionsのconcurrencyで直列化する。main上のスクリプトだけがprovider管理資格情報を使う。`pull_request_target` はclosedイベントだけで、PRコードをcheckout・実行しない。Vercelは指定したGitSourceのコードを、Preview DBの権限でリモートビルドする。
 
-Actionsには既存のRepository secrets `VERCEL_TOKEN` と `NEON_API_KEY` が必要。GitHub読取は最小権限の `github.token` を使う。Cannele用Secret名を暗黙に代用しない。設定不足なら両Secret名を資格情報の値なしで報告し、providerの読取・作成・削除を始める前に停止する。新規資格情報・DB・deploymentを代わりに作らない。旧Cannele名のSecretだけでは使えないため、既存資格情報をGitHub Repository Settings → Secrets and variables → Actionsでこの2名に登録する。値をチャットへ送らない。CLIは既存gh本人認証を使い、Vercel保護へのブラウザアクセスは別に確認する。
+Actionsには既存のRepository secrets `VERCEL_TOKEN` と `NEON_API_KEY` が必要。GitHub読取は最小権限の `github.token` を使う。Cannele用Secret名を暗黙に代用しない。設定不足なら両Secret名を資格情報の値なしで報告し、providerの読取・作成・削除を始める前に停止する。新規資格情報・DB・deploymentを代わりに作らない。旧Cannele名のSecretだけでは使えないため、既存資格情報をGitHub Repository Settings → Secrets and variables → Actionsでこの2名に登録する。値をチャットへ送らない。
+
+Cloud/PCのCLIは既存gh本人認証をそのまま使い、workflow・run・jobsとChecksの読取権限を確認する。`GH_TOKEN` / `GITHUB_TOKEN`などの環境変数は保存済みgh認証より優先するため、401/403では選択中の認証を値なしで確認して停止する。無断で資格情報やproxy・CA・ネットワークpolicyを変更しない。Vercel保護へのブラウザアクセスは別に確認する。結果受信に`checks: write`、新しいGitHub App、外部relay、artifact cacheは不要。
+
+実Deployment・DBの作成/更新・資源削除は、対象project・PR・branch・資源と影響を示し、利用者の承認済み範囲で実行する。未承認なら実行前に確認する。ローカル検証・draft PR作成だけの依頼を、これらの実資源操作の許可と扱わない。
 
 ## 開発とdraft PR
 
@@ -25,7 +29,7 @@ npm run build
 npm run task:pr -- --draft --title '変更内容' --verification-file /path/report.md
 ```
 
-タスクブランチは `codex/<task-name>`。環境ファイル・資格情報を別環境からコピーしない。`vercel.json` は `**: false` / `main: true` を維持し、feature pushによる自動Previewを止める。draft作成のpush前にローカルと現在mainの設定を確認する。mainの本番Git連携は維持する。
+タスクブランチは `codex/<task-name>`。環境ファイル・資格情報を別環境からコピーしない。`vercel.json` は `**: false` / `main: true` を維持し、feature pushによる自動Previewを止める。draft作成のpush前にローカルと現在mainの設定、workflowのtriggerを確認する。この設定下のpushとdraft PR作成は通常CIだけを起動し、Previewは明示dispatch時に操作する。mainの本番Git連携は維持する。PRのmerge/closeは別にcleanupを起動し得るため、無断で行わない。
 
 ## Previewの作成と読取
 
@@ -34,13 +38,21 @@ npm run deploy:preview
 npm run qa:status
 ```
 
-現在のOPEN PR・専用ブランチ・完全SHAを照合してからdispatchする。CLIは対象operation UUID、main SHA、workflow、REST APIの `run_attempt: 1`、success、receiptのPR/HEADを検証する。`gh run list --json attempt` はCLIによって未対応のため使用しない。失敗時は対応するActions run URLを報告する。完了確認は呼出し内の有限時間だけで、定期監視は行わない。receiptは非秘密情報だけの30日artifact、ローカルはGit外の `.cake/preview.json` に保存する。資源の正本はVercel/Neonで、artifactの消失を資源消失と扱わない。
+現在のOPEN PR・専用ブランチ・完全SHAを照合し、mainの`preview.config.json`がtransportを含めて実行中CLIの設定と完全一致することを確認してからmainへdispatchする。旧mainにnotice方式が未導入なら`PREVIEW_NOT_INSTALLED_ON_MAIN`でdispatch前に停止する。CLIはworkflow ID/path、repository、main SHA、operation UUID、REST APIの `run_attempt: 1` とrun成功を検証する。`gh run list --json attempt` はCLIによって未対応のため使用しない。失敗時は対応するActions run URLを報告する。完了確認は呼出し内の有限時間だけで、定期監視は行わない。
+
+dispatch inputの`controlSha`へCLIが固定したmain SHAを渡す。workflowは開始時の`GITHUB_SHA`との一致をprovider操作前に確認し、dispatch直前にmainが進んだ場合も停止する。競合による停止後にdispatchを盲目的に繰り返さず、該当runと資源状態を読取調査する。
+
+Actionsは公開用receiptへ`runId`・`runAttempt`・`controlSha`・operationを付け、専用stepで固定title `cake-preview-receipt/v1` の標準noticeを1件だけ出す。compact JSONは送出前に4,096 UTF-8 bytes以下を検査し、超過は失敗する。noticeはログにも残るため、接続文字列・token・DB host原文などの秘密を含めない。runnerの4,096文字切詰めや秘密マスクを正常なreceiptとして扱わない。
+
+Cloud/PCは同じ`gh api`経路で、対象runの初回attemptの全jobsから唯一のpreview jobを選び、その`check_run_url`、CheckSuite、repository・main SHA・GitHub Actions appの対応を確認する。全annotationを取得して固定titleのnoticeが正確に1件であることを確認し、厳密なJSONとreceiptのPR/HEAD・operation・run ID/attempt・main SHA・時刻を照合する。欠落・重複・古いattempt・秘密マスク・切詰め・不正JSON・metadata変化では停止し、別runやログの転記へfallbackしない。読取前後のrun/check再照合は変更の検出であり、annotationの永続不変や暗号学的署名を保証しない。
+
+結果受信はartifact ZIPのダウンロードに依存しない。受理したreceiptはGit外の `.cake/preview.json` に保存する。資源の正本はVercel/Neonで、receiptの欠落を資源消失と扱わない。
 
 初回はVercel REST GitSourceでNative用のprovisioning deploymentを作る。このbuildは確認済みendpoint情報がないためDB接続前に停止する。その後、Native branchの正確な名前、親branch、作成時刻、所属、read-write endpointをlistと直接GETで照合する。application deploymentには確認済みIDとhost digestだけを渡し、接続文字列はNativeに供給させる。
 
 同じPRの追加commitでは既存DBを維持する。別PR・別世代のmetadata、複数DB、本番endpoint一致、消失した既存DB、未管理の同名branchは停止条件。DB消失を再作成で修復しない。失敗deploymentもcleanup対象として残す。
 
-応答不明では新しいdispatchを繰り返さず、同じActions runを再実行してprovider metadataを再照合する。run attempt 2以降は不明なPOSTを再発行しない。証拠がない場合は `PREVIEW_CREATE_RESULT_UNKNOWN` で停止し、読取調査で結果を確定する。新規作成を再開する前に未知の資源がないことを確認する。
+応答不明では新しいdispatchを繰り返さず、同じActions runとprovider metadataを読取調査する。Actionsの再実行でもrun attempt 2以降は不明なPOSTを再発行せず、CLIは初回attempt以外のreceiptを受理しない。証拠がない場合は `PREVIEW_CREATE_RESULT_UNKNOWN` で停止する。新規作成を再開する前に未知の資源がないことを確認する。
 
 ## DB接続・migration・seed
 
@@ -67,7 +79,7 @@ Cloudでは実効policyの `*.vercel.app` と提供CAを確認する。Chromium�
 
 ## PR終了時のcleanup
 
-mergeと未マージcloseの両方でmainのworkflowを起動する。再実行は次の明示コマンドを使う。
+mergeと未マージcloseの両方でmainのworkflowを起動し、対象PRのDeployment・Neon branch/endpointを削除し得る。PRを閉じるだけの操作も実資源に影響するため、cleanup対象と影響が承認されるまで無断でmerge/closeしない。再実行は次の明示コマンドを使う。
 
 ```bash
 npm run qa:release -- --pr <閉じたPR番号>
@@ -82,3 +94,15 @@ npm run qa:release -- --pr <閉じたPR番号>
 旧QA運用との並行稼働・台帳移行は行わない。既存QA資源を別途棚卸しして整理し、旧writerと実行中runを止める。Cakeから旧workflow・CLI・固定alias処理・管理DB依存を撤去する。外部Canneleサービス・管理DB・旧資格情報自体の撤去は別作業で、本変更のコード削除に伴って実行しない。
 
 main導入後、試験PRで初回Native作成、アプリDB接続、追加commitでのDB保持、PC/mobile A/Bの画面操作、merge/close後のDeployment/branch/endpoint消失を受け入れる。2026-10-16の既存Preview検証はCloud接続・CA・OIDC・A/B読取操作の証拠であり、新方式の作成・cleanupを検証した証拠ではない。実資源の生成・削除が許可されていない開発依頼では、ローカル検証まで行いdraft PRに未実施理由を記載する。
+
+## notice receiptの検証状況と実機受入計画
+
+2026-10-16の隔離[probe run 38917756089](https://github.com/tyask/Cake/actions/runs/38917756089)は、`codex/checks-receipt-probe` のcommit `c2b8e948f283a71a872a76c638c2aa3a0627e88d` で合成noticeを1件生成した。workflow/jobとも`permissions: {}`、provider呼出しなしで、Cloudの既存gh認証から329 bytesの同一JSONを33.5秒隔てた2回の読取で確認した。同commitの[通常CI run 38917699728](https://github.com/tyask/Cake/actions/runs/38917699728)も成功した。probe branchは検証証拠として残す。この結果はnotice輸送の証拠であり、正式なPreview receiptや実Deployment・DBの作成/保持/cleanupの検証結果ではない。
+
+正式な受信実装も同日にCloudの実APIへGETだけで照合し、既存[run 38896088643](https://github.com/tyask/Cake/actions/runs/38896088643)の正確なattempt/job/check/suiteを確認後、新noticeがない旧結果を拒否した。旧mainに対する`PREVIEW_NOT_INSTALLED_ON_MAIN`停止も実測し、dispatch・provider操作は0件だった。これは所属照合と導入前停止の確認であり、正式receiptの実機往復成功とは区別する。
+
+今回の`codex/notice-receipts`はローカル検証と実装draft PR作成までを対象とし、実資源を使う受入は未実施。PR段階の新CLIはtransport設定がない旧mainのdeploy/status/cleanupをdispatch前に拒否する。provider workflowもmain限定なので、非main branchへdispatchして正式receiptを検証した扱いにしない。main導入後は本実装PRがclosedになるため、受入には別のOPEN試験PR/branchが必要。試験PR番号は未発行であり、今回は作成しない。main導入と実機試験は別途承認の対象とし、導入後に最新workflowと試験PR/HEADを確認して、次の対象・影響の承認が揃ってから実機受入を行う。
+
+1. Vercel `fumin1/cake` とNeon Preview project `misty-meadow-88903426`（親branch `br-lively-frog-b3y2mauu`）で別のOPEN試験PRの初回Previewを作る。branch例は`codex/notice-receipt-acceptance`、Native branch候補は`preview/codex/notice-receipt-acceptance`。実行前にPR番号、完全HEAD、configのproject/親branch bindingを改めて提示する。初回はprovisioningとapplicationの最大2 Deployment、専用DB branch/read-write endpointの生成と初回migration/seedを予定する。生成されたID・世代を記録し、別PR・本番・旧資源には触れない。
+2. 正式receiptを既存Cloud gh認証で受領し、`qa:status`とPC/mobile A/Bの`qa:verify`を確認する。同じ試験PRの追加commitを配置し、Native branch/endpoint・DB世代と入力済みデータが保持されることを確認する。追加配置と検証に伴う書込も承認範囲を確認する。
+3. cleanupは対象Deployment ID・Neon branch/endpointと削除影響を改めて提示し、承認後にだけPRをclose/merge、またはclosed PRへ明示cleanupを実行する。削除後の全対象不在を直接GETで確認する。cleanupの承認前にPRを閉じない。

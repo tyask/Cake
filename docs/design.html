@@ -529,9 +529,10 @@
           <p>通常のログイン済み<code>GET /api/app</code>は利用可否確認と画面用の集約取得を各1 SQLで行い、<code>full</code>・<code>metadata</code>ともに2 SQL・2回のNeon往復となる。初めてのワークスペース作成などでは追加処理がある。読込ではプロフィールをDBへ書き戻さない。</p>
           <h3>開発・Preview・Productionの配置</h3>
           <p>CloudとPCでCake内のコマンドを使い、ローカル検証→draft PR→明示的Preview作成→固有URLでのPC/mobile・A/B実ブラウザ検証→現在HEADのCI確認→Readyの順で進める。mainのActionsがPR単位に操作を直列化し、Vercel GitSourceとNeon Nativeを使用する。全feature pushの自動Previewは停止する。</p>
+          <p>Actionsの公開用receiptは専用stepの標準notice annotationで受け渡し、Cloud/PCの既存gh本人認証から同じAPIで読む。mainの設定に<code>receiptTransport: github-actions-notice/v1</code>が導入済みであることをdispatch前に照合する。対象run・初回attempt・job・CheckRun/CheckSuite・repository・main SHAと依頼を照合し、欠落・重複・不一致では停止する。artifact ZIP、外部relay、Checks書込権限への依存は設けない。provider protocolとDB markerは維持する。</p>
           <p>固定QA URL、QA枠、予約・貸出、Canneleと常設管理DBへの依存を廃止する。PR・完全SHA・Deployment ID・DB世代とNative branch/endpointを照合し、同PRのDBを維持する。本番DBへのfallbackと別PRのDB再利用は禁止する。</p>
           <p>初回Native provisioningはDB接続前に停止し、providerで専用endpointを照合したapplication配置だけがmigration・seedを行う。初回以降はQA入力済みデータを上書きしない。保護アクセスは同projectの短期development OIDCを対象originへ限定し、証明書検証を維持したChromiumを使用する。</p>
-          <p>merge/close後は信頼済みmainのActionsが対象PRのDeployment・Neon branch/endpointを照合してcleanupする。応答不明や所属不明は停止し、明示的再実行で復旧する。旧方式との互換運用や台帳移行はせず、既存資源の整理と外部Cannele撤去は別作業にする。詳細は<a href="development-workflow.md">運用手順</a>を参照する。</p>
+          <p>実Deployment・DBの作成/更新・削除は対象と影響が利用者に承認された範囲で行う。merge/close後は信頼済みmainのActionsが対象PRのDeployment・Neon branch/endpointを照合してcleanupするため、draft PR作成の依頼だけで無断close/mergeしない。応答不明や所属不明は停止し、読取調査で状態を確定する。旧方式との互換運用や台帳移行はせず、既存資源の整理と外部Cannele撤去は別作業にする。notice輸送の隔離試験と正式Previewの実機受入は分け、実施状況は<a href="development-workflow.md">運用手順</a>に記録する。</p>
           <p>本番はmainへのmergeを検知するVercel Git連携でbuild後のDB更新が成功してから公開する。手動Production操作は別途明示依頼時だけ行う。</p>
         </section>
 

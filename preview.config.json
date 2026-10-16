@@ -1,5 +1,6 @@
 {
   "protocol": "cake-preview/v1",
+  "receiptTransport": "github-actions-notice/v1",
   "repository": "tyask/Cake",
   "repositoryId": 1318171856,
   "vercelProjectId": "prj_Z37vquodhpRd08ZTAtYnP0qa59jD",

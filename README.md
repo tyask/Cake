@@ -178,7 +178,9 @@ QAのDB初回照合・fixture・migration/seed・同PR更新時のデータ保�
 
 ## 開発・QA運用手順
 
-CloudとローカルPCで共通の開発、draft PR作成、QA予約、デプロイ、画面・APIテスト、cleanupの手順は [docs/development-workflow.md](docs/development-workflow.md) にまとめています。作業開始前に確認してください。
+CloudとローカルPCで共通の開発、draft PR作成、PR専用Preview、画面・APIテスト、cleanupの手順は [docs/development-workflow.md](docs/development-workflow.md) にまとめています。Actionsの結果は標準notice annotationを既存gh本人認証で読み取り、artifact取得や外部relayを使いません。
+
+実Deployment・DBの作成/更新・資源削除は、対象と影響が承認された範囲で行います。PRのmerge/closeでもcleanupによる削除が起動し得るため、draft PR作成の依頼だけで実行しません。作業開始前に運用手順と検証の実施範囲を確認してください。
 
 ## PayPay CSV
 

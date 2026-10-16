@@ -764,7 +764,8 @@ BootstrapData extends BootstrapMetadata
               <tr><td>db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
               <tr><td>recurring-payment-calendar.test.ts / recurring-payment-form.test.ts / recurring-payments.test.ts / recurring-payment-handlers.test.ts</td><td>日本時間09:00の直前/境界、未来日・過去日・月末、追加履歴を参照しない予定計算、保存・再開・認可・入力検証、当日処理・処理開始日時・実行APIの環境制限。</td></tr>
               <tr><td>start-task.test.ts</td><td>最新origin/mainからの専用ブランチ・worktree作成、元のdirty状態の保持、既存作業の上書き拒否、作成先指定とnpm ci失敗時の保持。</td></tr>
-              <tr><td>preview-service.test.ts / preview-command.test.ts</td><td>専用ブランチ、HEADとPreviewの完全一致、Native照合・応答不明・DB消失時の停止、closed cleanupと検証証拠の一致。</td></tr>
+              <tr><td>preview-service.test.ts / preview-command.test.ts</td><td>専用ブランチ、HEADとPreviewの完全一致、Native照合・応答不明・DB消失時の停止、closed cleanupと検証証拠の一致。mainのtransport未導入はdispatch前に停止する。</td></tr>
+              <tr><td>preview-receipt.test.ts / preview-checks.test.ts</td><td>4,096 UTF-8 bytes上限、公開項目とrunAttempt、notice escape、厳密JSON、workflow/run/attempt/job/check/suite/repositoryの結合、全件取得、欠落・重複・古い値・マスク・metadata変化の拒否。</td></tr>
               <tr><td>database-environment.test.ts / vercel-build.test.ts</td><td>Preview専用接続の必須化、本番接続へのfallback禁止、PreviewのDB更新・seed、Productionのビルド後DB更新、失敗時の公開停止。</td></tr>
               <tr><td>seed-startup.test.ts / seed-error.test.ts</td><td>@next/env実起動、環境変数のロード、DB登録失敗の段階・原因を秘密情報なしで整形。</td></tr>
             </tbody>
@@ -785,11 +786,13 @@ BootstrapData extends BootstrapMetadata
             </tbody>
           </table></div>
           <h3>開発・Preview管理の契約</h3>
-          <p>実装はCake内のpreview-command/provider/service/workflow/browser/readyとpreview.config.json。mainのpreview.ymlのみがprovider管理資格情報を使用し、PRごとのconcurrencyで直列化する。closedイベントでもmainのみをcheckoutし、featureコードを管理資格情報付きで実行しない。</p>
+          <p>実装はCake内のpreview-command/provider/service/workflow/receipt/checks/browser/readyとpreview.config.json。mainのpreview.ymlのみがprovider管理資格情報を使用し、PRごとのconcurrencyで直列化する。closedイベントでもmainのみをcheckoutし、featureコードを管理資格情報付きで実行しない。configの<code>receiptTransport: github-actions-notice/v1</code>を含む完全一致をdispatch前に確認し、旧main未導入では<code>PREVIEW_NOT_INSTALLED_ON_MAIN</code>で停止する。dispatchの必須input <code>controlSha</code>でCLIが固定したmain SHAを渡し、workflow開始時の<code>GITHUB_SHA</code>と異なればprovider操作前に停止する。main更新との競合でも別SHAの操作を続けず、盲目的に再dispatchしない。provider protocol <code>cake-preview/v1</code>とDB marker version 2は維持する。</p>
+          <p>公開用receiptに<code>runId</code>・<code>runAttempt</code>・<code>controlSha</code>・operationを付け、compact JSONが4,096 UTF-8 bytes以下であることを送出前に検査する。provider操作後のローカル<code>preview-result.json</code>を専用step <code>Publish public operation receipt notice</code>で再検査し、固定title <code>cake-preview-receipt/v1</code>の標準noticeを1件出す。本文の%・CR・LFをworkflow command用にescapeする。runnerの秘密マスク・切詰めを受けた内容は受理しない。noticeはログにも残るため非秘密projectionだけを送る。artifact upload/download、外部relay、<code>checks: write</code>は使わない。</p>
+          <p>CLIはworkflow ID/pathと対象runのrepository・event・main ref/SHA・初回attempt・successを固定し、attempt指定jobs APIの全ページから唯一のpreview jobを選ぶ。canonical <code>check_run_url</code>からCheckRun/CheckSuiteのrepository・head SHA・GitHub Actions appを照合し、全annotationから固定titleのnoticeを正確に1件だけ受け入れる。重複keyを含む不正JSON、欠落・重複・古いattempt・マスク・切詰め、PR/HEAD・operation・run ID/attempt・control SHA・時刻の不一致は停止条件。取得後にrun/check metadataと件数を再確認し、receiptはGit外の<code>.cake/preview.json</code>へ保存する。この照合は更新の検出であり、永続不変や暗号学的署名の保証ではない。</p>
           <p>Deployment metadataのprotocol・repository・PR・generation・operation・phaseとGitSourceの完全SHA・branchを全ページ一覧と直接GETで照合する。初回provisioningはDB接続前に停止し、Native子branchの親・作成時刻・所属・非保護・read-write endpointを確認後、IDとhost digestをapplication deploymentへ渡す。接続文字列はNativeが供給する。</p>
           <p>DB識別marker version 2はrepository・PR・generation・source branch・Native branch・host・database名を保持する。DB接続前にURL上書きparameterと本番endpoint一致を拒否し、migration/seedは排他guard下で所有権を照合する。同PR更新ではmarkerとseed済みデータを保持する。旧markerは移行・上書きしない。</p>
           <p>GET /api/qa/previewはPreview/test限定で、実アプリと同じDB clientのmarkerを読取照合しnonce・commit・Deployment・DB digestを返す。任意のfeatureコードの暗号学的証明ではない。ブラウザはTLS検証付きの通常通信とorigin限定OIDCを使い、PC/mobile A/Bの実クリック・session/app GET・runtime proofを確認する。検証前後のprovider照合と最新push/PR CIがReady条件。証拠はGit外の.cakeに保存する。</p>
-          <p>cleanupはclosed PRを削除直前にも確認し、metadataを持つ最後のDeploymentを復旧用に残して他Deployment・専用DBを削除する。Nativeの先行削除も直接GETで確認し、最後のDeploymentと全資源の不在後だけ完了にする。応答不明時は同じrunのmetadataを再照合し、盲目的なPOSTをしない。管理DB、固定URL、旧方式へのfallbackは設けない。</p>
+          <p>cleanupはclosed PRを削除直前にも確認し、metadataを持つ最後のDeploymentを復旧用に残して他Deployment・専用DBを削除する。Nativeの先行削除も直接GETで確認し、最後のDeploymentと全資源の不在後だけ完了にする。応答不明時は同じrunのmetadataを再照合し、盲目的なPOSTをしない。実資源操作は対象と影響が承認された範囲で行い、PRのmerge/closeが削除を起動し得ることを確認する。無断でPRを閉じない。管理DB、固定URL、旧方式へのfallbackは設けない。</p>
         </section>
 
         <section id="qa-diagnostics">
