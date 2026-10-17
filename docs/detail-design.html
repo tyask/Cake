@@ -204,7 +204,7 @@
           <h1>コードから辿れる、実装の設計図。</h1>
           <p>Next.jsアプリケーションのルート、コンポーネント、APIアクション、ドメイン関数、型、SQLスキーマをソースコード単位で定義する。</p>
           <div class="meta">
-            <span>更新日: 2026-10-10</span>
+            <span>更新日: 2026-10-17</span>
             <span>対象: 現行リポジトリ</span>
             <span>粒度: ファイル / 関数 / API / テーブル</span>
             <span>基準: As-Is実装</span>
@@ -214,7 +214,7 @@
         <section id="policy">
           <span class="tag asis">As-Is</span>
           <h2>1. 文書方針</h2>
-          <p class="lead">本書は <a href="./design.html">基本設計書</a> を実装へ対応付ける詳細設計書であり、記載内容は2026-10-10時点のソースコードを正とする。</p>
+          <p class="lead">本書は <a href="./design.html">基本設計書</a> を実装へ対応付ける詳細設計書であり、現行ソースコードと開発・QA運用手順を正とする。</p>
           <div class="grid-3">
             <div class="card"><h3>対象</h3><p><code>app/</code>、<code>components/</code>、<code>lib/</code>、<code>auth.ts</code>、DBマイグレーション、セットアップスクリプト、単体テスト。</p></div>
             <div class="card"><h3>表記</h3><p>TypeScript上の名前、HTTPのアクション名、DBの物理名はコードと同じ英字表記を使用する。</p></div>
@@ -675,7 +675,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>007_recurring_payments.sql</td><td>開始日カラムを持たない定期設定1表、処理予定日next_scheduled_on、09:00境界による予定日計算関数、認可/入力検証/即時変更・再開/実行日時での明細生成関数。transactions.sourceにRECURRINGを追加。未公開機能についてユーザー指示で適用済みファイルを現行仕様へ修正し、新規DBで開始日を作成しない。</td></tr>
               <tr><td>008_recurring_payment_execution_time.sql</td><td>処理予定日と09:00境界による計算関数を準備し、007と同じ引数・生成処理を維持する。取引日時は登録処理開始時のtarget_nowを使用し、追加済み明細は更新しない。</td></tr>
               <tr><td>009_recurring_payment_immediate_changes.sql</td><td>旧変更予約を現在設定へ反映してclearし、revisionを更新する。処理予定日を現在の設定日と適用時刻の09:00境界から再計算し、編集・再開・生成関数を007・008と同じ現行仕様へ揃える。旧適用月は既定値0001-01-01、既存値は保持する。追加済み明細と旧成功月は変更しない。</td></tr>
-              <tr><td>010_recurring_payment_remove_start_on.sql</td><td>既存Previewの開始日カラムstart_onがあれば削除する。旧開始日Triggerをworkspace_idの変更禁止へ置き換え、開始日に依存していた複合CHECKを残る月列の月初CHECKへ置き換える。新規DBでは列がなく、既存の月初制約を重複して追加しない。公開中の本番アプリは削除列を参照しない。既存設定と追加済み明細は保持する。</td></tr>
+              <tr><td>010_recurring_payment_remove_start_on.sql</td><td>既存Previewの開始日カラムstart_onがあれば削除する。旧開始日Triggerをworkspace_idの変更禁止へ置き換え、開始日に依存していた複合CHECKを残る月列の月初CHECKへ置き換える。新規DBでは列がなく、既存の月初制約を重複して追加しない。現行アプリは削除列を参照しない。既存設定と追加済み明細は保持する。</td></tr>
               <tr><td>011_recurring_payment_next_scheduled_on.sql</td><td>既存DBへ処理予定日next_scheduled_onと計算関数を追加する。未設定の予定日は設定日と適用時刻の日本時間09:00境界から初期化し、NOT NULLにする。追加・編集・再開・生成関数を現行仕様へ揃える。成功月は予定判定・生成に使わず、追加済み明細と旧列の値は保持する。</td></tr>
             </tbody>
           </table></div>
@@ -784,11 +784,11 @@ BootstrapData extends BootstrapMetadata
               <tr><td><code>npm run db:setup</code></td><td>未適用番号付きSQLと適用履歴をatomicに追加。</td></tr>
               <tr><td><code>npm run db:seed:test</code></td><td>従来ローカルはA/Bを非管理者として登録する。新QAはdummyのAをサイト管理者・共有OWNER、Bを一般・MEMBERとする固定二人だけを使用する。空DBでは初回だけ登録し、厳密一致する継承fixtureではseed済みidentityを使用する。同PRのデータ・名前・権限・停止状態を維持し、自動修復しない。</td></tr>
               <tr><td><code>npm run build:vercel</code></td><td>Previewは必須環境変数・DB接続前guard確認 → DB内の所有権/初回受入条件（空DBまたは承認済みQA初期fixture）確認 → db:setup → テスト認証時db:seed:test → build。Productionは必須環境変数確認 → build → db:setup。いずれも失敗時に公開停止。Development/ローカルはbuildのみ。</td></tr>
-              <tr><td><code>npm run deploy:preview</code></td><td>Cloud/PC共通の開発・QA運用コマンド。引数・実行順序・検証・中断時の対応は<a href="development-workflow.md">開発・QA運用手順</a>を参照。</td></tr>
+              <tr><td><code>npm run deploy:preview</code></td><td>WSL/Windows共通の開発・QA運用コマンド。引数・実行順序・検証・中断時の対応は<a href="development-workflow.md">開発・QA運用手順</a>を参照。</td></tr>
               <tr><td><code>npm run qa:verify</code></td><td>対象PRのworktreeで既存ローカルブラウザ検証。前後statusと現在HEADを照合し、<code>.cake/verification.json</code>へ保存。</td></tr>
               <tr><td><code>npm run qa:windows -- status|input|preflight|self-test|verify</code></td><td>Windowsの保存済み資格情報を扱う共通入口。verifyはPR・完全SHA・Deployment・DB・generation必須、対象worktreeは任意指定。同じ正式ブラウザ検証の証跡、<code>.cake/windows-qa-launch-&lt;UUID&gt;.json</code>と<code>.cake/windows-qa-progress-&lt;UUID&gt;.json</code>を対象worktreeへ保存。Readyへは変更せず、旧PR管理のremote proof条件も緩めない。</td></tr>
               <tr><td><code>npm run qa:verify:ci -- --pr &lt;PR&gt; --sha &lt;完全SHA&gt; --deployment &lt;ID&gt;</code></td><td>最新mainと一致するcleanなcontrol checkoutから既存PreviewをActions検証。verify capabilityを照合し、成功証拠をcontrol側<code>.cake/verify-&lt;PR&gt;.json</code>へ保存。PRはReadyにしない。</td></tr>
-              <tr><td><code>npm run task:pr</code></td><td>Cloud/PC共通の開発・QA運用コマンド。任意の<code>--remote-proof &lt;path&gt;</code>指定時だけActions検証証拠を再照合する。<code>--target-worktree &lt;path&gt;</code>併用時は最新mainのcontrol checkoutから旧対象worktreeを管理する。remote proof必須・非draft専用。省略時は既存のローカル証拠を使う。引数・実行順序・検証・中断時の対応は<a href="development-workflow.md">開発・QA運用手順</a>を参照。</td></tr>
+              <tr><td><code>npm run task:pr</code></td><td>WSL/Windows共通の開発・QA運用コマンド。任意の<code>--remote-proof &lt;path&gt;</code>指定時だけActions検証証拠を再照合する。<code>--target-worktree &lt;path&gt;</code>併用時は最新mainのcontrol checkoutから別の対象worktreeを管理する。remote proof必須・非draft専用。省略時は既存のローカル証拠を使う。引数・実行順序・検証・中断時の対応は<a href="development-workflow.md">開発・QA運用手順</a>を参照。</td></tr>
             </tbody>
           </table></div>
           <h3>開発・Preview管理の契約</h3>
@@ -796,22 +796,20 @@ BootstrapData extends BootstrapMetadata
           <p>公開用receiptに<code>runId</code>・<code>runAttempt</code>・<code>controlSha</code>・operationを付け、compact JSONが4,096 UTF-8 bytes以下であることを送出前に検査する。provider操作後のローカル<code>preview-result.json</code>を専用step <code>Publish public operation receipt notice</code>で再検査し、固定title <code>cake-preview-receipt/v1</code>の標準noticeを1件出す。本文の%・CR・LFをworkflow command用にescapeする。runnerの秘密マスク・切詰めを受けた内容は受理しない。noticeはログにも残るため非秘密projectionだけを送る。artifact upload/download、外部relay、<code>checks: write</code>は使わない。</p>
           <p>CLIはworkflow ID/pathと対象runのrepository・event・main ref/SHA・初回attempt・successを固定し、attempt指定jobs APIの全ページから唯一のpreview jobを選ぶ。canonical <code>check_run_url</code>からCheckRun/CheckSuiteのrepository・head SHA・GitHub Actions appを照合し、全annotationから固定titleのnoticeを正確に1件だけ受け入れる。重複keyを含む不正JSON、欠落・重複・古いattempt・マスク・切詰め、PR/HEAD・operation・run ID/attempt・control SHA・時刻の不一致は停止条件。取得後にrun/check metadataと件数を再確認し、receiptはGit外の<code>.cake/preview.json</code>へ保存する。この照合は更新の検出であり、永続不変や暗号学的署名の保証ではない。</p>
           <h3>Actions verifyの独立契約</h3>
-          <p>新CLI <code>qa:verify:ci</code>は対象PRのHEADとは別のcontrol checkoutから動く。control側はcleanでHEADが取得時点の最新mainに一致し、対象はOPEN・同一repository・専用branch・完全SHA・READY application Deployment IDに固定する。mainの<code>preview-verify.config.json</code>を<code>{protocol: "cake-preview-verify/v1", workflow: ".github/workflows/preview.yml", action: "verify"}</code>と照合してからdispatchし、旧mainのverify未導入を止める。既存3 actionのwire/title/schemaと<code>preview.config.json</code>を変更しない。verify用inputは対象<code>deploymentId</code>を持ち、operation/controlShaで正確な要求を結び付ける。</p>
+          <p><code>qa:verify:ci</code>は対象PRのHEADとは別のcontrol checkoutから動く。control側はcleanでHEADが取得時点の最新mainに一致し、対象はOPEN・同一repository・専用branch・完全SHA・READY application Deployment IDに固定する。mainの<code>preview-verify.config.json</code>を<code>{protocol: "cake-preview-verify/v1", workflow: ".github/workflows/preview.yml", action: "verify"}</code>と照合してからdispatchし、旧mainのverify未導入を止める。既存3 actionのwire/title/schemaと<code>preview.config.json</code>を変更しない。verify用inputは対象<code>deploymentId</code>を持ち、operation/controlShaで正確な要求を結び付ける。</p>
           <p>同じmain限定workflow/concurrencyを使い、mainの完全SHAだけをcheckoutする。verifyの場合のみ資格情報を渡す前に公式<code>npx playwright install --with-deps chromium</code>を行う。provider TransportはmethodがGETでbodyなしのものだけを下流へ渡し、Vercel development env取得のOIDC読取にも同じguardを使う。既存<code>VERCEL_TOKEN</code>・<code>NEON_API_KEY</code>・読取用<code>github.token</code>だけを使用する。status前照合→通常TLSブラウザ検証→status後照合で対象とDBの不変を確認し、provider作成/更新/削除、direct SQL、migration、seedの入口は呼ばない。新規auth/security/network設定を必要としない。</p>
           <p>verify専用receiptはprotocol/titleとも<code>cake-preview-verify/v1</code>で、成功と固定stage/codeの失敗を区別する。送出前に公開項目と4,096 UTF-8 bytes上限を検査し、PR/HEAD/Deployment/DB・case/クリック/観測時刻とrun/初回attempt/control SHA/operationを照合する。既存noticeと同じ厳密JSON・全annotation取得・run/job/check/suite/repository/appの来歴検査を行う。成功receiptはcompleted/successと一致するものだけ受理し、失敗receiptはcompleted/failureと一致する診断だけを受理する。生例外、token、Cookie、接続文字列は含めず、欠落や不一致では停止する。artifactを結果輸送に使わない。</p>
-          <p>成功証拠のcontrol側<code>.cake/verify-&lt;PR&gt;.json</code>はprotocol <code>cake-preview-remote-proof/v1</code>、workflow ID、受理済みverify receiptを保持する。検証CLIからPRをReadyにはしない。新CLIを含む対象PRの<code>task:pr --remote-proof &lt;path&gt;</code>で明示した場合のみ、現在HEADのCIと保存receiptのActions来歴を読み直す。旧対象PRには最新mainのcontrol checkoutから<code>--remote-proof &lt;path&gt; --target-worktree &lt;path&gt;</code>を使い、対象ブランチのコードを変更・実行せずGit/gh管理を行う。target指定はremote proof必須・非draft専用で、controlのcleanな最新main/verify capabilityと対象のcleanな専用branch/完全HEADを照合する。報告書・証拠・対象worktreeのpathはcontrolのCWD基準で、絶対pathを推奨する。省略時のローカル証拠と既存Ready動作は変えず、異なるPR/HEAD/Deploymentの証拠は拒否する。</p>
+          <p>成功証拠のcontrol側<code>.cake/verify-&lt;PR&gt;.json</code>はprotocol <code>cake-preview-remote-proof/v1</code>、workflow ID、受理済みverify receiptを保持する。検証CLIからPRをReadyにはしない。新CLIを含む対象PRの<code>task:pr --remote-proof &lt;path&gt;</code>で明示した場合のみ、現在HEADのCIと保存receiptのActions来歴を読み直す。別の対象PRには最新mainのcontrol checkoutから<code>--remote-proof &lt;path&gt; --target-worktree &lt;path&gt;</code>を使い、対象ブランチのコードを変更・実行せずGit/gh管理を行う。target指定はremote proof必須・非draft専用で、controlのcleanな最新main/verify capabilityと対象のcleanな専用branch/完全HEADを照合する。報告書・証拠・対象worktreeのpathはcontrolのCWD基準で、絶対pathを推奨する。省略時のローカル証拠と既存Ready動作は変えず、異なるPR/HEAD/Deploymentの証拠は拒否する。</p>
+          <h3>WSLと報告</h3>
+          <p>WSLはLinux版Node.js/npm/gh/Playwrightを使用し、Windowsと依存・成果物・資格情報を分離する。本人のVercel認証からdevelopment OIDCをメモリ内だけで取得して既存browser helperへ明示的に渡し、Git/ghにはprovider tokenを渡さない。実行例は<a href="wsl-development.md">WSL手順</a>を参照する。標準の画面移動検証と業務更新テストを分け、明細の追加・編集・再読込・他ユーザー参照・作成済みIDだけの削除を確認する。PRのタイトル・本文・コメント・レビュー・検証報告は日本語にする。</p>
           <h3>資源とブラウザの共通照合</h3>
           <p>Deployment metadataのprotocol・repository・PR・generation・operation・phaseとGitSourceの完全SHA・branchを全ページ一覧と直接GETで照合する。初回provisioningはDB接続前に停止し、Native子branchの親・作成時刻・所属・非保護・read-write endpointを確認後、IDとhost digestをapplication deploymentへ渡す。接続文字列はNativeが供給する。</p>
           <p>DB識別marker version 2はrepository・PR・generation・source branch・Native branch・host・database名を保持する。DB接続前にURL上書きparameterと本番endpoint一致を拒否し、migration/seedは排他guard下で所有権を照合する。同PR更新ではmarkerとseed済みデータを保持する。旧markerは移行・上書きしない。</p>
           <p>GET /api/qa/previewはPreview/test限定で、実アプリと同じDB clientのmarkerを読取照合しnonce・commit・Deployment・DB digestを返す。任意のfeatureコードの暗号学的証明ではない。ローカル/Actionsは同じブラウザhelperで通常TLS通信とorigin限定OIDCを使い、PC/mobile A/Bの16実クリック・session/app GET・runtime proofを確認する。各caseでruntime-before・session/app・runtime-afterの観測時刻を記録する。HTTPはGET/HEAD/OPTIONSと認証callback POSTを許し、redirectの各hopを対象originへ制限する。ただし既存GET /api/appはworkspace0件なら初期workspace/membershipをINSERTするため、HTTPの制限をDB完全無変更の保証にしない。検証前後のprovider照合と最新push/PR CIがReady条件。証拠はGit外の.cakeに保存する。</p>
-          <p>cleanupはclosed PRを削除直前にも確認し、metadataを持つ最後のDeploymentを復旧用に残して他Deployment・専用DBを削除する。Nativeの先行削除も直接GETで確認し、最後のDeploymentと全資源の不在後だけ完了にする。応答不明時は同じrunのmetadataを再照合し、盲目的なPOSTをしない。実資源操作は対象と影響が承認された範囲で行い、PRのmerge/closeが削除を起動し得ることを確認する。無断でPRを閉じない。管理DB、固定URL、旧方式へのfallbackは設けない。</p>
+          <p>cleanupはclosed PRを削除直前にも確認し、metadataを持つ最後のDeploymentを復旧用に残して他Deployment・専用DBを削除する。Nativeの先行削除も直接GETで確認し、最後のDeploymentと全資源の不在後だけ完了にする。応答不明時は同じrunのmetadataを再照合し、盲目的なPOSTをしない。実資源操作は対象と影響が承認された範囲で行い、PRのmerge/closeが削除を起動し得ることを確認する。無断でPRを閉じない。PR専用資源だけを対象とする。</p>
         </section>
 
-        <section id="qa-diagnostics">
-          <h2>QA導入前の読取診断</h2>
-          <p>診断専用workflowはworkflow_dispatchだけでmainのcommitを読み、contents/pull-requests/deploymentsのread権限を使う。同一repositoryのmain/対象PRの完全SHAのmain-only Git設定とblobを照合し、<code>gitConfiguration.scope: repository-git-trigger-configuration</code>と<code>backendForcedDeploymentPreventionProven: false</code>で枝内設定の証拠だけを示す。Environmentを指定せず、API資格情報はGET実行stepだけへ渡す。不足・401/403・対象不一致は秘密値を含めず報告する。既存Neon GETの完全一覧からproject/branch/parent/default/endpoint IDを明示した項目だけで要約し、defaultのAPI根拠と未知状態、親候補の観測された子を示す。供給された本番hostと取得済みQA endpoint hostをpooler表記を正規化して照合し、endpoint IDとmatch/no-match/unknownだけを示す。不完全な比較はunknownとなる。URI・role・password・hostはこの要約に含めず、比較結果を本番project全体の完全分離、空DB、次回Native生成の親の証明にしない。SQLは実行せず空状態は未確認のまま扱う。probe/返却の計画は情報表示のみで実行入口を持たない。診断単体はDB/build/seedやtask-preview/task-prを実行せず、poolや確認flagを有効化しない。詳細は<a href="qa-diagnostics.md">QA診断手順</a>を参照する。</p>
-        </section>
-        <footer>Cake 家計管理アプリ 詳細設計書 · Version 1.1 · Source baseline 2026-10-10</footer>
+        <footer>Cake 家計管理アプリ 詳細設計書 · Version 1.1 · 現行実装・運用手順に対応</footer>
       </main>
     </div>
   </body>

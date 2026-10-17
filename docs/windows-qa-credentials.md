@@ -10,7 +10,7 @@ Windowsネイティブの独立したCodexタスクから、保存済みのCake�
 - 対象は同一repositoryのOPEN PRと、完全SHAが一致するcleanな専用worktree。既存のREADY application Deployment、Native DB branch、DB generationを事前に確認する。
 - A/BログインとPC/mobile表示、初回に限る個人workspace・OWNER membership作成を含め、対象DBで許可された書込範囲を確認する。HTTP GETの制限だけではDB無変更を保証しない。
 
-この手順はPreview/DBを作成・更新せず、migration・seed・取引作成・cleanupを行わない。それらが必要なら、対象と影響について別途承認された手順に従う。認証や対象照合の失敗を、別認証・広い権限・TLS検証の回避で修復しない。
+verify操作はPreview/DB資源を作成・更新せず、migration・seed・取引作成・cleanupを行わない。ただし認証後のGETによる初期workspace作成は起こり得る。それらが必要なら、対象と影響について別途承認された手順に従う。認証や対象照合の失敗を、別認証・広い権限・TLS検証の回避で修復しない。
 
 ## 保存済み資格情報の確認
 
@@ -49,7 +49,7 @@ Windowsの保存先がサンドボックスの `Packages/.../AC` 等へ仮想化
 npm.cmd run qa:windows -- verify --pr <PR番号> --sha <40桁の完全SHA> --deployment <Deployment ID> --database <Native branch ID> --generation <DB generation UUID>
 ```
 
-既定の対象worktreeは現在のworktree。古いPRなど、対象と検証実装のcheckoutを分ける場合は、共通ランチャーを持つcleanなcheckoutから次を実行する。
+既定の対象worktreeは現在のworktree。対象と検証実装のcheckoutを分ける場合は、共通ランチャーを持つcleanなcheckoutから次を実行する。
 
 ```powershell
 npm.cmd run qa:windows -- verify --pr <PR番号> --sha <40桁の完全SHA> --deployment <Deployment ID> --database <Native branch ID> --generation <DB generation UUID> --target-worktree <対象worktreeのpath>
@@ -75,7 +75,7 @@ Vercel tokenを供給するのは専用preflight/QA子プロセスだけ。Git/g
 npm.cmd run task:pr -- --title '変更内容' --verification-file '.cake\report.md'
 ```
 
-**旧PRを最新mainのcontrol checkoutから管理する `task:pr --target-worktree` はremote proof必須。** この共通ランチャーのローカル証跡は `qa:verify:ci` のremote proofではなく、代用できない。旧PRのReady手順は[Actions検証とtarget-worktreeの条件](development-workflow.md#actionsによる既存previewの実ブラウザ検証任意)に従う。merge/closeと資源cleanupの承認も別途確認する。
+**別の対象checkoutを最新mainのcontrolから管理する `task:pr --target-worktree` はremote proof必須。** この共通ランチャーのローカル証跡は `qa:verify:ci` のremote proofではなく、代用できない。別checkoutからのReady手順は[Readyと別checkout管理の条件](development-workflow.md#6-readymergecloseと削除確認)に従う。merge/closeと資源cleanupの承認も別途確認する。
 
 ## 再構築とダミー試験
 
@@ -86,5 +86,3 @@ npm.cmd run qa:windows -- self-test
 ```
 
 ダミー値の試験でDPAPI、本人ACL、二重保存拒否、改変時の停止、子プロセスへの環境変数限定供給、伏字画面等を確認する。実tokenの内容を読む試験や実Previewへの接続ではない。`self-test` も同じプロファイル分離判定を行うため、通常の本人Windowsコンテキストで実行する。lint・型検査・通常回帰テスト・buildも同じ最終SHAで別途行う。
-
-2026-10-17のPR #75のWindows正式QA成功は、特定実機の既存Previewを使った受入結果。今回の共通化コードとダミー試験をもって、別PR・別PCでの認証済みQA、新Preview/DB作成、同DB更新後の保持、cleanupまで成功したとは報告しない。実施した範囲と未検証点は各タスクの検証報告へ残す。
