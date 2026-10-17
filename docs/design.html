@@ -522,7 +522,7 @@
             <div class="card"><h3>認証</h3><p>Google OAuthの基本プロフィール・メールを用い、事前登録された有効な利用者だけを認証する。Cakeの内部ユーザーIDをセッションに保持し、表示名はCakeの設定を維持する。</p></div>
             <div class="card"><h3>デプロイ</h3><p>Vercelへ配置し、Neonの接続文字列とGoogle OAuth情報を暗号化された環境変数として設定する。</p></div>
           </div>
-          <p>アプリAPIはHTTP処理、用途別サービス（workspace/招待・明細・ルール・取込・清算）、DB storeの順に処理する。共通の入力schemaとDTO変換を使用し、業務条件をDBなしで検証できる。</p>
+          <p>アプリAPIはHTTP処理、用途別サービス（workspace/招待・明細・ルール・取込・清算）、DB storeの順に処理する。共通の入力schemaとDTO変換を使用し、業務条件をDBなしで検証できる。workspaceの削除は、清算済み明細と履歴の関連も含めて一括で完了し、制約違反時は全体を取り消す。</p>
           <div class="note">通常APIはセッションとDB上の利用可否を確認する。ワークスペースの参照・更新は所属、招待承認はトークン・宛先メール・期限、利用者管理は管理者権限を検証する。</div>
           <div class="warning">ローカル・Preview環境では <code>AUTH_MODE=test</code> により、固定IDを持つテストユーザーA/Bを選択して通常のAuth.jsセッションを発行できる。Vercel Productionではサーバー側で常に無効化し、Googleログインだけを提供する。</div>
           <h3>画面ごとのデータ取得</h3>

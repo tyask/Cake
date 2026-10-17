@@ -37,9 +37,18 @@ export function createAppStore() {
       const sql = db();
       await sql`UPDATE workspaces SET name = ${input.name}, updated_at = now() WHERE id = ${input.workspaceId}::uuid`;
     },
+    // Consume the CTE output before cascading into transactions, whose history FK is NO ACTION.
     async deleteWorkspace(input: Action<"deleteWorkspace">) {
       const sql = db();
-      await sql`DELETE FROM workspaces WHERE id = ${input.workspaceId}::uuid`;
+      await sql`
+        WITH removed_links AS (
+          DELETE FROM settlement_transactions
+          WHERE settlement_id IN (SELECT id FROM settlements WHERE workspace_id = ${input.workspaceId}::uuid)
+          RETURNING settlement_id
+        )
+        DELETE FROM workspaces WHERE id = ${input.workspaceId}::uuid
+          AND (SELECT COUNT(*) FROM removed_links) >= 0
+      `;
     },
     async memberCount(workspaceId: string) {
       const sql = db();
