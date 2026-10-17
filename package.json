@@ -17,6 +17,7 @@
     "qa:status": "node --import tsx scripts/preview-command.ts status",
     "qa:verify": "node --import tsx scripts/preview-command.ts verify",
     "qa:verify:ci": "node --import tsx scripts/preview-verify-command.ts",
+    "qa:retention": "node --import tsx scripts/preview-retention-command.ts",
     "qa:release": "node --import tsx scripts/preview-command.ts cleanup"
   },
   "dependencies": {

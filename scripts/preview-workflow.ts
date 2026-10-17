@@ -8,11 +8,14 @@ import { PreviewVerifyService } from './preview-verify-service';
 import { transport } from './preview-provider';
 import { parseVerifyReceipt, serializeVerifyReceipt, verifyReceiptNoticeCommand, verifyReceiptProtocol } from './preview-verify-receipt';
 import { fullSha } from './task-workflow';
+import { PreviewRetentionService } from './preview-retention-service';
+import { retentionActions, retentionProtocol, type RetentionAction } from './preview-retention-model';
+import { parseRetentionReceipt, serializeRetentionReceipt, retentionReceiptNoticeCommand } from './preview-retention-receipt';
 export function missingPreviewCredentials(env: Readonly<Record<string, string | undefined>>): string[] {
   return ['VERCEL_TOKEN','NEON_API_KEY'].filter(name => !env[name]?.trim());
 }
 export async function runPreviewWorkflow(env = process.env, service = new PreviewService(),
-  verifier = new PreviewVerifyService(transport(env))): Promise<void> {
+  verifier = new PreviewVerifyService(transport(env)), retention = new PreviewRetentionService(transport(env))): Promise<void> {
   // A failed preflight must never leave an older success for the always-notice step.
   await rm(resolve('preview-result.json'), { force: true });
   if (env.GITHUB_REPOSITORY !== config.repository || env.GITHUB_REF !== 'refs/heads/main'
@@ -23,6 +26,7 @@ export async function runPreviewWorkflow(env = process.env, service = new Previe
   const event = object(JSON.parse(await readFile(env.GITHUB_EVENT_PATH, 'utf8')));
   if (object(event.repository).full_name !== config.repository) throw new Error('PREVIEW_UNTRUSTED_EVENT');
   let pr: number, action: string, operation: string | undefined, sha: string | undefined, deploymentId: string | undefined;
+  let marker: string | undefined, baselineRunId: string | undefined, updateRunId: string | undefined;
   if (env.GITHUB_EVENT_NAME === 'pull_request_target') {
     const p = object(event.pull_request);
     if (event.action !== 'closed' || p.state !== 'closed' || object(object(p.head).repo).full_name !== config.repository
@@ -35,11 +39,20 @@ export async function runPreviewWorkflow(env = process.env, service = new Previe
     if (!fullSha(inputs.controlSha) || inputs.controlSha !== env.GITHUB_SHA) throw new Error('PREVIEW_UNTRUSTED_WORKFLOW');
     pr = Number(inputs.pr); action = String(inputs.action); operation = String(inputs.operation); sha = String(inputs.sha);
     if (!uuid(operation)) throw new Error('PREVIEW_INVALID_OPERATION');
-    if (action === 'verify') {
+    if (action === 'verify' || (retentionActions as readonly string[]).includes(action)) {
       deploymentId = String(inputs.deploymentId);
       if (typeof inputs.pr !== 'string' || !/^[1-9][0-9]*$/.test(inputs.pr) || !Number.isSafeInteger(pr)
         || !fullSha(sha) || !/^dpl_[A-Za-z0-9]+$/.test(deploymentId)) throw new Error('PREVIEW_VERIFY_INVALID_TARGET');
       if (env.GITHUB_RUN_ATTEMPT !== '1') throw new Error('PREVIEW_VERIFY_RERUN_UNSUPPORTED');
+    }
+    if ((retentionActions as readonly string[]).includes(action)) {
+      marker = String(inputs.marker);
+      baselineRunId = inputs.baselineRunId ? String(inputs.baselineRunId) : undefined;
+      updateRunId = inputs.updateRunId ? String(inputs.updateRunId) : undefined;
+      const id = (value: string | undefined) => value !== undefined && /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value)) && value !== env.GITHUB_RUN_ID;
+      if (!uuid(marker) || ['retention-prepare','retention-update'].includes(action) && operation !== marker
+        || (action !== 'retention-prepare') !== !!baselineRunId || baselineRunId !== undefined && !id(baselineRunId)
+        || ['retention-reconcile','retention-check'].includes(action) !== !!updateRunId || updateRunId !== undefined && !id(updateRunId)) throw new Error('PREVIEW_RETENTION_INVALID_REQUEST');
     }
   } else throw new Error('PREVIEW_UNTRUSTED_EVENT');
   const missing = missingPreviewCredentials(env);
@@ -48,9 +61,21 @@ export async function runPreviewWorkflow(env = process.env, service = new Previe
     console.error(`Cake: Repository secrets未設定: ${missing.join(', ')}。既存の資格情報をGitHubのSecrets設定で登録してください。値をチャットやログへ出さないでください。`);
     throw new Error('PREVIEW_CREDENTIALS_MISSING');
   }
-  const source = await (action === 'verify' ? verifier.provider : service.provider).pr(pr);
-  if (source.sha !== sha || !['deploy','status','cleanup','verify'].includes(action)
-    || action === 'verify' && source.state !== 'open') throw new Error('PREVIEW_PR_CHANGED');
+  const isRetention = (retentionActions as readonly string[]).includes(action);
+  const source = await (isRetention ? retention.provider : action === 'verify' ? verifier.provider : service.provider).pr(pr);
+  if (source.sha !== sha || !['deploy','status','cleanup','verify', ...retentionActions].includes(action)
+    || (action === 'verify' || isRetention) && source.state !== 'open') throw new Error('PREVIEW_PR_CHANGED');
+  if (isRetention) {
+    const result = await retention.run({ action: action as RetentionAction, source, expectedDeploymentId: deploymentId!, marker: marker!,
+      ...(baselineRunId ? { baselineRunId } : {}), ...(updateRunId ? { updateRunId } : {}), operation: operation!, runId: env.GITHUB_RUN_ID!,
+      runAttempt: 1, controlSha: env.GITHUB_SHA! }, env);
+    await writeFile(resolve('preview-result.json'), serializeRetentionReceipt({ ...result, operation, runId: env.GITHUB_RUN_ID,
+      runAttempt: 1, controlSha: env.GITHUB_SHA }), { mode: 0o600 });
+    if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY,
+      `Preview ${action}: ${result.success ? '成功' : '失敗'} / PR #${source.pr}\n\nCommit: ${source.sha}\n\nMarker: ${marker}\n${result.failure ? `\nStage: ${result.failure.stage} / ${result.failure.code}\n` : ''}`);
+    if (!result.success) throw new Error(result.failure!.code);
+    return;
+  }
   if (action === 'verify') {
     const verified = await verifier.verify(source, deploymentId!, env);
     const result = serializeVerifyReceipt({ ...verified, operation, runId: env.GITHUB_RUN_ID,
@@ -75,9 +100,10 @@ export async function runPreviewWorkflow(env = process.env, service = new Previe
 // or receives provider credentials. The summary is for humans, not receipt I/O.
 export async function emitPreviewReceipt(path = resolve('preview-result.json'), emit = console.log): Promise<void> {
   const text = await readFile(path, 'utf8');
-  let verify = false;
-  try { verify = object(JSON.parse(text)).protocol === verifyReceiptProtocol; } catch { /* The strict legacy parser below reports malformed input. */ }
-  emit(verify ? verifyReceiptNoticeCommand(parseVerifyReceipt(text)) : receiptNoticeCommand(parseReceipt(text)));
+  let selected: unknown;
+  try { selected = object(JSON.parse(text)).protocol; } catch { /* The strict legacy parser below reports malformed input. */ }
+  emit(selected === retentionProtocol ? retentionReceiptNoticeCommand(parseRetentionReceipt(text))
+    : selected === verifyReceiptProtocol ? verifyReceiptNoticeCommand(parseVerifyReceipt(text)) : receiptNoticeCommand(parseReceipt(text)));
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);

@@ -1,0 +1,11 @@
+{
+  "protocol": "cake-preview-retention/v1",
+  "workflow": ".github/workflows/preview.yml",
+  "actions": [
+    "retention-prepare",
+    "retention-inspect",
+    "retention-update",
+    "retention-reconcile",
+    "retention-check"
+  ]
+}

@@ -10,6 +10,10 @@ Actionsの結果は専用stepの標準notice annotationから受け取り、arti
 
 Actions検証の成功だけではPRをReadyにしない。control側の `.cake/verify-<PR>.json` を `task:pr --remote-proof <path>` で再照合し、現在HEADのCIと検証証拠が一致することを確認する。新CLIを持たない古い対象PRには、最新mainのcleanなcontrol checkoutから任意の `--target-worktree <path>` を併用する。この指定はremote proof必須・非draft時だけ許可し、controlの最新main/capabilityと対象worktreeのcleanな専用branch/HEADを照合する。対象PRの旧コードは実行せず、Git/ghの管理操作だけを行う。既存のローカル証拠と `task:pr` の既定動作は変更しない。
 
+同DB保持受入の `qa:retention` は、独立した `preview-retention.config.json` capabilityを照合した最新mainのcleanなcontrol checkoutから実行する。固定ダミー1件のprepare、文書commit1回とpush/CI、既存DBのapplication更新1回、既存の通常QA、最後のGET保持checkの順に進める。check CLIは通常QAと最終保持checkを自動で結合する。既存PR #75の旧CLIは実行・変更しない。prepare/updateの不確定POST・失敗後は再dispatch/rerunせず、元runをGETだけのinspect/reconcileで照合する。ローカルintentだけでなく全ページの正式workflow履歴で同PR/markerの書込回数を制限し、新markerで予算を回復しない。
+
+文書だけの更新でもPreview buildは `db:setup → db:seed:test → build` を行う。既存ledger/seeded_atで本体をskipしてもDB接続・所有権guard・lockは実行する。固定明細の通常登録はworkspaceの更新日時も変更する。保持受入は固定したtrusted mainの管理・検証処理であり、対象PR由来の任意テストや追加操作を管理資格情報付きで実行する入口ではない。main導入と実資源受入は実装PRとは別に扱う。
+
 機能・UI・API・DBを変更する際は、関連する[基本設計](docs/design.html)と[詳細設計](docs/detail-design.html)を確認する。仕様・運用の変更はこれらと運用手順へ反映する。
 
 最新mainから `npm run task:start -- <task-name>` で専用worktreeを作る。利用者の依頼範囲を守り、未コミット変更を保持する。mainへのmergeとProductionの手動操作は利用者の明示依頼時だけ行う。

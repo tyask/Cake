@@ -10,6 +10,9 @@ import { config, protocol, type Source } from '../scripts/preview-model';
 import { parseReceipt, receiptMaxBytes, receiptNoticeTitle } from '../scripts/preview-receipt';
 import { PreviewVerifyService } from '../scripts/preview-verify-service';
 import { parseVerifyReceipt, verifyReceiptNoticeTitle, verifyReceiptProtocol } from '../scripts/preview-verify-receipt';
+import { PreviewRetentionService, type RetentionRequest } from '../scripts/preview-retention-service';
+import { parseRetentionReceipt, retentionReceiptNoticeTitle } from '../scripts/preview-retention-receipt';
+import { retentionActions, retentionProtocol } from '../scripts/preview-retention-model';
 
 test('workflow refuses untrusted ref/event, fork PR and stale source before any provider write',async(t)=>{
   t.mock.method(console,'error',()=>{});
@@ -163,7 +166,7 @@ test('verify writes a failure receipt before failing the job, and notice is emit
 
 test('verify workflow installs the official browser before secrets and preserves main-only permissions and receipt isolation', async () => {
   const workflow = await readFile(new URL('../.github/workflows/preview.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /options: \[deploy, status, cleanup, verify\]/);
+  assert.match(workflow, /options: \[deploy, status, cleanup, verify, retention-prepare, retention-inspect, retention-update, retention-reconcile, retention-check\]/);
   assert.match(workflow, /deploymentId:[\s\S]*?required: false/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/);
@@ -172,6 +175,46 @@ test('verify workflow installs the official browser before secrets and preserves
   assert.ok(!/id-token:|checks: write|pull_request:\s|\bpush:/.test(workflow));
   assert.ok(workflow.indexOf('npx playwright install --with-deps chromium') < workflow.indexOf('GH_TOKEN:'));
   const notice = workflow.slice(workflow.indexOf('- name: Publish public operation receipt notice'));
-  assert.match(notice, /if: success\(\) \|\| \(always\(\) && github\.event_name == 'workflow_dispatch' && inputs\.action == 'verify'\)/);
+  assert.match(notice, /if: success\(\) \|\| \(always\(\) && github\.event_name == 'workflow_dispatch' && \(inputs\.action == 'verify' \|\| startsWith\(inputs\.action, 'retention-'\)\)\)/);
   assert.ok(!notice.includes('env:')); assert.ok(!notice.includes('TOKEN')); assert.ok(!workflow.includes('upload-artifact'));
+});
+
+test('all retention actions write a strict public failure receipt and emit it in the existing credential-free step',async(t)=>{
+  const dir=await mkdtemp(join(tmpdir(),'cake-retention-workflow-')),previous=process.cwd(),eventPath=join(dir,'event.json');
+  const marker='10000000-0000-4000-8000-000000000001',other='20000000-0000-4000-8000-000000000002',head='a'.repeat(40);
+  const raw={number:75,state:'open',created_at:'2026-10-16T00:00:00Z',head:{ref:'codex/acceptance',sha:head,repo:{full_name:config.repository}},base:{ref:'main',repo:{full_name:config.repository}}};
+  const retention=new PreviewRetentionService(async(provider,path,method='GET')=>{assert.equal(provider,'github');assert.match(path,/\/pulls\/75$/);assert.equal(method,'GET');return raw;});
+  t.mock.method(retention,'run',async (request:RetentionRequest)=>({protocol:retentionProtocol,action:request.action,source:request.source,expectedDeploymentId:request.expectedDeploymentId,
+    marker:request.marker,baselineRunId:request.baselineRunId,updateRunId:request.updateRunId,outcome:'unknown' as const,writeAttempts:0 as const,
+    checkedAt:new Date().toISOString(),success:false,failure:{stage:'preflight' as const,code:'PREVIEW_RETENTION_PREFLIGHT_FAILED' as const},private:'do-not-project'}));
+  const env:NodeJS.ProcessEnv={NODE_ENV:'test',VERCEL_TOKEN:'test-only',NEON_API_KEY:'test-only',GITHUB_REPOSITORY:config.repository,GITHUB_REF:'refs/heads/main',
+    GITHUB_WORKFLOW_REF:`${config.repository}/.github/workflows/preview.yml@refs/heads/main`,GITHUB_EVENT_PATH:eventPath,GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'c'.repeat(40),GITHUB_EVENT_NAME:'workflow_dispatch'};
+  try{process.chdir(dir);
+    for(const action of retentionActions){
+      const inputs={action,pr:'75',sha:head,controlSha:env.GITHUB_SHA,deploymentId:'dpl_Original',marker,
+        operation:action==='retention-prepare'||action==='retention-update'?marker:other,
+        ...(action!=='retention-prepare'?{baselineRunId:'10'}:{}),...(['retention-reconcile','retention-check'].includes(action)?{updateRunId:'20'}:{})};
+      await writeFile(eventPath,JSON.stringify({repository:{full_name:config.repository},inputs}));
+      await assert.rejects(runPreviewWorkflow(env,undefined,undefined,retention),/RETENTION_PREFLIGHT_FAILED/);
+      const text=await readFile(join(dir,'preview-result.json'),'utf8'),receipt=parseRetentionReceipt(text);
+      assert.equal(receipt.action,action);assert.equal(receipt.runAttempt,1);assert.equal(receipt.success,false);assert.ok(!text.includes('do-not-project'));
+      const notices:string[]=[];await emitPreviewReceipt(undefined,line=>notices.push(line));assert.deepEqual(notices,[`::notice title=${retentionReceiptNoticeTitle}::${text}`]);
+    }
+  }finally{process.chdir(previous);await rm(dir,{recursive:true,force:true});}
+});
+
+test('retention malformed references, wrong write operation and attempt two stop before provider access',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'cake-retention-gate-')),previous=process.cwd(),eventPath=join(dir,'event.json');
+  let calls=0;const retention=new PreviewRetentionService(async()=>{calls++;assert.fail('no provider access');});
+  const marker='10000000-0000-4000-8000-000000000001';
+  const env:NodeJS.ProcessEnv={NODE_ENV:'test',VERCEL_TOKEN:'test-only',NEON_API_KEY:'test-only',GITHUB_REPOSITORY:config.repository,GITHUB_REF:'refs/heads/main',GITHUB_WORKFLOW_REF:`${config.repository}/.github/workflows/preview.yml@refs/heads/main`,GITHUB_EVENT_PATH:eventPath,GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'c'.repeat(40),GITHUB_EVENT_NAME:'workflow_dispatch'};
+  const inputs={action:'retention-update',pr:'75',sha:'a'.repeat(40),controlSha:env.GITHUB_SHA,deploymentId:'dpl_Original',marker,operation:marker,baselineRunId:'10'};
+  try{process.chdir(dir);
+    for(const change of [{marker:'wrong'},{operation:'20000000-0000-4000-8000-000000000002'},{baselineRunId:undefined},{baselineRunId:'123'},{baselineRunId:'01'},{updateRunId:'20'}]){
+      await writeFile(eventPath,JSON.stringify({repository:{full_name:config.repository},inputs:{...inputs,...change}}));
+      await assert.rejects(runPreviewWorkflow(env,undefined,undefined,retention),/RETENTION_INVALID_REQUEST/);
+    }
+    await writeFile(eventPath,JSON.stringify({repository:{full_name:config.repository},inputs}));
+    await assert.rejects(runPreviewWorkflow({...env,GITHUB_RUN_ATTEMPT:'2'},undefined,undefined,retention),/RERUN_UNSUPPORTED/);assert.equal(calls,0);
+  }finally{process.chdir(previous);await rm(dir,{recursive:true,force:true});}
 });

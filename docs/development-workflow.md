@@ -8,9 +8,13 @@ CakeはCanneleを使用せず、PR単位のVercel Preview固有URLでQAする。
 
 Actionsブラウザ検証のcapabilityは独立した `preview-verify.config.json` で宣言する。`protocol: "cake-preview-verify/v1"`、`workflow: ".github/workflows/preview.yml"`、`action: "verify"` をmainの完全SHAで照合し、未導入・不一致のmainへはdispatchしない。既存deploy/status/cleanupのwire・receipt title/schema・`preview.config.json`を変更して検証機能の有無を表さない。
 
+同DB保持受入は別の `preview-retention.config.json` capabilityで宣言する。protocolは `cake-preview-retention/v1`、workflowは同じ `preview.yml`、actionsは `retention-prepare`・`retention-inspect`・`retention-update`・`retention-reconcile`・`retention-check` に固定する。最新mainの完全SHAでの一致を確認してからdispatchし、未導入なら停止する。既存deploy/status/cleanup/verifyの動作とprotocolは維持する。
+
 Cloud/PCのコマンドはmainの `.github/workflows/preview.yml` を明示的にdispatchし、同じPRの操作をActionsのconcurrencyで直列化する。Actionsのverifyもこのconcurrencyを使い、信頼済みmain上のスクリプトだけがprovider管理資格情報を使う。`pull_request_target` はclosedイベントだけで、PRコードをcheckout・実行しない。Vercelは指定したGitSourceのコードを、Preview DBの権限でリモートビルドする。
 
 Actionsには既存のRepository secrets `VERCEL_TOKEN` と `NEON_API_KEY` が必要。GitHub読取は最小権限の `github.token` を使う。Cannele用Secret名を暗黙に代用しない。設定不足なら両Secret名を資格情報の値なしで報告し、providerの読取・作成・削除を始める前に停止する。新規資格情報・DB・deploymentを代わりに作らない。旧Cannele名のSecretだけでは使えないため、既存資格情報をGitHub Repository Settings → Secrets and variables → Actionsでこの2名に登録する。値をチャットへ送らない。
+
+retentionの原noticeと全run履歴を読むため、既存preview jobへ `actions: read` と `checks: read` を追加する。どちらも読取用で、Checksへのwriteや新しいSecret/認証方式は追加しない。
 
 Cloud/PCのCLIは既存gh本人認証をそのまま使い、workflow・run・jobsとChecksの読取権限を確認する。`GH_TOKEN` / `GITHUB_TOKEN`などの環境変数は保存済みgh認証より優先するため、401/403では選択中の認証を値なしで確認して停止する。無断で資格情報やproxy・CA・ネットワークpolicyを変更しない。Vercel保護へのブラウザアクセスは別に確認する。結果受信に`checks: write`、新しいGitHub App、外部relay、artifact cacheは不要。
 
@@ -61,6 +65,8 @@ Cloud/PCは同じ`gh api`経路で、対象runの初回attemptの全jobsから�
 Previewは `CAKE_TEST_DATABASE_URL` 必須。本番・Developmentの `DATABASE_URL` で代用しない。repository・PR・ブランチ・完全SHA・DB世代・Native branch ID・確認済みhost digest・本番host digestをクライアント作成前に検査する。URLの接続先上書きparameterは拒否する。
 
 DB内の `cake_preview_database_identity` version 2はrepository・PR・ブランチ・世代・Native branch・host・database名を保持する。同PRのcommit更新でidentityは変えない。初回は空DBまたは承認済みの完全一致fixtureだけを受け入れ、他PR・旧versionのmarkerを上書きしない。migrationとseedは同じ所有権guardを通し、初回seed以降は入力データ・ユーザー名・権限を変更しない。
+
+文書commitだけの同DB更新でも、Preview/testのbuildは `db:setup → db:seed:test → build` を実行する。`db:setup` は既存migration ledgerの適用済み項目で本体をskipし、`db:seed:test` は既存identityの `seeded_at` があれば挿入前に戻る。DB接続・所有権guard・advisory lockは実行するため「DB処理なし」と報告しない。この保持はコード上の契約であり、既存の実DBでledger/seeded_atと更新後データを照合した結果は別に記録する。
 
 Aはテスト管理者・共有OWNER、Bは一般・MEMBER。Productionのテストログインは禁止。本番buildは従来どおりbuild成功後にmigrationを行い、失敗時は公開を止める。既存のアプリmigrationは変更しない。
 
@@ -116,6 +122,53 @@ npm run task:pr -- --title '変更内容' --verification-file /absolute/path/tar
 
 報告書・remote proof・対象worktreeは絶対pathを推奨する。相対pathは実行元のcontrol checkoutを基準に解釈される。`--target-worktree` も省略時の既定動作を変えず、検証CLIの成功から自動でReady処理を始めることはない。
 
+## 同DB更新後のデータ保持受入
+
+`qa:retention` は、独立capabilityを導入した最新mainとHEADが一致するcleanなcontrol checkoutで実行する。対象は同一repositoryのOPEN PR・専用branch・完全SHA・固有Deployment URL・専用DBで、既存PR #75の旧CLIを実行・変更する必要はない。trusted mainに固定した管理・ブラウザ処理だけを実行し、任意のPRテスト、任意HTTP payload、追加操作を渡す入口は設けない。この範囲を超える将来のテスト実行方式は現仕様に含めない。
+
+通常CIはPR自身の `npm test`／buildを実行するため、新しい単体・結合・localhostブラウザテストの追加にmainへの事前mergeは不要。上記のmain固定は、実Previewへの管理・ブラウザ検証経路に対する制限である。
+
+承認済みの実環境受入では、次の順に進める。各値と証拠pathはCLIが確認したものを使い、pathは絶対指定を推奨する。
+
+1. 更新前の正確なHEAD/READY application Deployment/DBを照合し、prepareで固定ダミー明細を1件だけ登録する。登録後GETからbaselineを受領してから次へ進む。
+2. 対象PRのworktreeに非機能の文書commitを1回追加し、pushと新HEADの最新CIを確認する。管理CLIはcontrol checkoutから実行し続ける。
+3. 旧baselineへ結び付くupdateを1回だけ実行し、新READY Deploymentと同一DB/世代を確認する。
+4. checkコマンドが新HEAD/Deploymentの既存 `qa:verify:ci` を自動実行し、成功後に登録明細とデータdigestをGETで最終照合する。通常QA中のGET副作用後も保持されていることを確認し、PC/mobile A/B QAと最終保持確認の両成功で完了する。
+
+```bash
+npm run qa:retention -- prepare --pr <PR番号> --sha <旧完全SHA> --deployment <旧Deployment ID> --marker <UUID>
+# baselineを受領後、対象PRに文書commitを1回追加してpush/CIを確認
+npm run qa:retention -- update --pr <PR番号> --sha <新完全SHA> --baseline <登録証拠path>
+npm run qa:retention -- check --pr <PR番号> --sha <新完全SHA> --deployment <新Deployment ID> --baseline <登録証拠path> --update <更新証拠path>
+```
+
+prepareはテストユーザーAで、固定共有workspace `00000000-0000-4000-8000-000000000001` に通常の `POST /api/app`・`action: saveTransaction` を最大1回だけ送る。入力は日時 `2020-01-01T00:00:00.000Z`、取引先 `Cake retention test`、支払方法 `QA_TEST`、支払1,234円、支払者A、個人費、割合A=1/B=0、メモ `cake-retention:<marker>` に固定し、任意入力は受け付けない。markerは正規形の小文字UUIDを使う。既存markerがあればPOST前に停止する。専用interceptorは明示arm後の完全一致payload・同origin・同pathの1回だけを許可し、redirectや他の業務書込を遮断する。既存verifyのPOST遮断は変更しない。通常登録は明細だけでなくworkspaceの更新日時も変更する。GETの初期workspace作成という既存副作用も前節どおりで、「DBの1行だけ変更」とは扱わない。
+
+baselineはPOST応答ではなく、その後のGET fullから作る。GETが日時を秒単位に整形するため、精度が異なるPOST応答と直接比較しない。要求したworkspaceと返却されたselected workspace、固定A/Bの所属・役割・重み・Aの有効/管理者条件を検査し、marker一致が正確に1件であることを確認する。公開証拠にはmarker、workspace/明細UUID、件数1、金額1,234円、全明細件数/合計、単体content digest・全明細collection digest・workspace/参加者/A identityのfixture digestを保持する。digestは検査済みの既知項目をID/key順に正規化したSHA-256とする。名前・メールやアプリの生応答をreceiptへ公開せず、欠落・重複・値やdigestの変化では停止する。
+
+updateは原baselineの旧READY Deployment、DB branch/endpoint/host digest、世代を固定し、旧SHAとは異なる文書だけの子孫SHAを対象にする。差分は `docs/` 配下または `README.md`／`AGENTS.md` に限定し、アプリ・workflow・設定の変更を拒否する。Vercel application作成POSTを最大1回だけ許し、初回provisioning、DB再作成、Neon書込、削除は行わない。旧Deploymentの所属/READYと全資源を再照合し、pendingや未知のapplication、別DB/世代を見つけたら停止する。Vercel上の新buildは対象PRのGitSourceを使い、前節の既存DB setup/seed guardを実行する。control側で対象PRの旧CLIを実行しないことと、リモートbuildの実行は区別する。
+
+更新POST後に新Deployment IDが判明したERROR/timeoutは、failure receiptの `attemptedDeploymentId` にその公開IDを残し、更新枠を消費した試行として保持する。POST自体の結果が不明でIDも未判明なら、その不確定性を明示する。reconcileはGETだけで元operationに属する候補IDを回収・照合し、成功しなくても判明済みIDを報告する。失敗資源を消えた扱いにせず、再POSTや予算復活を行わない。providerの生例外は公開しない。
+
+prepare/updateはoperationをmarkerと一致させる。書込dispatch前にPR/mode固定path `.cake/retention-<PR>-<mode>.intent.json` をmode 0600・排他的な新規作成で保存する。markerは中に保持し、別markerで同時に書込入口を作れないようにする。失敗/不確定なdispatchでもintentを残し、削除して再dispatchしない。run IDが判明した場合だけ記録を追記してinspect/reconcileへ渡す。ローカルファイルだけでなく、同PRの正式workflow履歴の全ページと初回attemptを確認し、failed/cancelled/incompleteを含む先行書込runがあれば再書込を拒否する。同じ受入PRでprepare後にmarkerを変更しても新たな書込を許さない。失敗buildやPOST応答不明を理由に更新予算を復活させず、再dispatch/rerunしない。全retention actionはattempt 2以降を拒否する。
+
+不確定な登録はinspect、不確定な更新はreconcileで元runを指定してGETだけで確認する。prepareの不確定結果を解消する前に文書commit/更新へ進まない。
+
+この節のGET/read-onlyはprovider管理APIと認証後の業務データ取得を指す。inspectのブラウザログインは既存の認証callback POSTを使い、GETのbootstrap副作用も残る。新たな業務POSTやprovider書込を許さないことと、DB完全無変更の保証は区別する。
+
+```bash
+npm run qa:retention -- inspect --pr <PR番号> --sha <旧完全SHA> --deployment <旧Deployment ID> --marker <同じUUID> --run <元prepare run ID>
+npm run qa:retention -- reconcile --pr <PR番号> --sha <新完全SHA> --baseline <登録証拠path> --run <元update run ID>
+```
+
+正式noticeがあり不確定結果を示した原prepareへ、1段だけのinspectが厳密に結び付き、presentと完全な証拠を返せた場合はbaselineとして扱える。登録baselineを観測するinspectのabsentやunknownは成功扱いしない。原updateに厳密に結び付くreconcileの成功も更新証拠として使える。`outcome` は明細観測の結果を表すため、update/reconcileの成功でもデータ未読の `outcome: unknown` を返す。この場合は新DeploymentのREADY成功が確定しており、更新自体の成否不明を意味しない。データ保持は通常QA後の最終checkで初めて確定する。inspect/reconcileは新たなPOSTを許可しない。
+
+原write runの正式noticeが欠落した場合、REST metadataから確認できるPR/action/operation/mainだけでは、原要求の対象SHA/Deploymentを復元できない。GETだけの診断で観測できても元結果の不確定性を残し、成功/baselineへ昇格せず停止する。欠落receiptを別の成功で置き換えず、再POSTもしない。不正・曖昧な元証拠も同様に停止する。
+
+retention専用protocol/titleは `cake-preview-retention/v1`、公開wrapperは `cake-preview-retention-proof/v1`。CLIは原noticeの来歴を照合したstrict receiptとworkflow IDを、control側の `.cake/retention-<PR>-<marker>-<mode>.json` にmode 0600で保存し、modeは `prepare`／`inspect`／`update`／`reconcile`／`check` とする。`readRetentionProof` 単独はローカルの形・値の確認だけで来歴を保証しない。baseline/updateファイルはヒントであり、使用する各commandが `loadRegistrationBaseline`／`loadRetentionUpdate` などで原noticeと参照chainを同じworkflow/job/check/suite/app/repository/main/run/初回attempt/operationへ再結合する。成功・失敗・明細未観測・実行結果不確定は分け、未知/重複key、秘密マスク、切詰め、4,096 UTF-8 bytes超過を拒否する。管理APIは原則GETのみで、updateの正確なVercel application POSTだけを例外とする。既存Secret、OIDCのメモリ内/origin限定、TLS検証を維持し、新規Secret・認証方式・schema・network/security設定は追加しない。
+
+check CLIは既存UI QAの成功後に最終GET保持checkを実行し、同じDB/世代の明細ID・値・件数・全digestを登録後baselineと比較する。QA中のGETで生じ得る副作用も、この最後の観測に含める。通常QAまたは最終保持checkが失敗したらコマンド全体は失敗で、成功check proofを保存せず、証拠参照と未完了段階を報告する。両方が成功したcombined proofは、同じ新HEAD/Deployment/control SHA、原baseline/updateと通常QAのworkflow/run/proof pathを結合する。保持成功や通常QA成功から自動でPRをReadyにしない。Readyへ進める依頼がある場合だけ、現在HEAD/CIと新しい通常QA証拠を既存 `task:pr --remote-proof` へ渡す。旧PR #75ではcontrol側から `--target-worktree` を併用し、旧証拠を新HEADへ流用しない。cleanupは別の承認対象とする。
+
 ## PR終了時のcleanup
 
 mergeと未マージcloseの両方でmainのworkflowを起動し、対象PRのDeployment・Neon branch/endpointを削除し得る。PRを閉じるだけの操作も実資源に影響するため、cleanup対象と影響が承認されるまで無断でmerge/closeしない。再実行は次の明示コマンドを使う。
@@ -148,6 +201,8 @@ notice実装PR `codex/notice-receipts` の作業範囲はローカル検証と�
 
 ## Actions verify実装PRの範囲と残る実環境受入
 
+この節はActions verify実装PR当時の範囲を記録し、その後のmain導入や実QAの現在状態を示すものではない。
+
 2026-10-16の `codex/actions-preview-qa` は、Actions検証経路の実装、ローカル検証、draft PRと通常CIまでを対象とする。既存の受入PR #75 (`codex/notice-receipt-acceptance`、HEAD `a0e0aac6fa479040463a268182ea61b5fefd07e2`) とそのDeployment/DBは更新しない。この実装作業では実Actions QA dispatch、OIDCによるPreviewアクセス、DB書込、deploy、migration/seed、main merge、cleanupを行わない。ローカルのスタブ/契約テストと通常CIの成功を、実Actionsのブラウザ/OIDC成功として報告しない。
 
 mainへの導入は既存Production Git連携のdeployを起動し得るため、別途承認が必要。導入と対象の実環境検証が承認された後は、更新したmainのcontrol checkoutでPR #75の最新HEAD・Deployment・専用DBを改めて照合する。次は現在の対象を示す未実施のコマンド例で、実行時点の値が変わっていた場合は停止して確認する。
@@ -159,3 +214,9 @@ npm run qa:verify:ci -- --pr 75 --sha a0e0aac6fa479040463a268182ea61b5fefd07e2 -
 PR #75の旧管理CLIへ新flagsを渡さない。実Actions QA成功と最新CIを確認し、Readyへの依頼がある場合だけ、前節のcontrol checkoutから `--remote-proof .../verify-75.json --target-worktree .../notice-receipt-acceptance` を指定する。これは将来の手順であり、この実装PRではReady操作を実行しない。
 
 同DB更新後のデータ保持、非機密の識別データ投入、PRのReady化、merge/closeや資源cleanupはこの実装PRの検証完了に含めない。既存受入の初回配置予算は2/2消費済み、同DB更新は0/1のまま保持し、再作成しない。各段階の対象・影響・実測結果を確認してから、承認された範囲だけ進める。
+
+## Retention実装PRの範囲
+
+2026-10-17の `codex/preview-retention` はmain `3f5f9903713a948ccc5e60143281b8437e6c4a25` を基に、固定した保持受入経路の実装、ローカル/統合テスト、draft PRと通常CIまでを対象とする。一般PRの任意テスト実行や新しい任意操作へ設計を拡張しない。既存PR #75の旧HEAD/コード・Deployment・専用DBに変更を加えず、実dispatch、明細登録、文書commit/push、更新deploy、実QA/保持確認、Ready、main merge、cleanupは行わない。ここでいう文書commit/push未実施は受入PR #75を指し、この実装PR自身のcommit/pushと通常CIは含まない。
+
+受入の初回配置予算2/2、同DB更新0/1は保持する。ローカルのスタブ/統合テストや通常CIの成功を、実環境での登録・更新・保持・OIDC/UI QAの成功として扱わない。機能のmain導入は既存Production Git連携のdeployを起動し得るため別途承認を得る。導入後も実資源受入の対象/影響を照合して承認範囲だけで進め、cleanup・本番/親DB/他作業・認証やnetwork/security設定の変更を含めない。

@@ -264,6 +264,19 @@ npm run qa:verify:ci -- --pr <PR番号> --sha <完全SHA> --deployment <Deployme
 
 信頼済みmain上の処理がproviderをGETだけで検証前後に照合し、公式Playwright ChromiumでPC/mobileのA/Bを操作します。Vercel保護には既存資格情報から取得する期限付きOIDCを対象originだけへ付与します。`GET /api/app` の初期workspace作成を含め、画面側のDB副作用は別途考慮が必要です。結果はcontrol checkoutの `.cake/verify-<PR番号>.json` に保存し、検証だけではPRをReadyにしません。
 
+同DBのデータ保持を受け入れる場合は、別capabilityの `qa:retention` を更新済みmainのcleanなcontrol checkoutから使います。固定ダミー明細1件をprepareで通常登録し、登録後GETの証拠を固定します。その後、対象PRへ文書だけのcommitを1回追加してpush/CIを確認し、既存DBのapplication配置を1回だけ更新します。checkコマンドは新しいDeploymentの既存PC/mobile A/B QAを自動実行し、成功後にGETで明細・データdigestを最終照合します。QA中のGET副作用後も保持できていることを確認し、両方の成功が必要です。
+
+```bash
+npm run qa:retention -- prepare --pr <PR番号> --sha <旧完全SHA> --deployment <旧Deployment ID> --marker <UUID>
+# 承認済み対象PRへ文書commitを1回追加し、pushと最新CIを確認した後
+npm run qa:retention -- update --pr <PR番号> --sha <新完全SHA> --baseline <登録証拠path>
+npm run qa:retention -- check --pr <PR番号> --sha <新完全SHA> --deployment <新Deployment ID> --baseline <登録証拠path> --update <更新証拠path>
+```
+
+登録・更新の応答が不確定でも再送しません。元runに対するGETだけの `inspect`／`reconcile` で確認し、markerを変えて書込予算を回復しません。通常登録はworkspaceの更新日時も変更し、更新buildは既存のDB guard付き `db:setup`／`db:seed:test` を実行します。保持受入は固定したtrusted mainの処理で、任意のPRテストや追加操作の実行には対応しません。実装PRのローカル検証・draft PR・通常CIと、main導入・実環境受入は分けて確認します。
+
+通常CIは従来どおりPR自身の `npm test`／buildを実行するため、そのテスト追加にmainへの事前mergeは不要です。ここでmainに固定しているのは実Previewを操作する管理・ブラウザ検証経路です。
+
 Readyへ進める際、対象PRに新しい管理CLIがない場合は、更新済みmainのcontrol checkoutから `task:pr --remote-proof <証拠の絶対path> --target-worktree <対象worktreeの絶対path>` を使えます。`--target-worktree` はremote proof必須・非draft専用で、対象の旧コードを実行しません。検証報告書の `--verification-file` も絶対pathを推奨します。
 
 draft作成・Ready条件・任意の `--remote-proof`／`--target-worktree`・認証・失敗復旧・導入範囲は[開発・QA運用手順](docs/development-workflow.md)を参照してください。Actions上の実QA/OIDC、同DB更新後の保持、cleanupの受入は個別に実施状況を確認します。mainへの導入は既存Production Git連携のdeployを起動し得るため、実装draft PRの作成とは別に承認を得ます。

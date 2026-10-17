@@ -1,8 +1,48 @@
 import { randomUUID } from 'node:crypto';
 import { config, deployment, object, protocol, sameDatabase, uuid, type Database, type Deployment, type Source } from './preview-model';
-import { PreviewProvider } from './preview-provider';
-import { assertMainOnlyGitConfig } from './task-workflow';
+import { PreviewProvider, type Transport } from './preview-provider';
+import { assertMainOnlyGitConfig, fullSha } from './task-workflow';
 export type Receipt = { protocol: typeof protocol; action: string; source: Source; deployment?: Deployment; database?: Database; checkedAt: string; success: true };
+/** A scoped, public identifier survives a failed build without carrying provider
+ * responses, credentials, or raw exception messages across the boundary. */
+export class PreviewUpdateError extends Error {
+  constructor(readonly deploymentId: string, code: 'PREVIEW_BUILD_FAILED' | 'PREVIEW_BUILD_TIMEOUT' | 'PREVIEW_UPDATE_FAILED') {
+    if (!/^dpl_[A-Za-z0-9]+$/.test(deploymentId)) throw new Error('PREVIEW_INVALID_DEPLOYMENT');
+    super(code); this.name = 'PreviewUpdateError';
+  }
+}
+function sameDeploymentMetadata(a: Deployment, b: Deployment): boolean {
+  return (['id','url','sha','branch','pr','generation','operation','phase','createdAt'] as const).every(k => a[k] === b[k])
+    && a.phase === 'application' && !!a.database && !!b.database && sameDatabase(a.database, b.database);
+}
+function samePinnedDeployment(a: Deployment, b: Deployment): boolean {
+  return sameDeploymentMetadata(a, b) && a.state === 'READY' && b.state === 'READY';
+}
+function creationRequest(s: Source, generation: string, operation: string, database?: Database) {
+  const phase = database ? 'application' : 'provisioning';
+  const env = { AUTH_MODE: 'test', CAKE_PREVIEW_REPOSITORY: config.repository, CAKE_PREVIEW_PR: String(s.pr), CAKE_PREVIEW_GENERATION: generation,
+    CAKE_PREVIEW_SOURCE_BRANCH: s.branch, CAKE_PREVIEW_SOURCE_SHA: s.sha, CAKE_PREVIEW_PHASE: phase,
+    CAKE_PREVIEW_DATABASE_BRANCH_ID: database?.branchId ?? '', CAKE_PREVIEW_DATABASE_HOST_SHA256: database?.hostDigest ?? '',
+    CAKE_PREVIEW_PRODUCTION_HOST_SHA256: config.productionHostDigest };
+  return { name: 'cake', project: config.vercelProjectId,
+    gitSource: { type: 'github', repoId: config.repositoryId, ref: s.branch, sha: s.sha }, env, build: { env },
+    meta: { cakePreviewProtocol: protocol, cakePreviewRepository: config.repository, cakePreviewPr: String(s.pr), cakePreviewGeneration: generation,
+      cakePreviewOperation: operation, cakePreviewPhase: phase, ...(database ? { cakePreviewDatabaseBranch: database.branchId,
+        cakePreviewDatabaseEndpoint: database.endpointId, cakePreviewDatabaseDigest: database.hostDigest } : {}) } };
+}
+export function boundedApplicationTransport(api: Transport, expectedBody: unknown, beforeWrite: () => Promise<void>, reconcile = false): Transport {
+  let spent = false;
+  const expected = JSON.stringify(expectedBody);
+  return async (provider, path, method = 'GET', body, missing = false) => {
+    if (method === 'GET' && body === undefined) return api(provider, path, 'GET', undefined, missing);
+    if (reconcile || spent || provider !== 'vercel' || path !== '/v13/deployments?forceNew=1' || method !== 'POST'
+      || JSON.stringify(body) !== expected) throw new Error('PREVIEW_RETENTION_WRITE_BUDGET');
+    // Reserve synchronously, before either preflight GETs or the write can yield.
+    spent = true;
+    await beforeWrite();
+    return api(provider, path, 'POST', body, missing);
+  };
+}
 export class PreviewService {
   constructor(readonly provider = new PreviewProvider(), readonly wait: (ms: number) => Promise<void> = ms => new Promise(r => setTimeout(r, ms))) {}
   private async gitGate(s: Source): Promise<void> {
@@ -50,21 +90,64 @@ export class PreviewService {
       const inventory = await this.inventory(s);
       if (!inventory.database || !sameDatabase(inventory.database, database)) throw new Error('PREVIEW_DATABASE_LOST');
     }
-    const phase = database ? 'application' : 'provisioning';
-    const env = { AUTH_MODE: 'test', CAKE_PREVIEW_REPOSITORY: config.repository, CAKE_PREVIEW_PR: String(s.pr), CAKE_PREVIEW_GENERATION: generation,
-      CAKE_PREVIEW_SOURCE_BRANCH: s.branch, CAKE_PREVIEW_SOURCE_SHA: s.sha, CAKE_PREVIEW_PHASE: phase,
-      CAKE_PREVIEW_DATABASE_BRANCH_ID: database?.branchId ?? '', CAKE_PREVIEW_DATABASE_HOST_SHA256: database?.hostDigest ?? '',
-      CAKE_PREVIEW_PRODUCTION_HOST_SHA256: config.productionHostDigest };
     // The first deployment triggers Native branching and intentionally fails the DB preconnect guard.
     // A second deployment receives only verified public identifiers; Native injects the actual credential.
-    const value = await this.provider.api('vercel', '/v13/deployments?forceNew=1', 'POST', {
-      name: 'cake', project: config.vercelProjectId,
-      gitSource: { type: 'github', repoId: config.repositoryId, ref: s.branch, sha: s.sha }, env, build: { env },
-      meta: { cakePreviewProtocol: protocol, cakePreviewRepository: config.repository, cakePreviewPr: String(s.pr), cakePreviewGeneration: generation,
-        cakePreviewOperation: operation, cakePreviewPhase: phase, ...(database ? { cakePreviewDatabaseBranch: database.branchId,
-          cakePreviewDatabaseEndpoint: database.endpointId, cakePreviewDatabaseDigest: database.hostDigest } : {}) },
-    });
+    const value = await this.provider.api('vercel', '/v13/deployments?forceNew=1', 'POST', creationRequest(s, generation, operation, database));
     return deployment(value, s);
+  }
+  private async docsOnlyDescendant(s: Source, baseline: Deployment): Promise<void> {
+    const comparison = object(await this.provider.api('github', `/repos/${config.repository}/compare/${baseline.sha}...${s.sha}?per_page=100`));
+    const files = comparison.files, commits = comparison.commits;
+    // GitHub truncates changed files at 300 and paginates commits. Refuse the
+    // boundary rather than treating an incomplete comparison as documentation.
+    const doc = (path: unknown) => typeof path === 'string' && !path.split('/').some(p => !p || p === '.' || p === '..')
+      && (path === 'README.md' || path === 'AGENTS.md' || path.startsWith('docs/'));
+    if (comparison.status !== 'ahead' || comparison.behind_by !== 0 || !Number.isSafeInteger(comparison.ahead_by)
+      || comparison.ahead_by !== 1 || comparison.total_commits !== 1 || object(comparison.base_commit).sha !== baseline.sha
+      || object(comparison.merge_base_commit).sha !== baseline.sha || !Array.isArray(commits) || commits.length !== 1
+      || object(commits[0]).sha !== s.sha || !Array.isArray(object(commits[0]).parents) || (object(commits[0]).parents as unknown[]).length !== 1
+      || object((object(commits[0]).parents as unknown[])[0]).sha !== baseline.sha || !Array.isArray(files) || files.length < 1 || files.length >= 300
+      || files.some(value => { const f = object(value); return !doc(f.filename) || f.previous_filename !== undefined && !doc(f.previous_filename)
+        || !['added','removed','modified','renamed','copied','changed'].includes(String(f.status)); })) throw new Error('PREVIEW_RETENTION_DOCS_ONLY_REQUIRED');
+  }
+  private async updateInventory(s: Source, baseline: Deployment, operation: string, reconcile: boolean): Promise<Deployment | undefined> {
+    const { ds, database } = await this.inventory(s);
+    const original = ds.find(d => d.id === baseline.id);
+    if (!original || !samePinnedDeployment(original, baseline) || !database || !sameDatabase(database, baseline.database!)) throw new Error('PREVIEW_RETENTION_TARGET_CHANGED');
+    const candidates = ds.filter(d => d.id !== baseline.id && d.phase === 'application');
+    if (candidates.length > (reconcile ? 1 : 0) || candidates.some(d => d.operation !== operation || d.sha !== s.sha
+      || d.generation !== baseline.generation || d.createdAt < baseline.createdAt || !d.database || !sameDatabase(d.database, baseline.database!))
+      || ds.some(d => d.generation !== baseline.generation || d.phase === 'provisioning' && (!['ERROR','CANCELED'].includes(d.state) || d.createdAt > baseline.createdAt))) throw new Error('PREVIEW_RETENTION_TARGET_CHANGED');
+    return candidates[0];
+  }
+  /** A separate bounded entry point: no provisioning, Neon writer or fallback to
+   * deploy(). The budget is consumed before awaiting even an uncertain POST. */
+  async updateOnly(s: Source, baseline: Deployment, operation: string, reconcile = false): Promise<Receipt> {
+    if (s.state !== 'open' || !uuid(operation) || !fullSha(s.sha) || s.sha === baseline.sha || !samePinnedDeployment(baseline, baseline)
+      || baseline.pr !== s.pr || baseline.branch !== s.branch) throw new Error('PREVIEW_RETENTION_INVALID_UPDATE');
+    const api = boundedApplicationTransport(this.provider.api, creationRequest(s, baseline.generation, operation, baseline.database),
+      async () => { await limited.updateInventory(s, baseline, operation, false); }, reconcile);
+    const limited = new PreviewService(new PreviewProvider(api), this.wait);
+    await limited.provider.assertBindings(); await limited.provider.assertSource(s, 'open');
+    await limited.gitGate(s); await limited.docsOnlyDescendant(s, baseline);
+    const candidate = await limited.updateInventory(s, baseline, operation, reconcile);
+    if (reconcile && !candidate) throw new Error('PREVIEW_CREATE_RESULT_UNKNOWN');
+    const created = candidate ?? await limited.create(s, baseline.generation, operation, baseline.database);
+    if (created.id === baseline.id || created.sha !== s.sha || created.branch !== s.branch || created.pr !== s.pr || created.phase !== 'application'
+      || created.generation !== baseline.generation || created.operation !== operation || created.createdAt < baseline.createdAt
+      || !created.database || !sameDatabase(created.database, baseline.database!)) throw new Error('PREVIEW_DEPLOYMENT_CHANGED');
+    try {
+      const current = await limited.settle(created, s);
+      if (!sameDeploymentMetadata(created, current)) throw new Error('PREVIEW_DEPLOYMENT_CHANGED');
+      if (current.state !== 'READY') throw new Error('PREVIEW_BUILD_FAILED');
+      const confirmed = await limited.updateInventory(s, baseline, operation, true);
+      if (!confirmed || !samePinnedDeployment(current, confirmed)) throw new Error('PREVIEW_RETENTION_TARGET_CHANGED');
+      return { ...await limited.status(s), action: 'deploy' };
+    } catch (error) {
+      const code = error instanceof Error && error.message === 'PREVIEW_BUILD_FAILED' ? 'PREVIEW_BUILD_FAILED'
+        : error instanceof Error && error.message === 'PREVIEW_BUILD_TIMEOUT' ? 'PREVIEW_BUILD_TIMEOUT' : 'PREVIEW_UPDATE_FAILED';
+      throw new PreviewUpdateError(created.id, code);
+    }
   }
   async deploy(s: Source, operation: string, resume = false): Promise<Receipt> {
     if (s.state !== 'open' || !uuid(operation)) throw new Error('PREVIEW_INVALID_REQUEST');
