@@ -2,6 +2,8 @@
 
 開発・PR作成・QA操作の前に、[開発・QA運用手順](docs/development-workflow.md)を読む。標準の開発環境はWindowsネイティブの専用clone/worktreeとし、PowerShellでは `npm.cmd` / `npx.cmd` を使う。既存gh認証を再利用し、必要なPATHの補完は当該プロセスだけに限定する。
 
+Windowsの保存済みVercel資格情報と正式QAは[Windows QA資格情報・実行手順](docs/windows-qa-credentials.md)を読む。`npm.cmd run qa:windows -- status` → `preflight` → 対象PR・完全SHA・Deployment・DB・generationを明示した `verify` の順で確認する。保存先はGit外の `%LOCALAPPDATA%\CakeQa\vercel-token.dpapi.json`。既存ファイルを変更せず、DPAPI CurrentUserと本人だけのACLを検査してQA専用子プロセスに限定供給する。未保存・失効時は停止し、トークン作成・伏字入力・保存確認は本人が行う。値をチャット・ログ・環境ファイルへ出さない。実QAにはテスト認証と、初回workspace・OWNER membership作成を含むDB書込範囲の承認が必要。
+
 QAはCake単体で運用する。PRごとのVercel Deployment固有URLとNeon Native Preview DBを使う。Cannele、固定QA URL、QA枠、旧台帳・旧Actions方式へのfallbackは使わない。
 
 Actionsの結果は専用stepの標準notice annotationから受け取り、artifact取得や外部relay、`checks: write`を必要としない。WindowsのCLIも既存gh本人認証でこの経路を使う。通常CI・Preview/DB管理・close時cleanupはActionsに残し、receiptの欠落・重複・不一致では停止する。
@@ -14,7 +16,7 @@ Actions検証の成功だけではPRをReadyにしない。control側の `.cake/
 
 機能・UI・API・DBを変更する際は、関連する[基本設計](docs/design.html)と[詳細設計](docs/detail-design.html)を確認する。仕様・運用の変更はこれらと運用手順へ反映する。
 
-最新mainから `npm.cmd run task:start -- <task-name>` で専用worktreeを作る。利用者の依頼範囲を守り、未コミット変更を保持する。必要なPreviewは `deploy:preview` で明示作成し、対象ブランチの `qa:verify` をWindowsで実行する。既存Chromeの目視確認とPlaywrightの正式な検証証拠を区別し、Readyは現行の同SHA・CI・Preview/DB照合を満たして明示依頼時だけ進める。mainへのmergeとProductionの手動操作も利用者の明示依頼時だけ行う。
+最新mainから `npm.cmd run task:start -- <task-name>` で専用worktreeを作る。利用者の依頼範囲を守り、未コミット変更を保持する。必要なPreviewは `deploy:preview` で明示作成し、Windowsでは共通ランチャー `qa:windows -- verify` から正式な `qa:verify` と同じブラウザ検証を行う。検証実装のSHAと対象runtimeのSHAを区別し、前後の対象照合を省略しない。既存Chromeの目視確認とPlaywrightの正式な検証証拠を区別し、Readyは現行の同SHA・CI・Preview/DB照合を満たして明示依頼時だけ進める。mainへのmergeとProductionの手動操作も利用者の明示依頼時だけ行う。
 
 実Deployment・DBの作成/更新・資源削除は、対象と影響が利用者に承認されている範囲で行う。未承認なら実行前に確認する。draft PR作成の依頼を資源操作の許可と扱わない。PRのmerge/closeはmainのcleanupによる削除を起動し得るため、無断で実行しない。
 

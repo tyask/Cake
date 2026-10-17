@@ -774,6 +774,7 @@ BootstrapData extends BootstrapMetadata
           <p>全テストは<code>tests/</code>配下。純粋関数、SQL/外部コマンドのスタブ、スクリプト起動を検証する。実DBの制約・同時操作とブラウザ操作は別途実環境で確認する。</p>
           <h3>コマンドとデプロイ</h3>
           <p>WindowsのPowerShellではnpm.cmd/npx.cmdと既存gh認証を使い、PATHの補完は当該プロセスに限定する。専用worktreeごとに依存・build・証拠・環境ファイルを分離し、追跡テキストはLFで保持する。同じ開発commitで検証してからdraft PRを作成し、必要なPreviewをWindowsで検証する。既存Ready条件・Actions管理契約は変更しない。詳細は<a href="development-workflow.md">開発・QA運用手順</a>を参照する。</p>
+          <p>共通の<code>qa:windows</code>は<code>scripts/windows-qa.ts</code>と<code>scripts/windows-token-helper/*.cs</code>から操作ごとに<code>.cake/windows-tools/run-&lt;一意ID&gt;</code>へ構築する。保存先はGit外の<code>%LOCALAPPDATA%\CakeQa\vercel-token.dpapi.json</code>とし、本人ACL・DPAPI CurrentUserの検査、既存ファイル上書き拒否、公開結果の秘密排除、専用子プロセスへの限定供給を行う。Git/ghにVercel tokenを渡さない。対象worktree（既定は実行worktree）のPR/完全SHA・Deployment・Native DB・generationを前後照合し、実装とruntimeのSHAを別々に記録する。特定PC・日付付きpath・PR・ブラウザキャッシュは固定しない。人による入力・再設定と同一Windowsユーザーによる復号可能性は<a href="windows-qa-credentials.md">資格情報手順</a>を参照する。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>コマンド</th><th>目的</th></tr></thead>
             <tbody>
@@ -785,6 +786,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td><code>npm run build:vercel</code></td><td>Previewは必須環境変数・DB接続前guard確認 → DB内の所有権/初回受入条件（空DBまたは承認済みQA初期fixture）確認 → db:setup → テスト認証時db:seed:test → build。Productionは必須環境変数確認 → build → db:setup。いずれも失敗時に公開停止。Development/ローカルはbuildのみ。</td></tr>
               <tr><td><code>npm run deploy:preview</code></td><td>Cloud/PC共通の開発・QA運用コマンド。引数・実行順序・検証・中断時の対応は<a href="development-workflow.md">開発・QA運用手順</a>を参照。</td></tr>
               <tr><td><code>npm run qa:verify</code></td><td>対象PRのworktreeで既存ローカルブラウザ検証。前後statusと現在HEADを照合し、<code>.cake/verification.json</code>へ保存。</td></tr>
+              <tr><td><code>npm run qa:windows -- status|input|preflight|self-test|verify</code></td><td>Windowsの保存済み資格情報を扱う共通入口。verifyはPR・完全SHA・Deployment・DB・generation必須、対象worktreeは任意指定。同じ正式ブラウザ検証の証跡、<code>.cake/windows-qa-launch-&lt;UUID&gt;.json</code>と<code>.cake/windows-qa-progress-&lt;UUID&gt;.json</code>を対象worktreeへ保存。Readyへは変更せず、旧PR管理のremote proof条件も緩めない。</td></tr>
               <tr><td><code>npm run qa:verify:ci -- --pr &lt;PR&gt; --sha &lt;完全SHA&gt; --deployment &lt;ID&gt;</code></td><td>最新mainと一致するcleanなcontrol checkoutから既存PreviewをActions検証。verify capabilityを照合し、成功証拠をcontrol側<code>.cake/verify-&lt;PR&gt;.json</code>へ保存。PRはReadyにしない。</td></tr>
               <tr><td><code>npm run task:pr</code></td><td>Cloud/PC共通の開発・QA運用コマンド。任意の<code>--remote-proof &lt;path&gt;</code>指定時だけActions検証証拠を再照合する。<code>--target-worktree &lt;path&gt;</code>併用時は最新mainのcontrol checkoutから旧対象worktreeを管理する。remote proof必須・非draft専用。省略時は既存のローカル証拠を使う。引数・実行順序・検証・中断時の対応は<a href="development-workflow.md">開発・QA運用手順</a>を参照。</td></tr>
             </tbody>

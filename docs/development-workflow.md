@@ -94,23 +94,27 @@ Aはテスト管理者・共有OWNER、Bは一般・MEMBER。Productionのテス
 
 ## Windowsの実Previewブラウザ検証とReady
 
+Windowsでは[Windows QA資格情報・実行手順](windows-qa-credentials.md)の共通ランチャーを標準にする。リポジトリ内のソースから既存Windows compilerで毎回構築し、Git外の `%LOCALAPPDATA%\CakeQa\vercel-token.dpapi.json` を参照する。日付付き作業フォルダー、利用者名、SID、特定PR/SHA、ブラウザキャッシュの絶対pathは手順に固定しない。新しい独立タスクもAGENTS.mdからこの手順を辿り、保存済み資格情報を再入力せず利用できる。
+
 ```powershell
-npm.cmd run qa:verify
+npm.cmd run qa:windows -- status
+npm.cmd run qa:windows -- preflight
+npm.cmd run qa:windows -- verify --pr <PR番号> --sha <完全SHA> --deployment <Deployment ID> --database <Native branch ID> --generation <DB generation UUID>
 # QA成功・最新CI照合・Readyへの明示依頼後だけ実行する
 npm.cmd run task:pr -- --title '変更内容' --verification-file '.cake\report.md'
 ```
 
-既存の `qa:verify` は対象PRのcleanなworktreeでそのブランチのコードを実行し、Windows側のPlaywright Chromiumから実Previewへアクセスする。localhostのアプリE2Eではない。検証前後にActionsで現在HEAD・READY Deployment・DBを再照合する。固有URLのみを使い、任意URLやbranch aliasは受け付けない。PC/mobileでA/Bログイン、ダッシュボード、取引明細・設定・ホームの計16実クリック、session/app GETとruntime proofを確認する。送信するHTTP methodはGET/HEAD/OPTIONSとテスト認証callbackのPOSTに制限するが、前節のbootstrap INSERTは起こり得る。変更箇所固有のテスト結果は報告書へ別途記載する。
+既存の `qa:verify` は維持する。共通ランチャーは実行中checkoutの検証実装を使い、対象PRのcleanなworktree（既定は現在のworktree、別の場合は `--target-worktree <path>`）とruntimeの完全SHAを照合する。検証実装SHAと対象runtime SHAを別々に記録し、古いPRへ現在のCLIを無理に渡さない。Windows側のPlaywright Chromiumから実Previewへアクセスし、localhostのアプリE2Eとは区別する。検証前後にActionsで現在HEAD・READY Deployment・Native DB・generationを再照合し、指定と不一致なら停止する。固有URLのみを使い、任意URLやbranch aliasは受け付けない。PC/mobileでA/Bログイン、ダッシュボード、取引明細・設定・ホームの計16実クリック、session/app GETとruntime proofを確認する。送信するHTTP methodはGET/HEAD/OPTIONSとテスト認証callbackのPOSTに制限するが、前節のbootstrap INSERTは起こり得る。変更箇所固有のテスト結果は報告書へ別途記載する。
 
-普段のChromeを正規ブラウザAPIで直接操作する確認は、利用者の目視確認を補助する別の経路とする。既存タブを変更せず、新規タブで確認する。2026-10-17のWindowsでの成功範囲は公開ページ操作と既存Previewのログイン前表示までで、実PreviewのA/B全操作の成功証拠ではない。Chromeでの表示成功・通常回帰テスト・正式 `qa:verify` の成否を分けて報告する。認証後のDB書込が許可されていない場合は、A/Bログインに進まず到達点を報告する。
+普段のChromeを正規ブラウザAPIで直接操作する確認は、利用者の目視確認を補助する別の経路とする。既存タブを変更せず、新規タブで確認する。この経路の2026-10-17の成功範囲は公開ページ操作と既存Previewのログイン前表示まで。別途Windowsの正式Playwright検証ではPR #75のA/B × PC/mobile、16クリック、API・runtime観測12件、画像12枚、指定SHA・Deployment・DB・generationの前後status照合が成功し、全体114.178秒だった。同DB更新後の保持、cleanup、全スクロール範囲はこの受入に含まない。特定実機・既存PRでの一度の成功と、共通化コードのダミー試験、別PR・別PCでの実環境再現は区別する。認証後のDB書込が許可されていない場合は、A/Bログインに進まず到達点を報告する。
 
 Vercel保護には同一project/team・development環境・期限内のOIDCを対象originだけへ付与する。既存 `VERCEL_OIDC_TOKEN` を優先し、なければ既存 `VERCEL_TOKEN` で同projectのdevelopment env取得APIからメモリ内へ取り込む。ユーザー照会の成功をproject単位操作の前提にしない。保護設定を弱めず、secretを新規発行しない。token・Cookie・生のprovider/browser例外をログ・artifact・スクリーンショットへ出さない。
 
-現行 `qa:verify` は公開PreviewでもこのOIDC取得を必須にするため、gh認証だけでは実行できない。Windowsで値が不足している場合は必要な既存資格情報の名前と停止段階だけを報告する。承認された一時的なプロセス内供給を使い、環境ファイルへの永続保存・別環境からのコピー・新secretの発行・保護や証明書検証の回避は行わない。
+現行 `qa:verify` は公開PreviewでもこのOIDC取得を必須にするため、gh認証だけでは実行できない。Windowsの共通ランチャーは保存済みファイルの本人ACLとDPAPI CurrentUserを検査し、Vercel tokenをpreflight/QA専用子プロセスだけへ供給する。Git/ghには渡さず、環境ファイルへの保存・別環境からのコピーは行わない。未保存・失効・アクセス拒否は安全な成否と停止段階だけを報告し、別認証、権限拡張、保護や証明書検証の回避へ自動fallbackしない。必要な初回保存や失効時の再設定は本人の操作とし、[保存・更新手順と制約](windows-qa-credentials.md#初回保存と失効時の再設定)に従う。既存tokenを自動上書き・削除しない。
 
 Cloudでローカル検証を行う場合は、実効policyの `*.vercel.app` と提供CA・既存NSS登録を読み取り照合する。ChromiumはLinuxのNSS信頼ストアを利用し、NSS DBにはSQLiteが必要とするアクセス権が必要。CA不足や読み取り専用状態で失敗した場合は対象hostと段階を報告して停止し、承認なしにCA・権限・proxy・ネットワーク設定を変更しない。信頼ストアのコピーやHOME移動で読み取り専用制限を回避しない。検証用ブラウザは一時プロファイルを使い、セッションは終了時に破棄する。既存Chromiumを使う場合は `CAKE_BROWSER_EXECUTABLE=/usr/bin/chromium` を指定できる。`ignoreHTTPSErrors`、証明書無視フラグ、TLS検証無効化、`route.fetch`による画面通信の代替は使わない。次節のActions検証は公式Playwright Chromiumを使用し、Cloudの信頼設定を変更しない。
 
-`.cake/verification.json` に対象commit・Deployment・DB・case・クリック時刻・成否を記録し、画面画像も `.cake/` に保存する。失敗時は以前の成功証拠を無効にする。Readyには現在HEADのpush/PR CIの最新attempt成功と一致する検証証拠が必要。古い成功runで新しい失敗を隠さない。PR更新後にもHEADを再照合してdraftを解除し、mergeは利用者が行う。
+対象worktreeの `.cake/verification.json` に対象commit・Deployment・DB・case・クリック時刻・成否を記録し、画面画像も `.cake/` に保存する。共通ランチャーの追加結果は対象worktreeの `.cake/windows-qa-launch-<UUID>.json`、進捗は `.cake/windows-qa-progress-<UUID>.json` に残り、実装/対象SHAと時間・前後照合を確認できる。失敗時は以前の成功証拠を無効にする。Readyには現在HEADのpush/PR CIの最新attempt成功と一致する検証証拠が必要。古い成功runで新しい失敗を隠さない。共通ランチャーはPRをReadyにしない。PR更新後にもHEADを再照合して、明示依頼がある場合だけ `task:pr` でdraftを解除し、mergeは利用者が行う。旧対象PRを最新controlから管理する `task:pr --target-worktree` のremote proof必須条件は変えず、Windowsのローカル証跡だけを流用しない。
 
 ## Actionsによる既存Previewの実ブラウザ検証（任意）
 
