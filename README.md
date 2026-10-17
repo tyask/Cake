@@ -199,7 +199,7 @@ QAのDB初回照合・fixture・migration/seed・同PR更新時のデータ保�
 
 ## 開発・QA運用手順
 
-専用worktreeで実装・関連テストを同じcommitに含め、ローカル検証→draft PR→自動Preview→実ブラウザ検証→明示依頼後のReadyの順に進めます。PRのタイトル・本文・コメント・レビュー・検証報告は日本語で書きます。
+専用worktreeで実装・関連テストを同じcommitに含め、ローカル検証→draft PR→自動Preview→変更に必要な検証・差分レビューの順に進めます。Codexが現在HEADをマージ可能と判断したら、追加確認を待たずReadyにし、このチャットで日本語で通知します。文書のみの変更の検証範囲とReady条件は開発手順を参照してください。PRのタイトル・本文・コメント・レビュー・検証報告は日本語で書きます。マージは依頼された範囲で別に行います。
 
 操作範囲とDB書込、実行前後の対象照合、PR close後の資源削除確認は[開発・QA運用手順](docs/development-workflow.md)にまとめています。WSLは[WSL手順](docs/wsl-development.md)、Windowsは[Windows QA手順](docs/windows-qa-credentials.md)を使います。ローカル自動テスト、実Previewでの画面移動、明細の追加・編集・削除を分けて報告します。
 

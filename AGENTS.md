@@ -32,4 +32,6 @@ OIDCは同一project/team・development・有効期限を確認し、redirectを
 
 通常の正式ブラウザ検証はPC/mobile × A/Bログインと画面移動・session/app GET・runtime proofを確認する。認証後のホーム/ `GET /api/app` はworkspaceが0件なら個人workspace・OWNER membershipをINSERTし得るため、GETだけを根拠にDB無変更と扱わない。明細追加などの業務更新は別途依頼された範囲で、識別できるテストデータだけを対象にし、削除と残存件数まで確認する。
 
-Readyは現在HEADのCIと対応する検証証拠を照合し、明示依頼がある場合だけ行う。Actions検証は `qa:verify:ci`、別checkoutからのReady管理は `task:pr --remote-proof ... --target-worktree ...` を使う。詳細・前提・失敗時の扱いは開発手順を参照する。
+Codexは現在HEADのCI、変更内容に必要な検証、差分の自己レビューを完了し、未解決の不具合・競合・検証不足がなくマージ可能と判断したら、追加確認を待たずPRをReadyにする。利用者がdraft維持を指定した場合は従う。Ready直前にHEADと証拠を再照合し、完了後はこのチャットでPRリンク・判断理由・検証結果・未実施項目・残る資源を日本語で通知し、PR本文も更新する。条件未達ならdraftを維持し、阻害要因を報告する。マージ・closeは依頼された範囲で別に判断する。
+
+アプリ変更は現在HEADに対応する正式ブラウザ証拠を必要とする。Actions検証は `qa:verify:ci`、別checkoutからのReady管理は `task:pr --remote-proof ... --target-worktree ...` を使う。AGENTS.md・README.md・docs配下だけの文書変更は、差分・リンク・コマンド・現行実装との整合性をレビューし、現在HEADのCIと自動Preview/statusを確認したうえで、ブラウザ再検証を省略する理由を記録して `gh pr ready` を使える。CLIのブラウザ証拠チェックを省略するオプションは追加しない。詳細は開発手順を参照する。

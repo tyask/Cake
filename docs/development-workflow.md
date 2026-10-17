@@ -99,14 +99,31 @@ WSLでは[WSL手順](wsl-development.md#実previewの正式ブラウザ検証)�
 
 ## 6. Ready・merge・closeと削除確認
 
-Readyは、現在HEADのCIと一致するブラウザ証拠を確認し、明示依頼時だけ進める。Actionsで検証する場合は、最新mainとHEADが一致するcleanなcontrol checkoutから既存対象を指定する。これはWSL上のブラウザ検証とは別の実行環境である。
+Codexは次の条件をすべて確認し、マージ可能と判断したら、追加のReady依頼を待たずPRをReadyにする。利用者がdraft維持を指定している場合は従う。
+
+1. 対象worktreeがcleanで、ローカル・remote・PRの完全HEAD SHAが一致し、現在HEADのpush/PR CIの最新attemptが成功している。
+2. 変更に必要な検証と差分の自己レビューが完了し、未解決の不具合・競合・必要な検証の不足がない。アプリ変更は同じHEADの正式ブラウザ証拠と変更箇所固有の検証を確認する。業務更新テストは承認済みの範囲で行う。
+3. 自動Previewが成功し、現在HEADのPR・Deployment・固有URL・DB branch/endpoint・generationが正式statusと一致している。
+4. PR本文に最終変更内容と、今回の成功・失敗・未実施、根拠・制約・残る資源を日本語で記載している。
+
+条件未達ならdraftを維持し、阻害要因と必要な対応を報告する。Ready直前にもPRのHEADと証拠の一致を再確認し、更新後に過去SHAの成功を再利用しない。
+
+**アプリ変更のReady操作：** ローカル証拠は対象worktreeの `task:pr` で再照合する。Actionsで検証する場合は、最新mainとHEADが一致するcleanなcontrol checkoutから既存対象を指定する。これはWSL上のブラウザ検証とは別の実行環境である。
 
 ```bash
 npm run qa:verify:ci -- --pr <PR番号> --sha <完全SHA> --deployment <Deployment ID>
 npm run task:pr -- --title '変更内容を日本語で記載' --verification-file /absolute/path/report.md --remote-proof /absolute/path/proof.json
 ```
 
-controlの `preview-verify.config.json` capabilityを照合し、成功証拠は `.cake/verify-<PR>.json` に保存する。検証だけではReadyにしない。対象checkoutに管理CLIがない場合は、最新main側で `task:pr --remote-proof ... --target-worktree /absolute/path/target` を使う。target指定はremote proof必須・非draft専用で、対象コードを管理資格情報付きで実行しない。
+controlの `preview-verify.config.json` capabilityを照合し、成功証拠は `.cake/verify-<PR>.json` に保存する。検証CLI自体はReadyにしないため、Codexが上記条件を確認して `task:pr` まで続けて行う。対象checkoutに管理CLIがない場合は、最新main側で `task:pr --remote-proof ... --target-worktree /absolute/path/target` を使う。target指定はremote proof必須・非draft専用で、対象コードを管理資格情報付きで実行しない。
+
+**文書のみのReady操作：** mainとの差分がAGENTS.md・README.md・docs配下の文書だけで、アプリ・script・workflow・依存・設定を変更しない場合に限る。リンク・コマンド例・現行実装との整合性と差分全体をレビューし、上記のCI・自動Preview/statusを確認する。実行時の挙動を変えないためブラウザ再検証を省略したことをPR本文に明記し、次を実行する。この場合もブラウザ証拠の成功を作ったり、アプリ変更の `task:pr` の証拠チェックを弱めたりしない。
+
+```bash
+gh pr ready <PR番号> --repo tyask/Cake
+```
+
+Ready完了後、このチャットで「Codexとしてマージ可能と判断し、Readyにした」と日本語で通知する。PRリンク、判断理由、検証の要点、未実施項目と残る資源を添える。ReadyはCodex側の検証完了を示すもので、GitHubの必須レビュー・branch保護や利用者によるマージ判断は維持する。
 
 main mergeはProduction deployと本番buildのDB更新を起動し得る。PR merge/closeは専用DBと入力データの削除を起動する。実行前に対象と影響を提示し、既に承認された範囲なら再承認を求めず進める。
 

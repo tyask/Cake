@@ -68,10 +68,10 @@ Vercel tokenを供給するのは専用preflight/QA子プロセスだけ。Git/g
 - 対象worktreeの `.cake/windows-qa-progress-<UUID>.json`：同じ操作の進捗と停止段階を示す公開結果。
 - 実行checkoutの `.cake/windows-tools/run-<一意ID>/`：構築した実行ファイル、公開request metadata、`result.json`。tokenやOIDCは保存しない。
 
-失敗時に以前の成功を再利用しない。QA成功だけではPRをReadyにせず、現在HEADのpush/PR CIの最新attempt成功、現在のPreview/DBと証跡の一致、変更箇所固有の検証、利用者からのReady依頼を確認する。現在の管理CLIを持つ通常の対象branchでは、従来どおりそのworktreeの `task:pr` がローカル証跡を再照合する。
+失敗時に以前の成功を再利用しない。QA成功に加えて、現在HEADのpush/PR CIの最新attempt成功、現在のPreview/DBと証跡の一致、変更箇所固有の検証、差分の自己レビューを確認する。Codexがマージ可能と判断したら、追加のReady依頼を待たず、通常の対象branchではそのworktreeの `task:pr` でローカル証跡を再照合してReadyにし、このチャットで日本語で通知する。利用者がdraft維持を指定している場合は従う。文書のみの変更は開発手順の検証範囲とReady操作に従う。
 
 ```powershell
-# QA成功・最新CI照合・Readyへの明示依頼後だけ実行する
+# QA・最新CI・対象照合・差分レビューを完了し、マージ可能と判断したら実行する
 npm.cmd run task:pr -- --title '変更内容' --verification-file '.cake\report.md'
 ```
 
