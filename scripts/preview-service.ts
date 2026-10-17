@@ -55,7 +55,7 @@ export class PreviewService {
       CAKE_PREVIEW_SOURCE_BRANCH: s.branch, CAKE_PREVIEW_SOURCE_SHA: s.sha, CAKE_PREVIEW_PHASE: phase,
       CAKE_PREVIEW_DATABASE_BRANCH_ID: database?.branchId ?? '', CAKE_PREVIEW_DATABASE_HOST_SHA256: database?.hostDigest ?? '',
       CAKE_PREVIEW_PRODUCTION_HOST_SHA256: config.productionHostDigest };
-    // The first deployment triggers Native branching and intentionally fails the DB preconnect guard.
+    // The first deployment triggers Native branching and publishes only a DB-free static page.
     // A second deployment receives only verified public identifiers; Native injects the actual credential.
     const value = await this.provider.api('vercel', '/v13/deployments?forceNew=1', 'POST', {
       name: 'cake', project: config.vercelProjectId,
@@ -79,7 +79,7 @@ export class PreviewService {
       // On an uncertain request a rerun reconciles metadata, never blindly POSTs again.
       if (resume) throw new Error('PREVIEW_CREATE_RESULT_UNKNOWN');
       const provision = await this.create(s, generation, operation);
-      await this.settle(provision, s);
+      if ((await this.settle(provision, s)).state !== 'READY') throw new Error('PREVIEW_PROVISIONING_BUILD_FAILED');
       for (let i = 0; i < 30 && !database; i++) { ({ database } = await this.inventory(s)); if (!database) await this.wait(2000); }
     }
     if (!database) throw new Error('PREVIEW_NATIVE_DATABASE_UNAVAILABLE');
