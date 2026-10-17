@@ -93,6 +93,30 @@ DB_SLOW_QUERY_MS=1000
 
 ## ローカルセットアップ
 
+### WindowsでDB接続なしの検証
+
+Windows側に独立したCake cloneを置き、Node.js 24・npm・Git・既存認証済みghを使います。WSLのフォルダをWindowsのNodeで変更しません。2026-10-17にはWindowsのNode 24.13.0でlint・型検査・366回帰テスト・buildと公式Chromiumのローカルfixtureが成功しました。CIはNode 24.19.0を使うため版は記録し、更新は別作業として扱います。
+
+PowerShellでは実行ポリシーを変更せず `npm.cmd` / `npx.cmd` を使います。ghがPATHにない場合は、既存のインストール先を確認して当該ターミナルだけへ追加します。次は標準の配置先の場合です。新しい認証・secret・グローバルPATH設定は不要です。
+
+```powershell
+if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+  $env:Path = "C:\Program Files\GitHub CLI;$env:Path"
+}
+node --version
+gh auth status
+npm.cmd ci
+npx.cmd playwright install chromium
+npm.cmd run lint
+npx.cmd tsc --noEmit
+npm.cmd test
+npm.cmd run build
+```
+
+`npm test`はローカルfixture・PGlite・スタブ等を使い、実DBへ接続しません。Chromiumのfixtureテストも含みますが、localhostでCake全体を起動するE2Eや実PreviewのA/B検証とは別です。追跡テキストのLFは `.gitattributes`、一時Git fixtureはテスト内のGit設定で保証します。globalの `core.autocrlf` は変更しません。タスクごとの専用worktreeと同SHAの最終検証は[開発・QA運用手順](docs/development-workflow.md)に従ってください。
+
+以下は実アプリをlocalhostで起動する場合の追加準備です。通常の回帰テストの前提ではありません。隔離したDB・認証設定とmigration/seedが必要になるため、承認された対象・操作だけを実行し、他環境の環境ファイルや資格情報をコピーしません。
+
 ### 1. Neonを作成
 
 1. [Neon Console](https://console.neon.tech/)で無料アカウントを作成します。
@@ -120,16 +144,17 @@ http://localhost:3000/api/auth/callback/google
 
 `.env.example`を`.env.local`へコピーし、値を設定します。
 
-```bash
-cp .env.example .env.local
-openssl rand -base64 32
+```powershell
+if (-not (Test-Path -LiteralPath .env.local)) {
+  Copy-Item -LiteralPath .env.example -Destination .env.local
+}
 ```
 
-生成した値を`AUTH_SECRET`へ設定します。
+`AUTH_SECRET`などは対象タスクで承認された手段で設定し、値をチャット・ログ・Gitへ出しません。
 
 ```dotenv
 DATABASE_URL=Neonの接続文字列
-AUTH_SECRET=生成したランダム値
+AUTH_SECRET=対象タスク用のランダム値
 AUTH_GOOGLE_ID=GoogleのClient ID
 AUTH_GOOGLE_SECRET=GoogleのClient secret
 AUTH_URL=http://localhost:3000
@@ -138,10 +163,10 @@ AUTH_MODE=google
 
 ### 4. DBとアプリを起動
 
-```bash
-npm install
-npm run db:setup
-npm run dev
+```powershell
+npm.cmd ci
+npm.cmd run db:setup
+npm.cmd run dev
 ```
 
 [http://localhost:3000](http://localhost:3000)を開きます。
@@ -168,8 +193,8 @@ AUTH_MODE=test
 
 ローカルテストでは初回ログイン時に固定ユーザーを登録します。テスト用のDBを準備して、次のコマンドで固定A/Bと参加済みの`テスト共有家計`を登録できます。
 
-```bash
-npm run db:seed:test
+```powershell
+npm.cmd run db:seed:test
 ```
 
 固定ユーザーはdummyの`test-a@cake.local`と`test-b@cake.local`です。Googleログインや実メールは使わず、A/BボタンによるCredentialsログインを使います。ローカルfixtureは両方非管理者で、固定A/Bは通常アカウント二人の上限に含めません。Vercel Productionでは、誤って`AUTH_MODE=test`を設定してもテストログインは無効になります。Preview・ローカル用には、本番と別のテスト用DBを使用してください。
@@ -178,7 +203,9 @@ QAのDB初回照合・fixture・migration/seed・同PR更新時のデータ保�
 
 ## 開発・QA運用手順
 
-CloudとローカルPCで共通の開発、draft PR作成、PR専用Preview、画面・APIテスト、cleanupの手順は [docs/development-workflow.md](docs/development-workflow.md) にまとめています。ローカルの `qa:verify` に加え、更新済みmainのcontrol checkoutから既存Previewを検証する `qa:verify:ci` を使えます。Actionsの結果は標準notice annotationを既存gh本人認証で読み取り、artifact取得や外部relayを使いません。
+Windowsネイティブの専用worktreeで実装・追加テストを同じcommitに含め、同じSHAのローカル検証→draft PR→必要な専用Preview→Windowsの `qa:verify` →明示依頼後のReadyの順に進めます。詳細は [docs/development-workflow.md](docs/development-workflow.md) にまとめています。テストを先にmainへmergeする必要はありません。通常CI・Preview/DB管理とcleanupはActionsに残し、更新済みmainのcontrol checkoutからの `qa:verify:ci` は任意の代替経路として維持します。Actionsの結果は標準notice annotationを既存gh本人認証で読み取り、artifact取得や外部relayを使いません。
+
+既存Chromeの直接操作は目視確認用で、Playwrightの正式な検証証拠とは分けます。Windowsでは公開ページ操作とPreviewのログイン前表示まで確認済みで、実PreviewのA/B全操作は未検証です。現行 `qa:verify` は既存 `VERCEL_OIDC_TOKEN`、またはOIDC取得用の既存 `VERCEL_TOKEN` を必要とします。必要な値は承認された一時供給だけを使い、gh認証だけで通るとは扱いません。認証後の `GET /api/app` も初期workspaceをINSERTし得るため、DB書込が許可されていない場合はログイン前で停止します。
 
 実Deployment・DBの作成/更新・資源削除は、対象と影響が承認された範囲で行います。PRのmerge/closeでもcleanupによる削除が起動し得るため、draft PR作成の依頼だけで実行しません。作業開始前に運用手順と検証の実施範囲を確認してください。
 

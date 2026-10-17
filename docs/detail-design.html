@@ -773,11 +773,12 @@ BootstrapData extends BootstrapMetadata
           </table></div>
           <p>全テストは<code>tests/</code>配下。純粋関数、SQL/外部コマンドのスタブ、スクリプト起動を検証する。実DBの制約・同時操作とブラウザ操作は別途実環境で確認する。</p>
           <h3>コマンドとデプロイ</h3>
+          <p>WindowsのPowerShellではnpm.cmd/npx.cmdと既存gh認証を使い、PATHの補完は当該プロセスに限定する。専用worktreeごとに依存・build・証拠・環境ファイルを分離し、追跡テキストはLFで保持する。同じ開発commitで検証してからdraft PRを作成し、必要なPreviewをWindowsで検証する。既存Ready条件・Actions管理契約は変更しない。詳細は<a href="development-workflow.md">開発・QA運用手順</a>を参照する。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>コマンド</th><th>目的</th></tr></thead>
             <tbody>
               <tr><td><code>npm run task:start -- &lt;タスク名&gt;</code></td><td>originを取得し、main-only Git設定を導入した最新origin/mainからcodex/ブランチと専用worktreeを作成してnpm ci。元の未コミット変更・環境設定を保持。</td></tr>
-              <tr><td><code>npm test</code></td><td><code>tsx --test tests/*.test.ts</code>。</td></tr>
+              <tr><td><code>npm test</code></td><td><code>node --import tsx --test tests/*.test.ts</code>。</td></tr>
               <tr><td><code>npm run lint</code> / <code>npm run build</code></td><td>ESLintとNext.js Production build・型/ルート検証。</td></tr>
               <tr><td><code>npm run db:setup</code></td><td>未適用番号付きSQLと適用履歴をatomicに追加。</td></tr>
               <tr><td><code>npm run db:seed:test</code></td><td>従来ローカルはA/Bを非管理者として登録する。新QAはdummyのAをサイト管理者・共有OWNER、Bを一般・MEMBERとする固定二人だけを使用する。空DBでは初回だけ登録し、厳密一致する継承fixtureではseed済みidentityを使用する。同PRのデータ・名前・権限・停止状態を維持し、自動修復しない。</td></tr>

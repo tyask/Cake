@@ -48,8 +48,8 @@ function pathExists(path: string): boolean {
   }
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
+export function shellQuote(value: string, platform: NodeJS.Platform = process.platform): string {
+  return `'${value.replaceAll("'", platform === "win32" ? "''" : "'\\''")}'`;
 }
 
 function installDependencies(cwd: string): void {
@@ -81,6 +81,7 @@ export function runStartTask({
     ? resolve(repositoryRoot, "..", `${basename(repositoryRoot)}-worktrees`)
     : resolve(repositoryRoot, configuredRoot);
   const worktreePath = resolve(worktreeRoot, name);
+  const changeDirectory = `${process.platform === "win32" ? "Set-Location -LiteralPath" : "cd"} ${shellQuote(worktreePath)}`;
   if (pathExists(worktreePath)) {
     throw new Error(`worktreeの作成先が既に存在します: ${worktreePath}`);
   }
@@ -105,9 +106,10 @@ export function runStartTask({
   try {
     install(worktreePath);
   } catch {
-    throw new Error(`npm ci が失敗しました。作成済みのブランチとworktreeは保持しています。\n作業先: ${worktreePath}\n再試行: cd ${shellQuote(worktreePath)} && npm ci`);
+    const retry = process.platform === "win32" ? `${changeDirectory}\nnpm.cmd ci` : `${changeDirectory} && npm ci`;
+    throw new Error(`npm ci が失敗しました。作成済みのブランチとworktreeは保持しています。\n作業先: ${worktreePath}\n再試行:\n${retry}`);
   }
-  log(`Cake: 作業を開始できます。cd ${shellQuote(worktreePath)}`);
+  log(`Cake: 作業を開始できます。${changeDirectory}`);
   log("Cake: .env.localとVercel接続情報はコピーしていません。READMEのタスク用環境の手順に従って設定してください。");
   return { branch, worktreePath };
 }
