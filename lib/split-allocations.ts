@@ -1,4 +1,5 @@
 import { validateSplitWeights } from "./expense-splits";
+import { MAX_AMOUNT_YEN } from "./domain-values";
 import type { SplitWeights } from "./types";
 
 type Member = { id: string };
@@ -13,7 +14,7 @@ export function equalSplitWeights(members: readonly Member[]): SplitWeights {
 
 /** Allocate whole yen while keeping the total exact, with stable ties in member order. */
 export function splitAmounts(amountYen: number, weights: SplitWeights, members: readonly Member[]): SplitWeights {
-  if (!Number.isInteger(amountYen) || amountYen < 0 || amountYen > 2_147_483_647) {
+  if (!Number.isInteger(amountYen) || amountYen < 0 || amountYen > MAX_AMOUNT_YEN) {
     throw new Error("金額は0から2147483647円までの整数で設定してください。");
   }
   const valid = validateSplitWeights(weights, members);
@@ -30,7 +31,7 @@ export function splitAmounts(amountYen: number, weights: SplitWeights, members: 
 
 /** Editing one share distributes the remaining amount among the other members. */
 export function changeSplitAmount(total: number, amount: number, memberId: string, weights: SplitWeights, members: readonly Member[]): SplitWeights {
-  if (!Number.isInteger(total) || total < 1 || total > 2_147_483_647
+  if (!Number.isInteger(total) || total < 1 || total > MAX_AMOUNT_YEN
     || !Number.isInteger(amount) || amount < 0 || amount > total) {
     throw new Error("支払い分は0から合計金額までの整数で設定してください。");
   }

@@ -1,5 +1,7 @@
 "use client";
 
+import { expenseClassLabels, expenseClasses } from "@/lib/domain-values";
+
 import { useState } from "react";
 import type { PayPayPreviewRow } from "@/lib/paypay";
 import type { ExpenseClass, SplitWeights, WorkspaceMember } from "@/lib/types";
@@ -72,7 +74,7 @@ function ImportPreviewRow({ row, members, actorId, saving, onSelect, onChangeCla
     <td data-label="金額（円）">{money(row.amountYen)}</td>
     <td data-label="支払者">{actorName}</td>
     <td data-label="費用区分"><select aria-label={`${row.merchant}の費用区分`} disabled={disabled} value={row.expenseClass} onChange={event => onChangeClass(row.key, event.target.value as ExpenseClass)}>
-      <option value="PERSONAL">個人費</option><option value="SHARED">共有費</option>
+      {expenseClasses.map(value => <option key={value} value={value}>{expenseClassLabels[value]}</option>)}
     </select></td>
     <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}>
       <SplitEditor compact inline label="支払い割合" members={members} value={row.splitWeights} amountYen={row.amountYen}

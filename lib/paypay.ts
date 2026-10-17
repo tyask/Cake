@@ -1,4 +1,6 @@
 import Papa from "papaparse";
+import { MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "./domain-values";
+import { amountYenSchema, merchantSchema, methodSchema } from "./domain-schemas";
 import { matchingDefaultRule, transactionDefaults } from "./expense-splits";
 import { applyPayPayDuplicateChecks } from "./import-duplicates";
 import { payPayDateToIso, payPayExternalId } from "./paypay-id";
@@ -72,6 +74,7 @@ export function parsePayPayCsv(
       }
       const merchant = row["取引先"]?.trim() ?? "";
       const amountYen = parseAmount(row["出金金額（円）"]);
+      const method = row["取引方法"]?.trim() || "PayPay";
       const duplicate = existingExternalIds.has(externalId);
       const error = !occurredAt
         ? "取引日がありません"
@@ -79,13 +82,15 @@ export function parsePayPayCsv(
           ? "取引先がありません"
           : !transactionNumber
             ? "取引番号がありません"
-            : identityError ?? (!Number.isInteger(amountYen) || amountYen <= 0 ? "出金金額が不正です" : null);
+            : identityError ?? (!amountYenSchema.safeParse(amountYen).success ? "出金金額が不正です"
+              : !merchantSchema.safeParse(merchant).success ? `取引先は${MAX_MERCHANT_LENGTH}文字以内で入力してください`
+              : !methodSchema.safeParse(method).success ? `取引方法は${MAX_METHOD_LENGTH}文字以内で入力してください` : null);
       return {
         key: `${externalId || "row"}-${index}`,
         selected: !duplicate && !error,
         occurredAt,
         merchant,
-        method: row["取引方法"]?.trim() || "PayPay",
+        method,
         amountYen,
         externalId,
         ...transactionDefaults(merchant, rules, members, actorUserId, "SHARED"),

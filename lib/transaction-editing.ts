@@ -1,3 +1,5 @@
+import { MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "./domain-values";
+import { amountYenSchema, expenseClassSchema, merchantSchema, methodSchema, transactionTypeSchema } from "./domain-schemas";
 import { defaultSplitWeights, personalSplitWeights, validateSplitWeights } from "./expense-splits";
 import type { ExpenseClass, TransactionRecord, WorkspaceMember } from "./types";
 
@@ -45,13 +47,13 @@ export function validateTransactionValues(values: TransactionValues, members: re
   }
   const merchant = values.merchant.trim();
   const method = values.method.trim();
-  if (!merchant || merchant.length > 240) throw new Error("取引先を1〜240文字で入力してください。");
-  if (!method || method.length > 120) throw new Error("取引方法を1〜120文字で入力してください。");
-  if (!Number.isInteger(values.amountYen) || values.amountYen < 1 || values.amountYen > 2_147_483_647) {
-    throw new Error("金額は1〜2147483647円の整数で入力してください。");
+  if (!merchantSchema.safeParse(merchant).success) throw new Error(`取引先を1〜${MAX_MERCHANT_LENGTH}文字で入力してください。`);
+  if (!methodSchema.safeParse(method).success) throw new Error(`取引方法を1〜${MAX_METHOD_LENGTH}文字で入力してください。`);
+  if (!amountYenSchema.safeParse(values.amountYen).success) {
+    throw new Error(`金額は1〜${MAX_AMOUNT_YEN}円の整数で入力してください。`);
   }
-  if (values.type !== "PAYMENT" && values.type !== "RECEIPT") throw new Error("取引種別が不正です。");
-  if (values.expenseClass !== "PERSONAL" && values.expenseClass !== "SHARED") throw new Error("費用区分が不正です。");
+  if (!transactionTypeSchema.safeParse(values.type).success) throw new Error("取引種別が不正です。");
+  if (!expenseClassSchema.safeParse(values.expenseClass).success) throw new Error("費用区分が不正です。");
   if (!members.some((member) => member.id === values.actorUserId)) throw new Error("担当者が参加者に含まれていません。");
   return {
     ...values, merchant, method,

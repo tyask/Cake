@@ -1,7 +1,7 @@
-import type { RecurringPaymentConfig, RecurringPaymentState } from "./recurring-payment-types";
+import type { RecurringPayment, RecurringPaymentConfig } from "./recurring-payment-types";
 
 export interface RecurringPaymentSchedule {
-  state: RecurringPaymentState;
+  state: RecurringPayment["state"];
   currentConfig: RecurringPaymentConfig;
 }
 

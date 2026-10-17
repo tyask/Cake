@@ -1,6 +1,5 @@
-export type WorkspaceType = "PERSONAL" | "SHARED";
-export type TransactionType = "PAYMENT" | "RECEIPT";
-export type ExpenseClass = "PERSONAL" | "SHARED";
+import type { ExpenseClass, TransactionSource, TransactionType, WorkspaceRole, WorkspaceType } from "./domain-values";
+export type { BootstrapScope, ExpenseClass, TransactionSource, TransactionType, WorkspaceRole, WorkspaceType } from "./domain-values";
 export type SplitWeights = Record<string, number>;
 
 export interface AppUser {
@@ -26,7 +25,7 @@ export interface WorkspaceSummary {
 
 export interface WorkspaceMember extends AppUser {
   weight: number;
-  role: "OWNER" | "MEMBER";
+  role: WorkspaceRole;
 }
 
 export interface TransactionRecord {
@@ -43,7 +42,7 @@ export interface TransactionRecord {
   splitWeights: SplitWeights;
   settledAt: string | null;
   externalId: string;
-  source: "MANUAL" | "PAYPAY" | "RECURRING";
+  source: TransactionSource;
 }
 
 export interface DefaultRule {
@@ -105,8 +104,6 @@ export interface WorkspaceData extends WorkspaceMetadata {
   settlement: SettlementResult | null;
   settlementHistory: SettlementHistory[];
 }
-
-export type BootstrapScope = "full" | "metadata";
 
 export interface BootstrapMetadata {
   user: AppUser;

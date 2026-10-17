@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
-import { RecurringPaymentError, recurringPaymentMutationSchema } from "./recurring-payments";
+import { RecurringPaymentError } from "./recurring-payments";
+import { recurringPaymentMutationSchema } from "./recurring-payment-schemas";
+import { workspaceIdSchema } from "./domain-schemas";
 import type { AppUser } from "./types";
 import type { listRecurringPayments, mutateRecurringPayment, runRecurringPayments } from "./recurring-payments";
 
@@ -12,8 +14,8 @@ type Dependencies = {
   environment: () => Readonly<Record<string, string | undefined>>;
 };
 
-const workspaceQuery = z.object({ workspaceId: z.string().uuid() }).strict();
-const manualRunInput = z.object({ workspaceId: z.string().uuid() }).strict();
+const workspaceQuery = z.object({ workspaceId: workspaceIdSchema }).strict();
+const manualRunInput = workspaceQuery;
 const noStore = { "Cache-Control": "no-store" };
 
 function response(body: unknown, status = 200) {

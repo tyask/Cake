@@ -1,5 +1,6 @@
 "use client";
 
+import type { AppActionInput } from "@/lib/app-input";
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { TestLoginButtons } from "./test-login-buttons";
@@ -11,7 +12,7 @@ export function InviteCard({ token, signedIn, testAuth = false }: { token: strin
   async function accept() {
     setLoading(true); setMessage(null);
     try {
-      const response = await fetch("/api/app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "acceptInvite", token }) });
+      const response = await fetch("/api/app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "acceptInvite", token } satisfies AppActionInput) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "招待を承認できませんでした。");
       location.href = `/?workspaceId=${result.workspaceId}`;

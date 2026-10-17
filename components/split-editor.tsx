@@ -1,5 +1,7 @@
 "use client";
 
+import { MAX_AMOUNT_YEN, MAX_SPLIT_WEIGHT } from "@/lib/domain-values";
+
 import { useId, useState } from "react";
 import { changeSplitAmount, equalSplitWeights, splitAmounts } from "@/lib/split-allocations";
 import type { SplitWeights, WorkspaceMember } from "@/lib/types";
@@ -23,7 +25,7 @@ export function SplitEditor({ members, value, onChange, onCommit, amountYen, dis
     setEmptyInput(null);
   }
   const transactionSplit = amountYen !== undefined;
-  const validAmount = Number.isInteger(amountYen) && amountYen! > 0 && amountYen! <= 2_147_483_647;
+  const validAmount = Number.isInteger(amountYen) && amountYen! > 0 && amountYen! <= MAX_AMOUNT_YEN;
   const total = members.reduce((sum, member) => sum + (value[member.id] ?? 0), 0);
   const percentages = safeAmounts(1000, value, members);
   const amounts = safeAmounts(validAmount ? amountYen! : 0, value, members);
@@ -67,7 +69,7 @@ export function SplitEditor({ members, value, onChange, onCommit, amountYen, dis
             {!inline && <span>{member.name}</span>}
             <div className="split-input"><input id={`${id}-${member.id}`} type="number" min="0"
               aria-label={`${member.name}の${transactionSplit && mode === "AMOUNT" ? "支払い金額（円）" : "支払い割合"}`}
-              max={transactionSplit ? mode === "AMOUNT" ? amountYen : 100 : 2_147_483_647}
+              max={transactionSplit ? mode === "AMOUNT" ? amountYen : 100 : MAX_SPLIT_WEIGHT}
               step={transactionSplit && mode === "RATIO" ? "0.1" : "1"}
               value={emptyInput?.memberId === member.id ? "" : transactionSplit ? mode === "AMOUNT" ? amounts[member.id] : percentages[member.id] / 10 : value[member.id] ?? 0}
               readOnly={!onChange} disabled={transactionSplit && (members.length < 2 || mode === "AMOUNT" && !validAmount)}

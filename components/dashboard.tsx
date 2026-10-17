@@ -1,5 +1,9 @@
 "use client";
 
+import { commonExpenseClassLabels, expenseClasses, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH, MAX_WORKSPACE_NAME_LENGTH, workspaceTypeLabels } from "@/lib/domain-values";
+
+import type { AppActionInput, RunAppAction } from "@/lib/app-input";
+
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { signOut } from "next-auth/react";
@@ -46,7 +50,7 @@ const inputDate = (value?: string) => {
 };
 const jstInputToIso = (value: string) => new Date(`${value.length === 16 ? `${value}:00` : value}+09:00`).toISOString();
 
-async function postAction(payload: Record<string, unknown>) {
+async function postAction(payload: AppActionInput) {
   const response = await fetch("/api/app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error ?? "処理に失敗しました。");
@@ -148,8 +152,8 @@ export function Dashboard({ initialData, testAuth = false }: { initialData: Boot
     }
   }
 
-  async function run(payload: Record<string, unknown>, success: string, workspaceId?: string) {
-    const originWorkspaceId = typeof payload.workspaceId === "string" ? payload.workspaceId : selected?.workspace.id;
+  async function run(payload: AppActionInput, success: string, workspaceId?: string) {
+    const originWorkspaceId = "workspaceId" in payload ? payload.workspaceId : selected?.workspace.id;
     const generation = workspaceView.current.generation;
     const originTabGeneration = tabGeneration.current;
     const isCurrentView = () => generation === workspaceView.current.generation && originWorkspaceId === workspaceView.current.workspaceId;
@@ -276,7 +280,7 @@ function HomePanel({ selected, pending, setTab, add, refreshAction, refreshing }
     </div>
     <div className="content-grid">
       <section className="panel recent"><div className="panel-head"><div><span>RECENT</span><h2>最近の取引</h2></div><button className="text-button" onClick={() => setTab("transactions")}>すべて見る →</button></div>
-        <div className="recent-list">{selected.transactions.slice(0, 6).map((item) => <div className="recent-row" key={item.id}><span className="recent-name"><b>{item.merchant}</b><small>{dateTime(item.occurredAt)} · {item.actorName}</small></span><span className="recent-class">{item.expenseClass === "SHARED" ? "共通費" : "個人費"}</span><strong className={item.type === "RECEIPT" ? "positive" : ""}>{money(item.amountYen)}</strong></div>)}{selected.transactions.length === 0 && <Empty text="まだ取引がありません" />}</div>
+        <div className="recent-list">{selected.transactions.slice(0, 6).map((item) => <div className="recent-row" key={item.id}><span className="recent-name"><b>{item.merchant}</b><small>{dateTime(item.occurredAt)} · {item.actorName}</small></span><span className="recent-class">{commonExpenseClassLabels[item.expenseClass]}</span><strong className={item.type === "RECEIPT" ? "positive" : ""}>{money(item.amountYen)}</strong></div>)}{selected.transactions.length === 0 && <Empty text="まだ取引がありません" />}</div>
       </section>
       <section className="panel quick"><div className="panel-head"><div><span>QUICK ACTIONS</span><h2>すぐにできること</h2></div></div>
         <button disabled={refreshing} onClick={add}><i>＋</i><span><b>明細を追加</b><small>現金や受け取りを手動登録</small></span></button>
@@ -291,7 +295,7 @@ const importFormats = {
   PAYPAY: { label: "PayPay", parse: parsePayPayCsv },
 };
 
-function ImportPanel({ selected, currentUserId, run }: { selected: WorkspaceData; currentUserId: string; run: (payload: Record<string, unknown>, success: string) => Promise<unknown> }) {
+function ImportPanel({ selected, currentUserId, run }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [format, setFormat] = useState<keyof typeof importFormats>("PAYPAY");
   const [rows, setRows] = useState<PayPayPreviewRow[]>([]);
@@ -413,7 +417,7 @@ function ImportPanel({ selected, currentUserId, run }: { selected: WorkspaceData
   </>;
 }
 
-function SettlementPanel({ selected, run, refreshAction, refreshing }: { selected: WorkspaceData; run: (payload: Record<string, unknown>, success: string) => Promise<unknown>; refreshAction: React.ReactNode; refreshing: boolean }) {
+function SettlementPanel({ selected, run, refreshAction, refreshing }: { selected: WorkspaceData; run: RunAppAction; refreshAction: React.ReactNode; refreshing: boolean }) {
   const result = selected.settlement;
   async function complete() { if (confirm("表示中の明細を清算済みにしますか？ 実際の送金は別途行ってください。")) await run({ action: "completeSettlement", workspaceId: selected.workspace.id }, "清算を完了しました。"); }
   return <>
@@ -426,7 +430,7 @@ function SettlementPanel({ selected, run, refreshAction, refreshing }: { selecte
   </>;
 }
 
-function SettingsPanel({ selected, currentUserId, run, afterDelete }: { selected: WorkspaceData; currentUserId: string; run: (payload: Record<string, unknown>, success: string) => Promise<unknown>; afterDelete: () => Promise<void> }) {
+function SettingsPanel({ selected, currentUserId, run, afterDelete }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction; afterDelete: () => Promise<void> }) {
   const [name, setName] = useState(selected.workspace.name);
   const [email, setEmail] = useState("");
   const [inviteLink, setInviteLink] = useState("");
@@ -499,12 +503,12 @@ function SettingsPanel({ selected, currentUserId, run, afterDelete }: { selected
   </>;
 }
 
-function WorkspaceModal({ close, run }: { close: () => void; run: (payload: Record<string, unknown>, success: string, workspaceId?: string) => Promise<unknown> }) {
+function WorkspaceModal({ close, run }: { close: () => void; run: RunAppAction }) {
   const [name, setName] = useState(""); const [type, setType] = useState<WorkspaceType>("PERSONAL");
-  return <Modal title="ワークスペースを作成" close={close}><form onSubmit={async (event) => { event.preventDefault(); await run({ action: "createWorkspace", name, type }, "ワークスペースを作成しました。"); close(); }}><label>名前<input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} placeholder="例: ふたりの家計" /></label><fieldset><legend>種類</legend><label className={`choice ${type === "PERSONAL" ? "selected" : ""}`}><input type="radio" checked={type === "PERSONAL"} onChange={() => setType("PERSONAL")} /><span><b>個人用</b><small>自分だけで管理する家計</small></span></label><label className={`choice ${type === "SHARED" ? "selected" : ""}`}><input type="radio" checked={type === "SHARED"} onChange={() => setType("SHARED")} /><span><b>共有用</b><small>もう一人を招待して清算</small></span></label></fieldset><div className="modal-actions"><button type="button" className="secondary" onClick={close}>キャンセル</button><button className="primary">作成する</button></div></form></Modal>;
+  return <Modal title="ワークスペースを作成" close={close}><form onSubmit={async (event) => { event.preventDefault(); await run({ action: "createWorkspace", name, type }, "ワークスペースを作成しました。"); close(); }}><label>名前<input required maxLength={MAX_WORKSPACE_NAME_LENGTH} value={name} onChange={(event) => setName(event.target.value)} placeholder="例: ふたりの家計" /></label><fieldset><legend>種類</legend><label className={`choice ${type === "PERSONAL" ? "selected" : ""}`}><input type="radio" checked={type === "PERSONAL"} onChange={() => setType("PERSONAL")} /><span><b>{workspaceTypeLabels.PERSONAL}</b><small>自分だけで管理する家計</small></span></label><label className={`choice ${type === "SHARED" ? "selected" : ""}`}><input type="radio" checked={type === "SHARED"} onChange={() => setType("SHARED")} /><span><b>{workspaceTypeLabels.SHARED}</b><small>もう一人を招待して清算</small></span></label></fieldset><div className="modal-actions"><button type="button" className="secondary" onClick={close}>キャンセル</button><button className="primary">作成する</button></div></form></Modal>;
 }
 
-function NewTransactionModal({ selected, currentUserId, close, run }: { selected: WorkspaceData; currentUserId: string; close: () => void; run: (payload: Record<string, unknown>, success: string) => Promise<unknown> }) {
+function NewTransactionModal({ selected, currentUserId, close, run }: { selected: WorkspaceData; currentUserId: string; close: () => void; run: RunAppAction }) {
   const initialActor = selected.members.some((member) => member.id === currentUserId) ? currentUserId : selected.members[0]?.id ?? "";
   const [occurredAt, setOccurredAt] = useState(inputDate());
   const [merchant, setMerchant] = useState("");
@@ -543,12 +547,12 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
     }}>
       <div className="form-grid">
         <label className="full">取引日時<input type="datetime-local" required value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} /></label>
-        <label className="full">取引先<input required maxLength={240} value={merchant} onChange={(event) => {
+        <label className="full">取引先<input required maxLength={MAX_MERCHANT_LENGTH} value={merchant} onChange={(event) => {
           setMerchant(event.target.value);
           if (!customized) applyDefaults(event.target.value);
         }} /></label>
-        <label>取引方法<input required maxLength={120} value={method} onChange={(event) => setMethod(event.target.value)} /></label>
-        <label>金額（円）<input type="number" required min="1" step="1" value={amountYen || ""} onChange={(event) => setAmountYen(Number(event.target.value))} /></label>
+        <label>取引方法<input required maxLength={MAX_METHOD_LENGTH} value={method} onChange={(event) => setMethod(event.target.value)} /></label>
+        <label>金額（円）<input type="number" required min="1" max={MAX_AMOUNT_YEN} step="1" value={amountYen || ""} onChange={(event) => setAmountYen(Number(event.target.value))} /></label>
         <label>支払者<select value={actorUserId} onChange={(event) => {
           const nextActor = event.target.value;
           setActorUserId(nextActor);
@@ -559,7 +563,7 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
           setExpenseClass(nextClass);
           setSplitWeights(nextClass === "PERSONAL" ? personalSplitWeights(selected.members, actorUserId) : defaultSplitWeights(selected.members));
           setCustomized(true);
-        }}><option value="PERSONAL">個人費</option><option value="SHARED">共通費</option></select></label>
+        }}>{expenseClasses.map(value => <option key={value} value={value}>{commonExpenseClassLabels[value]}</option>)}</select></label>
         <div className="full">
           <SplitEditor inline allowEqualSplit label={`支払い割合（${selected.members.map((member) => member.name).join(", ")}）`} amountYen={amountYen} members={selected.members} value={splitWeights}
             disabled={expenseClass === "PERSONAL" || saving} onChange={(next) => { setSplitWeights(next); setCustomized(true); }} />

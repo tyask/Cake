@@ -1,5 +1,9 @@
 "use client";
 
+import { expenseClassLabels, expenseClasses, MAX_RULE_MERCHANT_LENGTH, MAX_SPLIT_WEIGHT } from "@/lib/domain-values";
+
+import type { AppActionInput, RunAppAction, WorkspaceActionDraft } from "@/lib/app-input";
+
 import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/autosave";
 
 import { useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
@@ -7,14 +11,15 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { defaultSplitWeights, validateSplitWeights } from "@/lib/expense-splits";
+import { ruleMerchantSchema } from "@/lib/domain-schemas";
 import { orderedWorkspaceRules } from "@/lib/rule-order";
 import type { DefaultRule, ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/types";
 import styles from "./workspace-rules.module.css";
 
-type RunAction = (payload: Record<string, unknown>, success: string) => Promise<unknown>;
+type RunAction = RunAppAction;
 type RuleValues = Pick<DefaultRule, "merchantContains" | "expenseClass" | "splitWeights" | "enabled">;
 type SaveRule = (ruleId: string, getValues: () => { values: RuleValues; base: RuleValues }, accept: (values: RuleValues) => void) => Promise<void>;
-type StructuralAction = { payload: Record<string, unknown>; message: string };
+type StructuralAction = { payload: WorkspaceActionDraft<Extract<AppActionInput, { action: "createRule" | "reorderRules" | "deleteRules" }>>; message: string };
 type AcknowledgedSave = { sources: string[]; values: RuleValues };
 
 function ruleValues(rule: DefaultRule): RuleValues {
@@ -29,7 +34,7 @@ function signature(values: RuleValues): string {
 
 function validateRule(values: RuleValues, members: WorkspaceMember[]): RuleValues {
   const merchantContains = values.merchantContains.trim();
-  if (!merchantContains || merchantContains.length > 120) throw new Error("取引先に含まれる文字を1〜120文字で入力してください。");
+  if (!ruleMerchantSchema.safeParse(merchantContains).success) throw new Error(`取引先に含まれる文字を1〜${MAX_RULE_MERCHANT_LENGTH}文字で入力してください。`);
   return { ...values, merchantContains, splitWeights: values.expenseClass === "PERSONAL" || values.splitWeights === null ? null : validateSplitWeights(values.splitWeights, members) };
 }
 
@@ -275,13 +280,13 @@ function InlineFields({ values, members, disabled, onChange, onCommit, status }:
     if (onCommit && event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); onCommit(); }
   }
   return <>
-    <label className={styles.merchant} htmlFor={`${id}-merchant`}><span>取引先に含まれる文字</span><input id={`${id}-merchant`} required maxLength={120} value={values.merchantContains} disabled={disabled}
+    <label className={styles.merchant} htmlFor={`${id}-merchant`}><span>取引先に含まれる文字</span><input id={`${id}-merchant`} required maxLength={MAX_RULE_MERCHANT_LENGTH} value={values.merchantContains} disabled={disabled}
       onChange={(event) => onChange({ merchantContains: event.target.value })} onBlur={onCommit} onKeyDown={commitOnEnter} placeholder="例: スーパー" /></label>
     <label className={styles.expenseClass} htmlFor={`${id}-class`}><span>費用区分</span><select id={`${id}-class`} disabled={disabled} value={values.expenseClass}
-      onChange={(event) => onChange({ expenseClass: event.target.value as ExpenseClass, splitWeights: null }, true)}><option value="PERSONAL">個人費</option><option value="SHARED">共有費</option></select></label>
+      onChange={(event) => onChange({ expenseClass: event.target.value as ExpenseClass, splitWeights: null }, true)}>{expenseClasses.map(value => <option key={value} value={value}>{expenseClassLabels[value]}</option>)}</select></label>
     <div className={styles.ratios} role="group" aria-label="ルールの負担割合">
       {values.expenseClass === "PERSONAL" ? <span className={styles.personalRatio}>支払者・受取者 <b>1</b> : 相手 <b>0</b></span> : members.map((member) => <label key={member.id} htmlFor={`${id}-${member.id}`}>
-        <span title={member.name}>{member.name}</span><input id={`${id}-${member.id}`} type="number" required min="0" max="2147483647" step="1" disabled={disabled || values.splitWeights === null}
+        <span title={member.name}>{member.name}</span><input id={`${id}-${member.id}`} type="number" required min="0" max={MAX_SPLIT_WEIGHT} step="1" disabled={disabled || values.splitWeights === null}
           aria-label={`${member.name}の割合`} value={weights[member.id] ?? 0} onChange={(event) => onChange({ splitWeights: { ...weights, [member.id]: Number(event.target.value) } })} onBlur={onCommit} onKeyDown={commitOnEnter} />
       </label>)}
     </div>

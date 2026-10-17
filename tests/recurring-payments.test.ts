@@ -6,6 +6,7 @@ import {
 } from "../lib/recurring-payments";
 import type { RecurringPaymentLog, RecurringPaymentStore } from "../lib/recurring-payments";
 import type { RecurringPaymentConfig } from "../lib/recurring-payment-types";
+import { blockedReasonLabel, isRecurringBlockedReason, recurringPaymentStateLabel } from "../lib/recurring-payment-types";
 
 const workspaceId = "00000000-0000-4000-8000-000000000001";
 const paymentId = "00000000-0000-4000-8000-000000000002";
@@ -30,6 +31,34 @@ function fixture() {
   return { calls, store, service };
 }
 const now = new Date("2026-10-10T08:59:59.999+09:00");
+
+test("未知のDB停止原因・状態をJSONに保持し、表示は既存の確認案内へ戻す", () => {
+  for (const reason of ["FUTURE_REASON", "constructor", "__proto__", null]) {
+    const payment = recurringPaymentRecord(row({ state: "BLOCKED", blocked_reason: reason }), now);
+    assert.equal(payment.blockedReason, reason);
+    assert.equal(isRecurringBlockedReason(reason), false);
+    assert.equal(blockedReasonLabel(payment.blockedReason), "定期支払いの設定を確認する必要があります。");
+  }
+  assert.equal(isRecurringBlockedReason("ACTOR_UNAVAILABLE"), true);
+  assert.equal(blockedReasonLabel("ACTOR_UNAVAILABLE"), "支払者が利用できなくなりました。");
+  const payment = recurringPaymentRecord(row({ state: "FUTURE_STATE" }), now);
+  assert.equal(payment.state, "FUTURE_STATE");
+  assert.equal(payment.nextScheduledOn, null);
+  assert.equal(recurringPaymentStateLabel(payment.state), "要確認");
+});
+
+test("未知のDB停止コードをログへ伝播せず、既知の原因だけを有限コードとして記録する", async () => {
+  for (const errorCode of ["FUTURE_REASON", "constructor", "ACTOR_UNAVAILABLE"]) {
+    const { store, service } = fixture();
+    const logs: RecurringPaymentLog[] = [];
+    store.generate = async () => ({ status: "blocked", errorCode });
+    const result = await service.runRecurringPayments({ now, logger: entry => logs.push(entry) });
+    assert.equal(result.failed, 1);
+    const payment = logs.find(entry => entry.event === "recurring.payment.completed")!;
+    assert.equal(payment.status, "failed");
+    assert.equal(payment.errorCode, errorCode === "ACTOR_UNAVAILABLE" ? errorCode : "DATABASE_UNAVAILABLE");
+  }
+});
 
 test("入力はactionごとに厳密で、readonly列・日時の上書きを拒否する", () => {
   const create = { action: "create", workspaceId, ...config };
