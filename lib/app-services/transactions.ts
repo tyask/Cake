@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { transactionRecord } from "../transaction-record";
-import { resolveTransactionSplit } from "./splits";
+import { resolveTransactionSplit, transactionNeedsRules } from "./splits";
 import type { ExpenseClass, SplitWeights } from "../types";
 import type { AppStore } from "../app-store";
 import type { AppUser } from "../types";
@@ -16,17 +16,21 @@ export async function transactionsService(store: AppStore, user: AppUser, input:
 
   if (input.action === "saveTransaction") {
     await store.requireWorkspaceMember(input.workspaceId, user.id);
-    const context = await store.splitContext(input.workspaceId);
     const previous = input.transactionId && input.splitWeights === undefined
       ? await store.previousTransaction(input)
       : null;
-    const split = resolveTransactionSplit({
+    const splitInput = {
       ...input,
       expenseClass: input.expenseClass ?? (previous ? String(previous.expense_class) as ExpenseClass : undefined),
       splitWeights: previous && (input.expenseClass === undefined || input.expenseClass === previous.expense_class)
         && (previous.expense_class === "SHARED" || input.actorUserId === previous.actor_user_id)
         ? previous.split_weights as SplitWeights : input.splitWeights,
-    }, context);
+    };
+    const [members, rules] = await Promise.all([
+      store.splitMembers(input.workspaceId),
+      transactionNeedsRules(splitInput) ? store.splitRules(input.workspaceId) : Promise.resolve([]),
+    ]);
+    const split = resolveTransactionSplit(splitInput, { members, rules });
     let saved: Record<string, unknown>;
     if (input.transactionId) {
       const updated = await store.updateTransaction(input, user, split);
@@ -36,7 +40,7 @@ export async function transactionsService(store: AppStore, user: AppUser, input:
       const id = randomUUID();
       saved = await store.insertTransaction(input, user, split, id);
     }
-    return { ok: true, transaction: transactionRecord(saved, context.members.find(member => member.id === input.actorUserId)!.name) };
+    return { ok: true, transaction: transactionRecord(saved, members.find(member => member.id === input.actorUserId)!.name) };
   }
 
   if (input.action === "deleteTransaction") {

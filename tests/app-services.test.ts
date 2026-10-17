@@ -5,6 +5,7 @@ import { createAppService } from "../lib/app-service";
 import type { AppStore } from "../lib/app-store";
 import { parseAppActionInput } from "../lib/app-input";
 import type { AppUser, DefaultRule } from "../lib/types";
+import { resolveTransactionSplit } from "../lib/app-services/splits";
 
 const user: AppUser = { id: "a", email: "a@example.com", name: "A", imageUrl: null };
 const workspaceId = "00000000-0000-4000-8000-000000000001";
@@ -18,7 +19,9 @@ function fixture(overrides: Partial<AppStore> = {}) {
   const calls: { name: string; args: unknown[] }[] = [];
   const methods: Partial<AppStore> = {
     requireWorkspaceMember: async () => ({ id: workspaceId, name: "QA", type: "SHARED" }),
-    splitContext: async () => ({ members, rules: [rule] }),
+    splitMembers: async () => members,
+    splitRules: async () => [rule],
+    ruleForUpdate: async () => rule,
     ...overrides,
   };
   const store = new Proxy({} as AppStore, {
@@ -63,18 +66,18 @@ test("通常保存はDB確定値のDTOと担当者名を返し、個人費既定
     id: transactionId, occurredAt: "2026-10-10T00:00:00.000Z", merchant: "店", method: "現金", type: "PAYMENT", amountYen: 300,
     actorUserId: "a", actorName: "A", expenseClass: "SHARED", splitWeights: { a: 5, b: 2 }, settledAt: null, externalId: "manual_id", source: "MANUAL", memo: "保存メモ",
   } });
-  assert.deepEqual(f.calls[2].args[2], { expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } });
-  assert.match(String(f.calls[2].args[3]), /^[a-f0-9-]{36}$/);
+  assert.deepEqual(f.calls[3].args[2], { expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } });
+  assert.match(String(f.calls[3].args[3]), /^[a-f0-9-]{36}$/);
 });
 
 test("更新で割合省略時は保存済み共有割合を継承し、明示割合では以前の明細を取得しない", async () => {
   const f = fixture({ previousTransaction: async () => ({ expense_class: "SHARED", actor_user_id: "a", split_weights: { a: 5, b: 2 } }), updateTransaction: async () => savedRow() });
   await f.execute({ ...save, transactionId });
-  assert.deepEqual(f.calls.map(call => call.name), ["requireWorkspaceMember", "splitContext", "previousTransaction", "updateTransaction"]);
+  assert.deepEqual(f.calls.map(call => call.name), ["requireWorkspaceMember", "previousTransaction", "splitMembers", "updateTransaction"]);
   assert.deepEqual(f.calls[3].args[2], { expenseClass: "SHARED", splitWeights: { a: 5, b: 2 } });
   f.calls.length = 0;
   await f.execute({ ...save, transactionId, expenseClass: "SHARED", splitWeights: { a: 1, b: 4 } });
-  assert.deepEqual(f.calls.map(call => call.name), ["requireWorkspaceMember", "splitContext", "updateTransaction"]);
+  assert.deepEqual(f.calls.map(call => call.name), ["requireWorkspaceMember", "splitMembers", "updateTransaction"]);
   assert.deepEqual(f.calls[2].args[2], { expenseClass: "SHARED", splitWeights: { a: 1, b: 4 } });
 });
 
@@ -84,7 +87,7 @@ test("担当者変更した個人費は旧担当者の割合を継承せず、�
   assert.deepEqual(f.calls[3].args[2], { expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } });
   const invalid = fixture();
   await assert.rejects(invalid.execute({ ...save, actorUserId: "outsider" }), /参加していません/);
-  assert.equal(invalid.calls.length, 2);
+  assert.equal(invalid.calls.length, 3);
 });
 
 test("清算済み/消失明細の更新・削除失敗と、清算済みでも可能なメモ更新の応答を維持する", async () => {
@@ -97,9 +100,9 @@ test("清算済み/消失明細の更新・削除失敗と、清算済みでも�
 test("ルール更新は同分類で省略した割合とenabledを保持し、対象消失を拒否する", async () => {
   const f = fixture({ updateRule: async () => true });
   assert.deepEqual(await f.execute({ action: "updateRule", workspaceId, ruleId, merchantContains: "新店", expenseClass: "SHARED" }), { ok: true });
-  assert.deepEqual(f.calls[2].args[1], rule.splitWeights);
-  assert.equal((f.calls[2].args[2] as DefaultRule).enabled, false);
-  const missing = fixture({ splitContext: async () => ({ members, rules: [] }) });
+  assert.deepEqual(f.calls[3].args[1], rule.splitWeights);
+  assert.equal((f.calls[3].args[2] as DefaultRule).enabled, false);
+  const missing = fixture({ ruleForUpdate: async () => null });
   await assert.rejects(missing.execute({ action: "updateRule", workspaceId, ruleId, merchantContains: "店", expenseClass: "SHARED" }), /ルールがありません/);
   const gone = fixture({ updateRule: async () => false });
   await assert.rejects(gone.execute({ action: "updateRule", workspaceId, ruleId, merchantContains: "店", expenseClass: "SHARED" }), /ルールがありません/);
@@ -117,9 +120,103 @@ test("取込は共有費既定・有効ルールを使い、保存された件�
   const f = fixture({ persistPayPayImport: async () => ({ imported: 1, skipped: 2 }) });
   const item = { occurredAt: save.occurredAt, merchant: "店", method: "PayPay", amountYen: 300, actorUserId: "a", externalId: "123" };
   assert.deepEqual(await f.execute({ action: "bulkImport", workspaceId, fileName: "qa.csv", totalRows: 3, items: [item] }), { ok: true, imported: 1, skipped: 2 });
-  const persisted = f.calls[2].args[0] as { userId: string; items: unknown[] };
+  const persisted = f.calls[3].args[0] as { userId: string; items: unknown[] };
   assert.equal(persisted.userId, user.id);
   assert.deepEqual(persisted.items, [{ ...item, expenseClass: "SHARED", splitWeights: { a: 1, b: 3 } }]);
+});
+
+const activeRule: DefaultRule = { ...rule, enabled: true };
+const savedShared = { expense_class: "SHARED", actor_user_id: "a", split_weights: { a: 5, b: 2 } };
+const savedPersonal = { expense_class: "PERSONAL", actor_user_id: "a", split_weights: { a: 1, b: 0 } };
+const splitCases = [
+  { name: "新規の区分・割合省略は一致ルール", input: {}, expected: ["SHARED", { a: 2, b: 1 }], rules: true },
+  { name: "区分だけ省略した明示割合も区分のルールが必要", input: { splitWeights: { a: 1, b: 4 } }, expected: ["SHARED", { a: 1, b: 4 }], rules: true },
+  { name: "共有費の割合省略は一致ルール", input: { expenseClass: "SHARED" }, expected: ["SHARED", { a: 2, b: 1 }], rules: true },
+  { name: "共有費の区分・割合明示", input: { expenseClass: "SHARED", splitWeights: { a: 1, b: 4 } }, expected: ["SHARED", { a: 1, b: 4 }], rules: false },
+  { name: "個人費の割合省略", input: { expenseClass: "PERSONAL" }, expected: ["PERSONAL", { a: 1, b: 0 }], rules: false },
+  { name: "個人費の区分・割合明示", input: { expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } }, expected: ["PERSONAL", { a: 1, b: 0 }], rules: false },
+  { name: "保存済み共有費の区分・割合を継承", input: { transactionId }, previous: savedShared, expected: ["SHARED", { a: 5, b: 2 }], rules: false },
+  { name: "保存済み共有費は担当者変更でも割合を継承", input: { transactionId, actorUserId: "b" }, previous: savedShared, expected: ["SHARED", { a: 5, b: 2 }], rules: false },
+  { name: "保存済み個人費の区分・割合を継承", input: { transactionId }, previous: savedPersonal, expected: ["PERSONAL", { a: 1, b: 0 }], rules: false },
+  { name: "個人費の担当者変更で割合を再生成", input: { transactionId, actorUserId: "b" }, previous: savedPersonal, expected: ["PERSONAL", { a: 0, b: 1 }], rules: false },
+  { name: "共有費から個人費への変更で割合を再生成", input: { transactionId, expenseClass: "PERSONAL" }, previous: savedShared, expected: ["PERSONAL", { a: 1, b: 0 }], rules: false },
+  { name: "個人費から共有費への変更はルール割合", input: { transactionId, expenseClass: "SHARED" }, previous: savedPersonal, expected: ["SHARED", { a: 2, b: 1 }], rules: true },
+  { name: "既存でも割合明示・区分省略は前回値を読まずルール区分", input: { transactionId, splitWeights: { a: 4, b: 1 } }, expected: ["SHARED", { a: 4, b: 1 }], rules: true },
+];
+for (const scenario of splitCases) test(`割合取得の省略条件と保存値: ${scenario.name}`, async () => {
+  const f = fixture({ splitRules: async () => [activeRule], previousTransaction: async () => scenario.previous, insertTransaction: async () => savedRow(), updateTransaction: async () => savedRow() });
+  await f.execute({ ...save, ...scenario.input });
+  const writes = f.calls.filter(call => ["insertTransaction", "updateTransaction"].includes(call.name));
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].args[2], { expenseClass: scenario.expected[0], splitWeights: scenario.expected[1] });
+  assert.equal(f.calls.filter(call => call.name === "splitRules").length, Number(scenario.rules));
+  assert.deepEqual(f.calls[0], { name: "requireWorkspaceMember", args: [workspaceId, user.id] });
+  assert.equal(f.calls.filter(call => call.name === "splitMembers").length, 1);
+});
+
+test("明示値で確定する経路ではルールの参照・判定をせず参加者と割合を検証する", async () => {
+  const context = { members, get rules(): DefaultRule[] { throw new Error("不要なルール参照"); } };
+  assert.deepEqual(resolveTransactionSplit({ merchant: "店", actorUserId: "a", expenseClass: "PERSONAL" }, context), { expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } });
+  assert.deepEqual(resolveTransactionSplit({ merchant: "店", actorUserId: "a", expenseClass: "SHARED", splitWeights: { a: 2, b: 1 } }, context), { expenseClass: "SHARED", splitWeights: { a: 2, b: 1 } });
+  for (const input of [{ actorUserId: "outsider", splitWeights: { a: 1, b: 1 } }, { actorUserId: "a", splitWeights: { a: 1, outsider: 1 } }, { actorUserId: "a", splitWeights: { a: 0, b: 0 } }]) {
+    const f = fixture();
+    await assert.rejects(f.execute({ ...save, expenseClass: "SHARED", ...input }), /参加していません|参加者が一致|少なくとも/);
+    assert.deepEqual(f.calls.map(call => call.name), ["requireWorkspaceMember", "splitMembers"]);
+  }
+  const f = fixture();
+  assert.throws(() => f.execute({ ...save, splitWeights: null }));
+  assert.equal(f.calls.length, 0);
+});
+
+test("省略値は有効・部分一致・優先順を維持し、明示共有費では個人費ルールよりworkspace割合を使う", async () => {
+  const rules: DefaultRule[] = [{ ...activeRule, id: "later", sortOrder: 2 }, { ...activeRule, id: "first", merchantContains: "店", sortOrder: 1, splitWeights: { a: 3, b: 2 } }, { ...rule, sortOrder: 0 }];
+  const f = fixture({ splitRules: async () => rules, insertTransaction: async () => savedRow() });
+  await f.execute({ ...save, merchant: "支店の店" });
+  assert.deepEqual(f.calls.at(-1)!.args[2], { expenseClass: "SHARED", splitWeights: { a: 3, b: 2 } });
+  const personal = fixture({ splitRules: async () => [{ ...activeRule, expenseClass: "PERSONAL", splitWeights: null }], insertTransaction: async () => savedRow() });
+  await personal.execute({ ...save, expenseClass: "SHARED" });
+  assert.deepEqual(personal.calls.at(-1)!.args[2], { expenseClass: "SHARED", splitWeights: { a: 1, b: 3 } });
+});
+
+for (const action of ["createRule", "updateRule"]) for (const scenario of [
+  { name: "共有割合省略", expenseClass: "SHARED", expected: action === "updateRule" ? rule.splitWeights : null },
+  { name: "共有割合null", expenseClass: "SHARED", splitWeights: null, expected: null },
+  { name: "共有割合明示", expenseClass: "SHARED", splitWeights: { a: 4, b: 1 }, expected: { a: 4, b: 1 } },
+  { name: "個人費へ変更", expenseClass: "PERSONAL", expected: null },
+  { name: "個人費null", expenseClass: "PERSONAL", splitWeights: null, expected: null },
+]) test(`ルールの限定取得と割合補完: ${action} ${scenario.name}`, async () => {
+  const f = fixture({ createRule: async () => {}, updateRule: async () => true });
+  await f.execute({ action, workspaceId, ruleId, merchantContains: "店", ...scenario });
+  assert.ok(!f.calls.some(call => call.name === "splitRules"));
+  const write = f.calls.at(-1)!;
+  assert.equal(write.name, action);
+  assert.deepEqual(write.args[action === "createRule" ? 2 : 1], scenario.expected);
+  if (action === "updateRule") {
+    assert.deepEqual(f.calls[2], { name: "ruleForUpdate", args: [workspaceId, ruleId] });
+    assert.equal((write.args[2] as DefaultRule).enabled, false);
+  } else assert.deepEqual(f.calls.map(call => call.name), ["requireWorkspaceMember", "splitMembers", "createRule"]);
+});
+
+test("ルールの未知参加者と個人費の明示割合を保存前に拒否する", async () => {
+  for (const action of ["createRule", "updateRule"]) for (const input of [
+    { expenseClass: "SHARED", splitWeights: { a: 1, outsider: 1 } },
+    { expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } },
+  ]) {
+    const f = fixture();
+    await assert.rejects(f.execute({ action, workspaceId, ruleId, merchantContains: "店", ...input }), /参加者が一致|個人費ルール/);
+    assert.ok(!f.calls.some(call => call.name === "createRule" || call.name === "updateRule" || call.name === "splitRules"));
+  }
+});
+
+test("ルール更新は共有割合nullの継承と個人費から共有費への変更・enabled明示を維持する", async () => {
+  for (const previous of [{ ...rule, splitWeights: null }, { ...rule, expenseClass: "PERSONAL" as const, splitWeights: null }]) {
+    const f = fixture({ ruleForUpdate: async () => previous, updateRule: async () => true });
+    await f.execute({ action: "updateRule", workspaceId, ruleId, merchantContains: "店", expenseClass: "SHARED", enabled: true });
+    const write = f.calls.at(-1)!;
+    assert.equal(write.args[1], null);
+    assert.equal((write.args[0] as { enabled: boolean }).enabled, true);
+    assert.equal((write.args[2] as { enabled: boolean }).enabled, false);
+  }
 });
 
 test("招待は正規化メールとtokenハッシュのみ保存し、承認は宛先と人数を確認する", async () => {
