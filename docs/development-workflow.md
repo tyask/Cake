@@ -48,11 +48,13 @@ CLIがpushしてdraft PRを作成/更新する。remoteとPRの完全SHAが検�
 
 | 対象 | 自動で行う操作 |
 | --- | --- |
-| 初回Deployment | provisioningとapplicationの最大2回の作成要求。provisioningはNative準備後、DB接続前guardでERRORとなる設計。applicationがREADYになることを確認する |
+| 初回Deployment | provisioningとapplicationの最大2回の作成要求。provisioningはNative準備を起動し、DB接続・migration・seed・アプリのFunctionを持たない静的な準備中ページを生成してREADYになる。専用DB照合後のapplicationがREADYになった時点で検証可能とする |
 | 専用DB | PR branchに対応するNative child branchとread-write endpointを準備。親・所属・作成時刻・世代・endpointを照合する |
 | 初期化 | 専用DBの所有権marker、番号順migration・適用履歴、QAユーザーA/B・共有workspace・membershipのseed |
 | 同PRの更新 | 同じDB/endpoint/generationを維持し、未適用migrationとbuildを実行。初回seed済みのデータ・ユーザー名・権限を上書きしない |
-| PR merge/close | 紐づく全Deployment（失敗した準備用を含む）と専用DB/endpointを削除 |
+| PR merge/close | 紐づく全Deployment（準備用・旧版・失敗したものを含む）と専用DB/endpointを削除 |
+
+準備用のREADYだけではPreview完成とせず、statusは現在HEADのapplicationだけを返す。準備用の対象・branch/SHA・世代・本番host digestが不明なら静的生成も停止し、準備用でDB接続ガードを緩めない。静的成果物は既存Next.js builderが受け取るBuild Output API v3形式で `.next/output` に生成し、通常アプリのbuild前に `.next/output` と `.vercel/output` を除去する。準備用はルートのGET/HEADだけを表示し、API・ログイン・他のパスやPOSTは404となる。準備用の生成自体が失敗した場合はエラーとして止める。
 
 Native連携で生成される実資源数は作成後に照合する。別PR・本番endpointとの一致、DB消失、複数世代、未管理の同名branchでは停止する。空DBまたは承認済みの完全一致fixtureだけを初期化し、既存markerを別PRへ付け替えない。本番接続文字列をPreviewへ渡さず、Previewは `CAKE_TEST_DATABASE_URL` を使う。
 

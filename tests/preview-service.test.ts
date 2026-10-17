@@ -6,7 +6,7 @@ import { PreviewService } from '../scripts/preview-service';
 const sha='a'.repeat(40), generation='10000000-0000-4000-8000-000000000001', operation='20000000-0000-4000-8000-000000000002';
 const s:Source={pr:71,branch:'codex/test-preview',sha,createdAt:'2026-10-15T00:00:00Z',state:'open'};
 function fixture(initial=false) {
-  let state='open', lost=false, unknownCreate=false, failDelete=false, deploymentCounter=0;
+  let state='open', lost=false, unknownCreate=false, failDelete=false, deploymentCounter=0, provisionState='READY';
   const writes:{provider:string,path:string,method:string,body:unknown}[]=[], deployments:Record<string,unknown>[]=[], branches:Record<string,unknown>[]=[], endpoints:Record<string,unknown>[]=[];
   const parent={id:config.neonParentBranchId,project_id:config.neonProjectId};
   const branch={id:'br-child',project_id:config.neonProjectId,name:`preview/${s.branch}`,parent_id:parent.id,default:false,protected:false,created_at:'2026-10-16T00:00:01Z'};
@@ -14,7 +14,7 @@ function fixture(initial=false) {
   const make=(body:Record<string,unknown>,phase:string)=>{
     const value={id:`dpl_test${++deploymentCounter}`,url:`cake-test${deploymentCounter}.vercel.app`,projectId:config.vercelProjectId,target:null,
       gitSource:{type:'github',repoId:config.repositoryId,ref:s.branch,sha},meta:body.meta,
-      createdAt:Date.parse('2026-10-16T00:00:00Z'),readyState:phase==='provisioning'?'ERROR':'READY'};
+      createdAt:Date.parse('2026-10-16T00:00:00Z'),readyState:phase==='provisioning'?provisionState:'READY'};
     deployments.push(value);return value;
   };
   const api:Transport=async(provider,path,method='GET',body,missing=false)=>{
@@ -51,7 +51,7 @@ function fixture(initial=false) {
   };
   if(initial){make({meta:{cakePreviewProtocol:protocol,cakePreviewRepository:config.repository,cakePreviewPr:'71',cakePreviewGeneration:generation,cakePreviewOperation:operation,cakePreviewPhase:'provisioning'}},'provisioning');branches.push(branch);endpoints.push(endpoint);}
   return {service:new PreviewService(new PreviewProvider(api),async()=>{}),api,writes,deployments,branches,endpoints,
-    close:()=>{state='closed';return {...s,state:'closed' as const};},lose:()=>{lost=true;},unknown:()=>{unknownCreate=true;},failDelete:()=>{failDelete=true;}};
+    close:()=>{state='closed';return {...s,state:'closed' as const};},lose:()=>{lost=true;},unknown:()=>{unknownCreate=true;},failDelete:()=>{failDelete=true;},failProvision:(value:string)=>{provisionState=value;}};
 }
 test('Native provisioning precedes the application; no DB credential or fixed alias is sent',async()=>{
   const f=fixture();const r=await f.service.deploy(s,operation);
@@ -59,8 +59,21 @@ test('Native provisioning precedes the application; no DB credential or fixed al
   const creates=f.writes.filter(w=>w.method==='POST');assert.equal(creates.length,2);
   const first=creates[0].body as {env:Record<string,string>}, second=creates[1].body as {env:Record<string,string>};
   assert.equal(first.env.CAKE_PREVIEW_DATABASE_HOST_SHA256,'');assert.match(second.env.CAKE_PREVIEW_DATABASE_HOST_SHA256,/^[a-f0-9]{64}$/);
+  assert.equal(f.deployments[0].readyState,'READY');
   assert.ok(!JSON.stringify(creates).includes('CAKE_TEST_DATABASE_URL'));assert.ok(!f.writes.some(w=>w.path.includes('alias')));
   const again=await f.service.deploy(s,'30000000-0000-4000-8000-000000000003');assert.equal(again.deployment?.id,r.deployment?.id);assert.equal(f.writes.length,2);
+});
+test('a READY preparation alone is not a usable application Preview',async()=>{
+  const f=fixture(true),r=await f.service.status(s);
+  assert.equal(r.deployment,undefined);assert.equal(r.database?.branchId,'br-child');assert.equal(f.writes.length,0);
+});
+test('a failed or canceled preparation stops before creating the application',async()=>{
+  for(const state of ['ERROR','CANCELED']) {
+    const f=fixture();f.failProvision(state);
+    await assert.rejects(f.service.deploy(s,operation),/PROVISIONING_BUILD_FAILED/);
+    assert.equal(f.writes.length,1);assert.equal(f.deployments.length,1);
+    assert.ok(!f.writes.some(w=>w.provider==='neon'));
+  }
 });
 test('an uncertain create is never retried by the same run or a resumed run with no provider evidence',async()=>{
   const f=fixture();f.unknown();await assert.rejects(f.service.deploy(s,operation),/RESPONSE_UNKNOWN/);assert.equal(f.writes.length,1);
@@ -88,4 +101,22 @@ test('foreign PR ownership, production deployment and protected parent are rejec
     const f=fixture(true);Object.assign(f.deployments[0],change);await assert.rejects(f.service.deploy(s,operation));assert.equal(f.writes.length,0);
   }
   const f=fixture(true);f.branches[0].id=config.neonParentBranchId;await assert.rejects(f.service.deploy(s,operation),/DATABASE_IDENTITY/);assert.equal(f.writes.length,0);
+});
+test('専用DBの親・所属・保護・endpoint・重複が不正ならapplicationを作らない',async()=>{
+  const changes = [
+    (f:ReturnType<typeof fixture>)=>{f.branches[0].parent_id='br-other-parent';},
+    (f:ReturnType<typeof fixture>)=>{f.branches[0].project_id='other-project';},
+    (f:ReturnType<typeof fixture>)=>{f.branches[0].protected=true;},
+    (f:ReturnType<typeof fixture>)=>{f.branches[0].default=true;},
+    (f:ReturnType<typeof fixture>)=>{f.endpoints[0].project_id='other-project';},
+    (f:ReturnType<typeof fixture>)=>{f.endpoints[0].type='read_only';},
+    (f:ReturnType<typeof fixture>)=>{f.endpoints[0].branch_id='br-other';},
+    (f:ReturnType<typeof fixture>)=>{f.branches.push({...f.branches[0],id:'br-duplicate'});},
+    (f:ReturnType<typeof fixture>)=>{f.endpoints.push({...f.endpoints[0],id:'ep-duplicate'});},
+  ];
+  for(const change of changes) {
+    const f=fixture(true);change(f);
+    await assert.rejects(f.service.deploy(s,operation),/DATABASE_/);
+    assert.equal(f.writes.length,0);
+  }
 });
