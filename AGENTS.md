@@ -1,23 +1,37 @@
 # Cake の開発ルール
 
-開発・PR作成・QA操作の前に、[開発・QA運用手順](docs/development-workflow.md)を読む。標準の開発環境はWindowsネイティブの専用clone/worktreeとし、PowerShellでは `npm.cmd` / `npx.cmd` を使う。既存gh認証を再利用し、必要なPATHの補完は当該プロセスだけに限定する。
+## 開始と実行環境
 
-Windowsの保存済みVercel資格情報と正式QAは[Windows QA資格情報・実行手順](docs/windows-qa-credentials.md)を読む。`npm.cmd run qa:windows -- status` → `preflight` → 対象PR・完全SHA・Deployment・DB・generationを明示した `verify` の順で確認する。保存先はGit外の `%LOCALAPPDATA%\CakeQa\vercel-token.dpapi.json`。既存ファイルを変更せず、DPAPI CurrentUserと本人だけのACLを検査してQA専用子プロセスに限定供給する。未保存・失効時は停止し、トークン作成・伏字入力・保存確認は本人が行う。値をチャット・ログ・環境ファイルへ出さない。実QAにはテスト認証と、初回workspace・OWNER membership作成を含むDB書込範囲の承認が必要。
+開発・PR操作・QAの前に[開発・QA運用手順](docs/development-workflow.md)を読む。WSL2ではLinux版Node.js 24・npm・Git・gh・Playwright Chromiumを使う。[WSL手順](docs/wsl-development.md)で実行環境と認証を確認する。Windowsネイティブでも開発でき、PowerShellでは `npm.cmd` / `npx.cmd` を使う。
 
-QAはCake単体で運用する。PRごとのVercel Deployment固有URLとNeon Native Preview DBを使う。Cannele、固定QA URL、QA枠、旧台帳・旧Actions方式へのfallbackは使わない。
+最新 `origin/main` から `npm run task:start -- <task-name>` で `codex/<task-name>` と専用worktreeを作る。既存の未コミット変更を保持し、worktreeごとに `node_modules`・`.next`・`.cake`・環境ファイルを分離する。WindowsとWSLで作業ディレクトリや資格情報を共有・コピーしない。npm/Playwrightのキャッシュは同じ実行環境内で共有できる。
 
-Actionsの結果は専用stepの標準notice annotationから受け取り、artifact取得や外部relay、`checks: write`を必要としない。WindowsのCLIも既存gh本人認証でこの経路を使う。通常CI・Preview/DB管理・close時cleanupはActionsに残し、receiptの欠落・重複・不一致では停止する。
+機能・UI・API・DBを変更する際は[基本設計](docs/design.html)と[詳細設計](docs/detail-design.html)を確認し、仕様・運用の変更を関連文書へ反映する。文書には現在の仕様・手順だけを残す。個別PRの経緯、日時付き受入記録、廃止済み方式の説明はPR本文・検証結果に記録する。
 
-実装と追加テストを同じ開発ブランチへcommitし、その完全SHAの前後一致とclean状態を確認してWindowsでlint・型検査・回帰テスト・buildを行い、結果付きdraft PRを作る。テストを先にmainへmergeする必要はない。worktreeごとに `node_modules`・`.next`・`.cake`・環境ファイルを分離し、npm/Playwrightのキャッシュは共有できる。追跡テキストは `.gitattributes` のLFを維持し、globalのGit・PATH・セキュリティ設定やNodeを自動変更しない。
+## 言語と検証結果
 
-ローカルの `qa:verify` は維持する。Actionsで既存Previewを検証する `qa:verify:ci` は、最新mainとHEADが一致するcleanなcontrol checkoutから対象PR・完全SHA・Deployment IDを明示し、独立した `preview-verify.config.json` capabilityを照合して実行する。信頼済みmainだけをcheckoutし、provider管理APIはGETだけに制限する。ブラウザの `GET /api/app` は所属workspaceが0件なら初期workspace・membershipをINSERTし得るため、HTTP GETだけを根拠にDB無変更と扱わない。
+PRのタイトル・本文・コメント・レビューコメント・検証報告は日本語で書く。コマンド、識別子、protocol名、エラーコード、引用するログは原文を保持できる。
 
-Actions検証の成功だけではPRをReadyにしない。control側の `.cake/verify-<PR>.json` を `task:pr --remote-proof <path>` で再照合し、現在HEADのCIと検証証拠が一致することを確認する。新CLIを持たない古い対象PRには、最新mainのcleanなcontrol checkoutから任意の `--target-worktree <path>` を併用する。この指定はremote proof必須・非draft時だけ許可し、controlの最新main/capabilityと対象worktreeのcleanな専用branch/HEADを照合する。対象PRの旧コードは実行せず、Git/ghの管理操作だけを行う。既存のローカル証拠と `task:pr` の既定動作は変更しない。
+実装と関連テストを同じbranchにcommitし、最終SHAでlint・型チェック・自動テスト・buildを実行する。前後で完全SHA一致とclean状態を確認する。文書だけの変更ではリンク・コマンド・現行実装との整合性を確認し、機能テストの再実施は必要性に応じて判断する。
 
-機能・UI・API・DBを変更する際は、関連する[基本設計](docs/design.html)と[詳細設計](docs/detail-design.html)を確認する。仕様・運用の変更はこれらと運用手順へ反映する。
+報告は成功・失敗・未実施を分け、実行環境・版・完全SHA・所要時間・件数・残った資源を記録する。DB不要の自動テスト、ローカルCake、実Previewの画面移動、業務データの追加・編集・削除を区別する。件数や過去の成功を今回の検証結果として流用しない。
 
-最新mainから `npm.cmd run task:start -- <task-name>` で専用worktreeを作る。利用者の依頼範囲を守り、未コミット変更を保持する。同一repositoryの `codex/*` からmainへのPR作成・更新・再openで専用Previewを自動作成・更新する。PR未作成のpushだけではPreviewを作らない。`deploy:preview` は手動経路として維持し、Windowsでは共通ランチャー `qa:windows -- verify` から正式な `qa:verify` と同じブラウザ検証を行う。検証実装のSHAと対象runtimeのSHAを区別し、前後の対象照合を省略しない。既存Chromeの目視確認とPlaywrightの正式な検証証拠を区別し、Readyは現行の同SHA・CI・Preview/DB照合を満たして明示依頼時だけ進める。mainへのmergeとProductionの手動操作も利用者の明示依頼時だけ行う。
+## PRと自動Preview
 
-自動Previewの導入・有効化は、対象team/project、初回専用DBのmigration/seed、以後のPR更新時の同DBへのmigrationを含む継続的な実資源操作として承認を得て行う。導入後の対象PR作成・更新はこの処理を自動起動する。実Deployment・DBの作成/更新・資源削除は、対象と影響が利用者に承認されている範囲で行う。未承認なら実行前に確認する。draft PR作成の依頼を資源操作の許可と扱わない。PRのmerge/closeはmainのcleanupによる削除を起動し得るため、無断で実行しない。
+同一repositoryの `codex/*` からmainへのPR作成・更新・再openは、draftを含めて専用Preview・Neon Native DBの作成/更新とmigration/seedを自動起動する。PR未作成のpushだけではPreviewを作らない。Vercel Git連携の `**: false` / `main: true` は維持し、管理処理は信頼済みmainのActionsだけで実行する。
 
-アプリ説明とローカルセットアップは[README](README.md)を参照する。
+PR作成・更新前に、対象と自動資源操作の影響が依頼の承認範囲に含まれることを確認する。承認済みの操作は再確認せず進める。文書変更でも同じ自動化が起動する。main mergeはProduction deploy、PR merge/closeは専用Deployment・DBのcleanupを起動するため、対象と削除影響が承認されていない操作は行わない。
+
+通常CI・Preview/DB管理・cleanupはActionsを使い、結果は標準noticeの正式receiptから受け取る。対象PR・完全SHA・Deployment・固有URL・DB branch/endpoint・generationを検証前後に照合する。欠落・重複・不一致・応答不明では停止し、盲目的な再deployや削除をしない。削除完了はcleanup成功だけで判断せず、対象IDの直接GETによる不在確認とprovider一覧の再照合で確認する。Neon資格情報がWSLにない場合は、資格情報をコピーせずActions内の直接照合と後続statusの正式receiptを使う。
+
+## ブラウザと資格情報
+
+WSLでは[WSL手順](docs/wsl-development.md)、Windowsでは[Windows QA資格情報・実行手順](docs/windows-qa-credentials.md)を使う。既存本人認証を使い、未認証・失効時のログインは本人に依頼する。provider token・OIDC・Cookieをチャット・ログ・コマンド引数・Git・環境ファイル・検証artifactへ出さない。Vercel資格情報はQA処理のメモリ内で扱い、Git/gh子プロセスには渡さない。
+
+OIDCは同一project/team・development・有効期限を確認し、redirectを含めて対象originだけへ付ける。TLS検証と保護設定を維持し、CA・proxy・権限・global PATH/Git設定は変更しない。WSLからWindowsの `qa:windows` やtoken受渡しexeを使わない。
+
+通常の正式ブラウザ検証はPC/mobile × A/Bログインと画面移動・session/app GET・runtime proofを確認する。認証後のホーム/ `GET /api/app` はworkspaceが0件なら個人workspace・OWNER membershipをINSERTし得るため、GETだけを根拠にDB無変更と扱わない。明細追加などの業務更新は別途依頼された範囲で、識別できるテストデータだけを対象にし、削除と残存件数まで確認する。
+
+Codexは現在HEADのCI、変更内容に必要な検証、差分の自己レビューを完了し、未解決の不具合・競合・検証不足がなくマージ可能と判断したら、追加確認を待たずPRをReadyにする。利用者がdraft維持を指定した場合は従う。Ready直前にHEADと証拠を再照合し、完了後はこのチャットでPRリンク・判断理由・検証結果・未実施項目・残る資源を日本語で通知し、PR本文も更新する。条件未達ならdraftを維持し、阻害要因を報告する。マージ・closeは依頼された範囲で別に判断する。
+
+アプリ変更は現在HEADに対応する正式ブラウザ証拠を必要とする。Actions検証は `qa:verify:ci`、別checkoutからのReady管理は `task:pr --remote-proof ... --target-worktree ...` を使う。AGENTS.md・README.md・docs配下だけの文書変更は、差分・リンク・コマンド・現行実装との整合性をレビューし、現在HEADのCIと自動Preview/statusを確認したうえで、ブラウザ再検証を省略する理由を記録して `gh pr ready` を使える。CLIのブラウザ証拠チェックを省略するオプションは追加しない。詳細は開発手順を参照する。

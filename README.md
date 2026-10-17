@@ -24,7 +24,7 @@
 
 次回予定は設定日とサーバーの日本時間から決めます。その月の設定日の09:00より前はその月、09:00以降は翌月です。たとえば10/9に10日を指定した場合は10/10、9日を指定した場合は08:59まで10/9、09:00以降は11/9です。追加履歴は参照しません。設定日の変更によって同じ月に複数回追加されることを許容します。一覧では、停止中・要確認の次回予定を表示しません。画面を開いたままでも09:00に一覧とフォームの予定を更新します。
 
-007〜009を現在の仕様に合わせ、新規DBの定期設定には開始日カラム `start_on` を作成しません。従来の変更予約は009で現在設定へ反映し、適用済みのPreview DBに残る開始日カラムは010で削除します。011で既存設定に処理予定日 `next_scheduled_on` を追加し、設定日と適用時刻の09:00境界から初期化します。旧成功月・適用月・変更予約の列は新しい画面・API・予定判定では使用しません。定期支払いはこのPRで初めて本番へ公開するため、公開中の本番アプリは削除する開始日カラムを参照していません。
+定期支払いは現在の設定と処理予定日 `next_scheduled_on` を管理します。DBの初期化・更新は番号付きmigrationを順に適用する `db:setup` で行います。
 
 Vercel Cronは `0 0 * * *`（UTC毎日00:00、日本時間09:00ごろ）で、当日が予定日の有効設定だけを処理します。29〜31日がない月は月末に追加します。Hobbyでは09:00〜09:59のように実行時刻に幅があります。[Vercelのスケジュール精度](https://vercel.com/docs/cron-jobs/usage-and-pricing)
 
@@ -34,9 +34,9 @@ Vercel Cronは `0 0 * * *`（UTC毎日00:00、日本時間09:00ごろ）で、�
 
 失敗分・Cronが動かなかった日の分は自動補完しません。設定日の09:00以降に保存・再開すると処理予定日は翌月です。必要な未登録分は通常の明細追加で登録してください。生成済み明細には「定期」と表示し、通常の編集・清算・集計に含めます。
 
-Productionの環境変数へ `CRON_SECRET` を設定してから、この機能を含むPRをマージしてください。16文字以上のランダムな値をVercel上で設定し、Git・PR・ログへ保存しません。未設定・Bearer不一致のCronリクエストは401で拒否します。[VercelのCron認証](https://vercel.com/docs/cron-jobs/manage-cron-jobs)
+Productionで定期実行を使うには、環境変数へ `CRON_SECRET` を設定してください。16文字以上のランダムな値をVercel上で設定し、Git・PR・ログへ保存しません。未設定・Bearer不一致のCronリクエストは401で拒否します。[VercelのCron認証](https://vercel.com/docs/cron-jobs/manage-cron-jobs)
 
-開始・登録成功・省略・失敗・終了は `recurring.*` の構造化サーバーログで確認できます。失敗時は固定のエラーコードと対象設定IDを記録し、金額・取引先・メモ・SQL本文・認証情報は記録しません。「要確認」は支払者・実行承認者・正の割合を持つ参加者の利用不可などで停止した設定です。原因を修正して再開してください。再開時の設定日と時刻から次の処理予定日を決めます。共通ログ画面は今回の機能に含めません。
+開始・登録成功・省略・失敗・終了は `recurring.*` の構造化サーバーログで確認できます。失敗時は固定のエラーコードと対象設定IDを記録し、金額・取引先・メモ・SQL本文・認証情報は記録しません。「要確認」は支払者・実行承認者・正の割合を持つ参加者の利用不可などで停止した設定です。原因を修正して再開してください。再開時の設定日と時刻から次の処理予定日を決めます。アプリ内の共通ログ画面は設けていません。
 
 Previewには定期実行を期待せず、テストログイン中の `POST /api/recurring-payments/run` に `{ "workspaceId": "対象UUID" }` を送って当日予定を検証します。本人が参加するテストworkspaceに限り、日時を指定する入力は受け付けません。Production・Google認証では404になります。設定日の09:00以降に新規保存した設定は翌月予定のため、このAPIを呼んでも当日分は追加しません。固定日時による09:00境界・月末・即時変更/再開・設定日変更後の月内複数登録・同時実行・失敗時ロールバックのDB回帰は、対象タスクの `CAKE_TEST_DATABASE_URL` を設定して `npx tsx scripts/verify-recurring-payments.ts` で実行します。スクリプトは新規の検証データだけを作成・削除し、環境ファイルや本番の `DATABASE_URL` を読み込みません。
 
@@ -93,29 +93,25 @@ DB_SLOW_QUERY_MS=1000
 
 ## ローカルセットアップ
 
-### WindowsでDB接続なしの検証
+### DB接続なしの開発・テスト
 
-Windows側に独立したCake cloneを置き、Node.js 24・npm・Git・既存認証済みghを使います。WSLのフォルダをWindowsのNodeで変更しません。2026-10-17にはWindowsのNode 24.13.0でlint・型検査・366回帰テスト・buildと公式Chromiumのローカルfixtureが成功しました。CIはNode 24.19.0を使うため版は記録し、更新は別作業として扱います。
+WSL2/LinuxまたはWindowsネイティブで、Node.js 24・npm・Git・既存本人認証済みgh・公式Playwright Chromiumを使います。OSごとに独立したclone/worktreeを用意し、依存・build成果物・環境ファイル・資格情報を混ぜません。
 
-PowerShellでは実行ポリシーを変更せず `npm.cmd` / `npx.cmd` を使います。ghがPATHにない場合は、既存のインストール先を確認して当該ターミナルだけへ追加します。次は標準の配置先の場合です。新しい認証・secret・グローバルPATH設定は不要です。
+- WSLは[WSL開発・ブラウザ検証](docs/wsl-development.md)でLinux版ツール・認証・実行方法を確認してください。
+- WindowsのPowerShellは `npm.cmd` / `npx.cmd` を使います。QAの認証は[Windows QA手順](docs/windows-qa-credentials.md)を参照してください。
 
-```powershell
-if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-  $env:Path = "C:\Program Files\GitHub CLI;$env:Path"
-}
-node --version
-gh auth status
-npm.cmd ci
-npx.cmd playwright install chromium
-npm.cmd run lint
-npx.cmd tsc --noEmit
-npm.cmd test
-npm.cmd run build
+```bash
+npm ci
+npx --no-install playwright install chromium
+npm run lint
+npx --no-install tsc --noEmit
+npm test
+npm run build
 ```
 
-`npm test`はローカルfixture・PGlite・スタブ等を使い、実DBへ接続しません。Chromiumのfixtureテストも含みますが、localhostでCake全体を起動するE2Eや実PreviewのA/B検証とは別です。追跡テキストのLFは `.gitattributes`、一時Git fixtureはテスト内のGit設定で保証します。globalの `core.autocrlf` は変更しません。タスクごとの専用worktreeと同SHAの最終検証は[開発・QA運用手順](docs/development-workflow.md)に従ってください。
+`npm test` はローカルfixture・PGlite・スタブ等を使い、実DBへ接続しません。Chromium fixtureも実Cake全体のE2Eとは別です。最終commitのSHA・clean状態・各コマンドの時間を記録します。文書だけの変更はリンク・コマンド・実装との整合性を確認し、必要な検証を選びます。CIのNode版は `.github/workflows/ci.yml` を参照してください。
 
-以下は実アプリをlocalhostで起動する場合の追加準備です。通常の回帰テストの前提ではありません。隔離したDB・認証設定とmigration/seedが必要になるため、承認された対象・操作だけを実行し、他環境の環境ファイルや資格情報をコピーしません。
+以下はlocalhostでCake全体を起動する場合の追加準備です。ログイン後の操作には承認された隔離DB・認証設定・migration/seedが必要です。通常の回帰テストの前提ではなく、他環境から資格情報をコピーしません。既存Previewの検証は[開発手順](docs/development-workflow.md)に従ってください。
 
 ### 1. Neonを作成
 
@@ -203,13 +199,9 @@ QAのDB初回照合・fixture・migration/seed・同PR更新時のデータ保�
 
 ## 開発・QA運用手順
 
-Windowsネイティブの専用worktreeで実装・追加テストを同じcommitに含め、同じSHAのローカル検証→draft PR（専用Preview自動作成）→Windowsの `qa:verify` →明示依頼後のReadyの順に進めます。詳細は [docs/development-workflow.md](docs/development-workflow.md) にまとめています。テストを先にmainへmergeする必要はありません。通常CI・Preview/DB管理とcleanupはActionsに残し、更新済みmainのcontrol checkoutからの `qa:verify:ci` は任意の代替経路として維持します。Actionsの結果は標準notice annotationを既存gh本人認証で読み取り、artifact取得や外部relayを使いません。
+専用worktreeで実装・関連テストを同じcommitに含め、ローカル検証→draft PR→自動Preview→変更に必要な検証・差分レビューの順に進めます。Codexが現在HEADをマージ可能と判断したら、追加確認を待たずReadyにし、このチャットで日本語で通知します。文書のみの変更の検証範囲とReady条件は開発手順を参照してください。PRのタイトル・本文・コメント・レビュー・検証報告は日本語で書きます。マージは依頼された範囲で別に行います。
 
-既存Chromeの直接操作は目視確認用で、Playwrightの正式な検証証拠とは分けます。2026-10-17にWindowsでPR #75のA/B × PC/mobile、16クリック、API・runtime観測12件、画像12枚と前後status照合が成功しました（全体114.178秒）。普段のChromeの直接操作で確認した範囲は、公開ページ操作とPreviewのログイン前表示です。この実機受入と、共通ランチャーを別PR・別PCで再現できることは分けて評価します。
-
-Windowsの正式QAには [保存済み資格情報と共通ランチャーの手順](docs/windows-qa-credentials.md)を使います。`npm.cmd run qa:windows -- status` → `preflight` → 対象を明示した `verify` の順で、Git外のDPAPI保存済みトークンをQA専用子プロセスだけへ渡します。本人の保存済み資格情報を使い、gh認証だけで通るとは扱いません。認証後の `GET /api/app` も初期workspace・OWNER membershipをINSERTし得るため、そのDB書込が許可されていない場合はログイン前で停止します。
-
-実Deployment・DBの作成/更新・資源削除は、対象と影響が承認された範囲で行います。PRのmerge/closeでもcleanupによる削除が起動し得るため、draft PR作成の依頼だけで実行しません。作業開始前に運用手順と検証の実施範囲を確認してください。
+操作範囲とDB書込、実行前後の対象照合、PR close後の資源削除確認は[開発・QA運用手順](docs/development-workflow.md)にまとめています。WSLは[WSL手順](docs/wsl-development.md)、Windowsは[Windows QA手順](docs/windows-qa-credentials.md)を使います。ローカル自動テスト、実Previewでの画面移動、明細の追加・編集・削除を分けて報告します。
 
 ## PayPay CSV
 
@@ -226,8 +218,6 @@ CSV選択時の重複確認では、この外部IDだけを`/api/import/duplicat
 照合に失敗した場合は未確認のプレビューを表示しません。登録時にもDBの一意制約で重複を防ぐため、照合後に共有相手が同じ明細を取り込んだ場合も二重登録されません。同じ外部IDでも金額または取引先が異なる場合は衝突を知らせ、取込全体を中止します。重複として省略した行は取込件数に含めず、実際に追加できた件数を記録します。
 
 既存DBの更新時は`npm run db:setup`で`006_paypay_external_ids.sql`を適用してください。既存のPayPay明細は、保存済みの`occurred_at`を日本時間へ変換して外部IDを移行します。すでに新形式の明細と手動明細は変更しません。キーが衝突した場合は移行全体が失敗し、明細を削除・統合しません。移行前に取引日時を編集していた明細は元のCSV日時を復元できないため、再取込時に重複として判定できない場合があります。
-
-更新の切替中に旧サーバーから取引番号だけを受け取っても、DBの登録時トリガーで新形式へ変換します。このトリガーは新規登録時だけ動作し、日時編集時には外部IDを変更しません。移行中は取引への書込みをロックし、既存データの変換とトリガー作成の間に旧形式の明細が追加されることを防ぎます。
 
 ## コマンド
 
@@ -274,25 +264,15 @@ npm run db:seed:test # テストユーザーA・Bと共有ワークスペース�
 
 ## PR Preview
 
-固定QA URLとCanneleは使用しません。同一repositoryの `codex/*` からmainへのPRを作成・更新・再openすると、mainのActionsがPRごとの固有Preview URLと専用Neon Native DBを自動で用意します。draft PRも対象です。PRを開く前のpushだけでは作成しません。初回buildは専用DBへのmigration/seedを含み、更新時は同じDBへ未適用migrationを実行します。導入・有効化にはこの自動操作の範囲の承認が必要です。Vercel Git連携のfeature deployを直接有効にせず、既存のDB分離・所有権照合を維持します。手動操作のコマンドも残します。
+同一repositoryの `codex/*` からmainへのPR作成・更新・再openで、draftを含めて専用Vercel PreviewとNeon Native DBを自動作成・更新します。PR未作成のpushだけでは作成せず、Vercel Git連携のfeature deployは止めたままmainのActionsで管理します。PR作成・更新は専用DBへのmigration/seedを、merge/closeは資源削除を起動するため、対象と影響が承認された範囲で実行してください。
 
 ```bash
-npm run deploy:preview
 npm run qa:status
-npm run qa:verify
-npm run qa:release -- --pr <閉じたPR番号>
+npm run deploy:preview    # 手動の作成/更新が必要な場合
+npm run qa:verify         # Vercel認証を供給済みの環境用
+npm run qa:release -- --pr <閉じたPR番号>  # 必要な場合だけcleanupを再要求
 ```
 
-ローカルの `qa:verify` は対象PRのworktreeで実行します。Windowsでは [共通ランチャー](docs/windows-qa-credentials.md)が保存済み資格情報を限定供給し、同じ正式ブラウザ検証と前後照合を行います。テスト前に `npx.cmd playwright install chromium` で公式ブラウザを用意し、キャッシュ位置はPlaywrightが解決します。Linuxで既存Chromiumを使う場合は `CAKE_BROWSER_EXECUTABLE=/usr/bin/chromium` を指定できます。CA・権限・ネットワーク設定の変更やTLS検証の回避は、この操作に含めません。
+WSL保存済みVercel認証をメモリ内で使う方法は[WSL手順](docs/wsl-development.md)を参照してください。通常の正式検証はPC/mobile × A/Bの画面移動とAPI/runtime確認です。明細追加などの業務更新は依頼範囲に応じた別テストで確認します。認証後のホーム/ `GET /api/app` だけでも初期workspace・membershipをINSERTし得るため、HTTP GETをDB無変更の保証にしません。
 
-Actionsで検証する場合は、この機能を導入した最新mainとHEADが一致するcleanなcontrol checkoutから、対象PRの完全SHAと既存Deployment IDを指定します。
-
-```bash
-npm run qa:verify:ci -- --pr <PR番号> --sha <完全SHA> --deployment <Deployment ID>
-```
-
-信頼済みmain上の処理がproviderをGETだけで検証前後に照合し、公式Playwright ChromiumでPC/mobileのA/Bを操作します。Vercel保護には既存資格情報から取得する期限付きOIDCを対象originだけへ付与します。`GET /api/app` の初期workspace作成を含め、画面側のDB副作用は別途考慮が必要です。結果はcontrol checkoutの `.cake/verify-<PR番号>.json` に保存し、検証だけではPRをReadyにしません。
-
-Readyへ進める際、対象PRに新しい管理CLIがない場合は、更新済みmainのcontrol checkoutから `task:pr --remote-proof <証拠の絶対path> --target-worktree <対象worktreeの絶対path>` を使えます。`--target-worktree` はremote proof必須・非draft専用で、対象の旧コードを実行しません。検証報告書の `--verification-file` も絶対pathを推奨します。
-
-draft作成・Ready条件・任意の `--remote-proof`／`--target-worktree`・認証・失敗復旧・導入範囲は[開発・QA運用手順](docs/development-workflow.md)を参照してください。Actions上の実QA/OIDC、同DB更新後の保持、cleanupの受入は個別に実施状況を確認します。mainへの導入は既存Production Git連携のdeployを起動し得るため、実装draft PRの作成とは別に承認を得ます。
+close後は自動cleanupの成否に加え、削除前に記録した全Deployment ID・DB branch/endpointの直接GET不在と一覧の再照合を確認します。DB側の照合はActions内の既存資格情報で行えます。失敗・未確認を削除成功と扱わず、main merge・Production操作・追加削除は依頼範囲を確認してください。
