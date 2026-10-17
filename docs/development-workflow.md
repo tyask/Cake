@@ -10,7 +10,7 @@ CakeはCanneleを使用せず、PR単位のVercel Preview固有URLでQAする。
 
 Actionsブラウザ検証のcapabilityは独立した `preview-verify.config.json` で宣言する。`protocol: "cake-preview-verify/v1"`、`workflow: ".github/workflows/preview.yml"`、`action: "verify"` をmainの完全SHAで照合し、未導入・不一致のmainへはdispatchしない。既存deploy/status/cleanupのwire・receipt title/schema・`preview.config.json`を変更して検証機能の有無を表さない。
 
-Cloud/PCのコマンドはmainの `.github/workflows/preview.yml` を明示的にdispatchし、同じPRの操作をActionsのconcurrencyで直列化する。Actionsのverifyもこのconcurrencyを使い、信頼済みmain上のスクリプトだけがprovider管理資格情報を使う。`pull_request_target` はclosedイベントだけで、PRコードをcheckout・実行しない。Vercelは指定したGitSourceのコードを、Preview DBの権限でリモートビルドする。
+Cloud/PCのコマンドはmainの `.github/workflows/preview.yml` を明示的にdispatchし、同じPRの操作をActionsのconcurrencyで直列化する。Actionsのverifyもこのconcurrencyを使い、信頼済みmain上のスクリプトだけがprovider管理資格情報を使う。`pull_request_target` のopened・synchronize・reopenedで自動deploy、closedでcleanupを行う。同一repositoryの `codex/*` からmainへのPRだけを対象とし、管理側ではmainの完全SHAだけをcheckoutする。PRコードを管理資格情報付きでcheckout・実行しない。Vercelは指定したGitSourceのコードを、Preview DBの権限でリモートビルドする。
 
 Actionsには既存のRepository secrets `VERCEL_TOKEN` と `NEON_API_KEY` が必要。GitHub読取は最小権限の `github.token` を使う。Cannele用Secret名を暗黙に代用しない。設定不足なら両Secret名を資格情報の値なしで報告し、providerの読取・作成・削除を始める前に停止する。新規資格情報・DB・deploymentを代わりに作らない。旧Cannele名のSecretだけでは使えないため、既存資格情報をGitHub Repository Settings → Secrets and variables → Actionsでこの2名に登録する。値をチャットへ送らない。
 
@@ -55,7 +55,7 @@ npm.cmd run task:pr -- --draft --title '変更内容' --verification-file '.cake
 
 通常の `npm test` は実DB不要の回帰テストで、ローカルChromium fixtureを含む。localhostでCake全体を起動してログインするE2Eには、別途隔離DB・Auth.js設定・migration/seedが必要であり、PGliteの回帰テストで代用したとは報告しない。対象と書込範囲の承認なしにDB作成・接続・設定変更を行わない。
 
-タスクブランチは `codex/<task-name>`。環境ファイル・資格情報を別環境からコピーしない。`vercel.json` は `**: false` / `main: true` を維持し、feature pushによる自動Previewを止める。draft作成のpush前にローカルと現在mainの設定、workflowのtriggerを確認する。この設定下のpushとdraft PR作成は通常CIだけを起動し、Previewは明示dispatch時に操作する。mainの本番Git連携は維持する。PRのmerge/closeは別にcleanupを起動し得るため、無断で行わない。
+タスクブランチは `codex/<task-name>`。環境ファイル・資格情報を別環境からコピーしない。`vercel.json` は `**: false` / `main: true` を維持し、Vercel Git連携から直接のfeature deployは止める。専用DB識別情報なしのbuildを防ぐため、PreviewはmainのActionsが管理する。PR未作成のpushは通常CIだけを起動し、同一repositoryの `codex/*` からmainへのPR作成・更新・再openはdraftを含めて専用Previewを自動作成・更新する。fork・他のbase/branch・編集イベントは対象外。draft作成のpush前にローカルと現在mainの設定、workflowのtriggerを確認する。mainの本番Git連携は維持する。PRのmerge/closeは別にcleanupを起動し得るため、無断で行わない。
 
 ## Previewの作成と読取
 
@@ -64,7 +64,11 @@ npm.cmd run deploy:preview
 npm.cmd run qa:status
 ```
 
-Previewが必要で、その作成/更新と初回migration/seedが承認されている場合だけ実行する。作成後は同じ対象ブランチのworktreeで `qa:verify` を実行する。Preview管理に信頼済みmainを使うことと、Windowsで開発ブランチのテストを実行することは別であり、テスト追加のmainへの先行mergeは不要。
+自動Previewの導入・有効化には、対象team/projectでの専用Deployment/Native branch/endpoint作成、初回migration/seed、PR更新時の同DBへの未適用migrationを含む継続的な範囲の承認が必要。導入後は対象PRの作成・更新・再openで自動実行する。初回は最大2回のDeployment作成要求、以後の同PR更新は同じDBを維持してapplication Deploymentを作る。build/seed前のDB所有権guardとfixture照合は省略しない。必要なSecretsやbindingが不足していれば停止し、資格情報や外部設定を自動変更しない。
+
+自動runはGitHub run IDから一意で安定したoperation UUIDを生成し、同じrunの再実行では既存操作を照合する。不明なPOSTを盲目的に再発行しない。PRのHEADがイベントから進んだ場合もprovider書込前に停止する。結果はActionsのSummaryと既存noticeに表示し、検証用の `qa:status` / `qa:verify` は従来どおり最新mainと資源状態を再照合する。
+
+手動の `deploy:preview` も維持する。Previewが必要で、その作成/更新と初回migration/seedが承認されている場合だけ実行する。作成後は同じ対象ブランチのworktreeで `qa:verify` を実行する。Preview管理に信頼済みmainを使うことと、Windowsで開発ブランチのテストを実行することは別であり、テスト追加のmainへの先行mergeは不要。
 
 現在のOPEN PR・専用ブランチ・完全SHAを照合し、mainの`preview.config.json`がtransportを含めて実行中CLIの設定と完全一致することを確認してからmainへdispatchする。旧mainにnotice方式が未導入なら`PREVIEW_NOT_INSTALLED_ON_MAIN`でdispatch前に停止する。CLIはworkflow ID/path、repository、main SHA、operation UUID、REST APIの `run_attempt: 1` とrun成功を検証する。`gh run list --json attempt` はCLIによって未対応のため使用しない。失敗時は対応するActions run URLを報告する。完了確認は呼出し内の有限時間だけで、定期監視は行わない。
 

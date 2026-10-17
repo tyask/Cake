@@ -1,13 +1,20 @@
 import { readFile, writeFile, appendFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { config, object, uuid } from './preview-model';
 import { PreviewService } from './preview-service';
 import { parseReceipt, receiptNoticeCommand, serializeReceipt } from './preview-receipt';
 import { PreviewVerifyService } from './preview-verify-service';
 import { transport } from './preview-provider';
 import { parseVerifyReceipt, serializeVerifyReceipt, verifyReceiptNoticeCommand, verifyReceiptProtocol } from './preview-verify-receipt';
-import { fullSha } from './task-workflow';
+import { fullSha, validTaskBranch } from './task-workflow';
+
+// A rerun must reconcile the same operation instead of creating another deployment.
+function automaticOperation(runId: string): string {
+  const hash = createHash('sha256').update(`cake-preview-auto/v1:${config.repository}:${runId}`).digest('hex');
+  return `${hash.slice(0,8)}-${hash.slice(8,12)}-4${hash.slice(13,16)}-8${hash.slice(17,20)}-${hash.slice(20,32)}`;
+}
 export function missingPreviewCredentials(env: Readonly<Record<string, string | undefined>>): string[] {
   return ['VERCEL_TOKEN','NEON_API_KEY'].filter(name => !env[name]?.trim());
 }
@@ -25,9 +32,13 @@ export async function runPreviewWorkflow(env = process.env, service = new Previe
   let pr: number, action: string, operation: string | undefined, sha: string | undefined, deploymentId: string | undefined;
   if (env.GITHUB_EVENT_NAME === 'pull_request_target') {
     const p = object(event.pull_request);
-    if (event.action !== 'closed' || p.state !== 'closed' || object(object(p.head).repo).full_name !== config.repository
+    const automatic = ['opened','synchronize','reopened'].includes(String(event.action));
+    if ((!automatic && event.action !== 'closed') || p.state !== (automatic ? 'open' : 'closed')
+      || object(object(p.head).repo).full_name !== config.repository
       || object(p.base).ref !== 'main') throw new Error('PREVIEW_UNTRUSTED_EVENT');
-    pr = Number(p.number); action = 'cleanup'; sha = String(object(p.head).sha);
+    if (automatic && !validTaskBranch(object(p.head).ref)) throw new Error('PREVIEW_UNTRUSTED_EVENT');
+    pr = Number(p.number); action = automatic ? 'deploy' : 'cleanup'; sha = String(object(p.head).sha);
+    if (automatic) operation = automaticOperation(env.GITHUB_RUN_ID!);
   } else if (env.GITHUB_EVENT_NAME === 'workflow_dispatch') {
     const inputs = object(event.inputs);
     // A ref can advance between the caller's main/config check and dispatch.

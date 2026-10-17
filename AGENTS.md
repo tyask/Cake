@@ -16,8 +16,8 @@ Actions検証の成功だけではPRをReadyにしない。control側の `.cake/
 
 機能・UI・API・DBを変更する際は、関連する[基本設計](docs/design.html)と[詳細設計](docs/detail-design.html)を確認する。仕様・運用の変更はこれらと運用手順へ反映する。
 
-最新mainから `npm.cmd run task:start -- <task-name>` で専用worktreeを作る。利用者の依頼範囲を守り、未コミット変更を保持する。必要なPreviewは `deploy:preview` で明示作成し、Windowsでは共通ランチャー `qa:windows -- verify` から正式な `qa:verify` と同じブラウザ検証を行う。検証実装のSHAと対象runtimeのSHAを区別し、前後の対象照合を省略しない。既存Chromeの目視確認とPlaywrightの正式な検証証拠を区別し、Readyは現行の同SHA・CI・Preview/DB照合を満たして明示依頼時だけ進める。mainへのmergeとProductionの手動操作も利用者の明示依頼時だけ行う。
+最新mainから `npm.cmd run task:start -- <task-name>` で専用worktreeを作る。利用者の依頼範囲を守り、未コミット変更を保持する。同一repositoryの `codex/*` からmainへのPR作成・更新・再openで専用Previewを自動作成・更新する。PR未作成のpushだけではPreviewを作らない。`deploy:preview` は手動経路として維持し、Windowsでは共通ランチャー `qa:windows -- verify` から正式な `qa:verify` と同じブラウザ検証を行う。検証実装のSHAと対象runtimeのSHAを区別し、前後の対象照合を省略しない。既存Chromeの目視確認とPlaywrightの正式な検証証拠を区別し、Readyは現行の同SHA・CI・Preview/DB照合を満たして明示依頼時だけ進める。mainへのmergeとProductionの手動操作も利用者の明示依頼時だけ行う。
 
-実Deployment・DBの作成/更新・資源削除は、対象と影響が利用者に承認されている範囲で行う。未承認なら実行前に確認する。draft PR作成の依頼を資源操作の許可と扱わない。PRのmerge/closeはmainのcleanupによる削除を起動し得るため、無断で実行しない。
+自動Previewの導入・有効化は、対象team/project、初回専用DBのmigration/seed、以後のPR更新時の同DBへのmigrationを含む継続的な実資源操作として承認を得て行う。導入後の対象PR作成・更新はこの処理を自動起動する。実Deployment・DBの作成/更新・資源削除は、対象と影響が利用者に承認されている範囲で行う。未承認なら実行前に確認する。draft PR作成の依頼を資源操作の許可と扱わない。PRのmerge/closeはmainのcleanupによる削除を起動し得るため、無断で実行しない。
 
 アプリ説明とローカルセットアップは[README](README.md)を参照する。
