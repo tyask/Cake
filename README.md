@@ -205,7 +205,9 @@ QAのDB初回照合・fixture・migration/seed・同PR更新時のデータ保�
 
 Windowsネイティブの専用worktreeで実装・追加テストを同じcommitに含め、同じSHAのローカル検証→draft PR→必要な専用Preview→Windowsの `qa:verify` →明示依頼後のReadyの順に進めます。詳細は [docs/development-workflow.md](docs/development-workflow.md) にまとめています。テストを先にmainへmergeする必要はありません。通常CI・Preview/DB管理とcleanupはActionsに残し、更新済みmainのcontrol checkoutからの `qa:verify:ci` は任意の代替経路として維持します。Actionsの結果は標準notice annotationを既存gh本人認証で読み取り、artifact取得や外部relayを使いません。
 
-既存Chromeの直接操作は目視確認用で、Playwrightの正式な検証証拠とは分けます。Windowsでは公開ページ操作とPreviewのログイン前表示まで確認済みで、実PreviewのA/B全操作は未検証です。現行 `qa:verify` は既存 `VERCEL_OIDC_TOKEN`、またはOIDC取得用の既存 `VERCEL_TOKEN` を必要とします。必要な値は承認された一時供給だけを使い、gh認証だけで通るとは扱いません。認証後の `GET /api/app` も初期workspaceをINSERTし得るため、DB書込が許可されていない場合はログイン前で停止します。
+既存Chromeの直接操作は目視確認用で、Playwrightの正式な検証証拠とは分けます。2026-10-17にWindowsでPR #75のA/B × PC/mobile、16クリック、API・runtime観測12件、画像12枚と前後status照合が成功しました（全体114.178秒）。普段のChromeの直接操作で確認した範囲は、公開ページ操作とPreviewのログイン前表示です。この実機受入と、共通ランチャーを別PR・別PCで再現できることは分けて評価します。
+
+Windowsの正式QAには [保存済み資格情報と共通ランチャーの手順](docs/windows-qa-credentials.md)を使います。`npm.cmd run qa:windows -- status` → `preflight` → 対象を明示した `verify` の順で、Git外のDPAPI保存済みトークンをQA専用子プロセスだけへ渡します。本人の保存済み資格情報を使い、gh認証だけで通るとは扱いません。認証後の `GET /api/app` も初期workspace・OWNER membershipをINSERTし得るため、そのDB書込が許可されていない場合はログイン前で停止します。
 
 実Deployment・DBの作成/更新・資源削除は、対象と影響が承認された範囲で行います。PRのmerge/closeでもcleanupによる削除が起動し得るため、draft PR作成の依頼だけで実行しません。作業開始前に運用手順と検証の実施範囲を確認してください。
 
@@ -281,7 +283,7 @@ npm run qa:verify
 npm run qa:release -- --pr <閉じたPR番号>
 ```
 
-ローカルの `qa:verify` は対象PRのworktreeで実行します。テスト前に `npx playwright install chromium` でブラウザを用意し、既存Chromiumを使う場合は `CAKE_BROWSER_EXECUTABLE=/usr/bin/chromium` を指定できます。CA・権限・ネットワーク設定の変更やTLS検証の回避は、この操作に含めません。
+ローカルの `qa:verify` は対象PRのworktreeで実行します。Windowsでは [共通ランチャー](docs/windows-qa-credentials.md)が保存済み資格情報を限定供給し、同じ正式ブラウザ検証と前後照合を行います。テスト前に `npx.cmd playwright install chromium` で公式ブラウザを用意し、キャッシュ位置はPlaywrightが解決します。Linuxで既存Chromiumを使う場合は `CAKE_BROWSER_EXECUTABLE=/usr/bin/chromium` を指定できます。CA・権限・ネットワーク設定の変更やTLS検証の回避は、この操作に含めません。
 
 Actionsで検証する場合は、この機能を導入した最新mainとHEADが一致するcleanなcontrol checkoutから、対象PRの完全SHAと既存Deployment IDを指定します。
 
