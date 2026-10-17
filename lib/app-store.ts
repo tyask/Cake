@@ -1,16 +1,18 @@
 import { db } from "./db";
+import { createSettlementStore } from "./settlement-store";
 import { getBootstrap, requireWorkspaceMember } from "./repository";
 import { updateDisplayName } from "./user-access";
 import { persistPayPayImport } from "./paypay-import";
 import { defaultRuleRecord } from "./default-rule-record";
-import type { AppUser, DefaultRule, SettlementResult, SplitWeights } from "./types";
-import type { Action, SettlementTransaction, TransactionSplit } from "./app-services/types";
+import type { AppUser, DefaultRule, SplitWeights } from "./types";
+import type { Action, TransactionSplit } from "./app-services/types";
 
 type Row = Record<string, unknown>;
 
 /** SQL adapter. Each method retains the statement order and transaction boundary of its operation. */
 export function createAppStore() {
   return {
+    ...createSettlementStore(),
     bootstrap: getBootstrap,
     requireWorkspaceMember,
     updateDisplayName,
@@ -207,28 +209,6 @@ export function createAppStore() {
           UPDATE default_rules r SET sort_order = ranked.position FROM ranked WHERE r.id = ranked.id`,
       ]);
       return results[1].length;
-    },
-    async completeSettlement(input: Action<"completeSettlement">, user: AppUser, settlementId: string, result: SettlementResult, expectedTransactions: SettlementTransaction[], calculationSnapshot: SettlementResult & { transactions: SettlementTransaction[] }) {
-      const sql = db();
-      const queries = [
-        sql`SELECT cake_assert_settlement_snapshot(${input.workspaceId}::uuid, ${user.id}, ${JSON.stringify(expectedTransactions)}::jsonb)`,
-        sql`
-          INSERT INTO settlements (id, workspace_id, payer_user_id, payee_user_id, amount_yen,
-            weight_snapshot, calculation_snapshot, completed_by)
-          VALUES (${settlementId}::uuid, ${input.workspaceId}::uuid, ${result.payerUserId}, ${result.payeeUserId},
-            ${result.amountYen}, ${JSON.stringify(result.people.map((person) => ({ userId: person.userId, weight: person.weight })))}::jsonb,
-            ${JSON.stringify(calculationSnapshot)}::jsonb, ${user.id})
-        `,
-        ...result.transactionIds.map((transactionId) => sql`
-          INSERT INTO settlement_transactions (settlement_id, transaction_id)
-          VALUES (${settlementId}::uuid, ${transactionId}::uuid)
-        `),
-        ...result.transactionIds.map((transactionId) => sql`
-          UPDATE transactions SET settled_at = now(), updated_by = ${user.id}, updated_at = now()
-          WHERE id = ${transactionId}::uuid AND workspace_id = ${input.workspaceId}::uuid AND settled_at IS NULL
-        `),
-      ];
-      await sql.transaction(queries);
     },
   };
 }
