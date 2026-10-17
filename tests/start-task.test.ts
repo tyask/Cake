@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runStartTask } from "../scripts/start-task";
+import { runStartTask, shellQuote } from "../scripts/start-task";
 
 function git(cwd: string, ...args: string[]): string {
   const result = spawnSync("git", ["-c", "user.name=Cake Test", "-c", "user.email=test@cake.local",
@@ -27,10 +27,51 @@ function repository(t: TestContext) {
   git(remote, "commit", "-m", "initial main");
   const cwd = join(root, "Cake");
   git(root, "clone", remote, cwd);
+  // runStartTask's Git inherits system/global config; keep this fixture LF locally.
+  git(cwd, "config", "--local", "core.autocrlf", "false");
+  git(cwd, "config", "--local", "core.eol", "lf");
   return { root, remote, cwd, defaultWorktreeRoot: join(root, "Cake-worktrees") };
 }
 
 const silent = () => {};
+
+test("shellQuoteはPowerShellとPOSIXで空白・アポストロフィを引用する", () => {
+  assert.equal(shellQuote("C:\\Cake tasks\\owner's [worktree]", "win32"), "'C:\\Cake tasks\\owner''s [worktree]'");
+  assert.equal(shellQuote("/tmp/Cake tasks/owner's [worktree]", "linux"), "'/tmp/Cake tasks/owner'\\''s [worktree]'");
+});
+
+test("globalのautocrlf=trueを継承してもfixtureのworktreeはLFを保つ", (t) => {
+  const { cwd, root, defaultWorktreeRoot } = repository(t);
+  const globalConfig = join(root, "global.gitconfig");
+  writeFileSync(globalConfig, "[core]\n\tautocrlf = true\n");
+  const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", `
+    import { runStartTask } from ${JSON.stringify(new URL("../scripts/start-task.ts", import.meta.url).href)};
+    runStartTask({ args: ["lf-fixture"], cwd: ${JSON.stringify(cwd)}, environment: {},
+      installDependencies() {}, log() {} });
+  `], {
+    cwd: process.cwd(), encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_GLOBAL: globalConfig, GIT_CONFIG_NOSYSTEM: "1" },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const worktreePath = join(defaultWorktreeRoot, "lf-fixture");
+  assert.equal(git(cwd, "config", "--local", "core.autocrlf"), "false");
+  assert.equal(readFileSync(join(worktreePath, "app.txt"), "utf8"), "main version one\n");
+});
+
+test("依存install失敗はworktreeを保持し空白・アポストロフィのある作業先から再試行を案内する", (t) => {
+  const { cwd, root } = repository(t);
+  const configuredRoot = join(root, "Cake owner's [tasks]");
+  const worktreePath = join(configuredRoot, "retry-install");
+  const changeDirectory = `${process.platform === "win32" ? "Set-Location -LiteralPath" : "cd"} ${shellQuote(worktreePath)}`;
+  const retry = process.platform === "win32" ? `${changeDirectory}\nnpm.cmd ci` : `${changeDirectory} && npm ci`;
+  assert.throws(() => runStartTask({ args: ["retry-install"], cwd,
+    environment: { CAKE_WORKTREE_ROOT: configuredRoot },
+    installDependencies: () => { throw new Error("install failed"); }, log: silent }), {
+    message: `npm ci が失敗しました。作成済みのブランチとworktreeは保持しています。\n作業先: ${worktreePath}\n再試行:\n${retry}`,
+  });
+  assert.equal(git(worktreePath, "branch", "--show-current"), "codex/retry-install");
+  assert.equal(git(cwd, "branch", "--show-current"), "main");
+});
 
 test("最新origin/mainから作成し、元の未コミット変更と秘密ファイルを保持する", (t) => {
   const { cwd, remote, defaultWorktreeRoot } = repository(t);
