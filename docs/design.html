@@ -822,7 +822,7 @@
           </table></div>
           <h3>DBクエリの所要時間ログ</h3>
           <p><code>DB_QUERY_LOG</code>の<code>all</code>は成功・失敗をすべて、<code>slow</code>は遅い成功とすべての失敗、<code>off</code>は出力なし。未設定時はPreview・ローカル開発で<code>all</code>、Productionおよびそれ以外で<code>slow</code>。遅い判定の閾値は<code>DB_SLOW_QUERY_MS</code>（既定500ミリ秒）。</p>
-          <p>計測時間はNeon往復・DB処理・結果解析を含み、トランザクションは一括実行の総時間を1件で記録する。匿名クエリハッシュ、固定テーブル名、SQL文数、成否等を含むが、エラーメッセージも記録しない。API全体や画面全体の所要時間とは異なる。運用方法とログ項目はREADMEを参照する。</p>
+          <p>計測時間はNeon往復・DB処理・結果解析を含み、トランザクションは一括実行の総時間を1件で記録する。匿名クエリハッシュ、固定テーブル名、SQL文数、成否等を含むが、エラーメッセージも記録しない。API全体や画面全体の所要時間とは異なる。運用方法とログ項目は<a href="detail-design.html#repository">詳細設計書のRepository・データ取得設計</a>を参照する。</p>
         </section>
 
         <section id="acceptance">
