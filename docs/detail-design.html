@@ -366,7 +366,8 @@
               <tr><td>lib/expense-splits.ts / split-allocations.ts / settlement.ts</td><td>参加者別保存割合・デフォルトルール、整数円への配分・円入力からの割合、正確な分数集計による清算。</td></tr>
               <tr><td>lib/paypay.ts / paypay-id.ts / import-duplicates.ts / paypay-import.ts</td><td>CSV解析、JST外部ID生成・正規化、既存/CSV内重複・衝突の検出、DB Transactionでの登録。</td></tr>
               <tr><td>lib/transaction-editing.ts / transaction-record.ts / transaction-updates.ts</td><td>一覧入力検証・秒/ミリ秒付きJST変換、確定DB行のDTO化、応答の対象行への反映と清算再計算。</td></tr>
-              <tr><td>lib/transaction-memo.ts / transaction-filters.ts / transaction-filter-storage.ts</td><td>メモ専用schema、列条件・候補集計、localStorage形式の検証・保存。</td></tr>
+              <tr><td>lib/transaction-memo.ts / transaction-filters.ts / transaction-filter-storage.ts / transaction-list.ts</td><td>メモ専用schema、列条件・候補集計、localStorage形式の検証・保存、表示行と選択件数の導出。</td></tr>
+              <tr><td>lib/rule-order.ts</td><td>取得済みルールと楽観的な順序IDから表示順を組み立てる純粋関数。</td></tr>
               <tr><td>lib/types.ts</td><td>UI、API、Repository、ドメイン関数間の共通データ契約。</td></tr>
             </tbody>
           </table></div>
@@ -529,8 +530,10 @@
           <p><code>SplitEditor</code>は明細追加・一覧編集・CSV取込・ワークスペースのデフォルト割合で共用する。割合・負担金額の入力欄には<code>required</code>を指定せず、削除後の空欄を表示として保持し、計算と保存には数値0を使う。初期値の0と明示的に入力した0は0を表示する。単位の切替、明細金額の変更、親からのルール・費用区分の再適用では空欄表示を解除し、新しい値に追従する。相手の残額の自動計算、割合の0.1%単位、整数円、既存の数値範囲と全員0の拒否は維持する。</p>
           <h3>ルール編集</h3>
           <p>有効なルールを上から評価し、取引先の部分一致が最初に成立する一件を使う。文字・割合はblur/Enter、区分・デフォルト利用・有効状態は即保存。追加は末尾、ドラッグまたはスペース/上下キーで並び替え、選択したルールをまとめて削除する。操作キューは並び替え・削除と行編集を直列化し、失敗した入力や構造操作の再試行を保持する。ルール変更だけでは保存済み明細を変更しない。</p>
+          <p><code>orderedWorkspaceRules</code>はID→ルールのMapと出力済みIDのSetを用い、楽観的な順序に現在存在するルールを一度ずつ配置する。未知・外部削除済みIDは除外し、外部追加は最新取得順で末尾に残す。順序保存の成功時は最新取得順へ戻し、失敗時は操作前の順序へ戻す。選択IDの所属判定にもSetを使う。取引先の部分一致・優先順によるルール適用判定は変更しない。</p>
           <h3>取引明細のフィルタ保存</h3>
           <p><code>TransactionsPanel</code>は<code>useTransactionFilters(userId, workspaceId)</code>で列ごとの条件を管理し、<code>lib/transaction-filter-storage.ts</code>を通して<code>localStorage</code>へ保存・復元する。API・DBへは保存しない。</p>
+          <p>保存用の列条件は文字列配列のまま保持し、条件または参加者の変更時に<code>createTransactionFilterMatcher</code>が列ごとの検索用Setを準備する。同じ列はOR、列間はAND、空選択は0件とする。<code>transactionListView</code>は各明細の条件を一度だけ判定し、編集中・保存失敗・メモ編集中の条件外行を含む表示と条件外表示の印で結果を共用する。表示ID・未清算ID・選択IDの所属をSetで照合して非表示選択数と全選択状態を求め、削除済み・清算済みIDは一括操作対象から除く。絞り込みでは非表示の選択を保持する。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>項目</th><th>仕様</th></tr></thead>
             <tbody>
@@ -761,7 +764,8 @@ BootstrapData extends BootstrapMetadata
               <tr><td>paypay.test.ts / paypay-id.test.ts / import-duplicates.test.ts / paypay-import.test.ts</td><td>支払い抽出、JST日時・外部ID・先頭ゼロ、旧ID正規化、行/既存重複・内容衝突、保存順、Transactionと実挿入件数。</td></tr>
               <tr><td>settlement.test.ts / expense-splits.test.ts / split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、受け取り、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>
               <tr><td>transaction-editing.test.ts / transaction-updates.test.ts / transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>
-              <tr><td>transaction-filters.test.ts / transaction-filter-storage.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗。</td></tr>
+              <tr><td>transaction-filters.test.ts / transaction-filter-storage.test.ts / transaction-list.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗、多数候補・非表示選択・条件外行の保持。</td></tr>
+              <tr><td>rule-order.test.ts</td><td>楽観順序の組み立てと解除、多数ルール、外部追加・削除、未知・重複ID、入力配列の維持。</td></tr>
               <tr><td>user-access.test.ts / user-profile.test.ts</td><td>確認済みGoogleメールと事前登録、内部ID、有効状態・権限再確認、テストモード、表示名保持・本人更新schema。</td></tr>
               <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・秒精度、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
               <tr><td>db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
