@@ -1,5 +1,7 @@
 "use client";
 
+import { expenseClassLabels } from "@/lib/domain-values";
+
 import type { ReactNode } from "react";
 import type { TransactionColumn } from "@/lib/transaction-filters";
 import type { TransactionRecord, WorkspaceMember } from "@/lib/types";
@@ -59,7 +61,7 @@ export function MobileTransactionSummary({ item, expanded, onToggle, checked, di
     <input className={styles.checkbox} type="checkbox" aria-label={selectionLabel ?? item.merchant + "の明細を選択"} checked={checked} disabled={disabled} onChange={onSelect} />
     <button type="button" className={styles.summaryButton} aria-expanded={expanded} aria-label={item.merchant + "の詳細を" + (expanded ? "閉じる" : "開く")} onClick={onToggle}>
       <span className={styles.summaryName}><b>{item.merchant}</b><small>{dateLabel ?? summaryDate(item.occurredAt)} · {item.actorName}{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</small></span>
-      <span className={styles.summaryAmount}><strong>{amountLabel ?? money(item.amountYen)}</strong><small>{status ?? (item.expenseClass === "PERSONAL" ? "個人費" : "共有費")}</small></span>
+      <span className={styles.summaryAmount}><strong>{amountLabel ?? money(item.amountYen)}</strong><small>{status ?? (expenseClassLabels[item.expenseClass])}</small></span>
       <span className={styles.summaryChevron} aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
     </button>
     {indicator && <span className={styles.summaryUpdateStatus}>{indicator}</span>}

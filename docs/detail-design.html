@@ -368,6 +368,8 @@
               <tr><td>lib/transaction-editing.ts / transaction-record.ts / transaction-updates.ts</td><td>一覧入力検証・秒/ミリ秒付きJST変換、確定DB行のDTO化、応答の対象行への反映と清算再計算。</td></tr>
               <tr><td>lib/transaction-memo.ts / transaction-filters.ts / transaction-filter-storage.ts / transaction-list.ts</td><td>メモ専用schema、列条件・候補集計、localStorage形式の検証・保存、表示行と選択件数の導出。</td></tr>
               <tr><td>lib/rule-order.ts</td><td>取得済みルールと楽観的な順序IDから表示順を組み立てる純粋関数。</td></tr>
+              <tr><td>lib/domain-values.ts / domain-schemas.ts / app-input.ts</td><td>分類値一覧・派生型・表示ラベル・入力上限、共通フィールドschema、アプリAPIのaction判別unionとクライアント送信型。DB・認証には依存しない。</td></tr>
+              <tr><td>lib/recurring-payment-schemas.ts / recurring-payment-types.ts / recurring-payments.ts</td><td>定期支払いの共有入力schema・DTO・有限状態/コード/表示と、DB接続を扱うサービスを分離する。クライアントは共有定義だけを参照する。</td></tr>
               <tr><td>lib/types.ts</td><td>UI、API、Repository、ドメイン関数間の共通データ契約。</td></tr>
             </tbody>
           </table></div>
@@ -420,7 +422,9 @@
           <h3>共通仕様とGET</h3>
           <ul>
             <li>Runtimeは<code>nodejs</code>。UUID・32 byte招待トークン・SHA-256をNode Cryptoで生成。</li>
-            <li>POSTは<code>action</code>と入力をZodで検証。SQLはNeon tagged templateで値をパラメータ化する。</li>
+            <li>POSTは<code>lib/app-input.ts</code>の<code>appActionInputSchema</code>でaction別の入力を一度検証し、判別可能なunionで各分岐へ渡す。未対応actionのエラー文言を維持し、最後のnever照合で追加actionの処理漏れを型検査する。SQLはNeon tagged templateで値をパラメータ化する。</li>
+            <li><code>AppActionInput</code>と<code>RunAppAction</code>をクライアント送信と共有する。workspaceを親で補完するルール操作や定期支払いでも、actionごとの必須フィールドを維持した型を使う。プロフィール・メモ専用保存と定期支払いはstrict、その他のアプリactionは余分な項目を除去する既存方針を維持する。</li>
+            <li><code>domain-schemas.ts</code>でmerchant（trim後1〜240文字）、method（trim後1〜120文字）、amountYen（1〜2147483647の整数）、重み（0〜2147483647の整数）などを共有する。通常保存とCSV取込も金額上限を業務データのDB更新前に検証する。割合の全参加者一致・正の合計・個人費1:0は引き続きドメイン検証で確認する。</li>
             <li><code>/api/app</code>成功はHTTP 200。GET失敗は基本401、POST失敗は基本400。<code>UserAccessError</code>は固有statusを優先し、応答は<code>{ error }</code>。</li>
             <li>GETは<code>getBootstrap(user, workspaceId, scope)</code>を実行。scope省略はfull。所属していない/不正形式の指定IDは本人の所属一覧先頭へフォールバックする。</li>
           </ul>
@@ -434,7 +438,7 @@
               <tr><td><code>createInvite</code></td><td>共有workspace・所属、Email、本人以外、参加者2人未満。</td><td>tokenのHashだけ保存、期限7日。同じworkspace/emailは再発行。<code>{ ok, invitePath }</code>。メール送信は行わない。</td></tr>
               <tr><td><code>acceptInvite</code></td><td>token 64文字、Hash一致・PENDING・期限内・本人メール一致・2人未満。</td><td>MEMBER追加とACCEPTEDをTransaction実行。<code>{ ok, workspaceId }</code>。</td></tr>
               <tr><td><code>updateWeights</code></td><td>共有workspace・所属、現在の全参加者1〜2件、ID重複なし。整数0〜2147483647、合計は正。</td><td>workspaceとmemberのデフォルトweight更新。保存済み明細の割合は変えない。<code>{ ok }</code>。</td></tr>
-              <tr><td><code>saveTransaction</code></td><td>workspace/任意transaction UUID、ISO日時、merchant 1〜240、method 1〜120、正整数円、type、参加者actor、任意class/split。新規だけ任意memo。</td><td>新規はMANUALとmanual_UUID。既存は未清算行だけ更新し、既存割合の省略時は可能な限り保持。所属者別割合を検証。<code>{ ok, transaction }</code>は確定DB行のDTO。</td></tr>
+              <tr><td><code>saveTransaction</code></td><td>workspace/任意transaction UUID、ISO日時、merchant 1〜240、method 1〜120、1〜2147483647の整数円、type、参加者actor、任意class/split。新規だけ任意memo。</td><td>新規はMANUALとmanual_UUID。既存は未清算行だけ更新し、既存割合の省略時は可能な限り保持。所属者別割合を検証。<code>{ ok, transaction }</code>は確定DB行のDTO。</td></tr>
               <tr><td><code>saveTransactionMemo</code></td><td>strict入力: action、workspace UUID、transaction UUID、memo最大2000文字。</td><td>清算済みも更新可能。メモ・監査項目だけ更新。<code>{ ok, transactionId, memo }</code>。既存saveTransactionへmemoを含めると拒否。</td></tr>
               <tr><td><code>deleteTransaction</code></td><td>workspace/transaction UUID・所属。</td><td>未清算の対象行だけ削除。0件なら業務例外。<code>{ ok }</code>。</td></tr>
               <tr><td><code>deleteTransactions</code> / <code>applyTransactionRules</code></td><td>所属、transaction UUID配列1〜5000件、大小文字を正規化した重複なし。</td><td>DB関数で全選択の存在・未清算を検証し、全件削除/現在ルール適用。<code>{ ok, deleted }</code> / <code>{ ok, applied, appliedTransactions }</code>。</td></tr>
@@ -516,6 +520,7 @@
           <p>Productionは通常利用者のみ、非Productionのtestモードは固定テストID/メールの組だけを処理する。候補抽出では利用停止した承認者も検知できるよう、identityとenabledを分ける。実行時に利用可否を確認してBLOCKEDへ移し、自動実行でテストユーザーを再有効化しない。Cron設定はUTC <code>0 0 * * *</code>、日本時間09:00ごろ。Hobbyでは09:00〜09:59のように実行時刻に幅がある（<a href="https://vercel.com/docs/cron-jobs/usage-and-pricing">Vercelのスケジュール精度</a>）。</p>
           <p>Productionでは16文字以上のランダムな<code>CRON_SECRET</code>をVercelの環境変数へ設定し、Git・PR・ログへ保存しない。未設定・Bearer不一致のリクエストは401で拒否する（<a href="https://vercel.com/docs/cron-jobs/manage-cron-jobs">VercelのCron認証</a>）。Previewには定期実行を期待せず、テストログイン中に<code>POST /api/recurring-payments/run</code>へ<code>{ "workspaceId": "対象UUID" }</code>を送って当日予定を検証する。設定日の09:00以降に新規保存した設定は翌月予定のため、当日分は追加しない。</p>
           <p>開始・登録成功・省略・失敗・終了は<code>recurring.*</code>の構造化サーバーログで確認する。失敗は固定エラーコードと対象設定IDで確認し、金額・取引先・メモ・SQL本文・認証情報は記録しない。「要確認」は利用不可などで停止した設定で、原因を修正して再開する。過去の未登録分は通常の明細追加で登録する。アプリ内に共通ログ画面は設けない。</p>
+          <p>ホームの指標金額はoverflow-wrap: anywhere、次の清算の内部Gridはminmax(0, 1fr)とし、送金額も縮小・折り返しを許可する。桁数の多い金額がページ全体を押し広げてスマートフォンの下部ナビゲーションを妨げないようにする。</p>
           <h3>明細編集・一括操作</h3>
           <ul>
             <li>文字・日時・金額・割合は欄を離れるかEnterで保存。選択項目は変更時に保存。入力検証後、保存キューで順番に実行し、失敗時の下書きと再試行を保持する。</li>
@@ -566,9 +571,9 @@
             <thead><tr><th>処理</th><th>仕様</th></tr></thead>
             <tbody>
               <tr><td>必須列</td><td>取引日、出金金額（円）、取引内容、取引先、取引方法、取引番号。欠落時はファイル全体を例外。</td></tr>
-              <tr><td>対象行・金額</td><td>取引内容をtrimした値が支払いと完全一致する行だけ。金額のカンマ/前後空白を除去し、数字のみ・正整数を許可。</td></tr>
+              <tr><td>対象行・金額</td><td>取引内容をtrimした値が支払いと完全一致する行だけ。金額のカンマ/前後空白を除去し、数字のみ・1〜2147483647の整数を許可。上限超過は行エラーにして選択不可にする。</td></tr>
               <tr><td>日時・外部ID</td><td><code>yyyy/MM/dd HH:mm:ss</code>を存在するJST日時として検証。<code>PayPay_YYYYMMDDHHMMSS_{取引番号}</code>を生成し、番号の先頭ゼロを保持。日時/actor編集後も保存IDは保持。</td></tr>
-              <tr><td>行の値</td><td>取引先はtrimして必須。取引方法が空ならPayPay。区分・割合はtransactionDefaultsのフォールバックをSHAREDとして決める。有効な一致ルールがなければ共有費とワークスペースのデフォルト割合、一致時はルールを優先する。bulkImport APIも費用区分省略時のフォールバックをSHAREDとする。通常明細のPERSONALフォールバックは維持する。ImportPanelにはログイン本人のcurrentUserIdを渡し、支払者actorIdの初期値に使う。支払者・区分・割合の手動変更は維持する。</td></tr>
+              <tr><td>行の値</td><td>取引先はtrim後1〜240文字。取引方法はtrim後1〜120文字、空ならPayPay。文字数超過行はAPI送信前のプレビューで登録不可にする。区分・割合はtransactionDefaultsのフォールバックをSHAREDとして決める。有効な一致ルールがなければ共有費とワークスペースのデフォルト割合、一致時はルールを優先する。bulkImport APIも費用区分省略時のフォールバックをSHAREDとする。通常明細のPERSONALフォールバックは維持する。ImportPanelにはログイン本人のcurrentUserIdを渡し、支払者actorIdの初期値に使う。支払者・区分・割合の手動変更は維持する。</td></tr>
               <tr><td>重複・衝突</td><td>既存IDとCSV内同一キーの一致行は初期選択OFF。同一CSVの繰返しは最初の一件だけ登録候補。同じキーで金額/取引先が異なる場合、既存sourceがPAYPAY以外の場合は衝突エラーとして登録不可。</td></tr>
               <tr><td>専用API照合</td><td>有効な外部IDをまとめ、最大2000件ずつ選択workspaceへ照合。照合完了前や失敗後に未確認のプレビューは表示しない。ファイル変更時の遅延応答は破棄する。</td></tr>
               <tr><td>原本</td><td><code>File.text()</code>で端末内解析。サーバーへ送るのは選択済みitems・ファイル名・件数で、CSV本文は保存しない。</td></tr>
@@ -693,6 +698,8 @@ amountYen         = abs(payer.balance)</div>
 
         <section id="types">
           <h2>11. TypeScript型設計</h2>
+          <p><code>domain-values.ts</code>の定数値一覧から分類型とZodのenumを導出し、表示ラベルは各分類を網羅するRecordで型検査する。保存値・JSON値・画面ごとの「共有費／共通費」の表記を維持する。共有入力モジュールはZodと純粋な定義だけを実行時依存に持ち、DB・認証・Node専用モジュールを取り込まない。</p>
+          <p>定期支払いの状態・既知の停止原因・サービスエラーコード・ログ状態/コードは有限型とする。DBから来る未知の状態・停止原因は明示的な変換境界で識別し、DTOのJSON文字列を保持したまま「要確認」と既存の確認案内へ戻す。未知のDB停止コードはログへ転送せずDATABASE_UNAVAILABLEへ置き換える。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>型</th><th>値・重要フィールド</th></tr></thead>
             <tbody>
@@ -766,6 +773,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>transaction-editing.test.ts / transaction-updates.test.ts / transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>
               <tr><td>transaction-filters.test.ts / transaction-filter-storage.test.ts / transaction-list.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗、多数候補・非表示選択・条件外行の保持。</td></tr>
               <tr><td>rule-order.test.ts</td><td>楽観順序の組み立てと解除、多数ルール、外部追加・削除、未知・重複ID、入力配列の維持。</td></tr>
+              <tr><td>domain-schemas.test.ts / app-input.typecheck.ts</td><td>入口間の金額・文字数・割合境界、全actionの入力、既存の省略・strict/strip契約、共有入力の実行時依存境界。型検査では不一致payload・未知action・有限ログ値の拒否を確認する。</td></tr>
               <tr><td>user-access.test.ts / user-profile.test.ts</td><td>確認済みGoogleメールと事前登録、内部ID、有効状態・権限再確認、テストモード、表示名保持・本人更新schema。</td></tr>
               <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・秒精度、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
               <tr><td>db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>

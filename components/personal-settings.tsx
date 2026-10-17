@@ -1,5 +1,7 @@
 "use client";
 
+import type { RunAppAction } from "@/lib/app-input";
+
 import { signOut } from "next-auth/react";
 import { useState } from "react";
 import { PROFILE_NAME_MAX_LENGTH } from "@/lib/user-profile";
@@ -7,7 +9,7 @@ import type { AppUser } from "@/lib/types";
 
 export function PersonalSettings({ user, run }: {
   user: AppUser;
-  run: (payload: Record<string, unknown>, success: string) => Promise<unknown>;
+  run: RunAppAction;
 }) {
   const [name, setName] = useState(user.name);
   const [saving, setSaving] = useState(false);

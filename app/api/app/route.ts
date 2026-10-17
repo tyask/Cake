@@ -4,12 +4,10 @@ import { getCurrentUser } from "@/lib/current-user";
 import { getBootstrap, requireWorkspaceMember } from "@/lib/repository";
 import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
 import type { DefaultRule, ExpenseClass, SplitWeights } from "@/lib/types";
-import { z } from "zod";
-import { transactionMemoInputSchema, transactionMemoSchema } from "@/lib/transaction-memo";
+import { bootstrapScopeSchema } from "@/lib/domain-schemas";
+import { parseAppActionInput } from "@/lib/app-input";
 import { transactionRecord } from "@/lib/transaction-record";
-import { updateProfileInputSchema } from "@/lib/user-profile";
 import { updateDisplayName, UserAccessError } from "@/lib/user-access";
-import { MAX_PAYPAY_EXTERNAL_ID_LENGTH } from "@/lib/paypay-id";
 import { persistPayPayImport } from "@/lib/paypay-import";
 
 export const runtime = "nodejs";
@@ -30,23 +28,12 @@ export async function GET(request: Request) {
     const user = await currentUser();
     const params = new URL(request.url).searchParams;
     const workspaceId = params.get("workspaceId");
-    const scope = z.enum(["full", "metadata"]).parse(params.get("scope") ?? "full");
+    const scope = bootstrapScopeSchema.parse(params.get("scope") ?? "full");
     return Response.json(await getBootstrap(user, workspaceId, scope));
   } catch (error) {
     return errorResponse(error, 401);
   }
 }
-
-const workspaceIdSchema = z.string().uuid();
-const expenseClassSchema = z.enum(["PERSONAL", "SHARED"]);
-const transactionTypeSchema = z.enum(["PAYMENT", "RECEIPT"]);
-const weightSchema = z.number().int().min(0).max(2_147_483_647);
-const splitWeightsSchema = z.record(z.string().min(1), weightSchema);
-const selectedTransactionsSchema = z.object({
-  workspaceId: workspaceIdSchema,
-  transactionIds: z.array(z.string().uuid()).min(1).max(5000)
-    .refine((ids) => new Set(ids.map((id) => id.toLowerCase())).size === ids.length, "同じ明細が重複しています。"),
-});
 
 async function splitContext(workspaceId: string) {
   const sql = db();
@@ -91,17 +78,15 @@ function resolveRuleSplit(expenseClass: ExpenseClass, splitWeights: SplitWeights
 export async function POST(request: Request) {
   try {
     const user = await currentUser();
-    const body = (await request.json()) as Record<string, unknown>;
-    const action = z.string().parse(body.action);
+    const body: unknown = await request.json();
     const sql = db();
+    const input = parseAppActionInput(body);
 
-    if (action === "updateProfile") {
-      const input = updateProfileInputSchema.parse(body);
+    if (input.action === "updateProfile") {
       return Response.json({ ok: true, user: await updateDisplayName(user, input.name) });
     }
 
-    if (action === "createWorkspace") {
-      const input = z.object({ name: z.string().trim().min(1).max(80), type: z.enum(["PERSONAL", "SHARED"]) }).parse(body);
+    if (input.action === "createWorkspace") {
       const workspaceId = randomUUID();
       await sql.transaction([
         sql`INSERT INTO workspaces (id, name, type, owner_user_id) VALUES (${workspaceId}::uuid, ${input.name}, ${input.type}, ${user.id})`,
@@ -110,23 +95,20 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, workspaceId });
     }
 
-    if (action === "updateWorkspace") {
-      const input = z.object({ workspaceId: workspaceIdSchema, name: z.string().trim().min(1).max(80) }).parse(body);
+    if (input.action === "updateWorkspace") {
       await requireWorkspaceMember(input.workspaceId, user.id);
       await sql`UPDATE workspaces SET name = ${input.name}, updated_at = now() WHERE id = ${input.workspaceId}::uuid`;
       return Response.json({ ok: true });
     }
 
-    if (action === "deleteWorkspace") {
-      const input = z.object({ workspaceId: workspaceIdSchema, confirmationName: z.string() }).parse(body);
+    if (input.action === "deleteWorkspace") {
       const workspace = await requireWorkspaceMember(input.workspaceId, user.id);
       if (String(workspace.name) !== input.confirmationName) throw new Error("ワークスペース名が一致しません。");
       await sql`DELETE FROM workspaces WHERE id = ${input.workspaceId}::uuid`;
       return Response.json({ ok: true });
     }
 
-    if (action === "createInvite") {
-      const input = z.object({ workspaceId: workspaceIdSchema, email: z.string().email() }).parse(body);
+    if (input.action === "createInvite") {
       const workspace = await requireWorkspaceMember(input.workspaceId, user.id);
       if (workspace.type !== "SHARED") throw new Error("共有ワークスペースでのみ招待できます。");
       if (input.email.toLowerCase() === user.email.toLowerCase()) throw new Error("自分自身は招待できません。");
@@ -144,8 +126,7 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, invitePath: `/invite/${token}` });
     }
 
-    if (action === "acceptInvite") {
-      const input = z.object({ token: z.string().length(64) }).parse(body);
+    if (input.action === "acceptInvite") {
       const tokenHash = createHash("sha256").update(input.token).digest("hex");
       const invites = await sql`
         SELECT id, workspace_id, email FROM invitations
@@ -165,8 +146,7 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, workspaceId: String(invite.workspace_id) });
     }
 
-    if (action === "updateWeights") {
-      const input = z.object({ workspaceId: workspaceIdSchema, weights: z.array(z.object({ userId: z.string().min(1), weight: weightSchema })).min(1).max(2) }).parse(body);
+    if (input.action === "updateWeights") {
       const workspace = await requireWorkspaceMember(input.workspaceId, user.id);
       if (workspace.type !== "SHARED") throw new Error("共有ワークスペースのみデフォルト割合を設定できます。");
       const memberRows = await sql`SELECT user_id FROM workspace_members WHERE workspace_id = ${input.workspaceId}::uuid`;
@@ -180,8 +160,7 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
-    if (action === "saveTransactionMemo") {
-      const input = transactionMemoInputSchema.parse(body);
+    if (input.action === "saveTransactionMemo") {
       await requireWorkspaceMember(input.workspaceId, user.id);
       const results = await sql.transaction([
         sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
@@ -195,20 +174,7 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, transactionId: String(results[1][0].id), memo: String(results[1][0].memo) });
     }
 
-    if (action === "saveTransaction") {
-      const input = z.object({
-        workspaceId: workspaceIdSchema,
-        transactionId: z.string().uuid().optional(),
-        occurredAt: z.string().datetime(),
-        merchant: z.string().trim().min(1).max(240),
-        method: z.string().trim().min(1).max(120),
-        type: transactionTypeSchema,
-        amountYen: z.number().int().positive(),
-        actorUserId: z.string().min(1),
-        expenseClass: expenseClassSchema.optional(),
-        splitWeights: splitWeightsSchema.optional(),
-        memo: transactionMemoSchema.optional(),
-      }).refine(input => !input.transactionId || input.memo === undefined, "メモの更新は専用の保存処理を使用してください。").parse(body);
+    if (input.action === "saveTransaction") {
       await requireWorkspaceMember(input.workspaceId, user.id);
       const context = await splitContext(input.workspaceId);
       const previous = input.transactionId && input.splitWeights === undefined
@@ -254,8 +220,7 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, transaction: transactionRecord(saved, context.members.find(member => member.id === input.actorUserId)!.name) });
     }
 
-    if (action === "deleteTransaction") {
-      const input = z.object({ workspaceId: workspaceIdSchema, transactionId: z.string().uuid() }).parse(body);
+    if (input.action === "deleteTransaction") {
       await requireWorkspaceMember(input.workspaceId, user.id);
       const results = await sql.transaction([
         sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
@@ -267,18 +232,17 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
-    if (action === "deleteTransactions" || action === "applyTransactionRules") {
-      const input = selectedTransactionsSchema.parse(body);
+    if (input.action === "deleteTransactions" || input.action === "applyTransactionRules") {
       await requireWorkspaceMember(input.workspaceId, user.id);
       const rows = await sql`
         SELECT cake_bulk_transactions(
           ${input.workspaceId}::uuid, ${user.id},
           ARRAY(SELECT value::uuid FROM jsonb_array_elements_text(${JSON.stringify(input.transactionIds)}::jsonb)),
-          ${action === "deleteTransactions" ? "DELETE" : "APPLY_RULES"}
+          ${input.action === "deleteTransactions" ? "DELETE" : "APPLY_RULES"}
         ) AS result
       `;
       const result = rows[0].result as { affected: number; transactions?: Array<Record<string, unknown> & { occurredAt: string }> };
-      return Response.json(action === "deleteTransactions"
+      return Response.json(input.action === "deleteTransactions"
         ? { ok: true, deleted: Number(result.affected) }
         : {
           ok: true, applied: Number(result.affected),
@@ -288,8 +252,7 @@ export async function POST(request: Request) {
         });
     }
 
-    if (action === "createRule") {
-      const input = z.object({ workspaceId: workspaceIdSchema, merchantContains: z.string().trim().min(1).max(120), expenseClass: expenseClassSchema, splitWeights: splitWeightsSchema.nullable().optional(), enabled: z.boolean().optional() }).parse(body);
+    if (input.action === "createRule") {
       await requireWorkspaceMember(input.workspaceId, user.id);
       const context = await splitContext(input.workspaceId);
       const splitWeights = resolveRuleSplit(input.expenseClass, input.splitWeights, context.members);
@@ -302,8 +265,7 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
-    if (action === "updateRule") {
-      const input = z.object({ workspaceId: workspaceIdSchema, ruleId: z.string().uuid(), merchantContains: z.string().trim().min(1).max(120), expenseClass: expenseClassSchema, splitWeights: splitWeightsSchema.nullable().optional(), enabled: z.boolean().optional() }).parse(body);
+    if (input.action === "updateRule") {
       await requireWorkspaceMember(input.workspaceId, user.id);
       const context = await splitContext(input.workspaceId);
       const previous = context.rules.find((rule) => rule.id === input.ruleId);
@@ -318,15 +280,13 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
-    if (action === "reorderRules") {
-      const input = z.object({ workspaceId: workspaceIdSchema, ruleIds: z.array(z.string().uuid()).max(5000) }).parse(body);
+    if (input.action === "reorderRules") {
       await requireWorkspaceMember(input.workspaceId, user.id);
       await sql`SELECT cake_reorder_default_rules(${input.workspaceId}::uuid, ${user.id}, ARRAY(SELECT value::uuid FROM jsonb_array_elements_text(${JSON.stringify(input.ruleIds)}::jsonb)))`;
       return Response.json({ ok: true });
     }
 
-    if (action === "deleteRule") {
-      const input = z.object({ workspaceId: workspaceIdSchema, ruleId: z.string().uuid() }).parse(body);
+    if (input.action === "deleteRule") {
       await requireWorkspaceMember(input.workspaceId, user.id);
       await sql.transaction([
         sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
@@ -337,12 +297,7 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
-    if (action === "deleteRules") {
-      const input = z.object({
-        workspaceId: workspaceIdSchema,
-        ruleIds: z.array(z.string().uuid()).min(1).max(5000)
-          .refine((ids) => new Set(ids).size === ids.length, "同じルールが重複しています。"),
-      }).parse(body);
+    if (input.action === "deleteRules") {
       await requireWorkspaceMember(input.workspaceId, user.id);
       const requestedIds = JSON.stringify(input.ruleIds);
       const targets = await sql`
@@ -365,14 +320,7 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, deleted: results[1].length });
     }
 
-    if (action === "bulkImport") {
-      const itemSchema = z.object({
-        occurredAt: z.string().datetime(), merchant: z.string().trim().min(1).max(240),
-        method: z.string().trim().min(1).max(120), amountYen: z.number().int().positive(),
-        externalId: z.string().trim().min(1).max(MAX_PAYPAY_EXTERNAL_ID_LENGTH), actorUserId: z.string().min(1),
-        expenseClass: expenseClassSchema.optional(), splitWeights: splitWeightsSchema.optional(),
-      });
-      const input = z.object({ workspaceId: workspaceIdSchema, fileName: z.string().min(1).max(240), totalRows: z.number().int().nonnegative(), items: z.array(itemSchema).max(2000) }).parse(body);
+    if (input.action === "bulkImport") {
       await requireWorkspaceMember(input.workspaceId, user.id);
       const context = await splitContext(input.workspaceId);
       const items = input.items.map((item) => ({ ...item, ...resolveTransactionSplit(item, context, "SHARED") }));
@@ -380,8 +328,7 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, ...result });
     }
 
-    if (action === "completeSettlement") {
-      const input = z.object({ workspaceId: workspaceIdSchema }).parse(body);
+    if (input.action === "completeSettlement") {
       await requireWorkspaceMember(input.workspaceId, user.id);
       const latest = await getBootstrap(user, input.workspaceId);
       const result = latest.selected?.settlement;
@@ -420,7 +367,8 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
-    throw new Error(`未対応の操作です: ${action}`);
+    const unhandled: never = input;
+    throw new Error(`未対応の操作です: ${unhandled}`);
   } catch (error) {
     return errorResponse(error);
   }

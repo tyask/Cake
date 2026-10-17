@@ -1,3 +1,5 @@
+import { MAX_SPLIT_WEIGHT } from "./domain-values";
+import { weightSchema } from "./domain-schemas";
 import type { DefaultRule, ExpenseClass, SplitWeights, WorkspaceMember } from "./types";
 
 type MemberWeight = Pick<WorkspaceMember, "id" | "weight">;
@@ -23,11 +25,11 @@ export function validateSplitWeights(
     throw new Error("負担割合の参加者が一致しません。");
   }
   const entries = ids.map((id) => {
-    const weight = values[id];
-    if (typeof weight !== "number" || !Number.isInteger(weight) || weight < 0 || weight > 2_147_483_647) {
-      throw new Error("割合は0から2147483647までの整数で設定してください。");
+    const parsed = weightSchema.safeParse(values[id]);
+    if (!parsed.success) {
+      throw new Error(`割合は0から${MAX_SPLIT_WEIGHT}までの整数で設定してください。`);
     }
-    return [id, weight] as const;
+    return [id, parsed.data] as const;
   });
   if (entries.every(([, weight]) => weight === 0)) {
     throw new Error("割合は少なくとも一人を1以上にしてください。");

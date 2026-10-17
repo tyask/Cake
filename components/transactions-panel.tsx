@@ -1,5 +1,9 @@
 "use client";
 
+import { expenseClassLabels, expenseClasses, transactionActorLabels, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/domain-values";
+
+import type { RunAppAction } from "@/lib/app-input";
+
 import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/autosave";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -19,7 +23,7 @@ import { transactionListView } from "@/lib/transaction-list";
 import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } from "./transaction-table";
 import { useTransactionFilters } from "./use-transaction-filters";
 
-type RunAction = (payload: Record<string, unknown>, success: string) => Promise<unknown>;
+type RunAction = RunAppAction;
 type SaveTransaction = (id: string, getValues: () => { values: TransactionValues; base: TransactionValues }, accept: (values: TransactionValues) => void) => Promise<void>;
 type AcknowledgedSave = { sources: string[]; values: TransactionValues };
 type RowHandle = { freeze: (value: boolean) => void; flush: () => Promise<void>; acceptRules: (values: TransactionValues) => void };
@@ -393,11 +397,11 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
     <MobileTransactionSummary item={{ ...item, ...draft, actorName: members.find(member => member.id === draft.actorUserId)?.name ?? item.actorName }} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} checked={checked} disabled={busy} onSelect={() => onSelect(item.id)} columnCount={tableColumns.length} indicator={<SavingIndicator active={updating} />} />
     <td data-label="選択" className={styles.selectionCell} data-selection><input className={styles.checkbox} type="checkbox" aria-label={item.merchant + "の明細を選択"} checked={checked} disabled={busy} onChange={() => onSelect(item.id)} /></td>
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell}><input aria-label="取引日時" type="datetime-local" step="0.001" required value={dateDraft ?? transactionDateInput(draft.occurredAt)} title={dateDraft ?? transactionDateInput(draft.occurredAt)} disabled={busy} onChange={(event) => changeDate(event.target.value)} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
-    <td data-label="取引先"><input aria-label="取引先" required maxLength={240} value={draft.merchant} disabled={busy} onChange={(event) => change({ merchant: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} />{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</td>
-    <td data-label="方法"><input aria-label="取引方法" required maxLength={120} value={draft.method} disabled={busy} onChange={(event) => change({ method: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
-    <td data-label="金額（円）"><input aria-label="金額（円）" type="number" required min="1" max="2147483647" step="1" value={draft.amountYen} disabled={busy} onChange={(event) => change({ amountYen: Number(event.target.value) })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
-    <td data-label={draft.type === "PAYMENT" ? "支払者" : "受取者"}><select aria-label={draft.type === "PAYMENT" ? "支払者" : "受取者"} value={draft.actorUserId} disabled={busy} onChange={(event) => change(transactionActorPatch(currentValues(), event.target.value, members), true)}>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></td>
-    <td data-label="費用区分"><select aria-label="費用区分" value={draft.expenseClass} disabled={busy} onChange={(event) => change(transactionExpensePatch(currentValues(), event.target.value as ExpenseClass, members), true)}><option value="PERSONAL">個人費</option><option value="SHARED">共有費</option></select></td>
+    <td data-label="取引先"><input aria-label="取引先" required maxLength={MAX_MERCHANT_LENGTH} value={draft.merchant} disabled={busy} onChange={(event) => change({ merchant: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} />{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</td>
+    <td data-label="方法"><input aria-label="取引方法" required maxLength={MAX_METHOD_LENGTH} value={draft.method} disabled={busy} onChange={(event) => change({ method: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
+    <td data-label="金額（円）"><input aria-label="金額（円）" type="number" required min="1" max={MAX_AMOUNT_YEN} step="1" value={draft.amountYen} disabled={busy} onChange={(event) => change({ amountYen: Number(event.target.value) })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
+    <td data-label={transactionActorLabels[draft.type]}><select aria-label={transactionActorLabels[draft.type]} value={draft.actorUserId} disabled={busy} onChange={(event) => change(transactionActorPatch(currentValues(), event.target.value, members), true)}>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></td>
+    <td data-label="費用区分"><select aria-label="費用区分" value={draft.expenseClass} disabled={busy} onChange={(event) => change(transactionExpensePatch(currentValues(), event.target.value as ExpenseClass, members), true)}>{expenseClasses.map(value => <option key={value} value={value}>{expenseClassLabels[value]}</option>)}</select></td>
     <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}>
       <SplitEditor compact inline allowEqualSplit label="支払い割合" members={members} value={draft.splitWeights} amountYen={draft.amountYen}
         disabled={busy || draft.expenseClass === "PERSONAL"} onChange={(splitWeights) => change({ splitWeights })} onCommit={requestCommit} />
@@ -430,8 +434,8 @@ function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMe
     <td data-label="取引先"><b>{item.merchant}</b>{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</td>
     <td data-label="方法">{item.method}</td>
     <td data-label="金額（円）">{money(item.amountYen)}</td>
-    <td data-label={item.type === "PAYMENT" ? "支払者" : "受取者"}>{item.actorName}</td>
-    <td data-label="費用区分">{item.expenseClass === "PERSONAL" ? "個人費" : "共有費"}</td>
+    <td data-label={transactionActorLabels[item.type]}>{item.actorName}</td>
+    <td data-label="費用区分">{expenseClassLabels[item.expenseClass]}</td>
     <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}><span className={styles.settledSplit}>{members.map(member => <span key={member.id}><span>{money(amounts[member.id])}</span><small>{percentages[member.id] / 10}%</small></span>)}</span></td>
     <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={item.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} onError={onMemoError} onSavingChange={onMemoSavingChange} register={registerMemo} />
       {pinnedOutsideFilter && <small className={styles.filterHint}>編集中のため表示</small>}

@@ -1,11 +1,14 @@
 "use client";
 
+import { commonExpenseClassLabels, expenseClasses, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/domain-values";
+
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { validateSplitWeights, defaultSplitWeights, personalSplitWeights } from "@/lib/expense-splits";
 import { splitAmounts } from "@/lib/split-allocations";
 import { recurringFormConfig, recurringFormDefaults, recurringFormPreview } from "@/lib/recurring-payment-form";
 import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
-import type { RecurringPayment, RecurringPaymentConfig, RecurringPaymentMutationResult, RecurringPaymentsResponse } from "@/lib/recurring-payment-types";
+import { blockedReasonLabel, recurringPaymentStateLabel, type RecurringServiceErrorCode } from "@/lib/recurring-payment-types";
+import type { RecurringPaymentMutation, RecurringPaymentMutationDraft, RecurringPayment, RecurringPaymentConfig, RecurringPaymentMutationResult, RecurringPaymentsResponse } from "@/lib/recurring-payment-types";
 import type { ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/types";
 import { RefreshButton } from "./refresh-button";
 import { SplitEditor } from "./split-editor";
@@ -14,11 +17,11 @@ import styles from "./recurring-payments-panel.module.css";
 
 const money = (value: number) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(value);
 const dateLabel = (date: string) => date.replaceAll("-", "/");
-type StateAction = "pause" | "resume" | "archive";
+type StateAction = Extract<RecurringPaymentMutation, { action: "pause" | "resume" | "archive" }>["action"];
 type FormState = { payment?: RecurringPayment };
 
 class RecurringRequestError extends Error {
-  constructor(message: string, public readonly code?: string) { super(message); }
+  constructor(message: string, public readonly code?: RecurringServiceErrorCode) { super(message); }
 }
 
 async function readResponse<T>(response: Response): Promise<T> {
@@ -78,7 +81,7 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
     return () => window.clearTimeout(timer);
   }, [serverNow, load]);
 
-  async function save(payload: Record<string, unknown>) {
+  async function save(payload: RecurringPaymentMutationDraft) {
     requestId.current += 1;
     setBusy(true);
     try {
@@ -139,7 +142,7 @@ function RecurringPaymentRow({ payment, members, busy, onEdit, onAction }: { pay
   const [expanded, setExpanded] = useState(false);
   const config = payment.currentConfig;
   const actorName = members.find(member => member.id === config.actorUserId)?.name ?? "確認が必要です";
-  const stateLabel = payment.state === "ACTIVE" ? "有効" : payment.state === "PAUSED" ? "停止中" : "要確認";
+  const stateLabel = recurringPaymentStateLabel(payment.state);
   return <tr className={tableStyles.transactionRow} data-expanded={expanded} data-recurring-payment-id={payment.id}>
     <td className={tableStyles.mobileSummary} colSpan={10}><button type="button" className={`${tableStyles.summaryButton} ${styles.summaryButton}`} aria-expanded={expanded}
       aria-label={`${config.merchant}の詳細を${expanded ? "閉じる" : "開く"}`} onClick={() => setExpanded(current => !current)}>
@@ -149,7 +152,7 @@ function RecurringPaymentRow({ payment, members, busy, onEdit, onAction }: { pay
     <td data-label="毎月の日 / 次回" className={tableStyles.fullCell}><b>毎月{config.dayOfMonth}日</b><small>次回：{payment.nextScheduledOn ? dateLabel(payment.nextScheduledOn) : "—"}</small>
       {config.dayOfMonth >= 29 && <small>その日がない月は月末に追加</small>}</td>
     <td data-label="取引先"><b>{config.merchant}</b></td><td data-label="方法">{config.method}</td><td data-label="金額（円）">{money(config.amountYen)}</td>
-    <td data-label="支払者">{actorName}</td><td data-label="費用区分">{config.expenseClass === "PERSONAL" ? "個人費" : "共通費"}</td>
+    <td data-label="支払者">{actorName}</td><td data-label="費用区分">{commonExpenseClassLabels[config.expenseClass]}</td>
     <td data-label={`支払い割合（${members.map(member => member.name).join(", ")}）`} className={tableStyles.fullCell}><RecurringSplit config={config} members={members} /></td>
     <td data-label="メモ" className={`${tableStyles.fullCell} ${styles.memo}`}>{config.memo || "—"}</td>
     <td data-label="状態" className={tableStyles.fullCell}><span className={payment.state === "BLOCKED" ? "error-tag" : payment.state === "ACTIVE" ? "success-tag" : "class-tag personal"}>{stateLabel}</span>
@@ -173,19 +176,9 @@ function RecurringSplit({ config, members }: { config: RecurringPaymentConfig; m
   return <span className={tableStyles.settledSplit}>{members.map(member => <span key={member.id}><span>{money(shares.amounts[member.id])}</span><small>{shares.percentages[member.id] / 10}%</small></span>)}</span>;
 }
 
-function blockedReasonLabel(reason: string | null) {
-  switch (reason) {
-    case "AUTHORIZER_UNAVAILABLE": return "実行を承認した利用者が利用できなくなりました。";
-    case "ACTOR_UNAVAILABLE": return "支払者が利用できなくなりました。";
-    case "SPLIT_MEMBERS_INVALID": return "負担割合の参加者が一致しません。";
-    case "SPLIT_USER_UNAVAILABLE": return "費用を負担する利用者が利用できなくなりました。";
-    default: return "定期支払いの設定を確認する必要があります。";
-  }
-}
-
 function RecurringPaymentForm({ selected, currentUserId, data, payment, close, save, reloadLatest }: {
   selected: WorkspaceData; currentUserId: string; data: RecurringPaymentsResponse; payment?: RecurringPayment; close: () => void;
-  save: (payload: Record<string, unknown>) => Promise<RecurringPaymentMutationResult>; reloadLatest: (payment: RecurringPayment) => Promise<void>;
+  save: (payload: RecurringPaymentMutationDraft) => Promise<RecurringPaymentMutationResult>; reloadLatest: (payment: RecurringPayment) => Promise<void>;
 }) {
   const [config, setConfig] = useState(() => recurringFormConfig(selected, currentUserId, data.eligibleActorUserIds, data.today, payment));
   const [customized, setCustomized] = useState(!!payment);
@@ -207,7 +200,9 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
       try {
         validateSplitWeights(config.splitWeights, selected.members, config.expenseClass, config.actorUserId);
         if (unavailableActor) throw new Error("有効な参加者を支払者として選んでください。");
-        await save({ ...config, action: payment ? "update" : "create", ...(payment ? { paymentId: payment.id, expectedRevision: payment.revision } : {}) });
+        await save(payment
+          ? { ...config, action: "update", paymentId: payment.id, expectedRevision: payment.revision }
+          : { ...config, action: "create" });
       } catch (failure) {
         setError(failure instanceof Error ? failure.message : "保存できませんでした。入力内容は保持しています。");
         if (failure instanceof RecurringRequestError && failure.code === "REVISION_CONFLICT") setConflict(true);
@@ -216,12 +211,12 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
       {payment && payment.state !== "ACTIVE" && <p className={styles.hint}>保存後も自動追加は停止中です。再開は一覧から行ってください。</p>}
       <fieldset disabled={saving} className={styles.fields}><div className="form-grid">
         <label className="full">毎月の日<select required value={config.dayOfMonth} onChange={event => patch({ dayOfMonth: Number(event.target.value) })}>{Array.from({ length: 31 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}日</option>)}</select></label>
-        <label className="full">取引先<input required maxLength={240} value={config.merchant} onChange={event => {
+        <label className="full">取引先<input required maxLength={MAX_MERCHANT_LENGTH} value={config.merchant} onChange={event => {
           const merchant = event.target.value;
           patch({ merchant, ...(!customized ? recurringFormDefaults(selected, merchant, config.actorUserId) : {}) });
         }} /></label>
-        <label>取引方法<input required maxLength={120} value={config.method} onChange={event => patch({ method: event.target.value })} /></label>
-        <label>金額（円）<input type="number" required min="1" max="2147483647" step="1" value={config.amountYen || ""} onChange={event => patch({ amountYen: Number(event.target.value) })} /></label>
+        <label>取引方法<input required maxLength={MAX_METHOD_LENGTH} value={config.method} onChange={event => patch({ method: event.target.value })} /></label>
+        <label>金額（円）<input type="number" required min="1" max={MAX_AMOUNT_YEN} step="1" value={config.amountYen || ""} onChange={event => patch({ amountYen: Number(event.target.value) })} /></label>
         <label>支払者<select required value={config.actorUserId} onChange={event => {
           const actorUserId = event.target.value;
           patch({ actorUserId, ...(config.expenseClass === "PERSONAL" ? { splitWeights: personalSplitWeights(selected.members, actorUserId) } : {}) });
@@ -229,14 +224,14 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
         <label>費用区分<select value={config.expenseClass} disabled={selected.workspace.type === "PERSONAL"} onChange={event => {
           const expenseClass = event.target.value as ExpenseClass;
           patch({ expenseClass, splitWeights: expenseClass === "PERSONAL" ? personalSplitWeights(selected.members, config.actorUserId) : defaultSplitWeights(selected.members) }); setCustomized(true);
-        }}><option value="PERSONAL">個人費</option><option value="SHARED">共通費</option></select></label>
+        }}>{expenseClasses.map(value => <option key={value} value={value}>{commonExpenseClassLabels[value]}</option>)}</select></label>
         <div className="full"><SplitEditor inline label={`支払い割合（${selected.members.map(member => member.name).join(", ")}）`} amountYen={config.amountYen} members={selected.members} value={config.splitWeights}
           disabled={saving || config.expenseClass === "PERSONAL" || !splitValid} onChange={splitWeights => { patch({ splitWeights }); setCustomized(true); }} />
           {!splitValid && <p className="form-error">負担割合の参加者を確認してください。「取引先のルールを適用」で現在の参加者の割合に設定し直せます。</p>}
           <p className="ratio-note">{config.expenseClass === "PERSONAL" ? "個人費は支払者の負担が100%になります。" : "割合・金額で設定できます。相手の分は自動計算します。"}</p>
           <button type="button" className="text-button" disabled={!config.actorUserId} onClick={applyDefaults}>取引先のルールを適用</button></div>
       </div><label className={`new-transaction-memo ${styles.memoLabel}`}>メモ<textarea rows={2} maxLength={MAX_TRANSACTION_MEMO_LENGTH} value={config.memo} onChange={event => patch({ memo: event.target.value })} /></label></fieldset>
-      {preview && <div className={styles.preview}><b>毎月{config.dayOfMonth}日 · {money(config.amountYen)}</b><span>{payment ? "変更後の予定" : "初回予定"}：{preview.firstOn && dateLabel(preview.firstOn)}</span><span>{eligible.find(member => member.id === config.actorUserId)?.name ?? "支払者を選択してください"}の支払い · {config.expenseClass === "PERSONAL" ? "個人費" : "共通費"}</span><RecurringSplit config={config} members={selected.members} />
+      {preview && <div className={styles.preview}><b>毎月{config.dayOfMonth}日 · {money(config.amountYen)}</b><span>{payment ? "変更後の予定" : "初回予定"}：{preview.firstOn && dateLabel(preview.firstOn)}</span><span>{eligible.find(member => member.id === config.actorUserId)?.name ?? "支払者を選択してください"}の支払い · {commonExpenseClassLabels[config.expenseClass]}</span><RecurringSplit config={config} members={selected.members} />
         {config.dayOfMonth >= 29 && <small>その日がない月は月末に追加します。</small>}</div>}
       {payment && <p className={styles.current}>現在：毎月{payment.currentConfig.dayOfMonth}日 / {money(payment.currentConfig.amountYen)} / {payment.currentConfig.merchant}</p>}
       {error && <p className="form-error" role="alert">{error} 入力内容は保持しています。</p>}
@@ -249,7 +244,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
 }
 
 function RecurringPaymentConfirmation({ action, payment, close, save, reloadLatest }: { action: StateAction; payment: RecurringPayment; close: () => void;
-  save: (payload: Record<string, unknown>) => Promise<RecurringPaymentMutationResult>; reloadLatest: (payment: RecurringPayment) => Promise<void> }) {
+  save: (payload: RecurringPaymentMutationDraft) => Promise<RecurringPaymentMutationResult>; reloadLatest: (payment: RecurringPayment) => Promise<void> }) {
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);

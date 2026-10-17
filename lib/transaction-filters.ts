@@ -1,3 +1,4 @@
+import { expenseClassLabels } from "./domain-values";
 import { splitAmounts } from "./split-allocations";
 import { transactionDateInput } from "./transaction-editing";
 import type { TransactionRecord, WorkspaceMember } from "./types";
@@ -29,7 +30,7 @@ export function transactionFilterValue(item: TransactionRecord, column: Transact
     case "memo": return { value: item.memo, label: item.memo || "（空白）" };
     case "amountYen": return { value: String(item.amountYen), label: item.amountYen.toLocaleString("ja-JP") + "円" };
     case "actorUserId": return { value: item.actorUserId, label: members.find(member => member.id === item.actorUserId)?.name ?? item.actorName };
-    case "expenseClass": return { value: item.expenseClass, label: item.expenseClass === "PERSONAL" ? "個人費" : "共有費" };
+    case "expenseClass": return { value: item.expenseClass, label: expenseClassLabels[item.expenseClass] };
     case "settlement": {
       const value = item.settledAt ? "SETTLED" : item.expenseClass === "PERSONAL" ? "EXCLUDED" : "PENDING";
       return { value, label: value === "SETTLED" ? "清算済み" : value === "EXCLUDED" ? "対象外" : "未清算" };

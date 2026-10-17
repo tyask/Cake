@@ -3,7 +3,10 @@ import { z } from "zod";
 import { db } from "./db";
 import { isTestAuthEnabled } from "./auth-mode";
 import { validateSplitWeights } from "./expense-splits";
-import { transactionMemoSchema } from "./transaction-memo";
+import { recurringPaymentConfigSchema, recurringPaymentMutationSchema, type RecurringPaymentMutation } from "./recurring-payment-schemas";
+export { recurringPaymentConfigSchema, recurringPaymentMutationSchema } from "./recurring-payment-schemas";
+export type { RecurringPaymentMutation } from "./recurring-payment-schemas";
+import { isRecurringBlockedReason, recurringDatabaseState, recurringDatabaseBlockedReason, type RecurringServiceErrorCode, type RecurringLogErrorCode, type RecurringLogStatus } from "./recurring-payment-types";
 import { TEST_USERS } from "./test-users";
 import { jstToday, monthOf, nextScheduledOn } from "./recurring-payment-calendar";
 import type {
@@ -11,30 +14,8 @@ import type {
   RecurringPaymentRunResult, RecurringPaymentsResponse,
 } from "./recurring-payment-types";
 
-const configShape = {
-  dayOfMonth: z.number().int().min(1).max(31),
-  merchant: z.string().trim().min(1).max(240),
-  method: z.string().trim().min(1).max(120),
-  amountYen: z.number().int().positive().max(2_147_483_647),
-  actorUserId: z.string().min(1),
-  expenseClass: z.enum(["PERSONAL", "SHARED"]),
-  splitWeights: z.record(z.string().min(1), z.number().int().min(0).max(2_147_483_647))
-    .refine(weights => Object.values(weights).some(weight => weight > 0), "割合は少なくとも一人を1以上にしてください。"),
-  memo: transactionMemoSchema,
-};
-export const recurringPaymentConfigSchema = z.object(configShape).strict();
-const identityShape = { workspaceId: z.uuid(), paymentId: z.uuid(), expectedRevision: z.number().int().positive().max(2_147_483_647) };
-export const recurringPaymentMutationSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("create"), workspaceId: z.uuid(), ...configShape }).strict(),
-  z.object({ action: z.literal("update"), ...identityShape, ...configShape }).strict(),
-  z.object({ action: z.literal("pause"), ...identityShape }).strict(),
-  z.object({ action: z.literal("resume"), ...identityShape }).strict(),
-  z.object({ action: z.literal("archive"), ...identityShape }).strict(),
-]);
-export type RecurringPaymentMutation = z.infer<typeof recurringPaymentMutationSchema>;
-
 export class RecurringPaymentError extends Error {
-  constructor(message: string, public readonly status: number, public readonly code: string) {
+  constructor(message: string, public readonly status: number, public readonly code: RecurringServiceErrorCode) {
     super(message);
     this.name = "RecurringPaymentError";
   }
@@ -68,11 +49,11 @@ const rowConfig = (row: Row): RecurringPaymentConfig => recurringPaymentConfigSc
 
 export function recurringPaymentRecord(row: Row, now: Date): RecurringPayment {
   const payment: RecurringPayment = {
-    id: String(row.id), workspaceId: String(row.workspace_id), state: row.state as RecurringPayment["state"],
+    id: String(row.id), workspaceId: String(row.workspace_id), state: recurringDatabaseState(row.state),
     revision: Number(row.revision),
     authorizedById: String(row.authorized_by), currentConfig: rowConfig(row),
     nextScheduledOn: null,
-    blockedReason: row.blocked_reason == null ? null : String(row.blocked_reason),
+    blockedReason: recurringDatabaseBlockedReason(row.blocked_reason),
   };
   payment.nextScheduledOn = nextScheduledOn(payment, now);
   return payment;
@@ -107,7 +88,7 @@ const databaseStore: RecurringPaymentStore = {
   },
   async mutate(userId, input, testMode, now) {
     const config = input.action === "create" || input.action === "update"
-      ? recurringPaymentConfigSchema.parse(Object.fromEntries(Object.keys(configShape).map(key => [key, input[key as keyof typeof input]]))) : null;
+      ? recurringPaymentConfigSchema.parse(Object.fromEntries(Object.keys(recurringPaymentConfigSchema.shape).map(key => [key, input[key as keyof typeof input]]))) : null;
     const rows = await db()`SELECT cake_mutate_recurring_payment(
       ${input.workspaceId}::uuid,${userId},${input.action},${"paymentId" in input ? input.paymentId : null}::uuid,
       ${"expectedRevision" in input ? input.expectedRevision : null}::integer,${null}::date,
@@ -151,11 +132,11 @@ export interface RecurringPaymentLog {
   event: "recurring.run.started" | "recurring.payment.completed" | "recurring.run.completed";
   runId: string;
   timestamp: string;
-  status: string;
+  status: RecurringLogStatus;
   workspaceId?: string;
   recurringPaymentId?: string;
   scheduledOn?: string;
-  errorCode?: string;
+  errorCode?: RecurringLogErrorCode;
   durationMs?: number;
   counts?: Omit<RecurringPaymentRunResult, "runId">;
 }
@@ -166,8 +147,6 @@ interface RunOptions {
   maxDurationMs?: number;
   logger?: (entry: RecurringPaymentLog) => void;
 }
-const blockedCodes = new Set(["AUTHORIZER_UNAVAILABLE", "ACTOR_UNAVAILABLE", "SPLIT_MEMBERS_INVALID", "SPLIT_USER_UNAVAILABLE", "CONFIG_INVALID"]);
-
 export function createRecurringPaymentService(store: RecurringPaymentStore, options: { testMode?: () => boolean; monotonicNow?: () => number } = {}) {
   const mode = options.testMode ?? isTestAuthEnabled;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
@@ -221,13 +200,13 @@ export function createRecurringPaymentService(store: RecurringPaymentStore, opti
         break;
       }
       const paymentStarted = monotonicNow();
-      let status: string;
-      let errorCode: string | undefined;
+      let status: RecurringLogStatus;
+      let errorCode: RecurringLogErrorCode | undefined;
       try {
         const generated = await store.generate(candidate, testMode, now);
         if (generated.status === "created") { result.created++; status = "created"; }
         else if (generated.status === "skipped") { result.skipped++; status = "skipped"; }
-        else { result.failed++; status = "failed"; errorCode = generated.errorCode && blockedCodes.has(generated.errorCode)
+        else { result.failed++; status = "failed"; errorCode = isRecurringBlockedReason(generated.errorCode)
           ? generated.errorCode : "DATABASE_UNAVAILABLE"; }
       } catch { result.failed++; status = "failed"; errorCode = "DATABASE_UNAVAILABLE"; }
       log({ event: "recurring.payment.completed", status, errorCode, workspaceId: candidate.workspaceId,
