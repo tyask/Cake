@@ -1,5 +1,5 @@
 name: Cake Preview
-run-name: Preview ${{ inputs.action || 'cleanup' }} PR ${{ inputs.pr || github.event.pull_request.number }} ${{ inputs.operation || github.run_id }}
+run-name: Preview ${{ inputs.action || (github.event.action == 'closed' && 'cleanup' || 'deploy') }} PR ${{ inputs.pr || github.event.pull_request.number }} ${{ inputs.operation || github.run_id }}
 on:
   workflow_dispatch:
     inputs:
@@ -27,7 +27,7 @@ on:
         required: false
   pull_request_target:
     branches: [main]
-    types: [closed]
+    types: [opened, synchronize, reopened, closed]
 permissions: {}
 concurrency:
   group: cake-preview-${{ inputs.pr || github.event.pull_request.number }}

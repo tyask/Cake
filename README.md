@@ -203,7 +203,7 @@ QAのDB初回照合・fixture・migration/seed・同PR更新時のデータ保�
 
 ## 開発・QA運用手順
 
-Windowsネイティブの専用worktreeで実装・追加テストを同じcommitに含め、同じSHAのローカル検証→draft PR→必要な専用Preview→Windowsの `qa:verify` →明示依頼後のReadyの順に進めます。詳細は [docs/development-workflow.md](docs/development-workflow.md) にまとめています。テストを先にmainへmergeする必要はありません。通常CI・Preview/DB管理とcleanupはActionsに残し、更新済みmainのcontrol checkoutからの `qa:verify:ci` は任意の代替経路として維持します。Actionsの結果は標準notice annotationを既存gh本人認証で読み取り、artifact取得や外部relayを使いません。
+Windowsネイティブの専用worktreeで実装・追加テストを同じcommitに含め、同じSHAのローカル検証→draft PR（専用Preview自動作成）→Windowsの `qa:verify` →明示依頼後のReadyの順に進めます。詳細は [docs/development-workflow.md](docs/development-workflow.md) にまとめています。テストを先にmainへmergeする必要はありません。通常CI・Preview/DB管理とcleanupはActionsに残し、更新済みmainのcontrol checkoutからの `qa:verify:ci` は任意の代替経路として維持します。Actionsの結果は標準notice annotationを既存gh本人認証で読み取り、artifact取得や外部relayを使いません。
 
 既存Chromeの直接操作は目視確認用で、Playwrightの正式な検証証拠とは分けます。2026-10-17にWindowsでPR #75のA/B × PC/mobile、16クリック、API・runtime観測12件、画像12枚と前後status照合が成功しました（全体114.178秒）。普段のChromeの直接操作で確認した範囲は、公開ページ操作とPreviewのログイン前表示です。この実機受入と、共通ランチャーを別PR・別PCで再現できることは分けて評価します。
 
@@ -274,7 +274,7 @@ npm run db:seed:test # テストユーザーA・Bと共有ワークスペース�
 
 ## PR Preview
 
-固定QA URLとCanneleは使用しません。CakeのコマンドでmainのActionsへ操作を依頼し、PRごとの固有Preview URLと専用Neon Native DBを使います。
+固定QA URLとCanneleは使用しません。同一repositoryの `codex/*` からmainへのPRを作成・更新・再openすると、mainのActionsがPRごとの固有Preview URLと専用Neon Native DBを自動で用意します。draft PRも対象です。PRを開く前のpushだけでは作成しません。初回buildは専用DBへのmigration/seedを含み、更新時は同じDBへ未適用migrationを実行します。導入・有効化にはこの自動操作の範囲の承認が必要です。Vercel Git連携のfeature deployを直接有効にせず、既存のDB分離・所有権照合を維持します。手動操作のコマンドも残します。
 
 ```bash
 npm run deploy:preview
