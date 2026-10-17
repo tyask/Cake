@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { calculateSettlement } from "./settlement";
+import { defaultRuleRecord } from "./default-rule-record";
 import { transactionRecord } from "./transaction-record";
 import type {
   AppUser,
@@ -9,7 +10,6 @@ import type {
   DefaultRule,
   PendingInvitation,
   SettlementHistory,
-  SplitWeights,
   TransactionRecord,
   WorkspaceData,
   WorkspaceMember,
@@ -176,14 +176,7 @@ function getWorkspaceData(
     weight: number(row.weight),
     role: text(row.role) as WorkspaceMember["role"],
   }));
-  const rules: DefaultRule[] = (row.rules as Row[]).map((row) => ({
-    id: text(row.id),
-    merchantContains: text(row.merchant_contains),
-    expenseClass: text(row.expense_class) as DefaultRule["expenseClass"],
-    sortOrder: number(row.sort_order),
-    splitWeights: row.split_weights as SplitWeights | null,
-    enabled: Boolean(row.enabled),
-  }));
+  const rules: DefaultRule[] = (row.rules as Row[]).map(defaultRuleRecord);
   if (scope === "metadata") return { workspace, members, rules };
 
   const transactions: TransactionRecord[] = (row.transactions as Row[]).map(row => transactionRecord(row));

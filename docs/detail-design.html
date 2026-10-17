@@ -362,6 +362,7 @@
               <tr><td>lib/db.ts / db-query-logging.ts / database-environment.ts</td><td><code>db()</code>でNeonクライアントを遅延生成・再利用。PreviewはテストDB接続を必須とし、本番接続へのfallbackを禁止。<code>instrumentDatabase()</code>で単発/Transactionの実行時間と安全な識別情報を記録。</td></tr>
               <tr><td>lib/current-user.ts / auth-callbacks.ts / auth-mode.ts</td><td><code>getCurrentUser()</code>、<code>resolveSessionUser()</code>、<code>createAuthCallbacks()</code>、Productionでのテスト認証無効化。</td></tr>
               <tr><td>lib/user-access.ts / user-profile.ts / test-users.ts</td><td>登録・有効状態・管理者権限のDB確認、表示名更新・入力schema、固定テストユーザー定義。</td></tr>
+              <tr><td>lib/app-handlers.ts / app-service.ts / app-services/ / app-store.ts</td><td>HTTPの認証・入力/応答、actionの振分け、workspace/招待・明細・ルール・取込・清算の業務条件、SQL実行を分離する。サービスは差し替え可能なstoreを受け取る。</td></tr>
               <tr><td>lib/repository.ts / bootstrap.ts</td><td><code>getBootstrap()</code>の集約SQL・DTO構築、<code>requireWorkspaceMember()</code>、タブ別scopeとmetadataの併合。</td></tr>
               <tr><td>lib/expense-splits.ts / split-allocations.ts / settlement.ts</td><td>参加者別保存割合・デフォルトルール、整数円への配分・円入力からの割合、正確な分数集計による清算。</td></tr>
               <tr><td>lib/paypay.ts / paypay-id.ts / import-duplicates.ts / paypay-import.ts</td><td>CSV解析、JST外部ID生成・正規化、既存/CSV内重複・衝突の検出、DB Transactionでの登録。</td></tr>
@@ -629,8 +630,11 @@ amountYen         = abs(payer.balance)</div>
             </tbody>
           </table></div>
           <p>通常の画面要求/<code>GET /api/app</code>は利用可否確認1 SQLと集約1 SQLの合計2 SQL・2回のNeon通信。初期workspace作成時だけ追加SQLが発生する。lazy SQL断片は集約時に一緒に実行し、断片作成だけで通信しない。metadataは明細・清算・履歴のSQL自体を含まず、既存明細の全件取得を省く。</p>
-          <p>SQL行を<code>Record&lt;string, unknown&gt;</code>として受け、text/nullableText/number、<code>transactionRecord()</code>で明示変換する。集約日時は<code>date_trunc('second', ...)</code>で従来DTOの秒精度を維持し、並び順や期限判定は元の精度を使用する。</p>
+          <p>SQL行を<code>Record&lt;string, unknown&gt;</code>として受け、text/nullableText/number、<code>transactionRecord()</code>、共通の<code>defaultRuleRecord()</code>で明示変換する。集約日時は<code>date_trunc('second', ...)</code>で従来DTOの秒精度を維持し、並び順や期限判定は元の精度を使用する。</p>
           <div class="note"><code>requireWorkspaceMember(workspaceId, userId)</code>はworkspacesとworkspace_membersをJOINし、所属がなければ認可例外。scopeや指定IDはユーザーの所属を広げない。</div>
+          <h3>アプリAPIの処理境界</h3>
+          <p><code>app/api/app/route.ts</code>は実装を配線し、<code>appHandlers()</code>が認証、共有schemaによるparse、サービス呼出し、HTTP応答を担当する。<code>createAppService(store)</code>はactionを用途別サービスへ振り分け、所属・担当者・割合・招待条件・清算Snapshotを検証する。DB依存はstoreから注入し、SQLは<code>createAppStore()</code>と既存のrepository・user-access・paypay-importが実行する。サービスはRequest/ResponseやSQL clientを扱わない。</p>
+          <p>GETの通常2 SQL、各操作の所属確認、表示名更新時の有効利用者再確認、DB関数内の最新権限・清算Snapshot照合を維持する。明細保存のworkspace更新と明細更新、ルール更新/再採番、清算のSnapshot照合・履歴・関連・明細更新は従来のTransaction境界で実行する。一括ルール削除の対象SELECTは書込Transaction前に行う。workspace削除は、対象清算の関連行を先に除去するCTEの結果を消費してからworkspaceを削除し、明細・清算などのCASCADEを同じ一回のSQLで完了する。途中で制約違反が起きれば関連行の削除もrollbackする。</p>
           <h3>DB実行ログ</h3>
           <p>ローカルではサーバーを起動した端末、VercelではプロジェクトのLogsで確認する。調査時に全件が必要なら<code>DB_QUERY_LOG=all</code>へ変更する。例えば<code>DB_QUERY_LOG=slow</code>と<code>DB_SLOW_QUERY_MS=1000</code>では、1,000ms以上の成功とすべての失敗を記録する。<code>.env.example</code>の設定例はコメントで、コピーだけでは環境別の既定値を上書きしない。</p>
           <p><code>instrumentDatabase()</code>はlazy queryの実行時に、<code>db.query</code>または<code>db.transaction</code>のJSONを出力する。operation、匿名queryId、許可済みtable名、durationMs、sqlCount、status、slow、失敗時の標準errorType/SQLSTATEだけを含み、SQL本文・パラメータ・結果・エラーメッセージは含めない。</p>
@@ -775,6 +779,8 @@ BootstrapData extends BootstrapMetadata
               <tr><td>rule-order.test.ts</td><td>楽観順序の組み立てと解除、多数ルール、外部追加・削除、未知・重複ID、入力配列の維持。</td></tr>
               <tr><td>domain-schemas.test.ts / app-input.typecheck.ts</td><td>入口間の金額・文字数・割合境界、全actionの入力、既存の省略・strict/strip契約、共有入力の実行時依存境界。型検査では不一致payload・未知action・有限ログ値の拒否を確認する。</td></tr>
               <tr><td>user-access.test.ts / user-profile.test.ts</td><td>確認済みGoogleメールと事前登録、内部ID、有効状態・権限再確認、テストモード、表示名保持・本人更新schema。</td></tr>
+              <tr><td>workspace-deletion.test.ts</td><td>一時PostgreSQLで清算済みworkspaceと関連データの削除、他workspace保持、制約エラー時の全体rollback、所属確認と削除の2往復を確認する。</td></tr>
+              <tr><td>app-handlers.test.ts / app-services.test.ts / app-store.test.ts</td><td>HTTP応答・入力・未認証・所属拒否・DB失敗、割合継承・招待・清算Snapshot、全19操作のSQL往復とTransaction境界、通常bootstrapの2 SQL。</td></tr>
               <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・秒精度、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
               <tr><td>db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
               <tr><td>recurring-payment-calendar.test.ts / recurring-payment-form.test.ts / recurring-payments.test.ts / recurring-payment-handlers.test.ts</td><td>日本時間09:00の直前/境界、未来日・過去日・月末、追加履歴を参照しない予定計算、保存・再開・認可・入力検証、当日処理・処理開始日時・実行APIの環境制限。</td></tr>
