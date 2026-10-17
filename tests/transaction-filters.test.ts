@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { matchesTransactionFilters, transactionFilterOptions, transactionFilterValue } from "../lib/transaction-filters";
+import { createTransactionFilterMatcher, transactionFilterOptions, transactionFilterValue } from "../lib/transaction-filters";
+import type { TransactionFilters } from "../lib/transaction-filters";
 import type { TransactionRecord, WorkspaceMember } from "../lib/types";
 
 const members: WorkspaceMember[] = [
   { id: "a", name: "A", email: "a@example.test", imageUrl: null, weight: 1, role: "OWNER" },
   { id: "b", name: "B", email: "b@example.test", imageUrl: null, weight: 1, role: "MEMBER" },
 ];
+const matchesTransactionFilters = (item: TransactionRecord, filters: TransactionFilters, people: WorkspaceMember[]) => createTransactionFilterMatcher(filters, people)(item);
 const base: TransactionRecord = {
   id: "one", occurredAt: "2026-10-06T23:15:00.125Z", merchant: "スーパー", method: "現金",
   type: "PAYMENT", amountYen: 1001, actorUserId: "a", actorName: "A", expenseClass: "SHARED",
@@ -68,4 +70,22 @@ test("メモは改行を含む値と空白を区別し、清算済みの明細�
   assert.equal(matchesTransactionFilters(item, { memo: [""] }, members), false);
   assert.deepEqual(transactionFilterOptions([base, item], "memo", members).find(option => option.value === ""),
     { value: "", label: "（空白）", count: 1 });
+});
+
+
+test("多数候補を一度準備して再利用し、保存用配列は変更しない", () => {
+  const values = Array.from({ length: 5000 }, (_, index) => `店舗${index}`);
+  values.push("スーパー", "スーパー");
+  const filters = { merchant: values, method: ["現金"] };
+  const before = JSON.stringify(filters);
+  const matches = createTransactionFilterMatcher(filters, members);
+  const items = Array.from({ length: 5000 }, (_, index) => ({ ...base, id: String(index), merchant: `店舗${index}` }));
+  assert.equal(items.filter(matches).length, 5000);
+  assert.equal(matches(base), true);
+  assert.equal(matches({ ...base, merchant: "候補外" }), false);
+  assert.equal(matches({ ...base, method: "カード" }), false);
+  assert.equal(JSON.stringify(filters), before);
+  const changed = createTransactionFilterMatcher({ ...filters, merchant: [] }, members);
+  assert.equal(changed(base), false);
+  assert.equal(matches(base), true);
 });

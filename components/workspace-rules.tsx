@@ -2,11 +2,12 @@
 
 import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/autosave";
 
-import { useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { defaultSplitWeights, validateSplitWeights } from "@/lib/expense-splits";
+import { orderedWorkspaceRules } from "@/lib/rule-order";
 import type { DefaultRule, ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/types";
 import styles from "./workspace-rules.module.css";
 
@@ -50,11 +51,10 @@ function RulesEditor({ selected, run }: { selected: WorkspaceData; run: RunActio
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-  const orderedRules = orderOverride
-    ? [...orderOverride.map((id) => selected.rules.find((rule) => rule.id === id)).filter((rule): rule is DefaultRule => Boolean(rule)), ...selected.rules.filter((rule) => !orderOverride.includes(rule.id))]
-    : selected.rules;
+  const orderedRules = useMemo(() => orderedWorkspaceRules(selected.rules, orderOverride), [selected.rules, orderOverride]);
   const orderedIds = orderedRules.map((rule) => rule.id);
-  const selectedIds = orderedIds.filter((id) => selection.includes(id));
+  const selectionSet = new Set(selection);
+  const selectedIds = orderedIds.filter((id) => selectionSet.has(id));
   const allSelected = selectedIds.length > 0 && selectedIds.length === orderedIds.length;
 
   // Read drafts when their queued turn starts, after the previous refresh.
@@ -110,7 +110,10 @@ function RulesEditor({ selected, run }: { selected: WorkspaceData; run: RunActio
     if (!confirm(`選択した${selectedIds.length}件のルールを削除しますか？`)) return;
     const ids = [...selectedIds];
     const saved = await perform({ payload: { action: "deleteRules", ruleIds: ids }, message: `${ids.length}件のルールを削除しました。` });
-    if (saved) setSelection((current) => current.filter((id) => !ids.includes(id)));
+    if (saved) {
+      const deletedIds = new Set(ids);
+      setSelection((current) => current.filter((id) => !deletedIds.has(id)));
+    }
   }
 
   return (
@@ -143,7 +146,7 @@ function RulesEditor({ selected, run }: { selected: WorkspaceData; run: RunActio
         <SortableContext items={orderedIds} strategy={verticalListSortingStrategy}>
           <ol className={styles.list} aria-label="適用順のルール">
             {orderedRules.map((rule) => <EditableRule key={rule.id} rule={rule} members={selected.members} structuralBusy={structuralBusy}
-              selected={selectedIds.includes(rule.id)} onSelect={(checked) => setSelection((current) => checked ? [...new Set([...current, rule.id])] : current.filter((id) => id !== rule.id))} onSave={saveRule} />)}
+              selected={selectionSet.has(rule.id)} onSelect={(checked) => setSelection((current) => checked ? [...new Set([...current, rule.id])] : current.filter((id) => id !== rule.id))} onSave={saveRule} />)}
           </ol>
         </SortableContext>
       </DndContext>

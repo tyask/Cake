@@ -58,9 +58,10 @@ export function transactionFilterOptions(items: TransactionRecord[], column: Tra
     : a.label.localeCompare(b.label, "ja", { numeric: true }));
 }
 
-export function matchesTransactionFilters(item: TransactionRecord, filters: TransactionFilters, members: WorkspaceMember[]): boolean {
-  return transactionColumns.every(({ id }) => {
+export function createTransactionFilterMatcher(filters: TransactionFilters, members: WorkspaceMember[]): (item: TransactionRecord) => boolean {
+  const conditions = transactionColumns.flatMap(({ id }) => {
     const values = filters[id];
-    return values === undefined || values.includes(transactionFilterValue(item, id, members).value);
+    return values === undefined ? [] : [{ column: id, values: new Set(values) }];
   });
+  return item => conditions.every(({ column, values }) => values.has(transactionFilterValue(item, column, members).value));
 }

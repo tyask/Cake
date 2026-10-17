@@ -2,7 +2,7 @@
 
 import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/autosave";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { transactionActorPatch, transactionDateInput, transactionDateToIso, transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues } from "@/lib/transaction-editing";
 import type { ExpenseClass, TransactionRecord, WorkspaceData, WorkspaceMember } from "@/lib/types";
 import styles from "./transactions-panel.module.css";
@@ -14,7 +14,8 @@ import { TransactionMemoEditor, type SaveTransactionMemo, type TransactionMemoHa
 import { RefreshButton } from "./refresh-button";
 import { refreshTransactionEditors } from "@/lib/transaction-refresh";
 import { transactionMemoSchema } from "@/lib/transaction-memo";
-import { matchesTransactionFilters, transactionColumns, transactionFilterOptions, type TransactionColumn } from "@/lib/transaction-filters";
+import { createTransactionFilterMatcher, transactionColumns, transactionFilterOptions, type TransactionColumn } from "@/lib/transaction-filters";
+import { transactionListView } from "@/lib/transaction-list";
 import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } from "./transaction-table";
 import { useTransactionFilters } from "./use-transaction-filters";
 
@@ -81,17 +82,11 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
       return next;
     });
   }, []);
-  function matches(item: TransactionRecord) {
-    return matchesTransactionFilters(item, columnFilters, selected.members);
-  }
-  const visible = selected.transactions.filter((item) => matches(item) || pinnedIds.has(item.id) || memoPinnedIds.has(item.id));
-  const editableIds = new Set(selected.transactions.filter((item) => !item.settledAt).map((item) => item.id));
-  const checkedIds = [...selectedIds].filter((id) => editableIds.has(id));
-  const visibleEditable = visible.filter((item) => !item.settledAt);
-  const checkedVisibleCount = visibleEditable.filter((item) => selectedIds.has(item.id)).length;
-  const allVisibleChecked = visibleEditable.length > 0 && checkedVisibleCount === visibleEditable.length;
-  const selectionChecked = allVisibleChecked || (visibleEditable.length === 0 && checkedIds.length > 0);
-  const hiddenCheckedCount = checkedIds.filter((id) => !visible.some((item) => item.id === id)).length;
+  const matches = useMemo(() => createTransactionFilterMatcher(columnFilters, selected.members), [columnFilters, selected.members]);
+  const { visible, visibleEditable, outsideFilterIds, checkedIds, hiddenCheckedCount, selectionChecked } = useMemo(
+    () => transactionListView(selected.transactions, matches, pinnedIds, memoPinnedIds, selectedIds),
+    [selected.transactions, matches, pinnedIds, memoPinnedIds, selectedIds],
+  );
   const busy = bulkAction !== null || preparingRefresh || refreshing;
   const filteredColumns = transactionColumns.filter(column => columnFilters[column.id] !== undefined);
 
@@ -155,7 +150,8 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
       if (ids.some((id) => !latestIds.has(id))) throw new Error("選択した明細が削除または清算されています。選択し直してください。");
       const result = await enqueue(() => run({ action, workspaceId: selected.workspace.id, transactionIds: ids }, action === "deleteTransactions" ? "選択した明細を削除しました。" : "共有費ルールを適用しました。"));
       if (action === "deleteTransactions") {
-        setSelectedIds((current) => new Set([...current].filter((id) => !ids.includes(id))));
+        const deletedIds = new Set(ids);
+        setSelectedIds((current) => new Set([...current].filter((id) => !deletedIds.has(id))));
         setBulkNotice(ids.length + "件の明細を削除しました。");
       } else {
         const applied = (result as { appliedTransactions?: ({ id: string } & TransactionValues)[] } | null)?.appliedTransactions;
@@ -201,7 +197,7 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
       {bulkNotice && <p role="status" className={styles.bulkNotice}>{bulkNotice}</p>}
       <p className={styles.note}>清算済みの明細はメモのみ編集できます。メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。全選択チェックを外すと非表示の選択も解除します。編集中の明細は編集を終えるまで表示します。</p>
       <TransactionTable columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => <th key={column.id}><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
-        {visible.map((item) => <EditableTransaction key={item.id} item={item} members={selected.members} pinnedOutsideFilter={!matches(item)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} />)}
+        {visible.map((item) => <EditableTransaction key={item.id} item={item} members={selected.members} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} />)}
       </TransactionTable>
       {visible.length === 0 && <p className={styles.empty}>条件に一致する明細がありません。</p>}
     </section>
