@@ -34,6 +34,7 @@ function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean 
   });
   const trips: Trip[] = [];
   function rows(query: string): Row[] {
+    if (/WITH authorized AS/.test(query)) return [{ authorized: !options.forbidden, workspace_type: "SHARED", members: memberRows, transactions: [{ id: transactionId, actorUserId: "a", type: "PAYMENT", amountYen: 300, expenseClass: "SHARED", splitWeights: { a: 1, b: 1 } }] }];
     if (/WITH\s+my_workspaces AS/.test(query)) return [{
       workspaces: [{ id: workspaceId, name: "QA", type: "SHARED", owner_user_id: "a", member_count: 2 }], selected_workspace_id: workspaceId,
       members: memberRows, rules: [ruleRow], transactions: [transaction], pending_invitations: [], settlement_history: [],
@@ -88,7 +89,7 @@ const cases: { input: Row; counts: number[]; transactions?: number[]; result?: R
   { input: { action: "deleteRule", workspaceId, ruleId }, counts: [1, 3], transactions: [1] },
   { input: { action: "deleteRules", workspaceId, ruleIds: [ruleId] }, counts: [1, 1, 3], transactions: [2], result: { ok: true, deleted: 1 } },
   { input: { action: "bulkImport", workspaceId, fileName: "qa.csv", totalRows: 1, items: [{ occurredAt: save.occurredAt, merchant: "店", method: "PayPay", amountYen: 300, actorUserId: "a", externalId: "123" }] }, counts: [1, 1, 1, 4], transactions: [3], result: { ok: true, imported: 1, skipped: 0 } },
-  { input: { action: "completeSettlement", workspaceId }, counts: [1, 1, 4], transactions: [2] },
+  { input: { action: "completeSettlement", workspaceId }, counts: [1, 4], transactions: [1] },
 ];
 
 for (const [index, scenario] of cases.entries()) {
@@ -108,10 +109,13 @@ for (const [index, scenario] of cases.entries()) {
       assert.equal(body.transaction.id, transactionId);
     }
     if (scenario.input.action === "completeSettlement") {
-      const queries = f.trips[2].queries;
+      const queries = f.trips[1].queries;
       assert.match(queries[0].query, /cake_assert_settlement_snapshot/);
       assert.match(queries[1].query, /INSERT INTO settlements/);
       assert.match(queries[2].query, /INSERT INTO settlement_transactions/);
+      assert.match(queries[2].query, /jsonb_array_elements_text/);
+      assert.match(f.trips[0].queries[0].query, /WITH authorized AS/);
+      assert.doesNotMatch(f.trips[0].queries[0].query, /default_rules|invitations|settlements|my_workspaces/);
       assert.match(queries[3].query, /UPDATE transactions SET settled_at/);
       assert.deepEqual(JSON.parse(String(queries[0].params[2])), [{ id: transactionId, actorUserId: "a", type: "PAYMENT", amountYen: 300, expenseClass: "SHARED", splitWeights: { a: 1, b: 1 } }]);
     }

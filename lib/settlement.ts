@@ -1,5 +1,13 @@
-import type { SettlementResult, TransactionRecord, WorkspaceMember } from "./types";
+import type { SettlementResult, TransactionRecord, WorkspaceMember, WorkspaceType } from "./types";
 import { validateSplitWeights } from "./expense-splits";
+
+export type SettlementMember = Pick<WorkspaceMember, "id" | "name" | "weight">;
+export type SettlementTransaction = Pick<TransactionRecord, "id" | "actorUserId" | "type" | "amountYen" | "expenseClass" | "splitWeights" | "settledAt">;
+export interface SettlementContext {
+  workspaceType: WorkspaceType;
+  members: SettlementMember[];
+  transactions: SettlementTransaction[];
+}
 
 function gcd(a: bigint, b: bigint): bigint {
   while (b !== BigInt(0)) [a, b] = [b, a % b];
@@ -22,8 +30,8 @@ function roundFraction([numerator, denominator]: [bigint, bigint]): number {
 }
 
 export function calculateSettlement(
-  members: WorkspaceMember[],
-  transactions: TransactionRecord[],
+  members: readonly SettlementMember[],
+  transactions: readonly SettlementTransaction[],
 ): SettlementResult | null {
   if (members.length !== 2) return null;
 

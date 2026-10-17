@@ -362,7 +362,7 @@
               <tr><td>lib/db.ts / db-query-logging.ts / database-environment.ts</td><td><code>db()</code>でNeonクライアントを遅延生成・再利用。PreviewはテストDB接続を必須とし、本番接続へのfallbackを禁止。<code>instrumentDatabase()</code>で単発/Transactionの実行時間と安全な識別情報を記録。</td></tr>
               <tr><td>lib/current-user.ts / auth-callbacks.ts / auth-mode.ts</td><td><code>getCurrentUser()</code>、<code>resolveSessionUser()</code>、<code>createAuthCallbacks()</code>、Productionでのテスト認証無効化。</td></tr>
               <tr><td>lib/user-access.ts / user-profile.ts / test-users.ts</td><td>登録・有効状態・管理者権限のDB確認、表示名更新・入力schema、固定テストユーザー定義。</td></tr>
-              <tr><td>lib/app-handlers.ts / app-service.ts / app-services/ / app-store.ts</td><td>HTTPの認証・入力/応答、actionの振分け、workspace/招待・明細・ルール・取込・清算の業務条件、SQL実行を分離する。サービスは差し替え可能なstoreを受け取る。</td></tr>
+              <tr><td>lib/app-handlers.ts / app-service.ts / app-services/ / app-store.ts / settlement-store.ts</td><td>HTTPの認証・入力/応答、actionの振分け、workspace/招待・明細・ルール・取込・清算の業務条件、SQL実行を分離する。サービスは差し替え可能なstoreを受け取る。</td></tr>
               <tr><td>lib/repository.ts / bootstrap.ts</td><td><code>getBootstrap()</code>の集約SQL・DTO構築、<code>requireWorkspaceMember()</code>、タブ別scopeとmetadataの併合。</td></tr>
               <tr><td>lib/expense-splits.ts / split-allocations.ts / settlement.ts</td><td>参加者別保存割合・デフォルトルール、整数円への配分・円入力からの割合、正確な分数集計による清算。</td></tr>
               <tr><td>lib/paypay.ts / paypay-id.ts / import-duplicates.ts / paypay-import.ts</td><td>CSV解析、JST外部ID生成・正規化、既存/CSV内重複・衝突の検出、DB Transactionでの登録。</td></tr>
@@ -603,9 +603,9 @@ balance           = actual - target
 amountYen         = abs(payer.balance)</div>
           <p><code>SettlementPerson.weight</code>と<code>weight_snapshot</code>は現在のデフォルト割合を記録するが、計算は各明細の<code>splitWeights</code>を使用する。清算Snapshotには対象明細ごとの保存割合も含める。</p>
           <h3>清算完了と同時操作</h3>
-          <div class="state-flow"><span>full再取得・再計算</span><i>→</i><span>対象値をID順に固定</span><i>→</i><span>ロック・Snapshot照合</span><i>→</i><span>履歴・関連INSERT</span><i>→</i><span>settled_at更新</span></div>
+          <div class="state-flow"><span>清算専用取得・再計算</span><i>→</i><span>対象値をID順に固定</span><i>→</i><span>ロック・Snapshot照合</span><i>→</i><span>履歴・関連INSERT</span><i>→</i><span>settled_at更新</span></div>
           <p><code>cake_assert_settlement_snapshot()</code>をTransaction先頭で実行し、workspace行の更新ロックを取得して所属を再確認する。現在の未清算SHARED全明細のID・actor・type・amount・class・splitWeightsが期待値と完全一致しなければ全体を失敗させる。計算に関係しないメモ・日時・取引先・方法は照合Snapshotの対象外。</p>
-          <p>計算Snapshot・対象明細Snapshot、対象関連、settled_atを同じNeon Transactionで保存する。対象明細の追加・削除・計算値変更・先行清算があれば再確認を促す。<code>settlement_transactions.transaction_id</code>のUNIQUE制約でも二重清算を防ぐ。清算済みの計算値は通常更新/削除不可だが、メモは専用APIで変更できる。</p>
+          <p>計算Snapshot・対象明細Snapshot、対象関連、settled_atを同じNeon Transactionで保存する。アプリが生成する更新SQLはSnapshot照合・履歴INSERT・関連の集合INSERT・対象の集合UPDATEの4本で、明細件数に比例して増やさない。関連INSERTはJSON配列を行集合へ展開し、UPDATEはworkspace・未清算・対象ID集合で制限する。対象明細の追加・削除・計算値変更・先行清算があれば再確認を促す。<code>settlement_transactions.transaction_id</code>のUNIQUE制約でも二重清算を防ぐ。清算済みの計算値は通常更新/削除不可だが、メモは専用APIで変更できる。</p>
         </section>
 
         <section id="repository">
@@ -635,6 +635,9 @@ amountYen         = abs(payer.balance)</div>
           <h3>アプリAPIの処理境界</h3>
           <p><code>app/api/app/route.ts</code>は実装を配線し、<code>appHandlers()</code>が認証、共有schemaによるparse、サービス呼出し、HTTP応答を担当する。<code>createAppService(store)</code>はactionを用途別サービスへ振り分け、所属・担当者・割合・招待条件・清算Snapshotを検証する。DB依存はstoreから注入し、SQLは<code>createAppStore()</code>と既存のrepository・user-access・paypay-importが実行する。サービスはRequest/ResponseやSQL clientを扱わない。</p>
           <p>GETの通常2 SQL、各操作の所属確認、表示名更新時の有効利用者再確認、DB関数内の最新権限・清算Snapshot照合を維持する。明細保存のworkspace更新と明細更新、ルール更新/再採番、清算のSnapshot照合・履歴・関連・明細更新は従来のTransaction境界で実行する。一括ルール削除の対象SELECTは書込Transaction前に行う。workspace削除は、対象清算の関連行を先に除去するCTEの結果を消費してからworkspaceを削除し、明細・清算などのCASCADEを同じ一回のSQLで完了する。途中で制約違反が起きれば関連行の削除もrollbackする。</p>
+          <h3>清算専用取得</h3>
+          <p><code>settlement-store.ts</code>の<code>settlementContext(workspaceId, userId)</code>は所属確認を含む1 SQLで対象workspaceの種別、参加者のID・名前・現在の重み、未清算SHARED明細のID・担当者・種別・金額・費用区分・保存割合だけを取得する。参加者順はjoined_at・user_id、明細順はoccurred_at DESC・created_at DESCでfull取得と揃える。ルール・招待・履歴・他workspace一覧・個人費・清算済み明細を転送せず、初期workspaceも作成しない。</p>
+          <p>清算POSTは利用可否確認1 SQL、専用取得1 SQL、固定4 SQLのNeon Transactionという3回の通信で完了する。サービスは同じ<code>calculateSettlement()</code>を再利用し、対象IDをSetで照合してSnapshotをID順に固定する。保存時のworkspaceロック・最新の所属確認・Snapshot照合と一明細一清算のUNIQUE制約を維持する。通常の画面/<code>GET /api/app</code>の2 SQL契約は変えない。</p>
           <h3>DB実行ログ</h3>
           <p>ローカルではサーバーを起動した端末、VercelではプロジェクトのLogsで確認する。調査時に全件が必要なら<code>DB_QUERY_LOG=all</code>へ変更する。例えば<code>DB_QUERY_LOG=slow</code>と<code>DB_SLOW_QUERY_MS=1000</code>では、1,000ms以上の成功とすべての失敗を記録する。<code>.env.example</code>の設定例はコメントで、コピーだけでは環境別の既定値を上書きしない。</p>
           <p><code>instrumentDatabase()</code>はlazy queryの実行時に、<code>db.query</code>または<code>db.transaction</code>のJSONを出力する。operation、匿名queryId、許可済みtable名、durationMs、sqlCount、status、slow、失敗時の標準errorType/SQLSTATEだけを含み、SQL本文・パラメータ・結果・エラーメッセージは含めない。</p>
@@ -779,6 +782,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>rule-order.test.ts</td><td>楽観順序の組み立てと解除、多数ルール、外部追加・削除、未知・重複ID、入力配列の維持。</td></tr>
               <tr><td>domain-schemas.test.ts / app-input.typecheck.ts</td><td>入口間の金額・文字数・割合境界、全actionの入力、既存の省略・strict/strip契約、共有入力の実行時依存境界。型検査では不一致payload・未知action・有限ログ値の拒否を確認する。</td></tr>
               <tr><td>user-access.test.ts / user-profile.test.ts</td><td>確認済みGoogleメールと事前登録、内部ID、有効状態・権限再確認、テストモード、表示名保持・本人更新schema。</td></tr>
+              <tr><td>settlement-store.test.ts / scripts/settlement-scenarios.ts</td><td>専用取得の認可と最小項目、既存計算との一致、支払い/受け取り・保存割合・丸め・ゼロ円、取得後の変更・削除・追加・所属解除・先行/並列清算と全体rollback、多数明細の固定4 SQL、取得JSON量とEXPLAINによる比較。メモリPostgreSQLと専用Preview DBで同じシナリオを使う。</td></tr>
               <tr><td>workspace-deletion.test.ts</td><td>一時PostgreSQLで清算済みworkspaceと関連データの削除、他workspace保持、制約エラー時の全体rollback、所属確認と削除の2往復を確認する。</td></tr>
               <tr><td>app-handlers.test.ts / app-services.test.ts / app-store.test.ts</td><td>HTTP応答・入力・未認証・所属拒否・DB失敗、割合継承・招待・清算Snapshot、全19操作のSQL往復とTransaction境界、通常bootstrapの2 SQL。</td></tr>
               <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・秒精度、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>

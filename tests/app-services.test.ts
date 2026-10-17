@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { createAppService } from "../lib/app-service";
 import type { AppStore } from "../lib/app-store";
 import { parseAppActionInput } from "../lib/app-input";
-import type { AppUser, BootstrapData, DefaultRule, TransactionRecord } from "../lib/types";
+import type { AppUser, DefaultRule } from "../lib/types";
 
 const user: AppUser = { id: "a", email: "a@example.com", name: "A", imageUrl: null };
 const workspaceId = "00000000-0000-4000-8000-000000000001";
@@ -50,9 +50,9 @@ test("所属が必要な全16操作は拒否後に読取・書込へ進まない
   ];
   assert.equal(inputs.length, 16);
   for (const input of inputs) {
-    const f = fixture({ requireWorkspaceMember: async () => { throw new Error("所属なし"); } });
+    const f = fixture({ requireWorkspaceMember: async () => { throw new Error("所属なし"); }, settlementContext: async () => { throw new Error("所属なし"); } });
     await assert.rejects(f.execute({ workspaceId, ...input }), /所属なし/);
-    assert.deepEqual(f.calls, [{ name: "requireWorkspaceMember", args: [workspaceId, user.id] }]);
+    assert.deepEqual(f.calls, [{ name: input.action === "completeSettlement" ? "settlementContext" : "requireWorkspaceMember", args: [workspaceId, user.id] }]);
   }
 });
 
@@ -144,17 +144,20 @@ test("workspace削除名の不一致とデフォルト割合の重複参加者�
   assert.ok(f.calls.every(call => ["requireWorkspaceMember", "memberIds"].includes(call.name)));
 });
 
-test("清算は最新bootstrapを再取得し、対象だけをID順に固定して保存する", async () => {
-  const transaction = { id: transactionId, actorUserId: "a", type: "PAYMENT", amountYen: 300, expenseClass: "SHARED", splitWeights: { a: 1, b: 1 } } as unknown as TransactionRecord;
+test("清算は専用contextから既存計算を再利用し、対象だけをID順に固定する", async () => {
+  const transaction = { id: transactionId, actorUserId: "a", type: "PAYMENT" as const, amountYen: 300, expenseClass: "SHARED" as const, splitWeights: { a: 1, b: 1 }, settledAt: null };
   const second = { ...transaction, id: ruleId };
-  const settlement = { transactionIds: [ruleId, transactionId], amountYen: 150, people: [] };
-  const latest = { selected: { transactions: [second, { ...transaction, id: workspaceId }, transaction], settlement } } as unknown as BootstrapData;
-  const f = fixture({ bootstrap: (async () => latest) as AppStore["bootstrap"], completeSettlement: async () => {} });
+  const excluded = { ...transaction, id: workspaceId, expenseClass: "PERSONAL" as const };
+  const f = fixture({ settlementContext: async () => ({ workspaceType: "SHARED", members, transactions: [second, excluded, transaction] }), completeSettlement: async () => {} });
   assert.deepEqual(await f.execute({ action: "completeSettlement", workspaceId }), { ok: true });
-  assert.deepEqual(f.calls.map(call => call.name), ["requireWorkspaceMember", "bootstrap", "completeSettlement"]);
-  assert.deepEqual(f.calls[1].args, [user, workspaceId]);
-  assert.deepEqual(f.calls[2].args[4], [transaction, second]);
-  assert.deepEqual(f.calls[2].args[5], { ...settlement, transactions: [transaction, second] });
-  const empty = fixture({ bootstrap: (async () => ({ user, workspaces: [], pendingInvitations: [], selected: null })) as AppStore["bootstrap"] });
+  assert.deepEqual(f.calls.map(call => call.name), ["settlementContext", "completeSettlement"]);
+  assert.deepEqual(f.calls[0].args, [workspaceId, user.id]);
+  const expected = [transaction, second].map(({ id, actorUserId, type, amountYen, expenseClass, splitWeights }) => ({ id, actorUserId, type, amountYen, expenseClass, splitWeights }));
+  assert.deepEqual(f.calls[1].args[4], expected);
+  const result = f.calls[1].args[3];
+  assert.deepEqual(f.calls[1].args[5], { ...result as object, transactions: expected });
+  const empty = fixture({ settlementContext: async () => ({ workspaceType: "SHARED", members, transactions: [] }) });
   await assert.rejects(empty.execute({ action: "completeSettlement", workspaceId }), /清算対象の明細がありません/);
+  const personal = fixture({ settlementContext: async () => ({ workspaceType: "PERSONAL", members, transactions: [transaction] }) });
+  await assert.rejects(personal.execute({ action: "completeSettlement", workspaceId }), /清算対象の明細がありません/);
 });
