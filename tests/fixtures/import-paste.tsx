@@ -9,6 +9,10 @@ declare global {
   interface Window {
     importPasteWorkspace: WorkspaceData;
     importPasteClipboardReads: number;
+    importPasteClipboardActivations: boolean[];
+    importPasteClipboardMode: "success" | "reject" | "pending" | "unsupported";
+    importPasteClipboardText: string;
+    importPasteResolveClipboard: ((text: string) => void) | null;
   }
 }
 

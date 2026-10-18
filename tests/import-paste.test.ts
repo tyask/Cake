@@ -3,7 +3,7 @@ import test from "node:test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { build } from "esbuild";
-import { chromium, type Browser, type Route } from "playwright";
+import { chromium, type Browser, type Page, type Route } from "playwright";
 import type { WorkspaceData } from "../lib/types";
 
 const workspace: WorkspaceData = {
@@ -28,8 +28,9 @@ const duplicateResult = { externalIds: [], transactions: [{
   externalId: "PayPay_20261018120244_00001236", merchant: "保存済みのお店", amountYen: 990, source: "PAYPAY",
 }] };
 type Request = { path: string; payload: Record<string, unknown> };
+type ClipboardSetup = { mode: Window["importPasteClipboardMode"]; text?: string };
 
-async function openFixture(browser: Browser, origin: string, width: number, api: (route: Route, request: Request) => Promise<void>) {
+async function openFixture(browser: Browser, origin: string, width: number, api: (route: Route, request: Request) => Promise<void>, clipboard: ClipboardSetup = { mode: "reject" }) {
   const context = await browser.newContext({ viewport: { width, height: 1000 }, serviceWorkers: "block" });
   const page = await context.newPage(), requests: Request[] = [], errors: string[] = [];
   page.setDefaultTimeout(10000);
@@ -42,19 +43,42 @@ async function openFixture(browser: Browser, origin: string, width: number, api:
     requests.push(request);
     await api(route, request);
   });
-  await page.addInitScript(selected => {
+  await page.addInitScript(({ selected, clipboard }) => {
     window.importPasteWorkspace = selected;
     window.importPasteClipboardReads = 0;
-    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { readText() {
+    window.importPasteClipboardActivations = [];
+    window.importPasteClipboardMode = clipboard.mode;
+    window.importPasteClipboardText = clipboard.text ?? "";
+    window.importPasteResolveClipboard = null;
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: clipboard.mode === "unsupported" ? undefined : { readText() {
       window.importPasteClipboardReads += 1;
-      return Promise.reject(new Error("クリップボードの自動読み取りは禁止"));
+      window.importPasteClipboardActivations.push(navigator.userActivation.isActive);
+      if (window.importPasteClipboardMode === "success") return Promise.resolve(window.importPasteClipboardText);
+      if (window.importPasteClipboardMode === "pending") return new Promise<string>(resolve => { window.importPasteResolveClipboard = resolve; });
+      return Promise.reject(new Error("内部のクリップボードエラーを画面へ表示しない"));
     } } });
-  }, workspace);
+  }, { selected: workspace, clipboard });
   await page.goto(origin);
   return { page, requests, errors, context };
 }
 
-test("CSV貼り付けは確認時だけ重複照会し、選択した構造化明細だけを登録する", async t => {
+async function assertBusyInputs(page: Page) {
+  assert.equal(await page.getByLabel("CSVの内容", { exact: true }).isDisabled(), true);
+  for (const name of ["貼り付けて確認", "内容を確認", "ファイルを選択"]) {
+    assert.equal(await page.getByRole("button", { name, exact: true }).isDisabled(), true);
+  }
+  assert.equal(await page.locator("input[type=file]").isDisabled(), true);
+  assert.equal(await page.locator(".import-format select").isDisabled(), true);
+  await page.evaluate(text => {
+    for (const button of document.querySelectorAll<HTMLButtonElement>(".import-inputs button")) button.click();
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([text], "busy-drop.csv", { type: "text/csv" }));
+    document.querySelector(".upload-panel")!.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+  }, csv);
+  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+}
+
+test("CSV貼り付けはユーザー操作で読み取り・重複照会し、選択した構造化明細だけを登録する", async t => {
   const bundle = await build({ entryPoints: ["tests/fixtures/import-paste.tsx"], bundle: true, write: false,
     outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
   const server = createServer((req, res) => {
@@ -68,7 +92,7 @@ test("CSV貼り付けは確認時だけ重複照会し、選択した構造化�
     .catch(async error => { await new Promise<void>(done => server.close(() => done())); throw error; });
   try {
     for (const [name, width] of [["PC", 1440], ["mobile", 390]] as const) {
-      await t.test(`${name}: 貼り付け・確認・登録と失敗時の保持`, async () => {
+      await t.test(`${name}: 貼り付けて確認・登録と失敗時の保持`, async () => {
         let releaseDuplicates: (() => Promise<void>) | undefined, releaseSave: (() => Promise<void>) | undefined, saves = 0;
         const fixture = await openFixture(browser, origin, width, async (route, request) => {
           if (request.path === "/api/import/duplicates") releaseDuplicates = () => route.fulfill({ json: duplicateResult });
@@ -76,21 +100,22 @@ test("CSV貼り付けは確認時だけ重複照会し、選択した構造化�
             if (++saves === 1) await route.fulfill({ status: 500, json: { error: "検証用の登録失敗" } });
             else releaseSave = () => route.fulfill({ json: { ok: true, imported: 2, skipped: 3 } });
           } else { fixture.errors.push("unexpected API"); await route.abort(); }
-        });
+        }, { mode: "success", text: csv });
         const { page, requests, errors, context } = fixture;
         try {
           const draft = page.getByLabel("CSVの内容", { exact: true });
-          await draft.fill(csv);
+          assert.equal(await draft.inputValue(), "");
+          assert.equal(await page.evaluate(() => window.importPasteClipboardReads), 0);
           assert.equal(requests.length, 0);
           await Promise.all([
             page.waitForRequest(request => new URL(request.url()).pathname === "/api/import/duplicates"),
-            page.getByRole("button", { name: "内容を確認", exact: true }).click(),
+            page.getByRole("button", { name: "貼り付けて確認", exact: true }).click(),
           ]);
           await page.getByRole("status").waitFor();
-          assert.equal(await draft.isDisabled(), true);
-          assert.equal(await page.getByRole("button", { name: "内容を確認", exact: true }).isDisabled(), true);
-          assert.equal(await page.getByRole("button", { name: "ファイルを選択", exact: true }).isDisabled(), true);
-          assert.equal(await page.locator("input[type=file]").isDisabled(), true);
+          assert.equal(await draft.inputValue(), csv.replaceAll("\r\n", "\n"));
+          assert.deepEqual(await page.evaluate(() => window.importPasteClipboardActivations), [true]);
+          await assertBusyInputs(page);
+          assert.equal(await page.evaluate(() => window.importPasteClipboardReads), 1);
           assert.equal(requests.length, 1);
           assert.deepEqual(requests[0], { path: "/api/import/duplicates", payload: { workspaceId: "workspace", externalIds: [
             "PayPay_20261018120042_00001234", "PayPay_20261018120143_00001235", "PayPay_20261018120244_00001236", "PayPay_20261018120446_00001237",
@@ -135,7 +160,7 @@ test("CSV貼り付けは確認時だけ重複照会し、選択した構造化�
           assert.equal(requests.length, 3); assert.deepEqual(requests[2], requests[1]);
           assert.ok(releaseSave); await releaseSave();
           await draft.waitFor(); assert.equal(await draft.inputValue(), "");
-          assert.equal(await page.evaluate(() => window.importPasteClipboardReads), 0);
+          assert.equal(await page.evaluate(() => window.importPasteClipboardReads), 1);
           assert.deepEqual(errors, []);
         } finally { await context.close(); }
       });
@@ -177,6 +202,85 @@ test("CSV貼り付けは確認時だけ重複照会し、選択した構造化�
         } finally { await context.close(); }
       });
     }
+
+    await t.test("mobile: クリップボードの空本文・不正CSV・重複照会失敗では取得本文を保持する", async () => {
+      let checks = 0;
+      const { page, requests, errors, context } = await openFixture(browser, origin, 390, async route => {
+        if (++checks === 1) await route.fulfill({ status: 500, json: { error: "検証用の照会失敗" } });
+        else await route.fulfill({ json: duplicateResult });
+      }, { mode: "success" });
+      try {
+        const draft = page.getByLabel("CSVの内容", { exact: true });
+        for (const [text, message] of [
+          [" \n ", "CSVの内容が空です"], ["https://example.test/export.csv", "必要な列がありません"],
+          [header + "\n2026/10/18 12:00:42,100,受け取り,受取,PayPay,00001", "取引内容が「支払い」の行がありません"],
+        ]) {
+          await page.evaluate(text => { window.importPasteClipboardText = text; }, text);
+          await page.getByRole("button", { name: "貼り付けて確認", exact: true }).click();
+          await page.getByRole("alert").filter({ hasText: message }).waitFor();
+          assert.equal(await draft.inputValue(), text);
+          assert.equal(requests.length, 0);
+        }
+        await page.evaluate(text => { window.importPasteClipboardText = text; }, csv);
+        await page.getByRole("button", { name: "貼り付けて確認", exact: true }).click();
+        await page.getByRole("alert").filter({ hasText: "検証用の照会失敗" }).waitFor();
+        assert.equal(await draft.inputValue(), csv.replaceAll("\r\n", "\n"));
+        assert.equal(requests.length, 1);
+        await page.getByRole("button", { name: "内容を確認", exact: true }).click();
+        await page.getByRole("button", { name: "選択した3件を登録", exact: true }).waitFor();
+        assert.equal(requests.length, 2);
+        assert.ok(requests.every(request => request.path === "/api/import/duplicates" && Object.keys(request.payload).sort().join() === "externalIds,workspaceId"));
+        assert.equal(await page.evaluate(() => window.importPasteClipboardReads), 4);
+        assert.deepEqual(await page.evaluate(() => window.importPasteClipboardActivations), [true, true, true, true]);
+        assert.deepEqual(errors, []);
+      } finally { await context.close(); }
+    });
+
+    for (const mode of ["reject", "unsupported"] as const) {
+      await t.test(`mobile: クリップボード${mode === "reject" ? "拒否" : "未対応"}時は本文を保持して標準ペーストへ案内する`, async () => {
+        const { page, requests, errors, context } = await openFixture(browser, origin, 390, route => route.abort(), { mode });
+        try {
+          const draft = page.getByLabel("CSVの内容", { exact: true });
+          await draft.fill(csv);
+          await page.getByRole("button", { name: "貼り付けて確認", exact: true }).click();
+          const alert = page.getByRole("alert");
+          await alert.waitFor();
+          assert.match(await alert.innerText(), /ペースト/);
+          assert.doesNotMatch(await alert.innerText(), /内部のクリップボードエラー/);
+          assert.equal(await draft.inputValue(), csv.replaceAll("\r\n", "\n"));
+          assert.equal(await draft.evaluate(element => element === document.activeElement), true);
+          assert.equal(await page.getByRole("button", { name: "内容を確認", exact: true }).isEnabled(), true);
+          assert.equal(await page.evaluate(() => window.importPasteClipboardReads), mode === "reject" ? 1 : 0);
+          assert.equal(requests.length, 0);
+          assert.deepEqual(errors, []);
+        } finally { await context.close(); }
+      });
+    }
+
+    await t.test("mobile: クリップボード読込中は別入口を止め、家計切替後は取得本文と照会を破棄する", async () => {
+      const { page, requests, errors, context } = await openFixture(browser, origin, 390, route => route.abort(), { mode: "pending" });
+      try {
+        await page.getByLabel("CSVの内容", { exact: true }).fill("切替前の入力");
+        await page.getByRole("button", { name: "貼り付けて確認", exact: true }).click();
+        await page.getByRole("status").waitFor();
+        await assertBusyInputs(page);
+        assert.equal(await page.evaluate(() => window.importPasteClipboardReads), 1);
+        assert.equal(requests.length, 0);
+        await page.getByRole("button", { name: "家計を切り替える", exact: true }).click();
+        await page.getByText("切替後の家計", { exact: true }).waitFor();
+        await page.evaluate(text => {
+          if (!window.importPasteResolveClipboard) throw new Error("保留中のクリップボード読み取りがありません");
+          window.importPasteResolveClipboard(text);
+        }, csv);
+        await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+        assert.equal(await page.locator("[data-import-key]").count(), 0);
+        assert.equal(await page.getByLabel("CSVの内容", { exact: true }).inputValue(), "");
+        assert.equal(await page.getByRole("button", { name: "貼り付けて確認", exact: true }).isEnabled(), true);
+        assert.equal(await page.getByRole("alert").count(), 0);
+        assert.equal(requests.length, 0);
+        assert.deepEqual(errors, []);
+      } finally { await context.close(); }
+    });
 
     await t.test("mobile: 家計を切り替えた後の古い重複照会結果を破棄する", async () => {
       let release: (() => Promise<void>) | undefined;
