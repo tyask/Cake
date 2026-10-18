@@ -64,7 +64,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
   function removePreviewRow(key: string) {
     if (saving) return;
     const row = rows.find(item => item.key === key);
-    if (!row || !confirm(`「${row.merchant || "取引先未設定"}」を取込一覧から削除しますか？保存済みの明細は変更されません。`)) return;
+    if (!row || !confirm(`「${row.merchant || "取引先未設定"}」を取込一覧から削除しますか？`)) return;
     setRows(current => current.filter(item => item.key !== key));
   }
 
