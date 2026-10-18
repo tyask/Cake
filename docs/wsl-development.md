@@ -47,7 +47,7 @@ GitHubはWSL側の既存gh認証で `gh api repos/tyask/Cake --jq .full_name` �
 GIT_CONFIG_COUNT=1 \
 GIT_CONFIG_KEY_0=credential.helper \
 GIT_CONFIG_VALUE_0='!gh auth git-credential' \
-npm run task:pr -- --draft --title '変更内容を日本語で記載' --verification-file /absolute/path/report.md
+npm run task:pr -- --draft --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md
 ```
 
 PRの作成/更新は自動Preview・専用DB操作を起動するため、実行前にその影響が依頼範囲内か確認する。

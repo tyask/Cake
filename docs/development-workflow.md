@@ -34,10 +34,23 @@ npm run build
 
 PRのタイトル・本文・コメント・レビューコメント・検証報告は日本語にする。コマンド、識別子、エラーコード、引用するログは原文のままでよい。PR本文は最終的な問題・変更内容・検証結果を記載し、作業途中の経緯や過去の受入記録を混ぜない。
 
+「変更内容」には、次を機能ごとに関連付けて記載する。小さな変更は数段落でよく、複数機能にまたがる場合は小見出しや具体例を使う。
+
+- 対象機能・利用場面と、解決する問題。
+- 変更前と変更後の挙動。リファクタリングでは、処理方法の変化と維持する仕様。
+- その挙動を実現する主な修正と理由。ファイル名・関数名は説明を補うために添える。
+- 関連する影響範囲・互換性・制約。効果を数値で示す場合は測定条件を検証結果へ記載する。
+
+タイトルの繰り返し、ファイル一覧、検証結果だけを変更説明の代わりにしない。たとえば一括処理の改善なら「明細ごとの参加者集約と更新を、共通データの一回取得と集合更新へまとめる」と書き、対象の操作・変更理由・維持する適用結果も説明する。
+
+Git外の `.cake/changes.md` に「変更内容」の本文をMarkdownで保存する（`## 変更内容`自体はCLIが付ける）。`task:pr`は必須の`--changes-file`でその内容を読み、タイトル・Preview証拠・検証結果と分けてPR本文へ反映する。draft作成時だけでなく更新・Ready時にも同じ指定が必要で、最終実装に合わせて説明を書き直す。空・不存在・NULを含むファイル、通常ファイル以外、1MBを超えるファイルはPR操作前に拒否する。手動でPRを作る場合も[PRテンプレート](../.github/pull_request_template.md)と同じ記載方針に従う。
+
+変更説明・検証結果・remote proofのpathはCLIを実行するCWD基準で、絶対pathを推奨する。`--target-worktree`で別の対象を管理するときも、説明と報告はcontrol側で用意する。
+
 報告をGit外の `.cake/report.md` に保存する。環境・ツール版・完全SHA、コマンド別の成否/所要時間、件数、実画面で確認した内容、未実施項目を記載する。PR作成・更新が専用Preview/DBを操作することを承認済みの範囲で、次を実行する。
 
 ```bash
-npm run task:pr -- --draft --title '変更内容を日本語で記載' --verification-file /absolute/path/report.md
+npm run task:pr -- --draft --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md
 ```
 
 CLIがpushしてdraft PRを作成/更新する。remoteとPRの完全SHAが検証commitに一致すること、現在HEADのpush/PR CIの最新attemptが成功したことを確認する。固定の過去テスト件数を報告へ流用しない。
@@ -114,7 +127,7 @@ Codexは次の条件をすべて確認し、マージ可能と判断したら、
 
 ```bash
 npm run qa:verify:ci -- --pr <PR番号> --sha <完全SHA> --deployment <Deployment ID>
-npm run task:pr -- --title '変更内容を日本語で記載' --verification-file /absolute/path/report.md --remote-proof /absolute/path/proof.json
+npm run task:pr -- --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md --remote-proof /absolute/path/proof.json
 ```
 
 controlの `preview-verify.config.json` capabilityを照合し、成功証拠は `.cake/verify-<PR>.json` に保存する。検証CLI自体はReadyにしないため、Codexが上記条件を確認して `task:pr` まで続けて行う。対象checkoutに管理CLIがない場合は、最新main側で `task:pr --remote-proof ... --target-worktree /absolute/path/target` を使う。target指定はremote proof必須・非draft専用で、対象コードを管理資格情報付きで実行しない。
