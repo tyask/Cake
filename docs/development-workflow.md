@@ -69,6 +69,8 @@ CLIがpushしてdraft PRを作成/更新する。remoteとPRの完全SHAが検�
 
 準備用のREADYだけではPreview完成とせず、statusは現在HEADのapplicationだけを返す。準備用の対象・branch/SHA・世代・本番host digestが不明なら静的生成も停止し、準備用でDB接続ガードを緩めない。静的成果物は既存Next.js builderが受け取るBuild Output API v3形式で `.next/output` に生成し、通常アプリのbuild前に `.next/output` と `.vercel/output` を除去する。準備用はルートのGET/HEADだけを表示し、API・ログイン・他のパスやPOSTは404となる。準備用の生成自体が失敗した場合はエラーとして止める。
 
+DB setupは台帳初期化後に履歴を一度取得し、未適用ファイルだけを本文読込・適用する。全適用済みの通常再実行は本文0読込・2往復となる。Preview初回の所有権確保前は全原文のhash/bootstrap照合を維持し、空DBまたは承認済みfixture以外を受け入れない。同一世代では既存markerを照合して適用済み本文の読込を省く。各migrationの実行DO内でもadvisory lockと履歴再確認を行い、失敗時はそのSQLと履歴を一緒にrollbackする。過去に適用したSQLの変更検知や再適用のための仕組みではなく、既存migrationの原文は変更せず番号付きファイルを追加する。
+
 Native連携で生成される実資源数は作成後に照合する。別PR・本番endpointとの一致、DB消失、複数世代、未管理の同名branchでは停止する。空DBまたは承認済みの完全一致fixtureだけを初期化し、既存markerを別PRへ付け替えない。本番接続文字列をPreviewへ渡さず、Previewは `CAKE_TEST_DATABASE_URL` を使う。
 
 QAのAはテスト管理者・共有OWNER、Bは一般・MEMBER。正規QA用ログインは登録済みユーザーをSELECTし、自動作成・権限修復しない。ただし認証後のホームや `GET /api/app` は所属workspaceが0件なら個人workspaceとOWNER membershipをINSERTし得る。ローカルテスト認証のユーザー登録、Googleログイン時のプロフィール更新もDB書込として区別する。

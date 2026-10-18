@@ -31,7 +31,8 @@ test("空DB・PR identityの検査が失敗したらmigrationの作成・適用�
     return true;
   });
   assert.equal(queries.length, 1);
-  assert.doesNotMatch(queries[0], /CREATE TABLE IF NOT EXISTS schema_migrations|CREATE TABLE IF NOT EXISTS app_users/);
+  assert.doesNotMatch(queries[0], /CREATE TABLE IF NOT EXISTS app_users/);
+  assert.ok(queries[0].indexOf("RAISE EXCEPTION 'Cake Preview DB identity mismatch'") < queries[0].indexOf("CREATE TABLE IF NOT EXISTS schema_migrations"));
 });
 
 test("Neon endpoint未確認の初回provisionではsetupとseedがクライアントを生成しない", async () => {
@@ -77,33 +78,37 @@ test("既知bootstrapをPreview SQLから完全除去し、本番SQLは元のま
   assert.throws(() => prepareMigration("002_user_access.sql", `${migration}\n ${bootstrap}`, preview), /初期管理者SQLを確認できません/);
   assert.throws(() => prepareMigration("012_unknown.sql", "DO $cake_preview_guard$ BEGIN END $cake_preview_guard$;", preview), /SQL区切りが不正/);
   const statements: string[] = [];
-  await setupDatabase(preview, { connect: () => ({ query: async (statement) => { statements.push(statement); } }) });
+  await setupDatabase(preview, { connect: () => ({ query: async (statement) => { statements.push(statement); return []; } }) });
   assert.equal(statements.some((statement) => statement.includes(productionEmail)), false,
     "Every SQL statement sent to Preview must omit the production bootstrap identity");
 });
 
-test("未知・変更・重複bootstrapはDBクライアントの作成前に拒否する", async () => {
+test("未知・変更・重複bootstrapは所有権の確保・台帳作成前に拒否する", async () => {
   const directory = mkdtempSync(join(tmpdir(), "cake-preview-migration-"));
-  let clients = 0;
+  const original = new URL("../db/migrations/", import.meta.url);
+  const names = readdirSync(original).filter(name => /^\d+_[a-z0-9_]+\.sql$/.test(name)).sort();
   try {
-    const migration = readFileSync(new URL("../db/migrations/002_user_access.sql", import.meta.url), "utf8");
+    for (const name of names) writeFileSync(join(directory, name), readFileSync(new URL(name, original), "utf8"));
+    const migration = readFileSync(new URL("002_user_access.sql", original), "utf8");
     for (const statement of ["INSERT INTO app_users VALUES ('unknown');", migration.replace("'管理者'", "'changed'"), migration + migration]) {
       writeFileSync(join(directory, "002_user_access.sql"), statement);
-      await assert.rejects(setupDatabase(preview, { migrationDirectory: directory, connect: () => {
-        clients++;
-        return { query: async () => [] };
-      } }), /初期管理者SQLを確認できません/);
+      const queries: string[] = [];
+      await assert.rejects(setupDatabase(preview, { migrationDirectory: directory, connect: () => ({ query: async (sql) => {
+        queries.push(sql); throw Object.assign(new Error("Cake Preview DB identity is missing"), { code: "P0001" });
+      } }) }), /初期管理者SQLを確認できません/);
+      assert.equal(queries.length, 1, "Only the rolled-back missing-marker probe may run");
+      assert.match(queries[0], /RAISE EXCEPTION 'Cake Preview DB identity is missing'/);
+      assert.doesNotMatch(queries[0], /CREATE TABLE public.cake_preview_database_identity/);
     }
-    assert.equal(clients, 0);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test("承認済み11migrationの欠落やsource変更はfixture base判定・接続の前に拒否する", async () => {
+test("承認済みmigration名は接続前、初回の原文は所有権の確保前に照合する", async () => {
   const original = new URL("../db/migrations/", import.meta.url);
   const names = readdirSync(original).filter((name) => /^\d+_[a-z0-9_]+\.sql$/.test(name)).sort();
-  let clients = 0;
   for (const variant of ["changed", "missing"] as const) {
     const directory = mkdtempSync(join(tmpdir(), "cake-preview-migration-sources-"));
+    let clients = 0, queries = 0;
     try {
       for (const name of names) {
         if (variant === "missing" && name === "011_recurring_payment_next_scheduled_on.sql") continue;
@@ -112,17 +117,18 @@ test("承認済み11migrationの欠落やsource変更はfixture base判定・接
       }
       await assert.rejects(setupDatabase(preview, { migrationDirectory: directory, connect: () => {
         clients++;
-        return { query: async () => [] };
+        return { query: async () => { queries++; throw Object.assign(new Error("Cake Preview DB identity is missing"), { code: "P0001" }); } };
       } }), /Previewの承認済み/);
+      assert.equal(clients, variant === "changed" ? 1 : 0);
+      assert.equal(queries, variant === "changed" ? 1 : 0);
     } finally { rmSync(directory, { recursive: true, force: true }); }
   }
-  assert.equal(clients, 0);
 });
 
 test("番号migrationはそれぞれidentity確認と適用履歴を同一transactionに置く", async () => {
   const queries: string[] = [];
   const names = readdirSync(new URL("../db/migrations/", import.meta.url)).filter((name) => /^\d+_[a-z0-9_]+\.sql$/.test(name)).sort();
-  await setupDatabase(preview, { connect: () => ({ query: async (statement) => { queries.push(statement); } }) });
+  await setupDatabase(preview, { connect: () => ({ query: async (statement) => { queries.push(statement); return []; } }) });
   assert.equal(names.length, 13);
   assert.equal(queries.length, names.length + 2);
   for (const [index, name] of names.entries()) {
