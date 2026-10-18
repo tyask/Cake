@@ -298,8 +298,8 @@
             <div class="data-flow">
               <div class="data-flow-head"><h3>C. PayPay CSV取込</h3><small>CSV原本は利用者端末から出さない</small></div>
               <div class="dfd-track" role="img" aria-label="端末のPayPay CSVをブラウザ内で解析し、選択した変換済み明細だけをAPI経由でNeonへ保存するデータフロー">
-                <div class="dfd-node source"><strong>PayPay CSV</strong><small>端末上のFile<br />CSV原本文字列</small></div>
-                <div class="dfd-arrow"><b>→</b><small>File.text()</small></div>
+                <div class="dfd-node source"><strong>PayPay CSV</strong><small>端末上のFile<br />または貼り付け本文</small></div>
+                <div class="dfd-arrow"><b>→</b><small>File.text()<br />または画面State</small></div>
                 <div class="dfd-node process"><strong>parsePayPayCsv</strong><small>PapaParse・Header検証<br />支払い抽出・Rule適用</small></div>
                 <div class="dfd-arrow"><b>→</b><small>PreviewRow[]</small></div>
                 <div class="dfd-node output"><strong>取込プレビュー</strong><small>選択・担当者<br />費用区分を編集</small></div>
@@ -572,8 +572,8 @@
 
             <div class="data-flow" id="flow-csv-actions">
               <div class="data-flow-head"><h4>E. CSVは「選択」と「登録」で到達先が変わる</h4><small>重複照会は専用API、登録はrun</small></div>
-              <div class="dfd-track" role="img" aria-label="ファイル選択でブラウザ内のCSV解析とルール適用を行い、外部IDを重複APIへ送り、既存明細の応答をプレビューに反映する。明細の登録は行わない">
-                <div class="dfd-node source"><strong>「ファイルを選択」</strong><small>File.text → parsePayPayCsv<br />参加者・ルールを適用</small></div>
+              <div class="dfd-track" role="img" aria-label="ファイル選択または貼り付け本文の確認でブラウザ内のCSV解析とルール適用を行い、外部IDを重複APIへ送り、既存明細の応答をプレビューに反映する。明細の登録は行わない">
+                <div class="dfd-node source"><strong>ファイル選択 / 内容を確認</strong><small>File.text または貼り付け本文<br />共通解析・参加者・ルール適用</small></div>
                 <div class="dfd-arrow"><b>→</b><small>workspaceId<br />externalIds</small></div>
                 <div class="dfd-node store"><strong>POST /api/import/duplicates</strong><small>所属確認 → DBの既存ID照会<br />既存の金額・取引先・source</small></div>
                 <div class="dfd-arrow"><b>→</b><small>transactions</small></div>
@@ -586,7 +586,7 @@
                 <div class="dfd-arrow"><b>→</b><small>metadata GET</small></div>
                 <div class="dfd-node output"><strong>登録数通知・プレビュー解除</strong><small>取込タブの情報を更新<br />明細タブを押すとfull GET</small></div>
               </div>
-              <div class="dfd-boundary"><b>送信範囲:</b> CSV本文はブラウザ内だけで解析する。重複照会はworkspace IDと外部ID、登録は選択済み明細・ファイル名・件数を送る。古いファイルの非同期結果はImportPanelの要求IDで破棄する。</div>
+              <div class="dfd-boundary"><b>送信範囲:</b> CSV本文はブラウザ内だけで解析する。重複照会はworkspace IDと外部ID、登録は選択済み明細・ファイル名・件数を送る。ファイルと貼り付けは共通の要求IDを使い、古い非同期結果を破棄する。本文はURL・Web Storageへ保存せず、画面起動時のクリップボード読取も行わない。</div>
             </div>
           </div>
 
@@ -598,7 +598,7 @@
               <tr><td>明細フォームの「追加する」</td><td>run(saveTransaction)：workspaceId、日時、取引先、方法、金額、actor、区分、割合、メモ。</td><td>B → DB → 確定transactionをdataへ追加。成功後にフォームを閉じる。</td></tr>
               <tr><td>明細のblur / Enter、選択項目の変更</td><td>行の検証 → 保存キュー → run(saveTransaction)：workspaceId、transactionId、明細値。</td><td>B → DB → 確定transactionで対象行を差し替え。</td></tr>
               <tr><td>メモのblur / Ctrl+Enter</td><td>保存キュー → run(saveTransactionMemo)：workspaceId、transactionId、memo。</td><td>B → DB → 対象明細のメモだけ更新。</td></tr>
-              <tr><td>CSVの選択・登録</td><td>重複APIに外部ID、登録時はrun(bulkImport)に選択items。</td><td>E。選択時は照会まで、登録時にDB保存。</td></tr>
+              <tr><td>CSVの選択・貼り付け・登録</td><td>貼り付け入力だけでは通信なし。確認時に重複APIへ外部ID、登録時はrun(bulkImport)に選択items。</td><td>E。選択・確認時は照会まで、登録時にDB保存。</td></tr>
               <tr><td>設定の「変更を保存」／「割合を保存」</td><td>run(updateWorkspace)：workspaceId・name／run(updateWeights)：workspaceId・weights。</td><td>B → DB → settingsのmetadata GET。ルール操作もrunからDB更新後にmetadata GET。</td></tr>
               <tr><td>「清算を完了する」</td><td>confirm → run(completeSettlement)：workspaceId。</td><td>B → サーバーで対象明細を計算・再照合してDB確定 → settlementのfull GET。画面の計算額を送金・保存指示として送らない。</td></tr>
               <tr><td>workspace作成フォームの「作成する」</td><td>run(createWorkspace)：name・type。</td><td>B → DB → 応答workspaceIdの取得。metadataで選択先が変わる場合はfullを追加取得。</td></tr>
@@ -653,7 +653,7 @@
             <tbody>
               <tr><td>ホーム</td><td>今月の支払い、未清算共通費、次の送金、最近6件、保留招待数、登録/取込/清算への導線。lib/home-summary.tsで日本時間の年・月が一致する明細を抽出する。</td></tr>
               <tr><td>取引明細</td><td>全明細の列フィルタ、未清算行のインライン保存、清算済みもメモ保存、選択削除/ルール適用。</td></tr>
-              <tr><td>CSV取込</td><td>metadataのルール・参加者でCSVを解析し、外部IDだけを専用APIで照合。選択行の費用区分を一括変更し、行ごとの割合を編集してbulkImport。</td></tr>
+              <tr><td>CSV取込</td><td>ファイルまたは貼り付け本文を、metadataのルール・参加者で共通解析し、外部IDだけを専用APIで照合。選択行の費用区分を一括変更し、行ごとの割合を編集してbulkImport。</td></tr>
               <tr><td>清算</td><td>保存割合による清算内訳、対象明細、最新20件の履歴、清算完了。</td></tr>
               <tr><td>設定</td><td>本人表示名、workspace名・デフォルト割合・招待・削除、共有ルール、定期支払い、管理者だけの利用者登録/停止。</td></tr>
             </tbody>
@@ -733,10 +733,11 @@
               <tr><td>行の値</td><td>取引先はtrim後1〜240文字。取引方法はtrim後1〜120文字、空ならPayPay。文字数超過行はAPI送信前のプレビューで登録不可にする。区分・割合はtransactionDefaultsのフォールバックをSHAREDとして決める。有効な一致ルールがなければ共有費とワークスペースのデフォルト割合、一致時はルールを優先する。bulkImport APIも費用区分省略時のフォールバックをSHAREDとする。通常明細のPERSONALフォールバックは維持する。ImportPanelにはログイン本人のcurrentUserIdを渡し、支払者actorIdの初期値に使う。支払者・区分・割合の手動変更は維持する。</td></tr>
               <tr><td>重複・衝突</td><td>既存IDとCSV内同一キーの一致行は初期選択OFF。同一CSVの繰返しは最初の一件だけ登録候補。同じキーで金額/取引先が異なる場合、既存sourceがPAYPAY以外の場合は衝突エラーとして登録不可。</td></tr>
               <tr><td>専用API照合</td><td>有効な外部IDをまとめ、最大2000件ずつ選択workspaceへ照合。照合完了前や失敗後に未確認のプレビューは表示しない。ファイル変更時の遅延応答は破棄する。</td></tr>
-              <tr><td>原本</td><td><code>File.text()</code>で端末内解析。サーバーへ送るのは選択済みitems・ファイル名・件数で、CSV本文は保存しない。</td></tr>
+              <tr><td>原本・下書き</td><td><code>File.text()</code>または「CSVの内容」のStateから共通解析する。貼り付けは「内容を確認」を押すまで通信せず、空本文・支払い行なし・ヘッダー不備や照合失敗は本文を残してエラーを表示する。読み込み中は入力・形式・確認を無効化する。貼り付けのファイル名は固定の表示名を使う。サーバーへ送るのは選択済みitems・ファイル名・件数で、CSV本文は送信・保存しない。登録失敗はプレビューを保持し、登録成功時は本文も消去する。ImportPanelは利用者・workspaceに属する画面Stateとし、workspaceやタブの切替で破棄する。取込先の家計名を入力画面とプレビューへ表示する。</td></tr>
               <tr><td>DB登録</td><td>外部IDを正規化し、キー順にTransactionへ追加。同一キーは競合行のロック下でsource・金額・取引先を確認。一致は省略、不一致は履歴も含め全体をロールバック。</td></tr>
             </tbody>
           </table></div>
+          <p>取込直リンクは<code>/?tab=import</code>とし、<code>workspaceId</code>を併用できる。app/page.tsxで初期タブを決め、Dashboardとhookのtab/currentTabへ同じ初期値を渡す。初回Bootstrapのfull取得は維持し、以後の取込画面のrefreshはmetadataを使う。LoginScreenはサーバーで構築した内部パスをGoogle/テストログインのredirectToへ渡し、ログイン後も取込画面と取込先指定へ復帰する。任意URLへのredirect入力は追加しない。</p>
           <h3>清算計算</h3>
           <p><code>calculateSettlement(members, transactions): SettlementResult | null</code></p>
           <ol>
@@ -936,6 +937,8 @@ BootstrapData extends BootstrapMetadata
             <thead><tr><th>テストファイル群</th><th>主な検証</th></tr></thead>
             <tbody>
               <tr><td>paypay.test.ts / paypay-id.test.ts / import-duplicates.test.ts / paypay-import.test.ts</td><td>支払い抽出、JST日時・外部ID・先頭ゼロ、旧ID正規化、行/既存重複・内容衝突、保存順、Transactionと実挿入件数。</td></tr>
+              <tr><td>import-paste.test.ts</td><td>PC/mobileの実ImportPanelで貼り付け確認とファイル選択の共通処理、確認前の通信なし・原本不送信、本人・ルール・重複、入力/照合/登録失敗からの保持と再試行、成功時の本文消去、workspace切替後の遅延応答破棄を検証する。</td></tr>
+              <tr><td>home-navigation.test.ts</td><td>取込直リンクとworkspace指定の安全な内部URL化、未知・複数tabのhomeへのフォールバック、Google/テストログイン双方への復帰先引き渡しを確認する。実認証後の復帰はPreviewで別途確認する。</td></tr>
               <tr><td>settlement.test.ts / expense-splits.test.ts / split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、受け取り、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>
               <tr><td>transaction-editing.test.ts / transaction-updates.test.ts / transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>
               <tr><td>transaction-filters.test.ts / transaction-filter-storage.test.ts / transaction-list.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗、多数候補・非表示選択・条件外行の保持。</td></tr>
