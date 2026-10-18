@@ -49,7 +49,7 @@
       .nav-label { margin: 1rem 0 0.4rem; color: #8a938a; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.12em; }
       nav a { display: block; padding: 0.43rem 0.65rem; border-radius: 0.55rem; color: #59635a; font-size: 0.82rem; text-decoration: none; }
       nav a:hover { color: var(--green); background: rgba(255,255,255,0.65); }
-      main { min-width: 0; padding: 2.5rem 3rem 5rem; }
+      main { min-width: 0; overflow-wrap: anywhere; padding: 2.5rem 3rem 5rem; }
       .hero { padding: clamp(2rem, 5vw, 4.2rem); border-radius: 2rem; color: #f9fff9; background: linear-gradient(135deg, #173e4c, #245d66 58%, #427c77); box-shadow: var(--shadow); }
       .eyebrow { margin: 0 0 1rem; font-size: 0.76rem; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.8; }
       h1 { max-width: 16ch; margin: 0; font-family: Georgia, "Yu Mincho", serif; font-size: clamp(2.25rem, 6vw, 4.5rem); font-weight: 500; line-height: 1.05; letter-spacing: -0.045em; }
@@ -95,7 +95,11 @@
         background: linear-gradient(145deg, #fff, #fbfcf8);
       }
       .data-flow-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 0.75rem; }
-      .data-flow-head h3 { margin: 0; }
+      .data-flow-head h3, .data-flow-head h4 { margin: 0; }
+      .flow-branches { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 0.7rem; margin-top: 0.8rem; }
+      .flow-branches .dfd-node { align-content: start; }
+      .flow-branches p { font-size: 0.75rem; }
+      .data-flow code { overflow-wrap: anywhere; }
       .data-flow-head small { color: var(--muted); font-size: 0.7rem; }
       .dfd-lane { margin: 0.65rem 0 0.3rem; color: var(--green); font-size: 0.65rem; font-weight: 900; letter-spacing: 0.08em; }
       .dfd-track { display: flex; align-items: stretch; gap: 0.35rem; }
@@ -188,6 +192,7 @@
           <a href="#auth">5. 認証設計</a>
           <a href="#api">6. API設計</a>
           <a href="#client">7. クライアント設計</a>
+          <a href="#dashboard-data-flow">7.1 操作とデータの流れ</a>
           <a href="#domain">8. ドメイン処理</a>
           <p class="nav-label">DATA & QUALITY</p>
           <a href="#repository">9. データアクセス</a>
@@ -269,14 +274,14 @@
                 <div class="dfd-arrow"><b>→</b><small>typed object</small></div>
                 <div class="dfd-node output"><strong>BootstrapData</strong><small>user / workspaces / selected<br />pendingInvitations</small></div>
                 <div class="dfd-arrow"><b>→</b><small>initialData<br />or GET JSON</small></div>
-                <div class="dfd-node output"><strong>Dashboard</strong><small>initialData<br />画面Stateへ保持</small></div>
+                <div class="dfd-node output"><strong>Dashboard / hook</strong><small>initialDataでhookを初期化<br />確定データを画面へ渡す</small></div>
               </div>
               <div class="dfd-boundary"><b>サーバー境界:</b> Session CookieとDB行はブラウザへ直接渡さず、必要項目だけをBootstrapDataへ変換する。</div>
             </div>
 
             <div class="data-flow">
               <div class="data-flow-head"><h3>B. 画面からの更新</h3><small>フォーム入力から再描画まで</small></div>
-              <div class="dfd-track" role="img" aria-label="フォーム入力をJSONとしてAPIへ送り、検証後にNeonへ保存し、再取得結果で画面を更新するデータフロー">
+              <div class="dfd-track" role="img" aria-label="フォーム入力をJSONとしてAPIへ送り、検証後にNeonへ保存し、確定値の反映または再取得で画面を更新するデータフロー">
                 <div class="dfd-node source"><strong>フォーム State</strong><small>action<br />workspaceId<br />入力フィールド</small></div>
                 <div class="dfd-arrow"><b>→</b><small>POST JSON</small></div>
                 <div class="dfd-node process"><strong>Route Handler</strong><small>Session認証<br />Zod入力検証<br />所属・業務検証</small></div>
@@ -479,6 +484,140 @@
 
         <section id="client">
           <h2>7. クライアント状態・画面詳細設計</h2>
+
+          <h3 id="dashboard-data-flow">7.1 操作とデータの流れ</h3>
+          <p>確定データは<code>useDashboardController</code>がDashboardごとに保持し、Dashboardから各画面・フォームへpropsで渡す。入力途中の値は各画面に保持し、保存時に操作関数とpayloadを通じてhookへ渡す。図の矢印上は渡すデータ・呼ぶ関数、分岐の箱は条件と到達先を示す。</p>
+          <div class="data-flow-list">
+            <div class="data-flow" id="flow-ownership">
+              <div class="data-flow-head"><h4>A. データの所有と受け渡し</h4><small>表示データと操作関数をpropsで渡す</small></div>
+              <p class="dfd-lane">INITIAL DATA / 表示</p>
+              <div class="dfd-track" role="img" aria-label="サーバーがgetBootstrapで取得した初期データでhookを初期化し、Dashboardから各画面へ表示データを渡す">
+                <div class="dfd-node source"><strong>app/page.tsx</strong><small>サーバーで認証<br />getBootstrap(user, workspaceId)</small></div>
+                <div class="dfd-arrow"><b>→</b><small>initialData</small></div>
+                <div class="dfd-node process"><strong>Controller hook</strong><small>BootstrapDataをdataに保持<br />selected = data.selected</small></div>
+                <div class="dfd-arrow"><b>→</b><small>data / selected<br />loading / notice</small></div>
+                <div class="dfd-node process"><strong>Dashboard</strong><small>表示するタブを選ぶ<br />画面配置・モーダル開閉</small></div>
+                <div class="dfd-arrow"><b>→</b><small>props<br />データ＋操作関数</small></div>
+                <div class="dfd-node output"><strong>各画面・フォーム</strong><small>表示・入力下書き<br />CSVプレビュー・選択状態</small></div>
+              </div>
+              <p class="dfd-lane">操作 / 確定後の再描画</p>
+              <div class="dfd-track" role="img" aria-label="画面が操作関数を呼び、hookがAPIの確定応答を反映すると、新しいpropsで各画面を再描画する">
+                <div class="dfd-node source"><strong>各画面・フォーム</strong><small>クリック・blur・Enter<br />下書きからpayloadを作成</small></div>
+                <div class="dfd-arrow"><b>→</b><small>run(payload)<br />openTab / onRefresh</small></div>
+                <div class="dfd-node process"><strong>Controller hook</strong><small>APIを呼び、応答を判定<br />確定データをupdateData</small></div>
+                <div class="dfd-arrow"><b>→</b><small>新しいdata</small></div>
+                <div class="dfd-node output"><strong>Dashboard → 各画面</strong><small>新しいpropsを渡す<br />画面内の下書きとは別に保持</small></div>
+              </div>
+              <div class="dfd-boundary"><b>所有境界:</b> hookは独立した描画コンポーネントではなく、Dashboard内で呼ぶ。画面は受け取ったpropsを直接変更せず、確定値の更新を操作関数へ依頼する。DBへ到達する前のフォーム開閉・絞り込みはブラウザ内で完結する。</div>
+            </div>
+
+            <div class="data-flow" id="flow-save">
+              <div class="data-flow-head"><h4>B. 保存要求からDBまで</h4><small>run → POST → action振分け → SQL</small></div>
+              <div class="dfd-track" role="img" aria-label="画面のpayloadをhookのrunからpostActionでapp APIへ送り、認証と入力検証、action別serviceの権限と業務条件の確認後、store経由でDBへ保存する">
+                <div class="dfd-node source"><strong>画面のrun(payload)</strong><small>action / workspaceId<br />金額・日時・対象IDなど</small></div>
+                <div class="dfd-arrow"><b>→</b><small>postAction<br />POST /api/app</small></div>
+                <div class="dfd-node process"><strong>appHandlers</strong><small>現在ユーザーの確認<br />parseAppActionInput</small></div>
+                <div class="dfd-arrow"><b>→</b><small>user＋検証済みinput</small></div>
+                <div class="dfd-node process"><strong>app-service</strong><small>actionでserviceへ振分け<br />所属・権限・業務条件を確認</small></div>
+                <div class="dfd-arrow"><b>→</b><small>storeの操作<br />SQL引数</small></div>
+                <div class="dfd-node store"><strong>store → DB</strong><small>INSERT / UPDATE / DELETE<br />操作ごとのTransaction境界</small></div>
+              </div>
+              <p class="dfd-lane">POST成功応答 / hookでの反映分岐</p>
+              <p>応答の業務結果を受け取ると、まず操作元workspace IDと世代を現在値と比較する。不一致なら現在画面のdataへ反映せず、結果を呼出元へ返す。一致した場合は次の3経路に分かれる。</p>
+              <div class="flow-branches" role="group" aria-label="POST成功時の3つの反映経路">
+                <div class="dfd-node process"><strong>① saveTransaction＋transaction</strong><p>DB → <code>{ ok, transaction }</code> → <code>applyTransactionUpdate</code> → 対象明細を追加・差し替え → 共有workspaceの清算結果を再計算 → data更新。</p><small>通常は追加GETなし。確定済みの日時・金額・割合を採用する。</small></div>
+                <div class="dfd-node process"><strong>② saveTransactionMemo＋ID・memo</strong><p>DB → <code>{ ok, transactionId, memo }</code> → <code>applyTransactionUpdate</code> → 対象明細のメモだけ差し替え → data更新。</p><small>通常は追加GETなし。清算計算は変わらない。</small></div>
+                <div class="dfd-node output"><strong>③ それ以外</strong><p>DB → <code>{ ok, … }</code> → <code>refresh</code> → 現在タブのscopeでGET → 採用判定 → data更新。</p><small>CSV登録、設定・ルール変更、清算完了など。取得先IDは明示引数 → 応答workspaceId → 操作元IDの順に選ぶ。</small></div>
+              </div>
+              <div class="dfd-boundary"><b>反映と保存の違い:</b> 古いPOST応答の画面反映を止めても、DBで確定した保存は取り消さない。同一workspaceでタブだけ変わった場合はdataへ反映し、古いタブ向け通知は抑止する。通知にはworkspace世代・tab世代一致と手動更新中でないことが必要。エラーは<code>postAction</code>から例外となり、runが条件に合う通知を出して呼出元へ再throwし、画面側で入力・再試行を保持する。</div>
+            </div>
+
+            <div class="data-flow" id="flow-read">
+              <div class="data-flow-head"><h4>C. 再取得の入口・応答採用・併合</h4><small>GET要求の条件と、取得結果の反映条件を分ける</small></div>
+              <div class="dfd-track" role="img" aria-label="タブ切替やworkspace切替、手動更新や保存後更新がrefreshを呼び、workspace IDとscopeをapp GETに送り、返ったデータを採用条件で判定する">
+                <div class="dfd-node source"><strong>操作関数</strong><small>openTab / switchWorkspace<br />refreshCurrentView / run成功後</small></div>
+                <div class="dfd-arrow"><b>→</b><small>workspaceId<br />scope / 世代</small></div>
+                <div class="dfd-node process"><strong>refresh</strong><small>要求ID・dataRevision・<br />開始時の選択workspaceを記録</small></div>
+                <div class="dfd-arrow"><b>→</b><small>GET /api/app<br />workspaceId / scope</small></div>
+                <div class="dfd-node store"><strong>API → getBootstrap → DB</strong><small>認証・所属先の選択<br />scope別のDTOを返す</small></div>
+                <div class="dfd-arrow"><b>→</b><small>BootstrapData<br />またはMetadata</small></div>
+                <div class="dfd-node process"><strong>canApplyBootstrapResponse</strong><small>workspace ID・世代・revision・<br />要求IDが現在と一致？</small></div>
+              </div>
+              <div class="flow-branches" role="group" aria-label="GET応答の不一致、full、metadataの反映分岐">
+                <div class="dfd-node source"><strong>不一致 → 反映せず終了</strong><p>古いworkspace、保存開始前のGET、後続GETより遅れた応答をdataへ適用しない。</p><small>タブ世代はこの関数の比較項目に含めない。タブ切替で新しいGET要求IDが発行され、以前のGETを抑止する。同じタブの再選択は取得しない。</small></div>
+                <div class="dfd-node output"><strong>一致＋full → dataを置換</strong><p>利用者・workspace一覧・招待・選択先情報・参加者・ルール・明細・清算結果・履歴を受け取る。</p><small>workspace切替・手動更新はfull。home / transactions / settlementへのタブ切替もfull。</small></div>
+                <div class="dfd-node output"><strong>一致＋metadata → 併合</strong><p>利用者・workspace一覧・招待・選択先情報・参加者・ルールを更新。同じworkspaceなら既存の明細・清算結果・履歴を保持する。</p><small>import / settingsで使用。選択先が別ならそのIDのfullを追加取得、選択先なしならselectedをnullにする。</small></div>
+              </div>
+              <div class="dfd-boundary"><b>失敗・初期表示:</b> GET失敗は例外となり、既存dataを置き換えず呼出元で通知等を処理する。初回の<code>GET /</code>はサーバーが直接getBootstrapを呼ぶ経路で、このブラウザGETを経由しない。所属workspaceが0件の場合の初期workspace作成はサーバー側の処理であり、GETだけを理由にDB無変更とは扱わない。</div>
+            </div>
+
+            <div class="data-flow" id="flow-manual-refresh">
+              <div class="data-flow-head"><h4>D. 取引明細の「更新」</h4><small>未保存入力・メモを保存してからfull GET</small></div>
+              <div class="dfd-track" role="img" aria-label="更新ボタンから編集欄をfreezeし、hookへprepareを渡して各行とメモのflush、保存キューの完了を待つ">
+                <div class="dfd-node source"><strong>「更新」をクリック</strong><small>TransactionsPanel<br />requestRefresh</small></div>
+                <div class="dfd-arrow"><b>→</b><small>編集handle一覧</small></div>
+                <div class="dfd-node process"><strong>refreshTransactionEditors</strong><small>全編集欄をfreeze<br />編集・競合操作を抑止</small></div>
+                <div class="dfd-arrow"><b>→</b><small>prepare関数</small></div>
+                <div class="dfd-node process"><strong>refreshCurrentView(prepare)</strong><small>二重更新を防止<br />更新中表示・通知の整理</small></div>
+                <div class="dfd-arrow"><b>→</b><small>await prepare()</small></div>
+                <div class="dfd-node process"><strong>各行・メモのflush</strong><small>必要な保存POSTを実行<br />保存キュー完了まで待機</small></div>
+              </div>
+              <div class="flow-branches" role="group" aria-label="保存失敗、画面変更、保存成功時の手動更新の分岐">
+                <div class="dfd-node source"><strong>入力不正・保存失敗</strong><p>prepareが失敗 → full GETへ進まない → 下書きと再試行を保持。開始時の画面のままならエラー通知。</p></div>
+                <div class="dfd-node source"><strong>保存後に画面が変わっている</strong><p>workspace ID・世代またはtab世代が不一致 → 手動更新のGETを中止。元のタブへ戻っても旧世代の処理は継続しない。</p></div>
+                <div class="dfd-node output"><strong>保存成功＋画面が同じ</strong><p>refresh(full) → CのGET採用判定 → data更新。適用成功かつ開始時の画面のままなら完了通知を表示。</p></div>
+              </div>
+              <div class="dfd-boundary"><b>終了処理:</b> 成否・中止にかかわらずfinallyでfreezeを解除し、更新中状態を戻す。GET中のworkspace/tab切替でもCの採用条件と通知条件を適用する。ホーム・清算の「更新」は編集欄のprepareを渡さず、同じhookからfull GETする。</div>
+            </div>
+
+            <div class="data-flow" id="flow-csv-actions">
+              <div class="data-flow-head"><h4>E. CSVは「選択」と「登録」で到達先が変わる</h4><small>重複照会は専用API、登録はrun</small></div>
+              <div class="dfd-track" role="img" aria-label="ファイル選択でブラウザ内のCSV解析とルール適用を行い、外部IDを重複APIへ送り、既存明細の応答をプレビューに反映する。明細の登録は行わない">
+                <div class="dfd-node source"><strong>「ファイルを選択」</strong><small>File.text → parsePayPayCsv<br />参加者・ルールを適用</small></div>
+                <div class="dfd-arrow"><b>→</b><small>workspaceId<br />externalIds</small></div>
+                <div class="dfd-node store"><strong>POST /api/import/duplicates</strong><small>所属確認 → DBの既存ID照会<br />既存の金額・取引先・source</small></div>
+                <div class="dfd-arrow"><b>→</b><small>transactions</small></div>
+                <div class="dfd-node output"><strong>ImportPanelのrows</strong><small>重複・衝突を表示<br />行の選択・割合を編集</small></div>
+              </div>
+              <div class="dfd-track" role="img" aria-label="登録ボタンで選択行だけをbulkImportとしてrunへ送りDBへ保存し、metadataを再取得する。取引明細タブに切り替えたときにfullで明細を取得する">
+                <div class="dfd-node source"><strong>「選択したN件を登録」</strong><small>選択行を検証<br />日時・金額・actor・割合</small></div>
+                <div class="dfd-arrow"><b>→</b><small>run(bulkImport)<br />fileName / items</small></div>
+                <div class="dfd-node store"><strong>POST /api/app → DB</strong><small>明細・batchをTransaction保存<br />imported / skippedを返す</small></div>
+                <div class="dfd-arrow"><b>→</b><small>metadata GET</small></div>
+                <div class="dfd-node output"><strong>登録数通知・プレビュー解除</strong><small>取込タブの情報を更新<br />明細タブを押すとfull GET</small></div>
+              </div>
+              <div class="dfd-boundary"><b>送信範囲:</b> CSV本文はブラウザ内だけで解析する。重複照会はworkspace IDと外部ID、登録は選択済み明細・ファイル名・件数を送る。古いファイルの非同期結果はImportPanelの要求IDで破棄する。</div>
+            </div>
+          </div>
+
+          <h4>操作・payload・到達先の対応</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>操作</th><th>送る関数・データ</th><th>到達先・反映経路</th></tr></thead>
+            <tbody>
+              <tr><td>「＋ 明細を追加」／「＋ 新しく作成」</td><td>Dashboardの開閉Stateを変更。</td><td>モーダル表示まで。DB保存はフォームの送信時。</td></tr>
+              <tr><td>明細フォームの「追加する」</td><td>run(saveTransaction)：workspaceId、日時、取引先、方法、金額、actor、区分、割合、メモ。</td><td>B → DB → 確定transactionをdataへ追加。成功後にフォームを閉じる。</td></tr>
+              <tr><td>明細のblur / Enter、選択項目の変更</td><td>行の検証 → 保存キュー → run(saveTransaction)：workspaceId、transactionId、明細値。</td><td>B → DB → 確定transactionで対象行を差し替え。</td></tr>
+              <tr><td>メモのblur / Ctrl+Enter</td><td>保存キュー → run(saveTransactionMemo)：workspaceId、transactionId、memo。</td><td>B → DB → 対象明細のメモだけ更新。</td></tr>
+              <tr><td>CSVの選択・登録</td><td>重複APIに外部ID、登録時はrun(bulkImport)に選択items。</td><td>E。選択時は照会まで、登録時にDB保存。</td></tr>
+              <tr><td>設定の「変更を保存」／「割合を保存」</td><td>run(updateWorkspace)：workspaceId・name／run(updateWeights)：workspaceId・weights。</td><td>B → DB → settingsのmetadata GET。ルール操作もrunからDB更新後にmetadata GET。</td></tr>
+              <tr><td>「清算を完了する」</td><td>confirm → run(completeSettlement)：workspaceId。</td><td>B → サーバーで対象明細を計算・再照合してDB確定 → settlementのfull GET。画面の計算額を送金・保存指示として送らない。</td></tr>
+              <tr><td>workspace作成フォームの「作成する」</td><td>run(createWorkspace)：name・type。</td><td>B → DB → 応答workspaceIdの取得。metadataで選択先が変わる場合はfullを追加取得。</td></tr>
+              <tr><td>タブ／workspaceの選択</td><td>openTab(tab)／switchWorkspace(workspaceId)。</td><td>C。タブはscope別、workspace切替はfull GET。</td></tr>
+              <tr><td>ホーム・取引明細・清算の「更新」</td><td>refreshCurrentView。取引明細はprepareも渡す。</td><td>D → full GET。取引明細では保存失敗時にGETへ進まない。</td></tr>
+            </tbody>
+          </table></div>
+          <h4>共通runを経由しない操作</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>操作</th><th>独立した経路・到達先</th></tr></thead>
+            <tbody>
+              <tr><td>workspaceの「完全に削除」</td><td>SettingsPanel → 確認 → postAction(deleteWorkspace) → /api/app → DB削除 → afterDeleteからhookのrefresh。共通runの保存後分岐は経由しない。</td></tr>
+              <tr><td>定期支払いの更新・追加・編集・停止・再開・削除</td><td>RecurringPaymentsPanel → /api/recurring-paymentsのGET/POST → 専用サービス・DB。結果を同パネルのStateへ反映し、保存成功後は専用GETも行う。DashboardのBootstrapDataとは別に保持。</td></tr>
+              <tr><td>利用者管理</td><td>UserManagement → /api/admin/usersのGET/POST/DELETE → 管理者認可・DB。応答一覧は同コンポーネントのStateへ反映。</td></tr>
+              <tr><td>絞り込み・選択・コピー・ログアウト</td><td>絞り込み・行選択はブラウザ内の表示State（列条件はlocalStorageにも保存）。招待リンクのコピーはClipboard API。ログアウトはAuth.jsのsignOut。これらはrunから業務DB更新へ流れない。</td></tr>
+            </tbody>
+          </table></div>
+          <p>対応する実装：<a href="../components/dashboard.tsx">Dashboard</a>、<a href="../components/use-dashboard-controller.ts">controller hook</a>、<a href="../lib/dashboard-requests.ts">応答採用条件</a>、<a href="../lib/transaction-refresh.ts">保存待ち更新</a>、<a href="../lib/app-handlers.ts">HTTP境界</a>、<a href="../lib/app-service.ts">action振分け</a>。</p>
+
           <h3>Dashboardと取得・更新hookの状態</h3>
           <p><code>useDashboardController(initialData)</code>はdata・tab・loading・refreshing・noticeと、画面から呼ぶrun・refresh・switchWorkspace・openTab・refreshCurrentViewを返す。描画・フォームの入力は各コンポーネントに置く。遅延応答の採用条件は<code>canApplyBootstrapResponse</code>、<code>isWorkspaceViewCurrent</code>、<code>isDashboardViewCurrent</code>で判定する。要求対象のworkspaceと、要求開始時に選択していたworkspaceを区別し、新規作成や外部削除後のfull取得も同じ条件で照合する。</p>
           <div class="table-wrap"><table>
