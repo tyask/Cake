@@ -5,14 +5,17 @@ import { getCurrentUser } from "@/lib/current-user";
 import { isTestAuthEnabled } from "@/lib/auth-mode";
 import { getBootstrap } from "@/lib/repository";
 import { databaseVariable } from "@/lib/database-environment";
+import { homeNavigation, type HomeSearchParams } from "@/lib/home-navigation";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ workspaceId?: string; error?: string }> }) {
-  const { workspaceId, error } = await searchParams;
+export default async function Home({ searchParams }: { searchParams: Promise<HomeSearchParams> }) {
+  const params = await searchParams;
+  const { workspaceId, initialTab, redirectTo } = homeNavigation(params);
+  const error = typeof params.error === "string" ? params.error : undefined;
   const user = await getCurrentUser();
   const testAuth = isTestAuthEnabled();
-  if (!user) return <LoginScreen testAuth={testAuth} error={error} />;
+  if (!user) return <LoginScreen testAuth={testAuth} error={error} redirectTo={redirectTo} />;
 
   if (!process.env[databaseVariable(process.env)]) {
     return (
@@ -28,5 +31,5 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ w
   }
 
   const initialData = await getBootstrap(user, workspaceId);
-  return <Dashboard initialData={initialData} testAuth={testAuth} />;
+  return <Dashboard initialData={initialData} initialTab={initialTab} testAuth={testAuth} />;
 }

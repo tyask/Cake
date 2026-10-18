@@ -154,9 +154,27 @@ code { padding: .12rem .35rem; border-radius: .3rem; background: var(--surface-m
 .split-editor-inline .split-editor-fields > select { width: 100%; min-width: 0; margin: 0; padding: .4rem .3rem; border: 1px solid var(--line-strong); border-radius: .45rem; color: var(--ink); background: var(--paper); font: inherit; font-size: .72rem; }
 .ratio-note { margin: .6rem 0 .8rem; color: var(--muted); font-size: .7rem; line-height: 1.7; }
 .ratio-summary { display: block; max-width: 13rem; white-space: normal; line-height: 1.6; }
-.import-format { margin-bottom: 1rem; padding: 1rem; }
+.import-format { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 2rem; margin-bottom: 1rem; padding: 1rem; }
 .import-format label { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; color: var(--muted); font-size: .75rem; font-weight: 700; }
 .import-format select { width: min(16rem, 100%); min-width: 0; padding: .55rem .7rem; border: 1px solid var(--line-strong); border-radius: .6rem; color: var(--ink); background: var(--paper); font: inherit; }
+.import-destination { min-width: 0; margin: 0; }
+.import-destination span, .import-destination b { display: block; overflow-wrap: anywhere; }
+.import-destination span { color: var(--muted); font-size: .67rem; }
+.import-destination b { margin-top: .2rem; font-size: .85rem; }
+.import-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.import-inputs > section { min-width: 0; }
+.import-inputs .upload-panel { min-height: 0; padding: 1.5rem; }
+.import-inputs button { min-height: 2.75rem; }
+.import-paste { padding: 1.5rem; }
+.import-paste h2 { margin: 0 0 .6rem; font-size: 1.1rem; }
+.import-clipboard-button { display: block; min-width: 8rem; margin-inline: auto; }
+.import-paste small { display: block; margin-top: .7rem; color: var(--muted); font-size: .68rem; line-height: 1.6; }
+.import-paste .import-help-button { display: block; width: auto; margin-top: .2rem; padding: .4rem .2rem; font-size: .7rem; }
+.import-inputs .upload-panel h2 { margin-bottom: 1rem; }
+.import-input-note { margin: .8rem 0; color: var(--muted); font-size: .7rem; line-height: 1.7; }
+.import-summary { flex-wrap: wrap; }
+.import-summary > div { min-width: 0; }
+.import-summary div b { overflow-wrap: anywhere; }
 .settings-error, .import-error { margin: .8rem 1.3rem; }
 
 @media (max-width: 70rem) {
@@ -166,6 +184,9 @@ code { padding: .12rem .35rem; border-radius: .3rem; background: var(--surface-m
 @media (max-width: 48rem) {
   body { background: var(--canvas); }
   .user-registration-form fieldset { grid-template-columns: 1fr; }
+  .import-inputs { grid-template-columns: minmax(0, 1fr); }
+  .import-paste { padding: 1rem; }
+  .import-paste button { width: 100%; }
   .login-page { padding: 1.5rem; }.login-panel { gap: 2rem; padding: 2rem 0; border: 0; background: transparent; box-shadow: none; }.login-brand { width: 20rem; }.google-button { max-width: none; }
   .app-sidebar { display: none; }.app-main { margin: 0; padding: 5.3rem 1rem calc(6rem + env(safe-area-inset-bottom)); }.mobile-header { position: fixed; z-index: 20; top: 0; left: 0; right: 0; display: flex; height: 4.3rem; align-items: center; justify-content: space-between; gap: 1rem; padding: .7rem 1rem; border-bottom: 1px solid var(--line); background: rgba(255,254,248,.94); backdrop-filter: blur(12px); }.mobile-header .cake-icon { width: 2.125rem; height: 2.125rem; }.mobile-header select { min-width: 0; max-width: 10.5rem; padding: .55rem; border: 1px solid var(--line); border-radius: .55rem; background: #fff; font-size: .7rem; }
   .bottom-nav { position: fixed; z-index: 20; bottom: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(5,1fr); padding: .45rem .3rem max(.45rem,env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: rgba(255,254,248,.97); backdrop-filter: blur(12px); }.bottom-nav button { display: grid; place-items: center; gap: .15rem; padding: .2rem; border: 0; color: var(--muted); background: transparent; font-size: .58rem; }.bottom-nav i { font-size: 1rem; font-style: normal; }.bottom-nav button.active { color: var(--accent); font-weight: 800; }

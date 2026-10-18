@@ -17,6 +17,8 @@
 
 操作・計算ルールやAPI・DBの仕様は[詳細設計書](docs/detail-design.html)、全体構成や画面概要は[基本設計書](docs/design.html)を参照してください。
 
+iPhoneでのPayPay共有ショートカットとCSV貼り付けの確認方法は、[iPhoneからのPayPay CSV取込・実機検証手順](docs/iphone-paypay-import.md)を参照してください。
+
 ## 技術構成
 
 - Next.js 16 / React 19 / TypeScript
