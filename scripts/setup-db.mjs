@@ -5,8 +5,8 @@ import { dirname, resolve } from "node:path";
 import nextEnv from "@next/env";
 import { neon } from "@neondatabase/serverless";
 
-import { databaseConnectionString, guardPreviewDatabase, previewDatabaseGuardSql } from "../lib/database-connection.mjs";
-import { assertPreviewFixtureMigrationSources } from "../lib/preview-fixture-base.mjs";
+import { databaseConnectionString, previewDatabaseIdentity, previewDatabaseGuardSql } from "../lib/database-connection.mjs";
+import { assertPreviewFixtureMigrationNames, assertPreviewFixtureMigrationSource } from "../lib/preview-fixture-base.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationDirectory = resolve(here, "../db/migrations");
@@ -32,29 +32,57 @@ export function prepareMigration(name, migration, environment) {
 }
 
 export async function setupDatabase(environment, options = {}) {
-  // Validate every migration before constructing a client or claiming a DB.
   const connectionString = databaseConnectionString(environment);
   const directory = options.migrationDirectory ?? migrationDirectory;
   const names = (await readdir(directory)).filter((name) => /^\d+_[a-z0-9_]+\.sql$/.test(name)).sort();
-  const migrations = [];
-  const sources = [];
-  for (const name of names) {
-    const source = await readFile(resolve(directory, name), "utf8");
-    migrations.push({ name, sql: prepareMigration(name, source, environment) });
-    sources.push({ name, sql: source });
+  if (environment.VERCEL_ENV === "preview") assertPreviewFixtureMigrationNames(names);
+  const readMigration = options.readMigration ?? (name => readFile(resolve(directory, name), "utf8"));
+  async function loadMigrations(selectedNames) {
+    const migrations = [];
+    for (const name of selectedNames) {
+      const source = await readMigration(name);
+      const migration = prepareMigration(name, source, environment);
+      if (environment.VERCEL_ENV === "preview") assertPreviewFixtureMigrationSource(name, source);
+      migrations.push({ name, sql: migration });
+    }
+    return migrations;
   }
-  if (environment.VERCEL_ENV === "preview") assertPreviewFixtureMigrationSources(sources);
   const sql = (options.connect ?? neon)(connectionString);
-  const identity = await guardPreviewDatabase(sql, environment, true);
-  const statement = (body) => identity ? previewDatabaseGuardSql(identity, false, body)
+  const identity = previewDatabaseIdentity(environment);
+  const statement = (body, initialize = false) => identity ? previewDatabaseGuardSql(identity, initialize, body)
     : `DO $cake_migration$ BEGIN ${body} END; $cake_migration$;`;
-  await sql.query(statement(`
+  const ledger = `
     PERFORM pg_advisory_xact_lock(hashtext('cake:schema-migrations'));
     CREATE TABLE IF NOT EXISTS schema_migrations (
       name text PRIMARY KEY,
       applied_at timestamptz NOT NULL DEFAULT now()
     );
-`));
+`;
+  async function initializeLedger(claim = false) {
+    try { await sql.query(statement(ledger, claim)); return true; }
+    catch (error) {
+      // A missing marker fails before the ledger body and rolls back the whole
+      // probe. Only this exact error permits full source review and first claim.
+      if (identity && !claim && error?.code === "P0001" && error.message === "Cake Preview DB identity is missing") return false;
+      if (!identity) throw error;
+      throw new Error("Preview DBの空状態・PR・DB世代照合を確認できません。DB更新・seedを停止しました。接続情報やDBエラー本文は表示しません。");
+    }
+  }
+  let reviewed;
+  if (!await initializeLedger()) {
+    // Existing same-generation DBs trust their ledger. Unclaimed DBs must still
+    // pass every original source hash/bootstrap check before any claim or DDL.
+    reviewed = await loadMigrations(names);
+    await initializeLedger(true);
+  }
+  const history = await sql.query("SELECT name FROM schema_migrations ORDER BY name");
+  const rows = Array.isArray(history) ? history : history?.rows;
+  if (!Array.isArray(rows) || rows.some(row => !row || typeof row.name !== "string")) {
+    throw new Error("マイグレーションの適用履歴を確認できません。DB更新を停止しました。");
+  }
+  const applied = new Set(rows.map(row => row.name));
+  const pending = names.filter(name => !applied.has(name));
+  const migrations = reviewed ? reviewed.filter(({ name }) => !applied.has(name)) : await loadMigrations(pending);
 
   for (const { name, sql: migration } of migrations) {
     // Guard, SQL and migration ledger share one transaction. Locks protect

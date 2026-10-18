@@ -8,3 +8,5 @@ export function previewFixtureCatalogFingerprintSql(): string;
 export function previewFixtureEmptyDatabaseSql(): string;
 export function previewFixtureBaseValidationSql(): string;
 export function assertPreviewFixtureMigrationSources(migrations: readonly { name: string; sql: string }[]): void;
+export function assertPreviewFixtureMigrationNames(names: readonly string[]): void;
+export function assertPreviewFixtureMigrationSource(name: string, sql: string): void;
