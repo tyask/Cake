@@ -167,9 +167,10 @@ code { padding: .12rem .35rem; border-radius: .3rem; background: var(--surface-m
 .import-inputs button { min-height: 2.75rem; }
 .import-paste { padding: 1.5rem; }
 .import-paste h2 { margin: 0 0 .6rem; font-size: 1.1rem; }
-.import-paste p { margin: 0 0 1rem; color: var(--muted); font-size: .8rem; line-height: 1.7; }
-.import-clipboard-button { margin-bottom: 1rem; }
+.import-clipboard-button { display: block; min-width: 8rem; }
 .import-paste small { display: block; margin-top: .7rem; color: var(--muted); font-size: .68rem; line-height: 1.6; }
+.import-paste .import-help-button { display: block; width: auto; margin-top: .2rem; padding: .4rem .2rem; font-size: .7rem; }
+.import-inputs .upload-panel h2 { margin-bottom: 1rem; }
 .import-input-note { margin: .8rem 0; color: var(--muted); font-size: .7rem; line-height: 1.7; }
 .import-summary { flex-wrap: wrap; }
 .import-summary > div { min-width: 0; }

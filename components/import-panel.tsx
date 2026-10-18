@@ -8,6 +8,7 @@ import { applyPayPayDuplicateChecks, MAX_DUPLICATE_CHECK_IDS, type ExistingPayPa
 import type { ExpenseClass, WorkspaceData } from "@/lib/types";
 import { ImportPreviewTable } from "./import-preview-table";
 import { PageHeading } from "./dashboard-ui";
+import { ImportHelpDialog } from "./import-help-dialog";
 
 const importFormats = { PAYPAY: { label: "PayPay", parse: parsePayPayCsv } };
 const pastedFileName = "PayPay貼り付け.csv";
@@ -22,6 +23,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [reading, setReading] = useState(false);
+  const [helpUrl, setHelpUrl] = useState<string | null>(null);
   const fileRequest = useRef(0);
   const selectedCount = rows.filter((row) => row.selected).length;
   const busy = reading || saving;
@@ -112,7 +114,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
   }
 
   return <>
-    <PageHeading eyebrow="IMPORT" title="明細を取込" description="費用区分と負担割合を確認してから、支払い明細を登録します。" />
+    <PageHeading eyebrow="IMPORT" title="明細を取込" />
     <section className="panel import-format">
       <p className="import-destination"><span>取込先の家計</span><b>{selected.workspace.name}</b></p>
       <label>ファイル形式<select value={format} disabled={busy || rows.length > 0} onChange={event => setFormat(event.target.value as keyof typeof importFormats)}>
@@ -122,25 +124,23 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
     {rows.length === 0 ? <>
       <div className="import-inputs" aria-busy={reading}>
         <section className="panel import-paste" aria-labelledby="import-paste-title">
-          <h2 id="import-paste-title">CSVを貼り付けて取込</h2>
-          <p>PayPayの共有からショートカットでCSVをコピーし、「貼り付けて確認」を押してください。Safariの確認が出たら「ペースト」を選びます。</p>
-          <button className="primary import-clipboard-button" disabled={busy} onClick={pasteAndPreview}>貼り付けて確認</button>
-          <small>読み取れない場合は「ファイルを選択」から取り込めます。登録する明細は確認画面で選べます。</small>
+          <h2 id="import-paste-title">クリップボードから貼り付け</h2>
+          <button className="primary import-clipboard-button" disabled={busy} onClick={pasteAndPreview}>貼り付け</button>
+          <small>※Safariの確認が出たら「ペースト」を選んでください</small>
+          <button type="button" className="text-button import-help-button" disabled={busy} aria-haspopup="dialog"
+            onClick={event => { event.currentTarget.focus(); setHelpUrl(new URL("/?tab=import", window.location.origin).href); }}>ヘルプ</button>
         </section>
         <section className="panel upload-panel"
           onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); choose(event.dataTransfer.files[0]); }}>
           <div className="upload-icon">⇧</div><h2>CSVファイルをここにドロップ</h2>
-          <p>またはファイル選択から{importFormats[format].label}の取引履歴を指定してください。</p>
           <button className="secondary" disabled={busy} onClick={() => inputRef.current?.click()}>ファイルを選択</button>
           <input ref={inputRef} hidden type="file" accept=".csv,text/csv" aria-label="CSVファイル" disabled={busy} onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
             choose(file);
           }} />
-          <small>保存済みのCSVからも取り込めます。</small>
         </section>
       </div>
-      <p className="import-input-note">取引内容が「支払い」の行のみ対象 · CSVの原本はサーバーに送信・保存されません</p>
       {reading && <p className="import-input-note" role="status">CSVを読み込み、重複を確認しています…</p>}
       {error && <p className="import-error form-error" role="alert">{error}</p>}
     </> : <section className="panel table-panel">
@@ -162,5 +162,6 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
         <button className="primary" disabled={saving || selectedCount === 0} onClick={submit}>{saving ? "登録中…" : `選択した${selectedCount}件を登録`}</button>
       </div>
     </section>}
+    {helpUrl !== null && <ImportHelpDialog importUrl={helpUrl} close={() => setHelpUrl(null)} />}
   </>;
 }

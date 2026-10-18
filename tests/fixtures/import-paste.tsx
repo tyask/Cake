@@ -9,6 +9,8 @@ declare global {
   interface Window {
     importPasteWorkspace: WorkspaceData;
     importPasteClipboardReads: number;
+    importPasteClipboardWrites: string[];
+    importPasteClipboardWriteMode: "success" | "reject";
     importPasteClipboardActivations: boolean[];
     importPasteClipboardMode: "success" | "reject" | "pending" | "unsupported";
     importPasteClipboardText: string;
