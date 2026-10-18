@@ -285,7 +285,7 @@
                 <div class="dfd-arrow"><b>→</b><small>{ ok, ...確定値 }<br />or { error }</small></div>
                 <div class="dfd-node process"><strong>run / refresh</strong><small>明細・メモは確定値を反映<br />他の更新はscope別GET</small></div>
                 <div class="dfd-arrow"><b>→</b><small>new data</small></div>
-                <div class="dfd-node output"><strong>Dashboard State</strong><small>確定値または取得結果を反映<br />notice表示</small></div>
+                <div class="dfd-node output"><strong>Dashboard State</strong><small>useDashboardControllerで確定値または取得結果を反映<br />notice表示</small></div>
               </div>
               <div class="dfd-boundary"><b>信頼境界:</b> HTML入力制約を通過していても、APIで同じ値を再検証してからDBを更新する。</div>
             </div>
@@ -343,7 +343,11 @@
           <div class="table-wrap"><table>
             <thead><tr><th>ファイル</th><th>責務</th></tr></thead>
             <tbody>
-              <tr><td>components/dashboard.tsx</td><td><code>Dashboard</code>、<code>HomePanel</code>、<code>ImportPanel</code>、<code>SettlementPanel</code>、<code>SettingsPanel</code>、<code>WorkspaceModal</code>、<code>NewTransactionModal</code>、<code>Modal</code>。画面State・遷移・API・新規登録。</td></tr>
+              <tr><td>components/dashboard.tsx</td><td><code>Dashboard</code>。画面配置・ナビゲーション・ダイアログの開閉を担当する。</td></tr>
+              <tr><td>components/use-dashboard-controller.ts / lib/dashboard-requests.ts</td><td>取得・更新・通知のhookと、workspace世代・tab世代・revision・要求IDによる応答採用条件の純粋関数。</td></tr>
+              <tr><td>components/home-panel.tsx / import-panel.tsx / settlement-panel.tsx / workspace-settings-panel.tsx</td><td>ホーム・CSV選択/重複照合/取込・清算・workspace設定の表示と各画面の入力状態を担当する。</td></tr>
+              <tr><td>components/workspace-modal.tsx / new-transaction-modal.tsx / dashboard-ui.tsx</td><td>workspace/新規明細のフォームと共通の見出し・空表示・Modalを分離する。フォームの保存時期と再マウント用keyを保持する。</td></tr>
+              <tr><td>lib/app-client.ts</td><td><code>postAction()</code>でJSONのPOSTと非2xx応答の例外化を共用する。</td></tr>
               <tr><td>components/transactions-panel.tsx / transaction-table.tsx</td><td>明細一覧のインライン編集、行ごとの保存状態、一括選択・削除・ルール適用。<code>TransactionTable</code>は明細/取込の共通表枠とモバイル要約。</td></tr>
               <tr><td>components/transaction-filter-dialog.tsx / use-transaction-filters.ts</td><td>列候補の選択、列内OR・列間AND条件、ユーザー/workspace別のブラウザ保存。</td></tr>
               <tr><td>components/transaction-memo-editor.tsx</td><td>清算済みを含むメモ専用の編集・保存・再試行。</td></tr>
@@ -475,13 +479,14 @@
 
         <section id="client">
           <h2>7. クライアント状態・画面詳細設計</h2>
-          <h3>Dashboardの状態</h3>
+          <h3>Dashboardと取得・更新hookの状態</h3>
+          <p><code>useDashboardController(initialData)</code>はdata・tab・loading・refreshing・noticeと、画面から呼ぶrun・refresh・switchWorkspace・openTab・refreshCurrentViewを返す。描画・フォームの入力は各コンポーネントに置く。遅延応答の採用条件は<code>canApplyBootstrapResponse</code>、<code>isWorkspaceViewCurrent</code>、<code>isDashboardViewCurrent</code>で判定する。要求対象のworkspaceと、要求開始時に選択していたworkspaceを区別し、新規作成や外部削除後のfull取得も同じ条件で照合する。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>State / Ref</th><th>用途</th></tr></thead>
             <tbody>
               <tr><td><code>data</code> / <code>currentData</code></td><td>initialDataで初期化するBootstrapData。確定応答の局所更新、full置換、metadata併合。</td></tr>
               <tr><td><code>tab</code> / <code>currentTab</code> / <code>tabGeneration</code></td><td>home / transactions / import / settlement / settings。初期home。タブ切替ごとに世代を進め、元のタブへ戻っても古い通知を抑制する。</td></tr>
-              <tr><td><code>workspaceModal</code> / <code>transactionModal</code></td><td>ワークスペース作成、新規明細登録ダイアログの開閉。既存明細は一覧で編集。</td></tr>
+              <tr><td><code>workspaceModal</code> / <code>transactionModal</code></td><td>Dashboardが保持するワークスペース作成、新規明細登録ダイアログの開閉。既存明細は一覧で編集。</td></tr>
               <tr><td><code>loading</code> / <code>pendingRequests</code></td><td>同時API要求数を管理し、処理が一件でも残ればローディング表示を維持。</td></tr>
               <tr><td><code>refreshing</code> / <code>manualRefreshPending</code></td><td>手動更新の保存待ち・取得中の表示と二重実行防止。更新前の個別保存通知を抑え、手動更新の完了・失敗通知へまとめる。</td></tr>
               <tr><td><code>noticeState</code> / <code>notice</code></td><td>成功・エラーの共通ポップアップ。通知ごとに新しいStateを作り、表示から2秒後に自動で消す。同じ文言の再通知でもタイマーをリセットし、再通知・手動閉じる・アンマウント時は古いタイマーを解除する。「×」で手動閉じる。各編集画面の保存状態・エラー・再試行は個別に保持する。</td></tr>
@@ -804,8 +809,9 @@ BootstrapData extends BootstrapMetadata
               <tr><td>settlement-store.test.ts / scripts/settlement-scenarios.ts</td><td>専用取得の認可と最小項目、既存計算との一致、支払い/受け取り・保存割合・丸め・ゼロ円、取得後の変更・削除・追加・所属解除・先行/並列清算と全体rollback、多数明細の固定4 SQL、取得JSON量とEXPLAINによる比較。メモリPostgreSQLと専用Preview DBで同じシナリオを使う。</td></tr>
               <tr><td>workspace-deletion.test.ts</td><td>一時PostgreSQLで清算済みworkspaceと関連データの削除、他workspace保持、制約エラー時の全体rollback、所属確認と削除の2往復を確認する。</td></tr>
               <tr><td>app-handlers.test.ts / app-services.test.ts / app-store.test.ts</td><td>HTTP応答・入力・未認証・所属拒否・DB失敗、割合継承・招待・清算Snapshot、全19操作のSQL往復とTransaction境界、通常bootstrapの2 SQL。</td></tr>
-              <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・秒精度、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
+              <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・ミリ秒保持、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
               <tr><td>db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
+              <tr><td>dashboard-controller.test.ts / transaction-refresh.test.ts / bootstrap-updates.test.ts</td><td>esbuildで実hookをbundleし、ローカルChromium/Reactで要求逆順、workspace/tab往復、保存前GET、手動更新の保存待ち・二重実行・失敗・古い応答破棄、metadata/fullの使い分け・同一家計の保持、通知2秒を検証する。実Preview/DB検証とは区別する。</td></tr>
               <tr><td>recurring-payment-calendar.test.ts / recurring-payment-form.test.ts / recurring-payments.test.ts / recurring-payment-handlers.test.ts</td><td>日本時間09:00の直前/境界、未来日・過去日・月末、追加履歴を参照しない予定計算、保存・再開・認可・入力検証、当日処理・処理開始日時・実行APIの環境制限。</td></tr>
               <tr><td>start-task.test.ts</td><td>最新origin/mainからの専用ブランチ・worktree作成、元のdirty状態の保持、既存作業の上書き拒否、作成先指定とnpm ci失敗時の保持。</td></tr>
               <tr><td>preview-service.test.ts / preview-command.test.ts</td><td>専用ブランチ、HEADとPreviewの完全一致、Native照合・応答不明・DB消失時の停止、closed cleanupと検証証拠の一致。mainのtransport未導入はdispatch前に停止する。</td></tr>
