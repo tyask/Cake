@@ -113,7 +113,7 @@ Native連携で生成される実資源数は作成後に照合する。別PR・
 
 QAのAはテスト管理者・共有OWNER、Bは一般・MEMBER。正規QA用ログインは登録済みユーザーをSELECTし、自動作成・権限修復しない。ただし認証後のホームや `GET /api/app` は所属workspaceが0件なら個人workspaceとOWNER membershipをINSERTし得る。ローカルテスト認証のユーザー登録、Googleログイン時のプロフィール更新もDB書込として区別する。
 
-自動deployはActionsのSummaryとnoticeで結果を確認する。手動deployが必要な場合だけ `npm run deploy:preview` を使う。自動runはrun ID由来の安定したoperation UUIDで再実行を照合し、不明なPOSTを盲目的に再発行しない。PRのHEADがイベントから進んだ場合もprovider書込前に停止する。
+自動deployはActionsのSummaryとnoticeで結果を確認する。手動deployが必要な場合だけ `npm run deploy:preview` を使う。手動の作成・状態照合・削除はnpmコマンドから `scripts/preview-command.ts` を経由してmainのActionsへ要求し、PR作成・Ready管理には `npm run task:pr` を使う。自動runはrun ID由来の安定したoperation UUIDで再実行を照合し、不明なPOSTを盲目的に再発行しない。PRのHEADがイベントから進んだ場合もprovider書込前に停止する。
 
 ### mainの常設Preview
 
