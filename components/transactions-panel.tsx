@@ -138,10 +138,13 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
     });
   }
 
-  async function performBulk(action: BulkAction) {
-    if (bulkBusyRef.current || refreshBusyRef.current || refreshing || checkedIds.length === 0) return;
-    const ids = [...checkedIds];
-    if (action === "deleteTransactions" && !confirm("選択した" + ids.length + "件の明細を削除しますか？")) return;
+  async function performBulk(action: BulkAction, targetIds = checkedIds) {
+    if (bulkBusyRef.current || refreshBusyRef.current || refreshing || targetIds.length === 0) return;
+    const ids = [...targetIds];
+    const deletePrompt = targetIds !== checkedIds && ids.length === 1
+      ? `「${currentSelected.current.transactions.find(item => item.id === ids[0])?.merchant ?? "対象"}」の明細を削除しますか？この操作は元に戻せません。`
+      : `選択した${ids.length}件の明細を削除しますか？`;
+    if (action === "deleteTransactions" && !confirm(deletePrompt)) return;
     bulkBusyRef.current = true;
     for (const handle of handles.current.values()) handle.freeze(true);
     setBulkAction(action);
@@ -201,7 +204,7 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
       {bulkNotice && <p role="status" className={styles.bulkNotice}>{bulkNotice}</p>}
       <p className={styles.note}>清算済みの明細はメモのみ編集できます。メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。全選択チェックを外すと非表示の選択も解除します。編集中の明細は編集を終えるまで表示します。</p>
       <TransactionTable columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => <th key={column.id}><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
-        {visible.map((item) => <EditableTransaction key={item.id} item={item} members={selected.members} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} />)}
+        {visible.map((item) => <EditableTransaction key={item.id} item={item} members={selected.members} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} onDelete={() => { void performBulk("deleteTransactions", [item.id]); }} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} />)}
       </TransactionTable>
       {visible.length === 0 && <p className={styles.empty}>条件に一致する明細がありません。</p>}
     </section>
@@ -212,7 +215,7 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
   </>;
 }
 
-function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy, applyingRules, onSelect, register, onPin, onSave, onSaveMemo, onMemoPin }: {
+function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy, applyingRules, onSelect, onDelete, register, onPin, onSave, onSaveMemo, onMemoPin }: {
   item: TransactionRecord;
   members: WorkspaceMember[];
   pinnedOutsideFilter: boolean;
@@ -220,6 +223,7 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
   busy: boolean;
   applyingRules: boolean;
   onSelect: (id: string) => void;
+  onDelete: () => void;
   register: (id: string, handle: RowHandle | null) => void;
   onPin: (id: string, pinned: boolean) => void;
   onSave: SaveTransaction;
@@ -394,7 +398,7 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
   return <><tr ref={rowRef} className={styles.transactionRow} data-transaction-id={item.id} data-expanded={mobileExpanded}
     onFocusCapture={(event) => syncPin(editorFocused(event.target))}
     onBlurCapture={(event) => syncPin(editorFocused(event.relatedTarget))}>
-    <MobileTransactionSummary item={{ ...item, ...draft, actorName: members.find(member => member.id === draft.actorUserId)?.name ?? item.actorName }} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} checked={checked} disabled={busy} onSelect={() => onSelect(item.id)} columnCount={tableColumns.length} indicator={<SavingIndicator active={updating} />} />
+    <MobileTransactionSummary item={{ ...item, ...draft, actorName: members.find(member => member.id === draft.actorUserId)?.name ?? item.actorName }} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} checked={checked} disabled={busy} onSelect={() => onSelect(item.id)} columnCount={tableColumns.length} onDelete={onDelete} deleteDisabled={busy} indicator={<SavingIndicator active={updating} />} />
     <td data-label="選択" className={styles.selectionCell} data-selection><input className={styles.checkbox} type="checkbox" aria-label={item.merchant + "の明細を選択"} checked={checked} disabled={busy} onChange={() => onSelect(item.id)} /></td>
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell}><input aria-label="取引日時" type="datetime-local" step="0.001" required value={dateDraft ?? transactionDateInput(draft.occurredAt)} title={dateDraft ?? transactionDateInput(draft.occurredAt)} disabled={busy} onChange={(event) => changeDate(event.target.value)} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
     <td data-label="取引先"><input aria-label="取引先" required maxLength={MAX_MERCHANT_LENGTH} value={draft.merchant} disabled={busy} onChange={(event) => change({ merchant: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} />{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</td>

@@ -15,7 +15,7 @@ import styles from "./transactions-panel.module.css";
 const money = (value: number) => Number.isFinite(value)
   ? formatYen(value) : "—";
 
-export function ImportPreviewTable({ rows, members, actorId, saving, onSelect, onSelectAll, onChangeClass, onChangeSplit }: {
+export function ImportPreviewTable({ rows, members, actorId, saving, onSelect, onSelectAll, onChangeClass, onChangeSplit, onDelete }: {
   rows: PayPayPreviewRow[];
   members: WorkspaceMember[];
   actorId: string;
@@ -24,6 +24,7 @@ export function ImportPreviewTable({ rows, members, actorId, saving, onSelect, o
   onSelectAll: (selected: boolean) => void;
   onChangeClass: (key: string, expenseClass: ExpenseClass) => void;
   onChangeSplit: (key: string, splitWeights: SplitWeights) => void;
+  onDelete: (key: string) => void;
 }) {
   const eligible = rows.filter(row => !row.error && !row.duplicate);
   const count = eligible.filter(row => row.selected).length;
@@ -41,11 +42,11 @@ export function ImportPreviewTable({ rows, members, actorId, saving, onSelect, o
     </th>)}
   </tr>}>
     {rows.map(row => <ImportPreviewRow key={row.key} row={row} members={members} actorId={actorId} saving={saving}
-      onSelect={onSelect} onChangeClass={onChangeClass} onChangeSplit={onChangeSplit} columnCount={columns.length} />)}
+      onSelect={onSelect} onChangeClass={onChangeClass} onChangeSplit={onChangeSplit} onDelete={onDelete} columnCount={columns.length} />)}
   </TransactionTable>;
 }
 
-function ImportPreviewRow({ row, members, actorId, saving, onSelect, onChangeClass, onChangeSplit, columnCount }: {
+function ImportPreviewRow({ row, members, actorId, saving, onSelect, onChangeClass, onChangeSplit, onDelete, columnCount }: {
   row: PayPayPreviewRow;
   members: WorkspaceMember[];
   actorId: string;
@@ -53,6 +54,7 @@ function ImportPreviewRow({ row, members, actorId, saving, onSelect, onChangeCla
   onSelect: (key: string, selected: boolean) => void;
   onChangeClass: (key: string, expenseClass: ExpenseClass) => void;
   onChangeSplit: (key: string, splitWeights: SplitWeights) => void;
+  onDelete: (key: string) => void;
   columnCount: number;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -65,7 +67,7 @@ function ImportPreviewRow({ row, members, actorId, saving, onSelect, onChangeCla
     <MobileTransactionSummary item={{ ...row, actorName }} expanded={expanded} onToggle={() => setExpanded(value => !value)}
       checked={row.selected} disabled={disabled} onSelect={() => onSelect(row.key, !row.selected)}
       status={<span className={invalid ? styles.error : undefined}>{status}</span>}
-      selectionLabel={selectionLabel} columnCount={columnCount}
+      selectionLabel={selectionLabel} columnCount={columnCount} onDelete={() => onDelete(row.key)} deleteDisabled={saving}
       dateLabel={row.occurredAt.replace(/:\d{2}$/, "") || "日時未設定"} amountLabel={money(row.amountYen)} />
     <td data-label="選択" className={styles.selectionCell} data-selection>
       <input className={styles.checkbox} type="checkbox" aria-label={selectionLabel} checked={row.selected} disabled={disabled} onChange={event => onSelect(row.key, event.target.checked)} />

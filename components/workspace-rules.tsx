@@ -14,6 +14,7 @@ import { defaultSplitWeights, validateSplitWeights } from "@/lib/expense-splits"
 import { ruleMerchantSchema } from "@/lib/domain-schemas";
 import { orderedWorkspaceRules } from "@/lib/rule-order";
 import type { DefaultRule, ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/types";
+import { SwipeDelete } from "./swipe-delete";
 import styles from "./workspace-rules.module.css";
 
 type RunAction = RunAppAction;
@@ -110,10 +111,13 @@ function RulesEditor({ selected, run }: { selected: WorkspaceData; run: RunActio
     if (oldIndex >= 0 && newIndex >= 0) void reorder(arrayMove(orderedIds, oldIndex, newIndex));
   }
 
-  async function deleteSelected() {
-    if (selectedIds.length === 0 || structuralLock.current) return;
-    if (!confirm(`選択した${selectedIds.length}件のルールを削除しますか？`)) return;
-    const ids = [...selectedIds];
+  async function deleteSelected(targetIds = selectedIds) {
+    if (targetIds.length === 0 || structuralLock.current) return;
+    const prompt = targetIds !== selectedIds && targetIds.length === 1
+      ? `「${selected.rules.find(rule => rule.id === targetIds[0])?.merchantContains ?? "対象"}」のルールを削除しますか？保存済みの明細は変わりません。`
+      : `選択した${targetIds.length}件のルールを削除しますか？`;
+    if (!confirm(prompt)) return;
+    const ids = [...targetIds];
     const saved = await perform({ payload: { action: "deleteRules", ruleIds: ids }, message: `${ids.length}件のルールを削除しました。` });
     if (saved) {
       const deletedIds = new Set(ids);
@@ -151,7 +155,7 @@ function RulesEditor({ selected, run }: { selected: WorkspaceData; run: RunActio
         <SortableContext items={orderedIds} strategy={verticalListSortingStrategy}>
           <ol className={styles.list} aria-label="適用順のルール">
             {orderedRules.map((rule) => <EditableRule key={rule.id} rule={rule} members={selected.members} structuralBusy={structuralBusy}
-              selected={selectionSet.has(rule.id)} onSelect={(checked) => setSelection((current) => checked ? [...new Set([...current, rule.id])] : current.filter((id) => id !== rule.id))} onSave={saveRule} />)}
+              selected={selectionSet.has(rule.id)} onDelete={() => { void deleteSelected([rule.id]); }} onSelect={(checked) => setSelection((current) => checked ? [...new Set([...current, rule.id])] : current.filter((id) => id !== rule.id))} onSave={saveRule} />)}
           </ol>
         </SortableContext>
       </DndContext>
@@ -161,11 +165,12 @@ function RulesEditor({ selected, run }: { selected: WorkspaceData; run: RunActio
   );
 }
 
-function EditableRule({ rule, members, selected, onSelect, structuralBusy, onSave }: {
+function EditableRule({ rule, members, selected, onSelect, onDelete, structuralBusy, onSave }: {
   rule: DefaultRule;
   members: WorkspaceMember[];
   selected: boolean;
   onSelect: (checked: boolean) => void;
+  onDelete: () => void;
   structuralBusy: boolean;
   onSave: SaveRule;
 }) {
@@ -232,13 +237,14 @@ function EditableRule({ rule, members, selected, onSelect, structuralBusy, onSav
 
   return (
     <li ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={`${styles.rule}${isDragging ? ` ${styles.dragging}` : ""}`}>
-      <div className={styles.ruleLine}>
+      <SwipeDelete label={draft.merchantContains} disabled={structuralBusy || isDragging || pending > 0} onDelete={onDelete}><div className={styles.ruleLine}>
         <label className={styles.selection}><input type="checkbox" checked={selected} disabled={structuralBusy} onChange={(event) => onSelect(event.target.checked)} aria-label={`「${draft.merchantContains}」を削除対象に選択`} /></label>
         <InlineFields values={draft} members={members} disabled={structuralBusy} onChange={change} onCommit={commit}
           status={<span className={error ? styles.failed : styles.saveStatus} aria-live="polite">{pending > 0 ? "保存中…" : error ? "未保存" : Object.keys(changes).length > 0 ? "未保存" : "保存済み"}</span>} />
-        <button type="button" ref={setActivatorNodeRef} {...attributes} {...listeners} disabled={structuralBusy} className={styles.dragHandle}
+        <button type="button" ref={setActivatorNodeRef} data-no-swipe {...attributes} {...listeners} disabled={structuralBusy} className={styles.dragHandle}
           aria-label={`「${draft.merchantContains}」の順番を変更`} title="ドラッグして順番を変更">⠿</button>
       </div>
+      </SwipeDelete>
       {error && <div className={`form-error ${styles.rowError}`} role="alert">{error}<button type="button" className="text-button" disabled={structuralBusy || pending > 0} onClick={commit}>再試行</button></div>}
     </li>
   );

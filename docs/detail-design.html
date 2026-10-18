@@ -678,6 +678,25 @@
           <p>Productionでは16文字以上のランダムな<code>CRON_SECRET</code>をVercelの環境変数へ設定し、Git・PR・ログへ保存しない。未設定・Bearer不一致のリクエストは401で拒否する（<a href="https://vercel.com/docs/cron-jobs/manage-cron-jobs">VercelのCron認証</a>）。Previewには定期実行を期待せず、テストログイン中に<code>POST /api/recurring-payments/run</code>へ<code>{ "workspaceId": "対象UUID" }</code>を送って当日予定を検証する。設定日の09:00以降に新規保存した設定は翌月予定のため、当日分は追加しない。</p>
           <p>開始・登録成功・省略・失敗・終了は<code>recurring.*</code>の構造化サーバーログで確認する。失敗は固定エラーコードと対象設定IDで確認し、金額・取引先・メモ・SQL本文・認証情報は記録しない。「要確認」は利用不可などで停止した設定で、原因を修正して再開する。過去の未登録分は通常の明細追加で登録する。アプリ内に共通ログ画面は設けない。</p>
           <p>ホームの指標金額はoverflow-wrap: anywhere、次の清算の内部Gridはminmax(0, 1fr)とし、送金額も縮小・折り返しを許可する。桁数の多い金額がページ全体を押し広げてスマートフォンの下部ナビゲーションを妨げないようにする。</p>
+          <h3>スマートフォンの削除操作</h3>
+          <p><code>SwipeDelete</code>は幅48rem以下のタッチ・ペン操作で削除ボタンの開閉だけを管理する。10px以上の移動で横方向（横移動が縦の1.3倍超）と縦方向を判定し、横に45px以上動いたら左右に応じて開閉する。<code>touch-action: pan-y pinch-zoom</code>で縦スクロールと拡大を保ち、横移動後のclickによる詳細展開を抑止する。入力・select・textarea・並べ替えハンドルではスワイプを開始しない。別行・一覧外のpointerdown/focus、Escape、PC幅への変更で閉じる。削除操作を開く補助ボタンと、対象名を含む削除ボタンを提供する。</p>
+          <div class="data-flow">
+            <div class="dfd-track" role="img" aria-label="左スワイプまたは補助ボタンで削除枠を開き、削除ボタンを押して画面別の処理へ進む">
+              <div class="dfd-node source"><strong>左スワイプ / 補助ボタン</strong><small>画面内の開閉Stateだけ変更</small></div>
+              <div class="dfd-arrow"><b>→</b></div>
+              <div class="dfd-node process"><strong>赤い削除ボタンを表示</strong><small>この時点ではデータを削除しない</small></div>
+              <div class="dfd-arrow"><b>→</b></div>
+              <div class="dfd-node process"><strong>削除ボタンを押す</strong><small>対象ID / keyを呼出元へ渡す</small></div>
+            </div>
+            <div class="flow-branches" role="group" aria-label="画面ごとの削除経路">
+              <div class="dfd-node output"><strong>ファイル取り込み</strong><p>確認なし → 該当keyをローカルrowsから除去 → 登録時に残った選択行だけbulkImportへ送信。</p></div>
+              <div class="dfd-node process"><strong>未清算明細</strong><p>確認 → 対象IDだけfreeze / flush / キュー → deleteTransactions → DBで最新の未清算状態を検証。</p></div>
+              <div class="dfd-node process"><strong>デフォルトルール</strong><p>確認 → 対象IDだけ構造操作キュー → deleteRules → DBで削除・残存順序再採番。</p></div>
+              <div class="dfd-node process"><strong>定期支払い</strong><p>既存の削除確認ダイアログ → archive / expectedRevisionを送信 → DBでrevisionを確認。</p></div>
+            </div>
+            <p>サーバー更新は成功応答を既存の状態管理で反映し、失敗時は対象行・入力を保持する。</p>
+          </div>
+          <p>単件の明細・ルール削除はチェック状態を書き換えず対象ID配列を既存の一括操作へ渡し、他行の選択を保持する。明細は保存待ちと入力をflushしてから最新の未清算対象を再確認する。ルールの保存中・構造更新中・並べ替え中はスワイプ削除を無効にし、既存キューで編集と削除を直列化する。取り込み行の除外ではAPIを呼ばず、元の読込件数を別Stateに保持して取込履歴のtotalRowsへ渡す。ファイルを再度読み込むと除外もリセットする。取り込み登録中は行削除を無効にする。</p>
           <h3>明細編集・一括操作</h3>
           <ul>
             <li>文字・日時・金額・割合は欄を離れるかEnterで保存。選択項目は変更時に保存。入力検証後、保存キューで順番に実行し、失敗時の下書きと再試行を保持する。</li>

@@ -12,6 +12,7 @@ import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
 import { blockedReasonLabel, recurringPaymentStateLabel, type RecurringServiceErrorCode } from "@/lib/recurring-payment-types";
 import type { RecurringPaymentMutation, RecurringPaymentMutationDraft, RecurringPayment, RecurringPaymentConfig, RecurringPaymentMutationResult, RecurringPaymentsResponse } from "@/lib/recurring-payment-types";
 import type { ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/types";
+import { SwipeDelete } from "./swipe-delete";
 import { RefreshButton } from "./refresh-button";
 import { SplitEditor } from "./split-editor";
 import tableStyles from "./transactions-panel.module.css";
@@ -145,11 +146,11 @@ function RecurringPaymentRow({ payment, members, busy, onEdit, onAction }: { pay
   const actorName = members.find(member => member.id === config.actorUserId)?.name ?? "確認が必要です";
   const stateLabel = recurringPaymentStateLabel(payment.state);
   return <tr className={tableStyles.transactionRow} data-expanded={expanded} data-recurring-payment-id={payment.id}>
-    <td className={tableStyles.mobileSummary} colSpan={10}><button type="button" className={`${tableStyles.summaryButton} ${styles.summaryButton}`} aria-expanded={expanded}
+    <td className={tableStyles.mobileSummary} colSpan={10}><SwipeDelete label={config.merchant} disabled={busy} onDelete={() => onAction("archive")}><button type="button" className={`${tableStyles.summaryButton} ${styles.summaryButton}`} aria-expanded={expanded}
       aria-label={`${config.merchant}の詳細を${expanded ? "閉じる" : "開く"}`} onClick={() => setExpanded(current => !current)}>
       <span className={tableStyles.summaryName}><b>{config.merchant}</b><small>毎月{config.dayOfMonth}日 · {actorName}</small></span>
       <span className={tableStyles.summaryAmount}><strong>{formatYen(config.amountYen)}</strong><small>{stateLabel}</small></span><span className={tableStyles.summaryChevron} aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
-    </button></td>
+    </button></SwipeDelete></td>
     <td data-label="毎月の日 / 次回" className={tableStyles.fullCell}><b>毎月{config.dayOfMonth}日</b><small>次回：{payment.nextScheduledOn ? dateLabel(payment.nextScheduledOn) : "—"}</small>
       {config.dayOfMonth >= 29 && <small>その日がない月は月末に追加</small>}</td>
     <td data-label="取引先"><b>{config.merchant}</b></td><td data-label="方法">{config.method}</td><td data-label="金額（円）">{formatYen(config.amountYen)}</td>

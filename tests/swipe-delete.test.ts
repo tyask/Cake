@@ -1,0 +1,150 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { build } from "esbuild";
+import { chromium, type Locator, type Page } from "playwright";
+
+async function swipe(page: Page, target: Locator, dx = -100, dy = 0) {
+  await target.scrollIntoViewIfNeeded();
+  const box = (await target.boundingBox())!;
+  const x = box.x + box.width * .65, y = box.y + box.height / 2;
+  const session = await page.context().newCDPSession(page);
+  try {
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    for (let step = 1; step <= 6; step++) await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + dx * step / 6, y: y + dy * step / 6 }] });
+    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  } finally { await session.detach(); }
+}
+
+test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC表示を検証する", async t => {
+  const bundle = await build({ entryPoints: ["tests/fixtures/swipe-delete.tsx"], bundle: true, write: false, outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
+  const server = createServer((req, res) => {
+    const asset = bundle.outputFiles.find(file => file.path.endsWith(req.url === "/bundle.css" ? "/bundle.css" : "/bundle.js"));
+    res.setHeader("Content-Type", req.url === "/bundle.js" ? "application/javascript" : req.url === "/bundle.css" ? "text/css" : "text/html");
+    res.end(req.url?.startsWith("/bundle.") ? asset!.text : '<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>');
+  });
+  await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
+    .catch(async error => { await new Promise<void>(done => server.close(() => done())); throw error; });
+  try {
+    for (const view of ["transactions", "import", "rules", "recurring"]) await t.test(view, async () => {
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }), page = await context.newPage();
+      const writes: Record<string, unknown>[] = [], errors: string[] = [];
+      let fail = false, archived = false;
+      let hold = false, releaseWrite: (() => void) | undefined;
+      const payment = { id: "recurring", workspaceId: "workspace", state: "ACTIVE", revision: 1, authorizedById: "a", nextScheduledOn: "2026-11-18", blockedReason: null,
+        currentConfig: { dayOfMonth: 18, merchant: "家賃", method: "現金", amountYen: 100, actorUserId: "a", expenseClass: "SHARED", splitWeights: { a: 6, b: 4 }, memo: "" } };
+      page.on("pageerror", error => errors.push(error.message));page.setDefaultTimeout(6000);
+      try {
+        await page.route("**/api/**", async route => {
+          const path = new URL(route.request().url()).pathname;
+          if (path === "/api/recurring-payments" && route.request().method() === "GET") { await route.fulfill({ json: { payments: archived ? [] : [payment], eligibleActorUserIds: ["a", "b"], today: "2026-10-18", now: "2026-10-18T03:00:00.000Z" } });return; }
+          const payload = route.request().postDataJSON();
+          if (path === "/api/import/duplicates") { await route.fulfill({ json: { transactions: [] } });return; }
+          writes.push(payload);
+          if (hold) await new Promise<void>(resolve => { releaseWrite = resolve; });
+          if (fail) { await route.fulfill({ status: 503, json: { error: "テスト保存失敗" } });return; }
+          if (path === "/api/recurring-payments" && payload.action === "archive") archived = true;
+          await route.fulfill({ json: path === "/api/recurring-payments" ? { payment: { ...payment, state: "ARCHIVED", revision: 2 } } : { ok: true, transaction: { ...payload, id: payload.transactionId, actorName: "A", source: "MANUAL", settledAt: null, memo: "" } } });
+        });
+        await page.goto(`${origin}/?view=${view}`);
+        if (view === "import") await page.locator('input[type="file"]').setInputFiles({ name: "swipe.csv", mimeType: "text/csv", buffer: Buffer.from("取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n2026/10/18 12:00:00,100,支払い,first,現金,1\n2026/10/18 12:01:00,200,支払い,second,現金,2") });
+        const name = view === "rules" ? "rule1" : view === "recurring" ? "家賃" : "first";
+        const reveal = page.getByRole("button", { name: `${name}の削除操作`, exact: true });
+        await reveal.waitFor();
+        const row = page.locator("[data-swipe-open]").filter({ has: page.getByRole("button", { name: `${name}の削除操作`, exact: true, includeHidden: true }) });
+        const action = page.getByRole("button", { name: `${name}を削除`, exact: true });
+        const surface = row.locator('[class*="body"]');
+        assert.equal(await action.isVisible(), false);
+        if (view !== "rules") {
+          await swipe(page, surface, -100, -130);assert.equal(await action.isVisible(), false);
+          await swipe(page, surface);await action.waitFor();
+          assert.equal(await page.getByRole("button", { name: `${name}の詳細を閉じる`, exact: true }).count(), 0, "スワイプで詳細を開かない");
+          await swipe(page, surface, 100);await action.waitFor({ state: "hidden" });
+        }
+        await reveal.click();await action.waitFor();
+        await page.getByRole("button", { name: "一覧の外", exact: true }).click();await action.waitFor({ state: "hidden" });
+        await reveal.scrollIntoViewIfNeeded();await reveal.click();await action.waitFor();
+        await page.keyboard.press("Escape");await action.waitFor({ state: "hidden" });
+        assert.equal(await reveal.evaluate(element => element === document.activeElement), true);
+        if (process.env.CAKE_SWIPE_SCREENSHOTS) { await reveal.click();await page.screenshot({ animations: "disabled", path: `.cake/swipe-open-${view}.png` });await page.keyboard.press("Escape"); }
+        if (view === "import") {
+          page.on("dialog", () => { errors.push("取込で不要な確認"); });
+          const other = page.getByRole("button", { name: "secondの削除操作", exact: true });
+          await reveal.click();await other.click();await action.waitFor({ state: "hidden" });
+          await page.keyboard.press("Escape");
+          await swipe(page, surface);await action.click();await reveal.waitFor({ state: "hidden" });
+          assert.equal(writes.length, 0);hold = true;await page.getByRole("button", { name: "選択した1件を登録", exact: true }).click();
+          await page.getByRole("button", { name: "登録中…", exact: true }).waitFor();
+          assert.equal(await other.isDisabled(), true);
+          await swipe(page, page.locator("[data-import-key]").locator('[class*="body"]'));assert.equal(await page.locator('[data-swipe-open="true"]').count(), 0);
+          while (!releaseWrite) await new Promise(resolve => setTimeout(resolve, 5));releaseWrite();
+          await page.getByRole("button", { name: "ファイルを選択", exact: true }).waitFor();
+          assert.equal(writes.length, 1);assert.equal(writes[0].totalRows, 2);
+          assert.deepEqual((writes[0].items as { merchant: string }[]).map(item => item.merchant), ["second"]);
+        } else if (view === "recurring") {
+          await swipe(page, surface);await action.click();
+          const dialog = page.getByRole("dialog", { name: "定期支払いを削除", exact: true });await dialog.waitFor();
+          assert.match((await dialog.textContent())!, /追加済みの明細は残ります/);assert.equal(writes.length, 0);
+          await dialog.getByRole("button", { name: "キャンセル", exact: true }).click();assert.equal(writes.length, 0);
+          await reveal.click();await action.click();fail = true;await dialog.getByRole("button", { name: "削除する", exact: true }).click();
+          await dialog.getByRole("alert").waitFor();assert.equal(writes.length, 1);assert.equal(await row.count(), 1);
+          fail = false;await dialog.getByRole("button", { name: "削除する", exact: true }).click();await reveal.waitFor({ state: "hidden" });
+          assert.equal(writes[1].action, "archive");assert.equal(writes[1].paymentId, "recurring");assert.equal(writes[1].expectedRevision, 1);
+        } else {
+          if (view === "transactions") {
+            assert.equal(await page.getByRole("button", { name: "settledの削除操作", exact: true }).count(), 0);
+            await page.locator('[data-transaction-id="second"]').getByRole("checkbox", { name: "secondの明細を選択", exact: true }).check();
+          } else await page.getByRole("checkbox", { name: "「rule2」を削除対象に選択", exact: true }).check();
+          if (view === "rules") await swipe(page, surface.locator('label').filter({ hasText: "取引先" }).first().locator('span').first());
+          else await swipe(page, surface);
+          await action.waitFor();
+          page.once("dialog", dialog => dialog.dismiss());await action.click();assert.equal(writes.length, 0);assert.equal(await row.count(), 1);
+          fail = true;page.once("dialog", dialog => dialog.accept());await action.click();
+          await page.getByRole("alert").filter({ hasText: "テスト保存失敗" }).waitFor();assert.equal(writes.length, 1);assert.equal(await row.count(), 1);
+          fail = false;if (!await action.isVisible()) await reveal.click();page.once("dialog", dialog => dialog.accept());await action.click();await reveal.waitFor({ state: "hidden" });
+          assert.deepEqual(writes[1][view === "rules" ? "ruleIds" : "transactionIds"], [view === "rules" ? "rule1" : "first"]);
+          const otherCheckbox = view === "rules" ? page.getByRole("checkbox", { name: "「rule2」を削除対象に選択", exact: true }) : page.locator('[data-transaction-id="second"]').getByRole("checkbox", { name: "secondの明細を選択", exact: true });
+          assert.equal(await otherCheckbox.isChecked(), true);
+        }
+        if (process.env.CAKE_SWIPE_SCREENSHOTS) await page.screenshot({ animations: "disabled", path: `.cake/swipe-${view}.png` });
+        assert.deepEqual(errors, []);
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        assert.equal(await page.getByRole("button", { name: /の削除操作$/ }).count(), 0, "PCの既存表示を維持");
+      } finally { await context.close(); }
+    });
+    for (const saveFails of [false, true]) await t.test(`明細の保存待ち${saveFails ? "失敗" : "成功"}`, async () => {
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }), page = await context.newPage();
+      const writes: Record<string, unknown>[] = [];
+      let releaseSave!: () => void, started!: () => void;
+      const pendingSave = new Promise<void>(resolve => { releaseSave = resolve; });
+      const saveStarted = new Promise<void>(resolve => { started = resolve; });
+      try {
+        await page.route("**/api/app", async route => {
+          const payload = route.request().postDataJSON();writes.push(payload);
+          if (payload.action === "saveTransaction") {
+            started();await pendingSave;
+            await route.fulfill(saveFails ? { status: 503, json: { error: "保存待ち失敗" } } : { json: { transaction: { ...payload, id: "first", actorName: "A", settledAt: null, memo: "", source: "MANUAL" } } });
+          } else await route.fulfill({ json: { ok: true } });
+        });
+        await page.goto(origin);
+        const row = page.locator('[data-transaction-id="first"]');
+        await row.getByRole("button", { name: "firstの詳細を開く", exact: true }).click();
+        await row.getByLabel("金額（円）", { exact: true }).fill("222");
+        await row.getByRole("button", { name: "firstの削除操作", exact: true }).click();await saveStarted;
+        page.once("dialog", dialog => dialog.accept());await row.getByRole("button", { name: "firstを削除", exact: true }).click();
+        assert.deepEqual(writes.map(item => item.action), ["saveTransaction"]);
+        releaseSave();
+        if (saveFails) {
+          await page.getByRole("alert").filter({ hasText: "保存待ち失敗" }).first().waitFor();
+          assert.equal(await row.getByLabel("金額（円）", { exact: true }).inputValue(), "222");assert.equal(writes.length, 1);
+        } else {
+          await row.waitFor({ state: "hidden" });assert.deepEqual(writes.map(item => item.action), ["saveTransaction", "deleteTransactions"]);
+          assert.deepEqual(writes[1].transactionIds, ["first"]);
+        }
+      } finally { releaseSave();await context.close(); }
+    });
+  } finally { await browser.close();await new Promise<void>(done => server.close(() => done())); }
+});

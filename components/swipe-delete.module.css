@@ -1,0 +1,14 @@
+.root, .content, .body { display: contents; }
+.remove, .toggle { display: none; }
+@media (max-width: 48rem) {
+  .root { position: relative; display: flex; width: 100%; min-width: 0; overflow: hidden; border-radius: .45rem; }
+  .content { display: flex; flex: 1; min-width: 0; touch-action: pan-y pinch-zoom; transition: transform .18s ease; background: var(--paper, #fff); z-index: 1; }
+  .body { display: flex; align-items: center; gap: .65rem; width: 100%; min-width: 0; }
+  .body > div { min-width: 0; width: 100%; }
+  .root[data-swipe-open="true"] .content { transform: translateX(-5rem); }
+  .remove { position: absolute; inset: 0 0 0 auto; display: block; width: 5rem; min-height: 44px; border: 0; border-radius: .45rem; color: #fff; background: #b42318; font-size: .8rem; font-weight: 700; cursor: pointer; }
+  .remove[hidden] { display: none; }
+  .toggle { display: block; flex: 0 0 44px; align-self: stretch; min-height: 44px; padding: 0; border: 0; color: var(--muted); background: var(--paper, #fff); font-size: 1.25rem; cursor: pointer; z-index: 2; }
+  .root[data-swipe-open="true"] .toggle { visibility: hidden; margin-left: -44px; }
+}
+@media (prefers-reduced-motion: reduce) { .content { transition: none; } }
