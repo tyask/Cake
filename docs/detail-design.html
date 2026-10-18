@@ -367,7 +367,7 @@
               <tr><td>lib/expense-splits.ts / split-allocations.ts / settlement.ts</td><td>参加者別保存割合・デフォルトルール、整数円への配分・円入力からの割合、正確な分数集計による清算。</td></tr>
               <tr><td>lib/paypay.ts / paypay-id.ts / import-duplicates.ts / paypay-import.ts</td><td>CSV解析、JST外部ID生成・正規化、既存/CSV内重複・衝突の検出、DB Transactionでの登録。</td></tr>
               <tr><td>lib/display-formatters.ts</td><td>円とJST日時の表示を共通化し、Intl formatterをモジュール単位で再利用する。日時は秒付きと分までを使い分ける。入力日時の変換とCSVの不正値補正は含めない。</td></tr>
-              <tr><td>lib/transaction-editing.ts / transaction-record.ts / transaction-updates.ts</td><td>一覧入力検証・秒/ミリ秒付きJST変換、確定DB行のDTO化、応答の対象行への反映と清算再計算。</td></tr>
+              <tr><td>lib/transaction-editing.ts / transaction-record.ts / transaction-updates.ts</td><td>一覧入力検証・秒/ミリ秒付きJST変換、ミリ秒を保持する確定DB行のISO DTO化、応答の対象行への反映と清算再計算。</td></tr>
               <tr><td>lib/transaction-memo.ts / transaction-filters.ts / transaction-filter-storage.ts / transaction-list.ts</td><td>メモ専用schema、列条件・候補集計、localStorage形式の検証・保存、表示行と選択件数の導出。</td></tr>
               <tr><td>lib/rule-order.ts</td><td>取得済みルールと楽観的な順序IDから表示順を組み立てる純粋関数。</td></tr>
               <tr><td>lib/domain-values.ts / domain-schemas.ts / app-input.ts</td><td>分類値一覧・派生型・表示ラベル・入力上限、共通フィールドschema、アプリAPIのaction判別unionとクライアント送信型。DB・認証には依存しない。</td></tr>
@@ -515,6 +515,7 @@
             </tbody>
           </table></div>
           <h3>金額・日時の表示と入力</h3>
+          <p>サーバーは日時をミリ秒付きUTC ISO文字列としてブラウザへ返す。明細の保存応答・full再取得の取引日時と清算日時、清算履歴の完了日時、full/metadataの招待期限では秒への切捨てを行わない。DB driverのDateは文字列化を挟まずISOへ変換する。ブラウザは表示時にJSTと秒・分の書式を適用し、日時入力・再保存ではミリ秒を保持する。DBスキーマとクエリ回数・並び順・期限判定は変えない。</p>
           <p><code>formatYen</code>は日本円の通貨記号と桁区切りを表示し、ホーム・明細・清算・定期支払い・負担金額・CSV確認表で共用する。CSVの非有限金額を「—」にする補正は確認表に残す。通貨記号を付けない円表記や数値入力は各画面の書式を使う。</p>
           <p><code>formatJstDateTime</code>は<code>DateTimePrecision.Minute</code>／<code>Second</code>で表示精度を指定し（既定は秒）、Asia/Tokyo固定で、ホーム・清算履歴・清算済み明細では秒まで、スマートフォンの明細要約では分まで表示する。CSVの元日時と定期支払いの日付表示は各画面で保持する。表示関数はdatetime-local入力には使わない。明細編集の<code>transactionDateInput</code>／<code>transactionDateToIso</code>は秒・ミリ秒を保持し、UTCへ変換する。新規明細の入力初期値は専用formatterを再利用して分まで表示する。</p>
           <h3>新規明細</h3>
