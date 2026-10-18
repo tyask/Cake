@@ -579,8 +579,8 @@
                 <div class="dfd-arrow"><b>→</b><small>transactions</small></div>
                 <div class="dfd-node output"><strong>ImportPanelのrows</strong><small>重複・衝突を表示<br />行の選択・割合を編集<br />共通費の1:1もプレビューだけ更新</small></div>
               </div>
-              <div class="dfd-track" role="img" aria-label="登録ボタンで選択行だけをbulkImportとしてrunへ送りDBへ保存し、metadataを再取得する。取引明細タブに切り替えたときにfullで明細を取得する">
-                <div class="dfd-node source"><strong>「選択したN件を登録」</strong><small>選択行を検証<br />日時・金額・actor・割合</small></div>
+              <div class="dfd-track" role="img" aria-label="登録ボタンで残った登録可能な全明細をbulkImportとしてrunへ送りDBへ保存し、metadataを再取得する。取引明細タブに切り替えたときにfullで明細を取得する">
+                <div class="dfd-node source"><strong>「登録」</strong><small>登録可能な全行を検証<br />日時・金額・actor・割合</small></div>
                 <div class="dfd-arrow"><b>→</b><small>run(bulkImport)<br />fileName / items</small></div>
                 <div class="dfd-node store"><strong>POST /api/app → DB</strong><small>明細・batchをTransaction保存<br />imported / skippedを返す</small></div>
                 <div class="dfd-arrow"><b>→</b><small>metadata GET</small></div>
