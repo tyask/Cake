@@ -17,16 +17,23 @@ export function createAppStore() {
     requireWorkspaceMember,
     updateDisplayName,
     persistPayPayImport,
-    async splitContext(workspaceId: string) {
+    async splitMembers(workspaceId: string) {
       const sql = db();
-      const [memberRows, ruleRows] = await Promise.all([
-        sql`SELECT wm.user_id, wm.weight, u.name FROM workspace_members wm JOIN app_users u ON u.id = wm.user_id WHERE wm.workspace_id = ${workspaceId}::uuid ORDER BY wm.joined_at, wm.user_id`,
-        sql`SELECT id, merchant_contains, expense_class, sort_order, split_weights, enabled FROM default_rules WHERE workspace_id = ${workspaceId}::uuid ORDER BY sort_order, created_at, id`,
-      ]);
-      return {
-        members: memberRows.map((row) => ({ id: String(row.user_id), weight: Number(row.weight), name: String(row.name) })),
-        rules: ruleRows.map(defaultRuleRecord),
-      };
+      const rows = await sql`SELECT wm.user_id, wm.weight, u.name FROM workspace_members wm JOIN app_users u ON u.id = wm.user_id WHERE wm.workspace_id = ${workspaceId}::uuid ORDER BY wm.joined_at, wm.user_id`;
+      return rows.map(row => ({ id: String(row.user_id), weight: Number(row.weight), name: String(row.name) }));
+    },
+    async splitRules(workspaceId: string) {
+      const sql = db();
+      const rows = await sql`SELECT id, merchant_contains, expense_class, sort_order, split_weights, enabled FROM default_rules WHERE workspace_id = ${workspaceId}::uuid ORDER BY sort_order, created_at, id`;
+      return rows.map(defaultRuleRecord);
+    },
+    async ruleForUpdate(workspaceId: string, ruleId: string) {
+      const sql = db();
+      const [row] = await sql`SELECT expense_class, split_weights, enabled FROM default_rules WHERE workspace_id = ${workspaceId}::uuid AND id = ${ruleId}::uuid`;
+      return row ? {
+        expenseClass: String(row.expense_class) as DefaultRule["expenseClass"],
+        splitWeights: row.split_weights as SplitWeights | null, enabled: Boolean(row.enabled),
+      } : null;
     },
     async createWorkspace(workspaceId: string, input: Action<"createWorkspace">, user: AppUser) {
       const sql = db();
@@ -167,7 +174,7 @@ export function createAppStore() {
           FROM default_rules WHERE workspace_id = ${input.workspaceId}::uuid`,
       ]);
     },
-    async updateRule(input: Action<"updateRule">, splitWeights: SplitWeights | null, previous: DefaultRule) {
+    async updateRule(input: Action<"updateRule">, splitWeights: SplitWeights | null, previous: Pick<DefaultRule, "enabled">) {
       const sql = db();
       const results = await sql.transaction([
         sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,

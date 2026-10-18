@@ -429,6 +429,13 @@
             <li><code>/api/app</code>成功はHTTP 200。GET失敗は基本401、POST失敗は基本400。<code>UserAccessError</code>は固有statusを優先し、応答は<code>{ error }</code>。</li>
             <li>GETは<code>getBootstrap(user, workspaceId, scope)</code>を実行。scope省略はfull。所属していない/不正形式の指定IDは本人の所属一覧先頭へフォールバックする。</li>
           </ul>
+          <h3>用途別の割合コンテキスト取得</h3>
+          <ul>
+            <li>各操作はDB上の最新workspace所属を確認してから取得する。<code>splitMembers(workspaceId)</code>は参加者のID・重み・名前、<code>splitRules(workspaceId)</code>は部分一致判定に必要なルール一覧を優先順・作成日時・ID順で返す。</li>
+            <li><code>createRule</code>は参加者だけを取得。<code>updateRule</code>は参加者と<code>ruleForUpdate(workspaceId, ruleId)</code>を並列取得し、対象1件の区分・割合・enabledだけを読む。対象SELECTとUPDATEはともにworkspaceとrule IDで限定する。不在は更新せず拒否。区分同一で割合省略なら保存値を継承し、明示nullはデフォルト参照、enabled省略は保存値を維持する。</li>
+            <li><code>saveTransaction</code>は既存明細かつ割合省略の場合だけ未清算の前回値を取得し、区分と割合を従来の条件で継承する。その結果の区分が未指定、または共有費で割合が未指定の場合だけ<code>splitRules</code>とルール判定を行う。明示個人費は担当者1・ほか0を生成し、区分・割合が確定済みならルールを参照しない。どの経路でも参加者・担当者・割合の検証を実行する。</li>
+            <li>明示割合で区分だけ省略された通常明細はルール区分を使い、前回明細の区分を読まない。共有費の割合省略時は一致する共有費ルールの割合を使い、それ以外はworkspaceのデフォルト割合を使う。CSV取込は参加者とルールを取得し、省略値を共有費既定で補完する。</li>
+          </ul>
           <h3>POSTアクション一覧</h3>
           <div class="table-wrap"><table>
             <thead><tr><th>action</th><th>主な入力・検証</th><th>更新処理・成功応答</th></tr></thead>
