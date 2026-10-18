@@ -1,4 +1,4 @@
-import { defaultSplitWeights, matchingDefaultRule, personalSplitWeights, transactionDefaults } from "./expense-splits";
+import { defaultSplitWeights, personalSplitWeights, transactionDefaults, type DefaultRuleMatcher } from "./expense-splits";
 import { nextScheduledOn } from "./recurring-payment-calendar";
 import type { RecurringPayment, RecurringPaymentConfig } from "./recurring-payment-types";
 import type { WorkspaceMetadata } from "./types";
@@ -20,11 +20,9 @@ export function recurringFormConfig(selected: WorkspaceMetadata, currentUserId: 
       ? personalSplitWeights(selected.members, actorUserId) : defaultSplitWeights(selected.members), memo: "" };
 }
 
-export function recurringFormDefaults(selected: WorkspaceMetadata, merchant: string, actorUserId: string) {
+export function recurringFormDefaults(selected: WorkspaceMetadata, merchant: string, actorUserId: string, matchRule: DefaultRuleMatcher) {
   if (selected.workspace.type === "PERSONAL") return { expenseClass: "PERSONAL" as const, splitWeights: personalSplitWeights(selected.members, actorUserId) };
-  return matchingDefaultRule(merchant, selected.rules)
-    ? transactionDefaults(merchant, selected.rules, selected.members, actorUserId)
-    : { expenseClass: "SHARED" as const, splitWeights: defaultSplitWeights(selected.members) };
+  return transactionDefaults(merchant, matchRule, selected.members, actorUserId, "SHARED");
 }
 
 export function recurringFormPreview(config: RecurringPaymentConfig, now: Date) {

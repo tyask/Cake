@@ -125,6 +125,33 @@ test("取込は共有費既定・有効ルールを使い、保存された件�
   assert.deepEqual(persisted.items, [{ ...item, expenseClass: "SHARED", splitWeights: { a: 1, b: 3 } }]);
 });
 
+test("一括取込はルールを一度だけ準備し、単件登録も同じ優先順・割合で判定する", async () => {
+  let enabledReads = 0;
+  const rules = [{ ...rule, enabled: false, sortOrder: 0 }, { ...rule, expenseClass: "PERSONAL" as const, enabled: true, sortOrder: 2 }, { ...rule, enabled: true, sortOrder: 1 }]
+    .map(rule => ({ ...rule, get enabled() { enabledReads++; return rule.enabled; } }));
+  const f = fixture({ splitRules: async () => rules, persistPayPayImport: async () => ({ imported: 3, skipped: 0 }), insertTransaction: async () => savedRow() });
+  const items = Array.from({ length: 3 }, (_, i) => ({ occurredAt: save.occurredAt, merchant: "店", method: "PayPay", amountYen: 300, actorUserId: "a", externalId: String(i) }));
+  await f.execute({ action: "bulkImport", workspaceId, fileName: "qa.csv", totalRows: 3, items });
+  const stored = f.calls.at(-1)!.args[0] as { items: { expenseClass: string; splitWeights: unknown }[] };
+  assert.equal(enabledReads, rules.length);
+  for (const item of stored.items) {
+    assert.equal(item.expenseClass, "SHARED");
+    assert.deepEqual(item.splitWeights, { a: 2, b: 1 });
+  }
+  await f.execute(save);
+  assert.deepEqual(f.calls.at(-1)!.args[2], { expenseClass: "SHARED", splitWeights: stored.items[0].splitWeights });
+  assert.equal(enabledReads, rules.length * 2, "単件もリクエストごとに最新の一覧から準備する");
+});
+
+test("全明細の区分・割合が明示された取込ではルールの準備も省略する", async () => {
+  const unused = { ...rule, get enabled(): never { throw new Error("不要なルール準備"); } };
+  const f = fixture({ splitRules: async () => [unused], persistPayPayImport: async () => ({ imported: 1, skipped: 0 }) });
+  await f.execute({ action: "bulkImport", workspaceId, fileName: "qa.csv", totalRows: 1,
+    items: [{ occurredAt: save.occurredAt, merchant: "店", method: "PayPay", amountYen: 300, actorUserId: "a", externalId: "123", expenseClass: "SHARED", splitWeights: { a: 1, b: 3 } }] });
+  const saved = f.calls.at(-1)!.args[0] as { items: { splitWeights: unknown }[] };
+  assert.deepEqual(saved.items[0].splitWeights, { a: 1, b: 3 });
+});
+
 const activeRule: DefaultRule = { ...rule, enabled: true };
 const savedShared = { expense_class: "SHARED", actor_user_id: "a", split_weights: { a: 5, b: 2 } };
 const savedPersonal = { expense_class: "PERSONAL", actor_user_id: "a", split_weights: { a: 1, b: 0 } };
@@ -155,7 +182,7 @@ for (const scenario of splitCases) test(`割合取得の省略条件と保存値
 });
 
 test("明示値で確定する経路ではルールの参照・判定をせず参加者と割合を検証する", async () => {
-  const context = { members, get rules(): DefaultRule[] { throw new Error("不要なルール参照"); } };
+  const context = { members, get matchRule(): never { throw new Error("不要なルール参照"); } };
   assert.deepEqual(resolveTransactionSplit({ merchant: "店", actorUserId: "a", expenseClass: "PERSONAL" }, context), { expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } });
   assert.deepEqual(resolveTransactionSplit({ merchant: "店", actorUserId: "a", expenseClass: "SHARED", splitWeights: { a: 2, b: 1 } }, context), { expenseClass: "SHARED", splitWeights: { a: 2, b: 1 } });
   for (const input of [{ actorUserId: "outsider", splitWeights: { a: 1, b: 1 } }, { actorUserId: "a", splitWeights: { a: 1, outsider: 1 } }, { actorUserId: "a", splitWeights: { a: 0, b: 0 } }]) {

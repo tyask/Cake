@@ -2,8 +2,8 @@
 
 import { commonExpenseClassLabels, expenseClasses, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/domain-values";
 
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { validateSplitWeights, defaultSplitWeights, personalSplitWeights } from "@/lib/expense-splits";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { validateSplitWeights, defaultSplitWeights, personalSplitWeights, prepareDefaultRuleMatcher } from "@/lib/expense-splits";
 import { splitAmounts } from "@/lib/split-allocations";
 import { recurringFormConfig, recurringFormDefaults, recurringFormPreview } from "@/lib/recurring-payment-form";
 import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
@@ -180,6 +180,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
   selected: WorkspaceData; currentUserId: string; data: RecurringPaymentsResponse; payment?: RecurringPayment; close: () => void;
   save: (payload: RecurringPaymentMutationDraft) => Promise<RecurringPaymentMutationResult>; reloadLatest: (payment: RecurringPayment) => Promise<void>;
 }) {
+  const matchRule = useMemo(() => prepareDefaultRuleMatcher(selected.rules), [selected.rules]);
   const [config, setConfig] = useState(() => recurringFormConfig(selected, currentUserId, data.eligibleActorUserIds, data.today, payment));
   const [customized, setCustomized] = useState(!!payment);
   const [saving, setSaving] = useState(false);
@@ -193,7 +194,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
   let preview: ReturnType<typeof recurringFormPreview> | null = null;
   try { preview = recurringFormPreview(config, new Date(data.now)); } catch { /* Invalid config has no preview. */ }
   const patch = (update: Partial<RecurringPaymentConfig>) => { setConfig(current => ({ ...current, ...update })); if (!conflict) setError(null); };
-  const applyDefaults = () => { patch(recurringFormDefaults(selected, config.merchant, config.actorUserId)); setCustomized(false); };
+  const applyDefaults = () => { patch(recurringFormDefaults(selected, config.merchant, config.actorUserId, matchRule)); setCustomized(false); };
   return <RecurringDialog title={payment ? "定期支払いを編集" : "定期支払いを追加"} close={close} busy={saving}>
     <form onSubmit={async event => {
       event.preventDefault(); if (savingRef.current) return; savingRef.current = true; setError(null); setSaving(true);
@@ -213,7 +214,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
         <label className="full">毎月の日<select required value={config.dayOfMonth} onChange={event => patch({ dayOfMonth: Number(event.target.value) })}>{Array.from({ length: 31 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}日</option>)}</select></label>
         <label className="full">取引先<input required maxLength={MAX_MERCHANT_LENGTH} value={config.merchant} onChange={event => {
           const merchant = event.target.value;
-          patch({ merchant, ...(!customized ? recurringFormDefaults(selected, merchant, config.actorUserId) : {}) });
+          patch({ merchant, ...(!customized ? recurringFormDefaults(selected, merchant, config.actorUserId, matchRule) : {}) });
         }} /></label>
         <label>取引方法<input required maxLength={MAX_METHOD_LENGTH} value={config.method} onChange={event => patch({ method: event.target.value })} /></label>
         <label>金額（円）<input type="number" required min="1" max={MAX_AMOUNT_YEN} step="1" value={config.amountYen || ""} onChange={event => patch({ amountYen: Number(event.target.value) })} /></label>
