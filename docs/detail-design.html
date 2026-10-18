@@ -298,8 +298,8 @@
             <div class="data-flow">
               <div class="data-flow-head"><h3>C. PayPay CSV取込</h3><small>CSV原本は利用者端末から出さない</small></div>
               <div class="dfd-track" role="img" aria-label="端末のPayPay CSVをブラウザ内で解析し、選択した変換済み明細だけをAPI経由でNeonへ保存するデータフロー">
-                <div class="dfd-node source"><strong>PayPay CSV</strong><small>端末上のFile<br />または貼り付け本文</small></div>
-                <div class="dfd-arrow"><b>→</b><small>File.text()<br />または画面State</small></div>
+                <div class="dfd-node source"><strong>PayPay CSV</strong><small>端末上のFile<br />またはクリップボード</small></div>
+                <div class="dfd-arrow"><b>→</b><small>File.text() / readText()<br />処理内の一時値</small></div>
                 <div class="dfd-node process"><strong>parsePayPayCsv</strong><small>PapaParse・Header検証<br />支払い抽出・Rule適用</small></div>
                 <div class="dfd-arrow"><b>→</b><small>PreviewRow[]</small></div>
                 <div class="dfd-node output"><strong>取込プレビュー</strong><small>選択・担当者<br />費用区分を編集</small></div>
@@ -910,7 +910,7 @@ BootstrapData extends BootstrapMetadata
             <thead><tr><th>分類</th><th>検出・扱い</th></tr></thead>
             <tbody>
               <tr><td>未認証・利用不可</td><td>現在のDB登録・有効状態・モードを照合。一般/app GETは401、POSTは基本400、重複APIと管理APIの未認証は401。画面はログイン導線。</td></tr>
-              <tr><td>入力不正</td><td>Zod、CSV、純粋検証関数と入力欄で確認。API error/行エラーを表示し、未保存下書きを保持。管理APIは入力の詳細を固定メッセージへ変換。</td></tr>
+              <tr><td>入力不正</td><td>Zod、CSV、純粋検証関数と入力欄で確認。API error/行エラーを表示し、通常フォームは未保存下書きを保持する。CSV解析・照合失敗は再コピー・ファイル再選択で再試行し、登録失敗は確認表を保持する。管理APIは入力の詳細を固定メッセージへ変換。</td></tr>
               <tr><td>非所属・管理者以外</td><td>workspace所属を確認。利用者管理は現在のDB管理者権限で確認し403。通常workspace操作のOWNER専用制約は持たない。</td></tr>
               <tr><td>清算済み計算値の変更</td><td>通常UPDATE/DELETEはsettled_at IS NULL条件。0件は業務エラー。bulkは全対象の未清算を確認。メモは専用保存で変更可能。</td></tr>
               <tr><td>古い/欠けた一括選択</td><td>DB関数で全IDの存在・未清算・参加者・現在ルールをロック下で確認。一件でも不正なら全体を変更しない。</td></tr>
