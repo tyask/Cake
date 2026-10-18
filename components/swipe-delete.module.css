@@ -8,7 +8,8 @@
   .root[data-swipe-open="true"] .content { transform: translateX(-5rem); }
   .remove { position: absolute; inset: 0 0 0 auto; display: block; width: 5rem; min-height: 44px; border: 0; border-radius: .45rem; color: #fff; background: #b42318; font-size: .8rem; font-weight: 700; cursor: pointer; }
   .remove[hidden] { display: none; }
-  .toggle { display: block; flex: 0 0 44px; align-self: stretch; min-height: 44px; padding: 0; border: 0; color: var(--muted); background: var(--paper, #fff); font-size: 1.25rem; cursor: pointer; z-index: 2; }
-  .root[data-swipe-open="true"] .toggle { visibility: hidden; margin-left: -44px; }
+  .toggle { position: absolute; display: block; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; padding: 0; border: 0; }
+  .toggle:focus-visible { inset: 0 0 auto auto; width: auto; height: 44px; clip-path: none; padding: .4rem .65rem; color: var(--ink); background: var(--paper, #fff); font-size: .75rem; cursor: pointer; z-index: 2; }
+  .root[data-swipe-open="true"] .toggle { visibility: hidden; }
 }
 @media (prefers-reduced-motion: reduce) { .content { transition: none; } }

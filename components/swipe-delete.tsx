@@ -73,6 +73,6 @@ export function SwipeDelete({ children, label, disabled = false, onDelete }: {
       <div className={styles.body}>{children}</div>
     </div>
     <button ref={toggle} type="button" className={styles.toggle} disabled={disabled} aria-label={`${label}の削除操作`}
-      aria-expanded={shown} aria-controls={actionId} onClick={() => { focusAfterChange.current = shown ? "toggle" : "action"; setOpen(!shown); }}>⋯</button>
+      aria-expanded={shown} aria-controls={actionId} onClick={() => { focusAfterChange.current = shown ? "toggle" : "action"; setOpen(!shown); }}>削除操作</button>
   </div>;
 }

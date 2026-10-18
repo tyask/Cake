@@ -54,6 +54,8 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
         const name = view === "rules" ? "rule1" : view === "recurring" ? "家賃" : "first";
         const reveal = page.getByRole("button", { name: `${name}の削除操作`, exact: true });
         await reveal.waitFor();
+        assert.equal(await page.getByRole("button", { name: "⋯", exact: true }).count(), 0);
+        assert.ok((await reveal.boundingBox())!.width <= 1, "通常表示では補助操作が行幅を使わない");
         const row = page.locator("[data-swipe-open]").filter({ has: page.getByRole("button", { name: `${name}の削除操作`, exact: true, includeHidden: true }) });
         const action = page.getByRole("button", { name: `${name}を削除`, exact: true });
         const surface = row.locator('[class*="body"]');
@@ -69,16 +71,16 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
           assert.equal(await page.getByRole("button", { name: `${name}の詳細を閉じる`, exact: true }).count(), 0, "スワイプで詳細を開かない");
           await swipe(page, surface, 100);await action.waitFor({ state: "hidden" });
         }
-        await reveal.click();await action.waitFor();
+        await reveal.focus();await page.keyboard.press("Enter");await action.waitFor();
         await page.getByRole("button", { name: "一覧の外", exact: true }).click();await action.waitFor({ state: "hidden" });
-        await reveal.scrollIntoViewIfNeeded();await reveal.click();await action.waitFor();
+        await reveal.scrollIntoViewIfNeeded();await reveal.focus();await page.keyboard.press("Enter");await action.waitFor();
         await page.keyboard.press("Escape");await action.waitFor({ state: "hidden" });
         assert.equal(await reveal.evaluate(element => element === document.activeElement), true);
-        if (process.env.CAKE_SWIPE_SCREENSHOTS) { await reveal.click();await page.screenshot({ animations: "disabled", path: `.cake/swipe-open-${view}.png` });await page.keyboard.press("Escape"); }
+        if (process.env.CAKE_SWIPE_SCREENSHOTS) { await reveal.focus();await page.keyboard.press("Enter");await page.screenshot({ animations: "disabled", path: `.cake/swipe-open-${view}.png` });await page.keyboard.press("Escape"); }
         if (view === "import") {
           page.on("dialog", () => { errors.push("取込で不要な確認"); });
           const other = page.getByRole("button", { name: "secondの削除操作", exact: true });
-          await reveal.click();await other.click();await action.waitFor({ state: "hidden" });
+          await reveal.focus();await page.keyboard.press("Enter");await other.focus();await page.keyboard.press("Enter");await action.waitFor({ state: "hidden" });
           await page.keyboard.press("Escape");
           await swipe(page, surface);await action.click();await reveal.waitFor({ state: "hidden" });
           assert.equal(writes.length, 0);hold = true;await page.getByRole("button", { name: "選択した1件を登録", exact: true }).click();
@@ -95,7 +97,7 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
           const dialog = page.getByRole("dialog", { name: "定期支払いを削除", exact: true });await dialog.waitFor();
           assert.match((await dialog.textContent())!, /追加済みの明細は残ります/);assert.equal(writes.length, 0);
           await dialog.getByRole("button", { name: "キャンセル", exact: true }).click();assert.equal(writes.length, 0);
-          await reveal.click();await action.click();fail = true;await dialog.getByRole("button", { name: "削除する", exact: true }).click();
+          await reveal.focus();await page.keyboard.press("Enter");await action.click();fail = true;await dialog.getByRole("button", { name: "削除する", exact: true }).click();
           await dialog.getByRole("alert").waitFor();assert.equal(writes.length, 1);assert.equal(await row.count(), 1);
           fail = false;await dialog.getByRole("button", { name: "削除する", exact: true }).click();await reveal.waitFor({ state: "hidden" });
           assert.equal(writes[1].action, "archive");assert.equal(writes[1].paymentId, "recurring");assert.equal(writes[1].expectedRevision, 1);
@@ -110,7 +112,7 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
           page.once("dialog", dialog => dialog.dismiss());await action.click();assert.equal(writes.length, 0);assert.equal(await row.count(), 1);
           fail = true;page.once("dialog", dialog => dialog.accept());await action.click();
           await page.getByRole("alert").filter({ hasText: "テスト保存失敗" }).waitFor();assert.equal(writes.length, 1);assert.equal(await row.count(), 1);
-          fail = false;if (!await action.isVisible()) await reveal.click();page.once("dialog", dialog => dialog.accept());await action.click();await reveal.waitFor({ state: "hidden" });
+          fail = false;if (!await action.isVisible()) { await reveal.focus();await page.keyboard.press("Enter"); }page.once("dialog", dialog => dialog.accept());await action.click();await reveal.waitFor({ state: "hidden" });
           assert.deepEqual(writes[1][view === "rules" ? "ruleIds" : "transactionIds"], [view === "rules" ? "rule1" : "first"]);
           const otherCheckbox = view === "rules" ? page.getByRole("checkbox", { name: "「rule2」を削除対象に選択", exact: true }) : page.locator('[data-transaction-id="second"]').getByRole("checkbox", { name: "secondの明細を選択", exact: true });
           assert.equal(await otherCheckbox.isChecked(), true);
@@ -139,7 +141,7 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
         const row = page.locator('[data-transaction-id="first"]');
         await row.getByRole("button", { name: "firstの詳細を開く", exact: true }).click();
         await row.getByLabel("金額（円）", { exact: true }).fill("222");
-        await row.getByRole("button", { name: "firstの削除操作", exact: true }).click();await saveStarted;
+        await row.getByRole("button", { name: "firstの削除操作", exact: true }).focus();await page.keyboard.press("Enter");await saveStarted;
         page.once("dialog", dialog => dialog.accept());await row.getByRole("button", { name: "firstを削除", exact: true }).click();
         assert.deepEqual(writes.map(item => item.action), ["saveTransaction"]);
         releaseSave();
