@@ -39,6 +39,6 @@ export function applyPayPayDuplicateChecks(rows: PayPayPreviewRow[], existing: E
     const repeated = seen.has(row.externalId);
     seen.add(row.externalId);
     const duplicate = row.duplicate || byId.has(row.externalId) || repeated;
-    return { ...row, duplicate, selected: !duplicate, error: repeated ? "CSV内で重複しています" : null };
+    return { ...row, duplicate, selected: row.selected && !duplicate, error: repeated ? "CSV内で重複しています" : null };
   });
 }

@@ -22,6 +22,10 @@ export interface PayPayPreviewRow {
   error: string | null;
 }
 
+export function isPayPayRowImportable(row: PayPayPreviewRow): boolean {
+  return !row.error && !row.duplicate;
+}
+
 const REQUIRED_HEADERS = [
   "取引日",
   "出金金額（円）",
@@ -88,7 +92,7 @@ export function parsePayPayCsv(
               : !methodSchema.safeParse(method).success ? `取引方法は${MAX_METHOD_LENGTH}文字以内で入力してください` : null);
       return {
         key: `${externalId || "row"}-${index}`,
-        selected: !duplicate && !error,
+        selected: false,
         occurredAt,
         merchant,
         method,

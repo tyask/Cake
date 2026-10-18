@@ -98,7 +98,7 @@ async function assertBusyInputs(page: Page) {
   await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
 }
 
-test("CSV貼り付けはユーザー操作で読み取り・重複照会し、選択した構造化明細だけを登録する", async t => {
+test("CSV貼り付けはユーザー操作で読み取り・重複照会し、登録可能な全明細を登録し選択行だけを削除する", async t => {
   const bundle = await build({ entryPoints: ["tests/fixtures/import-paste.tsx"], bundle: true, write: false,
     outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
   const server = createServer((req, res) => {
@@ -236,7 +236,7 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
             "PayPay_20261018120042_00001234", "PayPay_20261018120143_00001235", "PayPay_20261018120244_00001236", "PayPay_20261018120446_00001237",
           ] } });
           assert.ok(releaseDuplicates); await releaseDuplicates();
-          await page.getByRole("button", { name: "選択した3件を登録", exact: true }).waitFor();
+          await page.getByRole("button", { name: "登録", exact: true }).waitFor();
           await assertNoManualInput(page);
           assert.equal(await page.locator("[data-import-key]").count(), 5);
           assert.equal(await page.getByText("受取の行", { exact: true }).count(), 0);
@@ -248,16 +248,46 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
           assert.equal(await row("和食のお店").first().getByLabel("本人の支払い割合", { exact: true }).inputValue(), "60");
           assert.equal(await row("個人カフェ").getByLabel("個人カフェの費用区分", { exact: true }).inputValue(), "PERSONAL");
           assert.equal(await row("個人カフェ").getByLabel("本人の支払い割合", { exact: true }).inputValue(), "100");
-          assert.equal(await row("保存済みのお店").getByRole("checkbox", { name: "保存済みのお店を取り込む", exact: true }).isDisabled(), true);
-          assert.equal(await row("和食のお店").last().getByRole("checkbox", { name: "和食のお店を取り込む", exact: true }).isDisabled(), true);
+          assert.equal(await row("保存済みのお店").getByRole("checkbox", { name: "保存済みのお店を選択", exact: true }).isDisabled(), true);
+          assert.equal(await row("和食のお店").last().getByRole("checkbox", { name: "和食のお店を選択", exact: true }).isDisabled(), true);
           assert.ok((await row("和食のお店").last().textContent())?.includes("CSV内で重複しています"));
-          await row("除外するお店").getByRole("checkbox", { name: "除外するお店を取り込む", exact: true }).uncheck();
+          assert.ok((await page.locator(".import-summary").textContent())?.includes("3 / 5件"));
+          assert.equal(await page.getByRole("button", { name: "削除", exact: true }).isDisabled(), true);
+          assert.equal(await page.getByRole("button", { name: "個人費に変更", exact: true }).isDisabled(), true);
+          assert.equal(await page.getByRole("button", { name: "登録", exact: true }).isEnabled(), true);
+          for (const checkbox of await page.getByRole("checkbox").all()) assert.equal(await checkbox.isChecked(), false);
+          const savedStyle = await row("保存済みのお店").evaluate(element => ({
+            color: getComputedStyle(element).color, background: getComputedStyle(element).backgroundColor,
+          }));
+          assert.deepEqual(savedStyle, { color: "rgb(107, 114, 128)", background: "rgb(243, 244, 246)" });
+          if (width < 700) assert.equal(await row("保存済みのお店").getByRole("button", { name: /の詳細を閉じる$/ }).evaluate(element => getComputedStyle(element).color), savedStyle.color);
+          const all = page.getByRole("checkbox", { name: "登録可能な明細をすべて選択", exact: true });
+          await all.check();
+          for (const merchant of ["和食のお店", "個人カフェ", "除外するお店"]) assert.equal(await row(merchant).first().getByRole("checkbox", { name: `${merchant}を選択`, exact: true }).isChecked(), true);
+          assert.equal(await row("保存済みのお店").getByRole("checkbox", { name: "保存済みのお店を選択", exact: true }).isChecked(), false);
+          await all.uncheck();
+          await row("除外するお店").getByRole("checkbox", { name: "除外するお店を選択", exact: true }).check();
+          page.once("dialog", dialog => { assert.equal(dialog.message(), "選択した1件を取込一覧から削除しますか？"); void dialog.dismiss(); });
+          await page.getByRole("button", { name: "削除", exact: true }).click();
+          assert.equal(await row("除外するお店").count(), 1);
+          assert.equal(await row("除外するお店").getByRole("checkbox", { name: "除外するお店を選択", exact: true }).isChecked(), true);
+          page.once("dialog", dialog => dialog.accept());
+          await page.getByRole("button", { name: "削除", exact: true }).click();
+          assert.equal(await row("除外するお店").count(), 0);
+          assert.equal(await page.locator("[data-import-key]").count(), 4);
+          assert.ok((await page.locator(".import-summary").textContent())?.includes("2 / 4件"));
+          assert.equal(await row("和食のお店").first().getByLabel("本人の支払い割合", { exact: true }).inputValue(), "60");
+          await row("個人カフェ").getByRole("checkbox", { name: "個人カフェを選択", exact: true }).check();
+          await page.getByRole("button", { name: "共通費に変更", exact: true }).click();
+          assert.equal(await row("個人カフェ").getByLabel("個人カフェの費用区分", { exact: true }).inputValue(), "SHARED");
+          await page.getByRole("button", { name: "個人費に変更", exact: true }).click();
+          assert.equal(await row("和食のお店").first().getByLabel("和食のお店の費用区分", { exact: true }).inputValue(), "SHARED");
           assert.equal(requests.length, 1);
-          await page.getByRole("button", { name: "選択した2件を登録", exact: true }).click();
+          await page.getByRole("button", { name: "登録", exact: true }).click();
           await page.getByRole("alert").filter({ hasText: "検証用の登録失敗" }).waitFor();
           await assertNoManualInput(page);
-          assert.equal(await page.locator("[data-import-key]").count(), 5);
-          assert.equal(await row("除外するお店").getByRole("checkbox", { name: "除外するお店を取り込む", exact: true }).isChecked(), false);
+          assert.equal(await page.locator("[data-import-key]").count(), 4);
+          assert.equal(await row("個人カフェ").getByRole("checkbox", { name: "個人カフェを選択", exact: true }).isChecked(), true);
           assert.deepEqual(Object.keys(requests[1].payload).sort(), ["action", "fileName", "items", "totalRows", "workspaceId"]);
           assert.deepEqual(requests[1].payload, {
             action: "bulkImport", workspaceId: "workspace", fileName: "PayPay貼り付け.csv", totalRows: 5,
@@ -270,16 +300,49 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
           });
           await Promise.all([
             page.waitForRequest(request => new URL(request.url()).pathname === "/api/app"),
-            page.getByRole("button", { name: "選択した2件を登録", exact: true }).click(),
+            page.getByRole("button", { name: "登録", exact: true }).click(),
           ]);
           await page.getByRole("button", { name: "登録中…", exact: true }).waitFor();
           await assertNoManualInput(page);
+          assert.equal(await page.getByRole("button", { name: "削除", exact: true }).isDisabled(), true);
           await page.waitForFunction(() => document.querySelector(".sticky-actions .primary")?.hasAttribute("disabled"));
           assert.equal(requests.length, 3); assert.deepEqual(requests[2], requests[1]);
           assert.ok(releaseSave); await releaseSave();
           await page.getByRole("button", { name: "貼り付け", exact: true }).waitFor();
           await assertNoManualInput(page);
           assert.equal(await page.evaluate(() => window.importPasteClipboardReads), 1);
+          assert.deepEqual(errors, []);
+        } finally { await context.close(); }
+      });
+
+      await t.test(`${name}: 全選択の削除で登録可能行がなくなり、全行削除後は再読込できる`, async () => {
+        const { page, requests, errors, context } = await openFixture(browser, origin, width,
+          route => route.fulfill({ json: duplicateResult }), { mode: "success", text: csv });
+        try {
+          await page.getByRole("button", { name: "貼り付け", exact: true }).click();
+          await page.getByRole("button", { name: "登録", exact: true }).waitFor();
+          await page.getByRole("checkbox", { name: "登録可能な明細をすべて選択", exact: true }).check();
+          page.once("dialog", dialog => { assert.equal(dialog.message(), "選択した3件を取込一覧から削除しますか？"); void dialog.accept(); });
+          await page.getByRole("button", { name: "削除", exact: true }).click();
+          assert.equal(await page.locator("[data-import-key]").count(), 2);
+          for (const roleName of ["登録", "削除", "個人費に変更", "共通費に変更"]) assert.equal(await page.getByRole("button", { name: roleName, exact: true }).isDisabled(), true);
+          assert.equal(await page.getByRole("checkbox", { name: "登録可能な明細をすべて選択", exact: true }).isDisabled(), true);
+          assert.equal(requests.length, 1);
+          await page.getByRole("button", { name: "キャンセル", exact: true }).click();
+          const singleCsv = header + "\n2026/10/18 12:10:00,100,支払い,一件のお店,PayPay,single";
+          await page.evaluate(text => { window.importPasteClipboardText = text; }, singleCsv);
+          await page.getByRole("button", { name: "貼り付け", exact: true }).click();
+          await page.getByRole("button", { name: "登録", exact: true }).waitFor();
+          await page.getByRole("checkbox", { name: "登録可能な明細をすべて選択", exact: true }).check();
+          page.once("dialog", dialog => dialog.accept());
+          await page.getByRole("button", { name: "削除", exact: true }).click();
+          await page.getByRole("button", { name: "貼り付け", exact: true }).waitFor();
+          assert.equal(await page.locator("[data-import-key]").count(), 0);
+          await page.getByRole("button", { name: "貼り付け", exact: true }).click();
+          await page.getByRole("button", { name: "登録", exact: true }).waitFor();
+          assert.equal(await page.getByRole("checkbox", { name: "登録可能な明細をすべて選択", exact: true }).isChecked(), false);
+          assert.equal(await page.getByRole("button", { name: "登録", exact: true }).isEnabled(), true);
+          assert.ok(requests.every(request => request.path === "/api/import/duplicates"));
           assert.deepEqual(errors, []);
         } finally { await context.close(); }
       });
@@ -310,11 +373,11 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
           await assertNoManualInput(page);
           assert.equal(requests.length, 1);
           await page.getByRole("button", { name: "貼り付け", exact: true }).click();
-          await page.getByRole("button", { name: "選択した3件を登録", exact: true }).waitFor();
+          await page.getByRole("button", { name: "登録", exact: true }).waitFor();
           await page.getByRole("button", { name: "キャンセル", exact: true }).click();
           await assertNoManualInput(page);
           await page.locator("input[type=file]").setInputFiles({ name: "paypay-file.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
-          await page.getByRole("button", { name: "選択した3件を登録", exact: true }).waitFor();
+          await page.getByRole("button", { name: "登録", exact: true }).waitFor();
           await assertNoManualInput(page);
           assert.ok((await page.locator(".import-summary").textContent())?.includes("paypay-file.csv"));
           assert.equal(requests.length, 3);
@@ -331,7 +394,7 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
         route => route.fulfill({ json: duplicateResult }), { mode: "success", text: csv });
       try {
         await page.getByRole("button", { name: "貼り付け", exact: true }).click();
-        await page.getByRole("button", { name: "選択した3件を登録", exact: true }).waitFor();
+        await page.getByRole("button", { name: "登録", exact: true }).waitFor();
         await page.getByRole("button", { name: "キャンセル", exact: true }).click();
         await assertNoManualInput(page);
         assert.equal(requests.length, 1);
@@ -342,7 +405,7 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
         assert.equal(requests.length, 1);
         await page.evaluate(text => { window.importPasteClipboardText = text; }, csv);
         await page.getByRole("button", { name: "貼り付け", exact: true }).click();
-        await page.getByRole("button", { name: "選択した3件を登録", exact: true }).waitFor();
+        await page.getByRole("button", { name: "登録", exact: true }).waitFor();
         assert.equal(requests.length, 2);
         await page.getByRole("button", { name: "やり直す", exact: true }).click();
         await assertNoManualInput(page);
@@ -351,7 +414,7 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
           transfer.items.add(new File([text], "paypay-drop.csv", { type: "text/csv" }));
           document.querySelector(".upload-panel")!.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
         }, csv);
-        await page.getByRole("button", { name: "選択した3件を登録", exact: true }).waitFor();
+        await page.getByRole("button", { name: "登録", exact: true }).waitFor();
         await assertNoManualInput(page);
         assert.ok((await page.locator(".import-summary").textContent())?.includes("paypay-drop.csv"));
         assert.equal(requests.length, 3);

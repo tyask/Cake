@@ -49,7 +49,7 @@ for (const amount of [0, 1, 2_147_483_647, 2_147_483_648]) {
     assert.equal(appActionInputSchema.safeParse({ ...save, amountYen: amount }).success, valid);
     assert.equal(appActionInputSchema.safeParse({ ...bulk, items: [{ ...imported, amountYen: amount }] }).success, valid);
     assert.equal(recurringPaymentConfigSchema.safeParse({ ...config, amountYen: amount }).success, valid);
-    assert.equal(parsePayPayCsv(csv(amount), [], new Set(), members, "a")[0].selected, valid);
+    assert.equal(parsePayPayCsv(csv(amount), [], new Set(), members, "a")[0].error === null, valid);
     if (valid) assert.equal(validateTransactionValues({ ...values, amountYen: amount }, members).amountYen, amount);
     else assert.throws(() => validateTransactionValues({ ...values, amountYen: amount }, members), /金額/);
   });
@@ -73,7 +73,7 @@ test("文字数上限とtrimを保存・取込・編集・定期支払いで共�
       assert.throws(() => validateTransactionValues({ ...values, [key]: value }, members));
     }
     assert.equal(appActionInputSchema.safeParse({ ...save, [key]: exact }).success, true);
-    assert.equal(parsePayPayCsv(csv(100, key === "merchant" ? exact : "店舗", key === "method" ? exact : "現金"), [], new Set(), members, "a")[0].selected, true);
+    assert.equal(parsePayPayCsv(csv(100, key === "merchant" ? exact : "店舗", key === "method" ? exact : "現金"), [], new Set(), members, "a")[0].error, null);
     const row = parsePayPayCsv(csv(100, key === "merchant" ? overflow : "店舗", key === "method" ? overflow : "現金"), [], new Set(), members, "a")[0];
     assert.equal(row.selected, false);
     assert.match(row.error!, /文字以内/);

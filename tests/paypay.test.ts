@@ -14,7 +14,7 @@ for (const fixture of defaultRuleCases) {
     const csv = `取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n2026/10/10 10:00:00,101,支払い,${fixture.merchant},現金,fixture`;
     const [row] = parsePayPayCsv(csv, fixture.rules, new Set(), members, "b");
     assert.equal(row.error, null);
-    assert.equal(row.selected, true);
+    assert.equal(row.selected, false);
     assert.equal(row.expenseClass, fixture.expenseClass);
     assert.deepEqual(row.splitWeights, fixture.splitWeights);
   });
@@ -34,6 +34,7 @@ test("サンプルCSVから支払い行だけを抽出する", () => {
   assert.deepEqual(rows.map((row) => row.amountYen), [1200, 500]);
   assert.ok(rows.every((row) => row.amountYen > 0));
   assert.ok(rows.every((row) => !row.error));
+  assert.ok(rows.every((row) => !row.selected));
   assert.ok(rows.every((row) => row.occurredAt === row.occurredAt.trim()));
   assert.equal(payPayDateToIso(rows[0].occurredAt), "2026-07-15T11:01:44.000Z");
 });
@@ -84,7 +85,7 @@ test("同じ取引番号でも取引日時が違えば、それぞれ取り込�
   assert.deepEqual(rows.map(row => row.externalId), [
     "PayPay_20261010143000_000123", "PayPay_20261010143001_000123", "PayPay_20261011143000_000123",
   ]);
-  assert.deepEqual(rows.map(row => row.selected), [false, true, true]);
+  assert.deepEqual(rows.map(row => row.selected), [false, false, false]);
 });
 
 test("取込担当者の変更でもCSVの外部IDは変わらない", () => {
@@ -108,14 +109,16 @@ test("不正な取引日や取引番号の行はプレビューで登録不可�
   }
 });
 
-test("同じCSV内で完全に同じ明細が複数ある場合は1件だけ選択する", () => {
+test("同じCSV内で完全に同じ明細が複数ある場合は1件だけ登録可能にする", () => {
   const csv = [
     "取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号",
     "2026/10/10 14:30:00,500,支払い,店舗,PayPay残高,abc",
     "2026/10/10 14:30:00,500,支払い,店舗,PayPay残高,abc",
   ].join("\n");
   const rows = parsePayPayCsv(csv, [], new Set());
-  assert.deepEqual(rows.map(row => row.selected), [true, false]);
+  assert.deepEqual(rows.map(row => row.selected), [false, false]);
+  assert.equal(rows[0].duplicate, false);
+  assert.equal(rows[0].error, null);
   assert.match(rows[1].error!, /CSV内で重複/);
   assert.notEqual(rows[0].key, rows[1].key);
 });
