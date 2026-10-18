@@ -19,6 +19,8 @@ npm run task:start -- feature-name
 
 このコマンドは最新 `origin/main` から `codex/feature-name` と専用worktreeを作り、その中で `npm ci` を実行する。作業先を変える場合は `CAKE_WORKTREE_ROOT` をそのプロセスだけに指定する。
 
+実装前に[設計・実装原則](design-principles.md)を読み、変更する操作のデータ経路・共有する規則・保存と取得の順序・処理量・更新の整合性を確認する。関係する判断と分岐は基本/詳細設計へ反映し、同じ観点を自己レビュー・別Agentレビューでも確認する。
+
 ## 2. ローカル検証と日本語のdraft PR
 
 開発は、実装・関連テスト・自己レビュー → commit → 別Agentレビュー → 指摘への対応・必要な再レビュー → 最終SHAでのローカル検証 → draft PR → 現在HEADのCI・自動Preview・変更に必要な検証 → Readyの順に進める。文書のみの変更にも別Agentレビューを適用する。
