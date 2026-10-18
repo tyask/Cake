@@ -653,7 +653,7 @@ amountYen         = abs(payer.balance)</div>
 
         <section id="database">
           <h2>10. データベース物理設計</h2>
-          <p class="lead">PostgreSQL。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜012の順次適用後を指す。</p>
+          <p class="lead">PostgreSQL。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜013の順次適用後を指す。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>テーブル</th><th>主キー</th><th>主要列・制約・Index</th><th>参照・削除</th></tr></thead>
             <tbody>
@@ -683,7 +683,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>cake_reorder_default_rules</code></td><td>workspace行ロック・所属・現在全ルールとの完全一致を確認し、sort_orderを0始まりで再採番。</td></tr>
               <tr><td><code>cake_delete_default_rules</code></td><td>単件/複数の共通削除。1〜5000件・UUIDとしての一意性を確認し、workspace→actorのmember FOR SHARE→対象ID順FOR UPDATEでロックする。全件必須モードは不足時に中止、単件モードは不存在0件成功。削除後はsort_order/created_at/id順を0始まりへ再採番し、互換Triggerでpriorityも同期する。旧並べ替え関数・旧版の削除SQLを保持する。</td></tr>
               <tr><td><code>cake_assert_settlement_snapshot</code></td><td>workspace行ロック・所属・全未清算SHARED明細の計算値Snapshot一致を同じTransactionで確認。</td></tr>
-              <tr><td><code>cake_bulk_transactions</code></td><td>operationと1〜5000件の一意IDを検証。workspace行ロック、member FOR SHARE、対象をID順FOR UPDATE。全件存在・未清算を確認後、DELETEまたはAPPLY_RULESを実行し、ロック中の確定値を返す。</td></tr>
+              <tr><td><code>cake_bulk_transactions</code></td><td>operationと1〜5000件の一意IDを検証。workspace行ロック、member FOR SHARE、対象をID順FOR UPDATE。全件存在・未清算を確認後、DELETEまたはAPPLY_RULESを実行し、ロック中の確定値を返す。APPLY_RULESは参加者/現在割合の集約を一回行い、LATERALで各明細の有効・部分一致・sort_order/created_at/id順の先頭を選ぶ。実際に使う共有費ルールごとに参加者キーを補完し、最大5000件の仮割合JSONを全件検証して一つのUPDATEで保存する。</td></tr>
               <tr><td><code>cake_normalize_paypay_external_id</code> / <code>cake_assert_paypay_duplicate</code></td><td>PayPay INSERT時の旧ID正規化と、ON CONFLICT条件でのsource・金額・取引先照合。</td></tr>
               <tr><td><code>cake_mutate_recurring_payment</code> / <code>cake_generate_recurring_payment</code></td><td>workspace→定期設定→利用者(ID順)・memberの順にロック。所属・利用可否・状態・revision・設定を再確認する。編集は設定を即時更新し、再開は即時ACTIVEにする。追加・編集・再開時に処理予定日を09:00境界で計算する。生成では当日予定の再判定、明細INSERTと処理予定日の翌月への更新を同じTransactionで確定する。</td></tr>
             </tbody>
@@ -704,6 +704,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>010_recurring_payment_remove_start_on.sql</td><td>既存Previewの開始日カラムstart_onがあれば削除する。旧開始日Triggerをworkspace_idの変更禁止へ置き換え、開始日に依存していた複合CHECKを残る月列の月初CHECKへ置き換える。新規DBでは列がなく、既存の月初制約を重複して追加しない。現行アプリは削除列を参照しない。既存設定と追加済み明細は保持する。</td></tr>
               <tr><td>011_recurring_payment_next_scheduled_on.sql</td><td>既存DBへ処理予定日next_scheduled_onと計算関数を追加する。未設定の予定日は設定日と適用時刻の日本時間09:00境界から初期化し、NOT NULLにする。追加・編集・再開・生成関数を現行仕様へ揃える。成功月は予定判定・生成に使わず、追加済み明細と旧列の値は保持する。</td></tr>
               <tr><td>012_delete_default_rules.sql</td><td>単件・複数の共通削除関数を追加。既存表・既存DB関数の引数・旧アプリの呼出しは変更せず、全対象確認をworkspaceロック後へ移す。</td></tr>
+              <tr><td>013_bulk_rule_application.sql</td><td>既存cake_bulk_transactionsの署名・DELETE・ロック/全件検証・確定DTOを維持し、APPLY_RULESを一回の参加者集約・使用ルールごとの割合投影・集合UPDATEへ置き換える。004は変更しない。</td></tr>
             </tbody>
           </table></div>
           <p><code>scripts/setup-db.mjs</code>は環境に応じたDB接続（PreviewはCAKE_TEST_DATABASE_URL、それ以外はDATABASE_URL）を確認し、番号付きSQLをファイル名順に適用する。schema_migrationsを作成し、各SQLと適用履歴を同じDO文/Transaction内で実行。共通advisory lockで同時適用を防ぎ、適用済みファイルを省略する。再実行しても利用者/権限を初期状態へ戻さない。</p>
@@ -788,6 +789,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>settlement.test.ts / expense-splits.test.ts / split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、受け取り、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>
               <tr><td>transaction-editing.test.ts / transaction-updates.test.ts / transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>
               <tr><td>transaction-filters.test.ts / transaction-filter-storage.test.ts / transaction-list.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗、多数候補・非表示選択・条件外行の保持。</td></tr>
+              <tr><td>bulk-rule-sql.test.ts / scripts/bulk-rule-*.ts</td><td>共通fixtureのTS/実SQL一致、無効/未一致/同順位/部分一致/新参加者0、最大5000件、不正割合・清算済み/対象不足の全件中止、集合UPDATE中の失敗とrollback。隔離PostgreSQLの独立sessionで編集/清算との実ロック待機を確認し、旧004と同じデータでDB実行時間とpg_stat_statementsの内部回数を比較する。アプリのNeon通信は一回の関数SELECTのまま。互換Triggerの明細ごとの処理は別計数で維持する。</td></tr>
               <tr><td>rule-deletion.test.ts / scripts/rule-deletion-scenarios.ts</td><td>共通削除の実SQL、単件/複数/全件・不存在・他workspace・重複UUID・認可・残存順序・旧版互換と全体rollback。一時PostgreSQLと専用Preview DBで同じシナリオを使い、独立した二つの実DB sessionで同時削除/並べ替え/所属解除のロック待機と確定結果を確認する。</td></tr>
               <tr><td>rule-order.test.ts</td><td>楽観順序の組み立てと解除、多数ルール、外部追加・削除、未知・重複ID、入力配列の維持。</td></tr>
               <tr><td>domain-schemas.test.ts / app-input.typecheck.ts</td><td>入口間の金額・文字数・割合境界、全actionの入力、既存の省略・strict/strip契約、共有入力の実行時依存境界。型検査では不一致payload・未知action・有限ログ値の拒否を確認する。</td></tr>
