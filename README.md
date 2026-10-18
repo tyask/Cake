@@ -150,6 +150,8 @@ npm run db:seed:test # テストユーザーA・Bと共有ワークスペース�
 
 ## PR Preview
 
+Previewの手動操作は下記のnpmコマンドを使います。作成・状態照合・削除は `scripts/preview-command.ts` を入口としてmainのActionsへ要求し、PR作成・Ready管理は `npm run task:pr` を使います。
+
 同一repositoryの `codex/*` からmainへのPR作成・更新・再openで、draftを含めて専用Vercel PreviewとNeon Native DBを自動作成・更新します。PR未作成のpushだけでは作成せず、Vercel Git連携のfeature deployは止めたままmainのActionsで管理します。PR作成・更新は専用DBへのmigration/seedを、merge/closeは資源削除を起動するため、対象と影響が承認された範囲で実行してください。
 
 ```bash
