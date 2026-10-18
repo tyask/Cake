@@ -19,11 +19,11 @@ type Query = { query: string; params: unknown[] };
 type Trip = { queries: Query[]; transaction: boolean };
 
 function encoded(rows: Row[]) {
-  const fields = Object.entries(rows[0] ?? {}).map(([name, value]) => ({ name, dataTypeID: typeof value === "boolean" ? 16 : value && typeof value === "object" ? 3802 : 25 }));
-  return { fields, rows: rows.map(row => fields.map(({ name, dataTypeID }) => row[name] == null ? null : dataTypeID === 16 ? row[name] ? "t" : "f" : dataTypeID === 3802 ? JSON.stringify(row[name]) : String(row[name]))) };
+  const fields = Object.entries(rows[0] ?? {}).map(([name, value]) => ({ name, dataTypeID: value instanceof Date ? 1184 : typeof value === "boolean" ? 16 : value && typeof value === "object" ? 3802 : 25 }));
+  return { fields, rows: rows.map(row => fields.map(({ name, dataTypeID }) => row[name] == null ? null : dataTypeID === 1184 ? (row[name] as Date).toISOString().replace("T", " ").replace("Z", "+00") : dataTypeID === 16 ? row[name] ? "t" : "f" : dataTypeID === 3802 ? JSON.stringify(row[name]) : String(row[name]))) };
 }
 
-function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean; rules?: Row[]; deleteError?: string } = {}) {
+function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean; rules?: Row[]; deleteError?: string; transaction?: Row } = {}) {
   const previous = { url: process.env.DATABASE_URL, logging: process.env.DB_QUERY_LOG, fetch: neonConfig.fetchFunction };
   process.env.DATABASE_URL = "postgresql://user:password@mock.neon.tech/app_service_test";
   process.env.DB_QUERY_LOG = "off";
@@ -37,7 +37,7 @@ function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean;
     if (/WITH authorized AS/.test(query)) return [{ authorized: !options.forbidden, workspace_type: "SHARED", members: memberRows, transactions: [{ id: transactionId, actorUserId: "a", type: "PAYMENT", amountYen: 300, expenseClass: "SHARED", splitWeights: { a: 1, b: 1 } }] }];
     if (/WITH\s+my_workspaces AS/.test(query)) return [{
       workspaces: [{ id: workspaceId, name: "QA", type: "SHARED", owner_user_id: "a", member_count: 2 }], selected_workspace_id: workspaceId,
-      members: memberRows, rules: [ruleRow], transactions: [transaction], pending_invitations: [], settlement_history: [],
+      members: memberRows, rules: [ruleRow], transactions: [options.transaction ?? transaction], pending_invitations: [], settlement_history: [],
     }];
     if (/SELECT \* FROM app_users|UPDATE app_users SET name/.test(query)) return [{ id: user.id, email: user.email, name: user.name, image_url: null, is_enabled: true, is_admin: false }];
     if (/SELECT w.id, w.name, w.type, w.owner_user_id/.test(query)) return options.forbidden ? [] : [{ id: workspaceId, name: "QA", type: "SHARED" }];
@@ -53,7 +53,7 @@ function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean;
     if (/cake_delete_default_rules/.test(query)) return [{ deleted: 1 }];
     if (/RETURNING imported_rows, skipped_rows/.test(query)) return [{ imported_rows: 1, skipped_rows: 0 }];
     if (/RETURNING id, memo/.test(query)) return [{ id: transactionId, memo: "メモ" }];
-    if (/RETURNING \*/.test(query)) return [transaction];
+    if (/RETURNING \*/.test(query)) return [options.transaction ?? transaction];
     if (/RETURNING id|SELECT id FROM default_rules/.test(query)) return [{ id: ruleId }];
     return [];
   }
@@ -226,4 +226,24 @@ test("別workspaceまたは不存在のルール更新は対象SELECT後に書�
     assert.equal(f.trips.length, 3);
     assert.ok(f.trips.every(trip => !trip.transaction));
   }
+});
+
+test("NeonのtimestamptzをDateで受けても新規・編集のHTTP応答と再取得にミリ秒を残す", async t => {
+  const occurredAt = "2026-12-31T15:00:42.123Z";
+  const date = new Date(occurredAt);
+  const f = fixture(t, { transaction: { ...transaction, occurred_at: date } });
+  for (const input of [{ ...save, occurredAt }, { ...save, occurredAt, transactionId }]) {
+    const response = await f.post(input);
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.transaction.occurredAt, occurredAt);
+    assert.ok(f.trips.at(-1)!.queries[1].params.includes(occurredAt));
+  }
+  const response = await f.handlers.GET(new Request(`https://cake.example/api/app?workspaceId=${workspaceId}`));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.selected.transactions[0].occurredAt, occurredAt);
+  assert.equal(body.selected.transactions[0].settledAt, null);
+  assert.doesNotMatch(f.trips.at(-1)!.queries[0].query, /date_trunc/);
+  assert.equal(date.toISOString(), occurredAt);
 });

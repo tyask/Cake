@@ -1,5 +1,7 @@
 "use client";
 
+import { formatYen } from "@/lib/display-formatters";
+
 import { expenseClassLabels, expenseClasses } from "@/lib/domain-values";
 
 import { useState } from "react";
@@ -11,7 +13,7 @@ import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } fro
 import styles from "./transactions-panel.module.css";
 
 const money = (value: number) => Number.isFinite(value)
-  ? new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(value) : "—";
+  ? formatYen(value) : "—";
 
 export function ImportPreviewTable({ rows, members, actorId, saving, onSelect, onSelectAll, onChangeClass, onChangeSplit }: {
   rows: PayPayPreviewRow[];

@@ -1,5 +1,7 @@
 "use client";
 
+import { formatYen } from "@/lib/display-formatters";
+
 import { MAX_AMOUNT_YEN, MAX_SPLIT_WEIGHT } from "@/lib/domain-values";
 
 import { useId, useState } from "react";
@@ -75,7 +77,7 @@ export function SplitEditor({ members, value, onChange, onCommit, amountYen, dis
               readOnly={!onChange} disabled={transactionSplit && (members.length < 2 || mode === "AMOUNT" && !validAmount)}
               onChange={(event) => updateShare(member.id, event.target.value)} />
               {transactionSplit && <span aria-hidden="true">{mode === "AMOUNT" ? "円" : "%"}</span>}</div>
-            <small>{transactionSplit && mode === "RATIO" ? money(amounts[member.id]) : total > 0 ? `${percentages[member.id] / 10}%` : "—"}</small>
+            <small>{transactionSplit && mode === "RATIO" ? formatYen(amounts[member.id]) : total > 0 ? `${percentages[member.id] / 10}%` : "—"}</small>
           </label>
         ))}
         {inline && transactionSplit && <select aria-label={`${label}の単位`} value={mode} onChange={(event) => changeMode(event.target.value)}>
@@ -88,8 +90,6 @@ export function SplitEditor({ members, value, onChange, onCommit, amountYen, dis
     </fieldset>
   );
 }
-
-const money = (value: number) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(value);
 
 function safeAmounts(total: number, value: SplitWeights, members: WorkspaceMember[]) {
   try { return splitAmounts(total, value, members); }
