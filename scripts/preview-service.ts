@@ -51,7 +51,7 @@ export class PreviewService {
       if (!inventory.database || !sameDatabase(inventory.database, database)) throw new Error('PREVIEW_DATABASE_LOST');
     }
     const phase = database ? 'application' : 'provisioning';
-    const env = { AUTH_MODE: 'test', CAKE_PREVIEW_REPOSITORY: config.repository, CAKE_PREVIEW_PR: String(s.pr), CAKE_PREVIEW_GENERATION: generation,
+    const env = { ...(s.pr === 0 ? { CAKE_PREVIEW_KIND: 'main' } : {}), AUTH_MODE: 'test', CAKE_PREVIEW_REPOSITORY: config.repository, CAKE_PREVIEW_PR: String(s.pr), CAKE_PREVIEW_GENERATION: generation,
       CAKE_PREVIEW_SOURCE_BRANCH: s.branch, CAKE_PREVIEW_SOURCE_SHA: s.sha, CAKE_PREVIEW_PHASE: phase,
       CAKE_PREVIEW_DATABASE_BRANCH_ID: database?.branchId ?? '', CAKE_PREVIEW_DATABASE_HOST_SHA256: database?.hostDigest ?? '',
       CAKE_PREVIEW_PRODUCTION_HOST_SHA256: config.productionHostDigest };

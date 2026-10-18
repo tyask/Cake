@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { config, uuid } from './preview-model';
+import staging from '../staging.config.json';
 import { fullSha, validTaskBranch } from './task-workflow';
 
 type Environment = Readonly<Record<string, string | undefined>>;
@@ -9,11 +10,12 @@ type Environment = Readonly<Record<string, string | undefined>>;
 export function provisioningBuild(environment: Environment): boolean {
   if (environment.CAKE_PREVIEW_PHASE !== 'provisioning') return false;
   const pr = environment.CAKE_PREVIEW_PR;
+  const mainPreview = environment.CAKE_PREVIEW_KIND === 'main';
   if (environment.VERCEL_ENV !== 'preview' || environment.AUTH_MODE !== 'test'
     || environment.CAKE_PREVIEW_REPOSITORY !== config.repository
-    || !/^[1-9][0-9]*$/.test(pr ?? '') || !Number.isSafeInteger(Number(pr)) || Number(pr) > 2147483647
+    || (mainPreview ? pr !== '0' : environment.CAKE_PREVIEW_KIND !== undefined || !/^[1-9][0-9]*$/.test(pr ?? '') || !Number.isSafeInteger(Number(pr)) || Number(pr) > 2147483647)
     || !uuid(environment.CAKE_PREVIEW_GENERATION)
-    || !validTaskBranch(environment.CAKE_PREVIEW_SOURCE_BRANCH)
+    || (mainPreview ? environment.CAKE_PREVIEW_SOURCE_BRANCH !== staging.branch : !validTaskBranch(environment.CAKE_PREVIEW_SOURCE_BRANCH))
     || environment.CAKE_PREVIEW_SOURCE_BRANCH !== environment.VERCEL_GIT_COMMIT_REF
     || !fullSha(environment.CAKE_PREVIEW_SOURCE_SHA)
     || environment.CAKE_PREVIEW_SOURCE_SHA !== environment.VERCEL_GIT_COMMIT_SHA
