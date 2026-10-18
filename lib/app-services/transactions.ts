@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { transactionRecord } from "../transaction-record";
 import { resolveTransactionSplit, transactionNeedsRules } from "./splits";
+import { prepareDefaultRuleMatcher } from "../expense-splits";
 import type { ExpenseClass, SplitWeights } from "../types";
 import type { AppStore } from "../app-store";
 import type { AppUser } from "../types";
@@ -26,11 +27,13 @@ export async function transactionsService(store: AppStore, user: AppUser, input:
         && (previous.expense_class === "SHARED" || input.actorUserId === previous.actor_user_id)
         ? previous.split_weights as SplitWeights : input.splitWeights,
     };
+    const needsRules = transactionNeedsRules(splitInput);
     const [members, rules] = await Promise.all([
       store.splitMembers(input.workspaceId),
-      transactionNeedsRules(splitInput) ? store.splitRules(input.workspaceId) : Promise.resolve([]),
+      needsRules ? store.splitRules(input.workspaceId) : Promise.resolve([]),
     ]);
-    const split = resolveTransactionSplit(splitInput, { members, rules });
+    const matchRule = needsRules ? prepareDefaultRuleMatcher(rules) : () => undefined;
+    const split = resolveTransactionSplit(splitInput, { members, matchRule });
     let saved: Record<string, unknown>;
     if (input.transactionId) {
       const updated = await store.updateTransaction(input, user, split);

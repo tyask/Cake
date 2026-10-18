@@ -1,7 +1,7 @@
 import Papa from "papaparse";
 import { MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "./domain-values";
 import { amountYenSchema, merchantSchema, methodSchema } from "./domain-schemas";
-import { matchingDefaultRule, transactionDefaults } from "./expense-splits";
+import { prepareDefaultRuleMatcher, transactionDefaults } from "./expense-splits";
 import { applyPayPayDuplicateChecks } from "./import-duplicates";
 import { payPayDateToIso, payPayExternalId } from "./paypay-id";
 import type { DefaultRule, ExpenseClass, SplitWeights, WorkspaceMember } from "./types";
@@ -38,7 +38,7 @@ function parseAmount(value: string | undefined) {
 }
 
 export function defaultExpenseClass(merchant: string, rules: DefaultRule[]): ExpenseClass {
-  return matchingDefaultRule(merchant, rules)?.expenseClass ?? "SHARED";
+  return prepareDefaultRuleMatcher(rules)(merchant)?.expenseClass ?? "SHARED";
 }
 
 export function parsePayPayCsv(
@@ -58,6 +58,7 @@ export function parsePayPayCsv(
     throw new Error(`必要な列がありません: ${missingHeaders.join("、")}`);
   }
 
+  const matchRule = prepareDefaultRuleMatcher(rules);
   const rows = parsed.data
     .filter((row) => row["取引内容"]?.trim() === "支払い")
     .map((row, index): PayPayPreviewRow => {
@@ -93,7 +94,7 @@ export function parsePayPayCsv(
         method,
         amountYen,
         externalId,
-        ...transactionDefaults(merchant, rules, members, actorUserId, "SHARED"),
+        ...transactionDefaults(merchant, matchRule, members, actorUserId, "SHARED"),
         duplicate,
         error,
       };

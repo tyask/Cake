@@ -60,25 +60,24 @@ export function personalSplitWeights(members: readonly { id: string }[], actorUs
   );
 }
 
-export function matchingDefaultRule(merchant: string, rules: readonly DefaultRule[]): DefaultRule | undefined {
-  let match: DefaultRule | undefined;
-  for (const rule of rules) {
-    // Only a smaller sortOrder replaces the match; ties preserve input order.
-    if (rule.enabled && (!match || rule.sortOrder < match.sortOrder) && merchant.includes(rule.merchantContains)) {
-      match = rule;
-    }
-  }
-  return match;
+export type DefaultRuleMatcher = (merchant: string) => DefaultRule | undefined;
+
+/** Reuse for an immutable rule list; prepare again when that list changes. */
+export function prepareDefaultRuleMatcher(rules: readonly DefaultRule[]): DefaultRuleMatcher {
+  const enabled = rules.filter(rule => rule.enabled);
+  // Stable sort preserves input order for tied priorities and leaves rules untouched.
+  if (enabled.length > 1) enabled.sort((a, b) => a.sortOrder - b.sortOrder);
+  return merchant => enabled.find(rule => merchant.includes(rule.merchantContains));
 }
 
 export function transactionDefaults(
   merchant: string,
-  rules: readonly DefaultRule[],
+  matchRule: DefaultRuleMatcher,
   members: readonly MemberWeight[],
   actorUserId: string,
   fallbackExpenseClass: ExpenseClass = "PERSONAL",
 ): { expenseClass: ExpenseClass; splitWeights: SplitWeights } {
-  const rule = matchingDefaultRule(merchant, rules);
+  const rule = matchRule(merchant);
   const expenseClass = rule?.expenseClass ?? fallbackExpenseClass;
   if (expenseClass === "PERSONAL") {
     return { expenseClass, splitWeights: personalSplitWeights(members, actorUserId) };

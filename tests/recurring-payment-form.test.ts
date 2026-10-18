@@ -3,6 +3,7 @@ import test from "node:test";
 import { recurringFormConfig, recurringFormDefaults, recurringFormPreview } from "../lib/recurring-payment-form";
 import type { RecurringPayment } from "../lib/recurring-payment-types";
 import type { WorkspaceMetadata } from "../lib/types";
+import { prepareDefaultRuleMatcher } from "../lib/expense-splits";
 import { defaultRuleCases, ruleMembers } from "./fixtures/default-rule-cases";
 
 const selected: WorkspaceMetadata = { workspace: { id: "w", name: "家計", type: "SHARED", ownerUserId: "a", memberCount: 2 },
@@ -18,7 +19,7 @@ for (const fixture of defaultRuleCases) {
     let merchantReads = 0;
     const rules = fixture.rules.map(rule => ({ ...rule, get merchantContains() { merchantReads++; return rule.merchantContains; } }));
     const workspace = { ...selected, rules, members: selected.members.map((member, i) => ({ ...member, weight: ruleMembers[i].weight })) };
-    assert.deepEqual(recurringFormDefaults(workspace, fixture.merchant, "b"), {
+    assert.deepEqual(recurringFormDefaults(workspace, fixture.merchant, "b", prepareDefaultRuleMatcher(rules)), {
       expenseClass: fixture.expenseClass, splitWeights: fixture.splitWeights,
     });
     assert.ok(merchantReads <= rules.length, "一致確認のためにルールを二度走査しない");
@@ -36,7 +37,7 @@ test("editing starts with the current saved amount and day and copies split weig
 test("new recurring payment selects an eligible actor and fixes a personal workspace split", () => {
   assert.equal(recurringFormConfig(selected, "a", ["b"], "2026-10-10").actorUserId, "b");
   const personal = { ...selected, workspace: { ...selected.workspace, type: "PERSONAL" as const } };
-  assert.deepEqual(recurringFormDefaults(personal, "", "b"), { expenseClass: "PERSONAL", splitWeights: { a: 0, b: 1 } });
+  assert.deepEqual(recurringFormDefaults(personal, "", "b", prepareDefaultRuleMatcher(personal.rules)), { expenseClass: "PERSONAL", splitWeights: { a: 0, b: 1 } });
 });
 
 test("preview chooses this month before the configured day at JST 09:00 and next month at the boundary", () => {

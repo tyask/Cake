@@ -5,7 +5,7 @@ import { commonExpenseClassLabels, expenseClasses, MAX_AMOUNT_YEN, MAX_MERCHANT_
 import type { AppActionInput, RunAppAction } from "@/lib/app-input";
 
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { signOut } from "next-auth/react";
 import { PersonalSettings } from "./personal-settings";
 import { UserManagement } from "./user-management";
@@ -17,7 +17,7 @@ import { ImportPreviewTable } from "./import-preview-table";
 import { TransactionsPanel } from "./transactions-panel";
 import { RecurringPaymentsPanel } from "./recurring-payments-panel";
 import { RefreshButton } from "./refresh-button";
-import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
+import { defaultSplitWeights, personalSplitWeights, prepareDefaultRuleMatcher, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
 import { parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
 import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
 import { applyTransactionUpdate } from "@/lib/transaction-updates";
@@ -509,6 +509,7 @@ function WorkspaceModal({ close, run }: { close: () => void; run: RunAppAction }
 }
 
 function NewTransactionModal({ selected, currentUserId, close, run }: { selected: WorkspaceData; currentUserId: string; close: () => void; run: RunAppAction }) {
+  const matchRule = useMemo(() => prepareDefaultRuleMatcher(selected.rules), [selected.rules]);
   const initialActor = selected.members.some((member) => member.id === currentUserId) ? currentUserId : selected.members[0]?.id ?? "";
   const [occurredAt, setOccurredAt] = useState(inputDate());
   const [merchant, setMerchant] = useState("");
@@ -523,7 +524,7 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
   const [error, setError] = useState<string | null>(null);
 
   function applyDefaults(nextMerchant = merchant, nextActor = actorUserId) {
-    const defaults = transactionDefaults(nextMerchant, selected.rules, selected.members, nextActor, "SHARED");
+    const defaults = transactionDefaults(nextMerchant, matchRule, selected.members, nextActor, "SHARED");
     setExpenseClass(defaults.expenseClass);
     setSplitWeights(defaults.splitWeights);
   }

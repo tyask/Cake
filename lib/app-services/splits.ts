@@ -1,8 +1,8 @@
-import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights } from "../expense-splits";
-import type { DefaultRule, ExpenseClass, SplitWeights, WorkspaceMember } from "../types";
+import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights, type DefaultRuleMatcher } from "../expense-splits";
+import type { ExpenseClass, SplitWeights, WorkspaceMember } from "../types";
 
 type TransactionSplitInput = { merchant: string; actorUserId: string; expenseClass?: ExpenseClass; splitWeights?: SplitWeights };
-type SplitContext = { members: readonly Pick<WorkspaceMember, "id" | "weight" | "name">[]; rules: readonly DefaultRule[] };
+type SplitContext = { members: readonly Pick<WorkspaceMember, "id" | "weight" | "name">[]; matchRule: DefaultRuleMatcher };
 
 /** Apply this after inheriting any saved classification and ratio. */
 export function transactionNeedsRules(input: Pick<TransactionSplitInput, "expenseClass" | "splitWeights">) {
@@ -16,7 +16,7 @@ export function resolveTransactionSplit(
 ) {
   if (!context.members.some((member) => member.id === input.actorUserId)) throw new Error("取引担当者がワークスペースに参加していません。");
   const defaults = transactionNeedsRules(input)
-    ? transactionDefaults(input.merchant, context.rules, context.members, input.actorUserId, fallbackExpenseClass) : null;
+    ? transactionDefaults(input.merchant, context.matchRule, context.members, input.actorUserId, fallbackExpenseClass) : null;
   const expenseClass = input.expenseClass ?? defaults?.expenseClass ?? fallbackExpenseClass;
   const splitWeights = input.splitWeights === undefined
     ? expenseClass === "PERSONAL"

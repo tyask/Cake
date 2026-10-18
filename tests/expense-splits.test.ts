@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { defaultSplitWeights, matchingDefaultRule, personalSplitWeights, transactionDefaults, validateSplitWeights } from "../lib/expense-splits";
+import { defaultSplitWeights, prepareDefaultRuleMatcher, personalSplitWeights, transactionDefaults, validateSplitWeights } from "../lib/expense-splits";
 import { defaultRuleCases } from "./fixtures/default-rule-cases";
 import type { DefaultRule } from "../lib/types";
 
@@ -15,8 +15,9 @@ for (const fixture of defaultRuleCases) {
     const rules = structuredClone(fixture.rules);
     for (const item of rules) Object.freeze(item);
     Object.freeze(rules);
-    assert.equal(matchingDefaultRule(fixture.merchant, rules)?.id, fixture.matchedId);
-    assert.deepEqual(transactionDefaults(fixture.merchant, rules, members, "b", "SHARED"), {
+    const matchRule = prepareDefaultRuleMatcher(rules);
+    assert.equal(matchRule(fixture.merchant)?.id, fixture.matchedId);
+    assert.deepEqual(transactionDefaults(fixture.merchant, matchRule, members, "b", "SHARED"), {
       expenseClass: fixture.expenseClass, splitWeights: fixture.splitWeights,
     });
     assert.deepEqual(rules, fixture.rules);
@@ -39,25 +40,25 @@ test("個人費は担当者だけが1になり、担当者の変更に追従す�
 test("一番上の一致ルールを採用し、順番を入れ替えると区分と割合が変わる", () => {
   const shared = rule({ id: "shared", sortOrder: 0, splitWeights: { a: 2, b: 3 } });
   const personal = rule({ id: "personal", merchantContains: "スーパー駅前", expenseClass: "PERSONAL", sortOrder: 1 });
-  assert.deepEqual(transactionDefaults("スーパー駅前店", [personal, shared], members, "a"), {
+  assert.deepEqual(transactionDefaults("スーパー駅前店", prepareDefaultRuleMatcher([personal, shared]), members, "a"), {
     expenseClass: "SHARED", splitWeights: { a: 2, b: 3 },
   });
-  assert.deepEqual(transactionDefaults("スーパー駅前店", [{ ...personal, sortOrder: 0 }, { ...shared, sortOrder: 1 }], members, "a"), {
+  assert.deepEqual(transactionDefaults("スーパー駅前店", prepareDefaultRuleMatcher([{ ...personal, sortOrder: 0 }, { ...shared, sortOrder: 1 }]), members, "a"), {
     expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 },
   });
 });
 
 test("無効なルールは飛ばし、該当しない取引は担当者の個人費にする", () => {
-  assert.deepEqual(transactionDefaults("スーパー", [rule({ enabled: false })], members, "b"), {
+  assert.deepEqual(transactionDefaults("スーパー", prepareDefaultRuleMatcher([rule({ enabled: false })]), members, "b"), {
     expenseClass: "PERSONAL", splitWeights: { a: 0, b: 1 },
   });
-  assert.deepEqual(transactionDefaults("薬局", [rule()], members, "b"), {
+  assert.deepEqual(transactionDefaults("薬局", prepareDefaultRuleMatcher([rule()]), members, "b"), {
     expenseClass: "PERSONAL", splitWeights: { a: 0, b: 1 },
   });
 });
 
 test("ルールの共有割合を省略した場合はワークスペースのデフォルトをコピーする", () => {
-  const snapshot = transactionDefaults("スーパー", [rule()], members, "a");
+  const snapshot = transactionDefaults("スーパー", prepareDefaultRuleMatcher([rule()]), members, "a");
   assert.deepEqual(snapshot.splitWeights, { a: 6, b: 4 });
   snapshot.splitWeights.a = 1;
   assert.equal(members[0].weight, 6);
@@ -65,14 +66,14 @@ test("ルールの共有割合を省略した場合はワークスペースの�
 
 test("ルールの割合はコピーし、新しい参加者に未指定の割合は0にする", () => {
   const savedRule = rule({ splitWeights: { a: 3 } });
-  const snapshot = transactionDefaults("スーパー", [savedRule], members, "b");
+  const snapshot = transactionDefaults("スーパー", prepareDefaultRuleMatcher([savedRule]), members, "b");
   assert.deepEqual(snapshot.splitWeights, { a: 3, b: 0 });
   snapshot.splitWeights.a = 9;
   assert.equal(savedRule.splitWeights?.a, 3);
 });
 
 test("個人費ルールの割合は登録者のIDによらず、明細の担当者を基準にする", () => {
-  assert.deepEqual(transactionDefaults("スーパー", [rule({ expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } })], members, "b"), {
+  assert.deepEqual(transactionDefaults("スーパー", prepareDefaultRuleMatcher([rule({ expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } })]), members, "b"), {
     expenseClass: "PERSONAL", splitWeights: { a: 0, b: 1 },
   });
 });

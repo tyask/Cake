@@ -571,7 +571,7 @@
           <h2>8. ドメイン処理詳細設計</h2>
           <h3>保存割合・デフォルト判定</h3>
           <p><code>SplitWeights = Record&lt;userId, number&gt;</code>は現在の参加者IDをすべて含み、余分なIDなし、各値0〜2147483647の整数、合計は正とする。<code>validateSplitWeights()</code>は入力のコピーを返す。個人費はactorが1・ほか0、共通費は任意の有効割合を保存する。</p>
-          <p><code>matchingDefaultRule()</code>は入力配列を変更せず一回走査し、有効な部分一致のうち<code>sortOrder</code>が最小のルールを選ぶ。同順位は入力順を維持し、未整列入力も受け付ける。CSVの各行を含め、判定時にルール配列をコピー・sortしない。<code>transactionDefaults()</code>はこの一回の判定から区分と割合を返す。未一致は既定PERSONAL、明細追加・定期支払いの共有workspace・CSV取込ではSHAREDフォールバックを指定し、一致確認のための再検索を行わない。共通費のルール割合nullはmemberの現在デフォルトをコピーする。明示ルールの新参加者IDがない場合は0として補う。個人費は担当者1・ほか0とし、デフォルトやルール変更だけでは過去明細の保存割合を変更しない。</p>
+          <p><code>prepareDefaultRuleMatcher(rules)</code>は有効なルールだけを新しい配列へ抽出し、<code>sortOrder</code>昇順の安定ソートを一度行って、先頭から最初に部分一致したルールを返す判定関数を作る。同順位は入力順を維持し、入力配列を変更せず、未整列入力も受け付ける。<code>transactionDefaults()</code>は準備済み判定関数を一度呼び、区分と割合を返す。CSV解析はファイル全行、取込APIはリクエスト内の全明細で一つの判定関数を共有し、単件登録も同じ方式で準備する。明細追加・定期支払いフォームはルール一覧を依存値にした<code>useMemo</code>で準備し、取引先の変更や再描画で再ソートせず、一覧更新時に作り直す。グローバルなルールキャッシュは持たない。未一致は既定PERSONAL、明細追加・定期支払いの共有workspace・CSV取込ではSHAREDフォールバックを指定する。共通費のルール割合nullはmemberの現在デフォルトをコピーする。明示ルールの新参加者IDがない場合は0として補う。個人費は担当者1・ほか0とし、デフォルトやルール変更だけでは過去明細の保存割合を変更しない。</p>
           <h3>PayPay CSV解析</h3>
           <p><code>parsePayPayCsv(text, rules, existingExternalIds, members?, actorUserId?): PayPayPreviewRow[]</code></p>
           <div class="state-flow"><span>BOM除去</span><i>→</i><span>PapaParse</span><i>→</i><span>必須Header検証</span><i>→</i><span>「支払い」抽出</span><i>→</i><span>行検証・Rule適用</span><i>→</i><span>ID照合後Preview</span></div>
