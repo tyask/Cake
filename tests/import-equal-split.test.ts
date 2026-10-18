@@ -50,13 +50,13 @@ test("割合の単位は共通の3択で、CSV取込と定期支払いの保存�
             if (url.pathname === "/api/import/duplicates") await route.fulfill({ json: { externalIds: [], transactions: [{
               externalId: payPayExternalId("2026-10-18T03:00:42.000Z", "duplicate"), merchant: "duplicate", amountYen: 101, source: "PAYPAY",
             }] } });
-            else if (url.pathname === "/api/app" && payload.action === "bulkImport") releaseSave = () => route.fulfill({ json: { ok: true, imported: 3, skipped: 3 } });
+            else if (url.pathname === "/api/app" && payload.action === "bulkImport") releaseSave = () => route.fulfill({ json: { ok: true, imported: 4, skipped: 2 } });
             else { errors.push("unexpected API"); await route.abort(); }
           });
           await page.addInitScript(selected => { window.importWorkspace = selected; }, workspace(memberCount));
           await page.goto(origin);
           await page.locator("input[type=file]").setInputFiles({ name: "equal.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
-          await page.getByRole("button", { name: "選択した4件を登録", exact: true }).waitFor();
+          await page.getByRole("button", { name: "登録", exact: true }).waitFor();
           const row = (merchant: string) => page.locator("[data-import-key]").filter({ has: page.locator('td[data-label="取引先"] b', { hasText: new RegExp(`^${merchant}$`) }) });
           for (const merchant of ["odd", "even", "unchecked", "personal", "invalid", "duplicate"]) {
             const item = row(merchant); if (width < 700) await item.getByRole("button", { name: /の詳細を開く$/ }).click();
@@ -78,18 +78,19 @@ test("割合の単位は共通の3択で、CSV取込と定期支払いの保存�
           assert.equal(await row("even").getByLabel("Bの支払い割合", { exact: true }).inputValue(), "30");
           await unit("even").selectOption("AMOUNT");await row("even").getByLabel("Aの支払い金額（円）", { exact: true }).fill("20");
           assert.equal(await row("even").getByLabel("Bの支払い金額（円）", { exact: true }).inputValue(), "80");await unit("even").selectOption("EQUAL");
-          const checkbox = row("unchecked").getByRole("checkbox", { name: "uncheckedを取り込む", exact: true });await checkbox.uncheck();
+          const checkbox = row("unchecked").getByRole("checkbox", { name: "uncheckedを選択", exact: true });
+          assert.equal(await checkbox.isChecked(), false);
           await unit("unchecked").selectOption("EQUAL");assert.equal(await checkbox.isChecked(), false);
           for (const merchant of ["personal", "invalid", "duplicate"]) assert.equal(await unit(merchant).isDisabled(), true);
           assert.equal(requests.length, 1);assert.deepEqual(await page.evaluate(() => window.importWorkspace.members.map(m => m.weight)), [6, 4]);
-          await page.getByRole("button", { name: "選択した3件を登録", exact: true }).click();
+          await page.getByRole("button", { name: "登録", exact: true }).click();
           await page.waitForFunction(() => document.querySelector(".sticky-actions .primary")?.textContent === "登録中…");
           for (const merchant of ["odd", "even", "unchecked"]) assert.equal(await unit(merchant).isDisabled(), true);
           assert.equal(requests.length, 2);assert.ok(releaseSave);const payload = requests[1].payload;
           assert.equal(requests[1].path, "/api/app");assert.equal(payload.action, "bulkImport");
           const items = payload.items as { merchant: string; splitWeights: Record<string, number>; amountYen: number }[];
-          assert.deepEqual(items.map(item => item.merchant), ["odd", "even", "personal"]);
-          for (const merchant of ["odd", "even"]) assert.deepEqual(items.find(item => item.merchant === merchant)!.splitWeights, { a: 1, b: 1 });
+          assert.deepEqual(items.map(item => item.merchant), ["odd", "even", "unchecked", "personal"]);
+          for (const merchant of ["odd", "even", "unchecked"]) assert.deepEqual(items.find(item => item.merchant === merchant)!.splitWeights, { a: 1, b: 1 });
           assert.deepEqual(items.find(item => item.merchant === "personal")!.splitWeights, { a: 1, b: 0 });
           assert.equal(items.find(item => item.merchant === "odd")!.amountYen, 101);
           await releaseSave();await page.getByRole("button", { name: "ファイルを選択", exact: true }).waitFor();assert.deepEqual(errors, []);

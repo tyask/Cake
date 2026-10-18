@@ -5,7 +5,7 @@ import { formatYen } from "@/lib/display-formatters";
 import { expenseClassLabels, expenseClasses } from "@/lib/domain-values";
 
 import { useState } from "react";
-import type { PayPayPreviewRow } from "@/lib/paypay";
+import { isPayPayRowImportable, type PayPayPreviewRow } from "@/lib/paypay";
 import type { ExpenseClass, SplitWeights, WorkspaceMember } from "@/lib/types";
 import { SelectionCheckbox } from "./selection-checkbox";
 import { SplitEditor } from "./split-editor";
@@ -26,7 +26,7 @@ export function ImportPreviewTable({ rows, members, actorId, saving, onSelect, o
   onChangeSplit: (key: string, splitWeights: SplitWeights) => void;
   onDelete: (key: string) => void;
 }) {
-  const eligible = rows.filter(row => !row.error && !row.duplicate);
+  const eligible = rows.filter(isPayPayRowImportable);
   const count = eligible.filter(row => row.selected).length;
   const allSelected = eligible.length > 0 && count === eligible.length;
   const columns = [
@@ -38,7 +38,7 @@ export function ImportPreviewTable({ rows, members, actorId, saving, onSelect, o
   ] as const;
   return <TransactionTable columns={columns} label="取り込み明細" header={<tr>
     {columns.map(column => <th key={column.id} className={column.id === "selection" ? styles.selectionCell : undefined}>
-      {column.id === "selection" ? <SelectionCheckbox label="取込対象をすべて選択" mobileLabel={allSelected ? "全解除" : "全選択"} checked={allSelected} partial={count > 0 && !allSelected} disabled={saving || eligible.length === 0} onChange={() => onSelectAll(!allSelected)} /> : column.label}
+      {column.id === "selection" ? <SelectionCheckbox label="登録可能な明細をすべて選択" mobileLabel={allSelected ? "全解除" : "全選択"} checked={allSelected} partial={count > 0 && !allSelected} disabled={saving || eligible.length === 0} onChange={() => onSelectAll(!allSelected)} /> : column.label}
     </th>)}
   </tr>}>
     {rows.map(row => <ImportPreviewRow key={row.key} row={row} members={members} actorId={actorId} saving={saving}
@@ -62,11 +62,11 @@ function ImportPreviewRow({ row, members, actorId, saving, onSelect, onChangeCla
   const invalid = !!row.error || row.duplicate;
   const disabled = saving || invalid;
   const status = row.error ?? (row.duplicate ? "登録済み" : "登録可能");
-  const selectionLabel = `${row.merchant || "取引先未設定"}を取り込む`;
-  return <tr className={styles.transactionRow} data-expanded={expanded} data-import-key={row.key}>
+  const selectionLabel = `${row.merchant || "取引先未設定"}を選択`;
+  return <tr className={`${styles.transactionRow}${row.duplicate ? ` ${styles.importDuplicate}` : ""}`} data-expanded={expanded} data-import-key={row.key}>
     <MobileTransactionSummary item={{ ...row, actorName }} expanded={expanded} onToggle={() => setExpanded(value => !value)}
       checked={row.selected} disabled={disabled} onSelect={() => onSelect(row.key, !row.selected)}
-      status={<span className={invalid ? styles.error : undefined}>{status}</span>}
+      status={<span className={row.error ? styles.error : undefined}>{status}</span>}
       selectionLabel={selectionLabel} columnCount={columnCount} onDelete={() => onDelete(row.key)} deleteDisabled={saving}
       dateLabel={row.occurredAt.replace(/:\d{2}$/, "") || "日時未設定"} amountLabel={money(row.amountYen)} />
     <td data-label="選択" className={styles.selectionCell} data-selection>
@@ -84,6 +84,6 @@ function ImportPreviewRow({ row, members, actorId, saving, onSelect, onChangeCla
       <SplitEditor compact inline label="支払い割合" members={members} value={row.splitWeights} amountYen={row.amountYen}
         disabled={disabled || row.expenseClass === "PERSONAL"} onChange={value => onChangeSplit(row.key, value)} />
     </td>
-    <td data-label="状態"><span className={invalid ? styles.error : styles.muted}>{status}</span></td>
+    <td data-label="状態"><span className={row.error ? styles.error : styles.muted}>{status}</span></td>
   </tr>;
 }

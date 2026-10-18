@@ -30,7 +30,7 @@ test("登録済みの同じキーで内容が違えば重複扱いで隠さず�
 test("同じ番号でも日時が違う登録済みキーは取り込みを妨げない", () => {
   const original = rows();
   const checked = applyPayPayDuplicateChecks(original, [{ ...original[0], externalId: "PayPay_20261011143000_abc", source: "PAYPAY" }]);
-  assert.equal(checked[0].selected, true);
+  assert.equal(checked[0].selected, false);
   assert.equal(checked[0].duplicate, false);
 });
 
@@ -41,4 +41,11 @@ test("重複確認は接頭辞を含む最大長と最大2000件の制限を受�
   assert.equal(importDuplicateCheckSchema.safeParse({ workspaceId, externalIds: [maxId + "1"] }).success, false);
   assert.equal(importDuplicateCheckSchema.safeParse({ workspaceId, externalIds: Array(2000).fill(maxId) }).success, true);
   assert.equal(importDuplicateCheckSchema.safeParse({ workspaceId, externalIds: Array(2001).fill(maxId) }).success, false);
+});
+
+test("重複照合は登録可能行のチェックを維持し、登録済みになった行は解除する", () => {
+  const original = rows();
+  original[0].selected = true;
+  assert.equal(applyPayPayDuplicateChecks(original)[0].selected, true);
+  assert.equal(applyPayPayDuplicateChecks(original, [{ ...original[0], source: "PAYPAY" }])[0].selected, false);
 });

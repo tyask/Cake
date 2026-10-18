@@ -134,3 +134,13 @@
 .settledSplit { display: flex; gap: 1rem; font-size: inherit; }
 .settledSplit > span { display: grid; gap: .2rem; }
 .settledSplit small { color: var(--muted); font-size: .62rem; }
+
+.table .importDuplicate {
+  --ink: #6b7280;
+  --muted: #6b7280;
+  --paper: #f3f4f6;
+  --surface-disabled: #e5e7eb;
+  --disabled-ink: #6b7280;
+  color: var(--ink);
+  background: var(--paper);
+}
