@@ -1,3 +1,6 @@
+export const DateTimePrecision = { Minute: "minute", Second: "second" } as const;
+export type DateTimePrecision = typeof DateTimePrecision[keyof typeof DateTimePrecision];
+
 const yenFormatter = new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" });
 const dateTimeOptions: Intl.DateTimeFormatOptions = {
   timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
@@ -11,6 +14,6 @@ export function formatYen(value: number): string {
 }
 
 /** Display only. datetime-local values must use the input conversion functions. */
-export function formatJstDateTime(value: string, precision: "minute" | "second" = "second"): string {
-  return (precision === "minute" ? minuteFormatter : secondFormatter).format(new Date(value));
+export function formatJstDateTime(value: string, precision: DateTimePrecision = DateTimePrecision.Second): string {
+  return (precision === DateTimePrecision.Minute ? minuteFormatter : secondFormatter).format(new Date(value));
 }

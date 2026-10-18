@@ -4,7 +4,7 @@ import {
   transactionActorPatch, transactionDateInput, transactionDateToIso,
   transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues,
 } from "../lib/transaction-editing";
-import { formatJstDateTime } from "../lib/display-formatters";
+import { formatJstDateTime, DateTimePrecision } from "../lib/display-formatters";
 import type { TransactionRecord, WorkspaceMember } from "../lib/types";
 
 const members: WorkspaceMember[] = [
@@ -28,7 +28,7 @@ test("一覧の日時はJSTで表示し、日付をまたいでも秒・ミリ�
   // Display drops subsecond precision; editing must keep it across the JST year boundary.
   const yearEnd = "2026-12-31T15:00:42.123Z";
   assert.equal(formatJstDateTime(yearEnd), "2027/01/01 00:00:42");
-  assert.equal(formatJstDateTime(yearEnd, "minute"), "2027/01/01 00:00");
+  assert.equal(formatJstDateTime(yearEnd, DateTimePrecision.Minute), "2027/01/01 00:00");
   assert.equal(transactionDateToIso(transactionDateInput(yearEnd)), yearEnd);
 });
 

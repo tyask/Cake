@@ -516,7 +516,7 @@
           </table></div>
           <h3>金額・日時の表示と入力</h3>
           <p><code>formatYen</code>は日本円の通貨記号と桁区切りを表示し、ホーム・明細・清算・定期支払い・負担金額・CSV確認表で共用する。CSVの非有限金額を「—」にする補正は確認表に残す。通貨記号を付けない円表記や数値入力は各画面の書式を使う。</p>
-          <p><code>formatJstDateTime</code>はAsia/Tokyo固定で、ホーム・清算履歴・清算済み明細では秒まで、スマートフォンの明細要約では分まで表示する。CSVの元日時と定期支払いの日付表示は各画面で保持する。表示関数はdatetime-local入力には使わない。明細編集の<code>transactionDateInput</code>／<code>transactionDateToIso</code>は秒・ミリ秒を保持し、UTCへ変換する。新規明細の入力初期値は専用formatterを再利用して分まで表示する。</p>
+          <p><code>formatJstDateTime</code>は<code>DateTimePrecision.Minute</code>／<code>Second</code>で表示精度を指定し（既定は秒）、Asia/Tokyo固定で、ホーム・清算履歴・清算済み明細では秒まで、スマートフォンの明細要約では分まで表示する。CSVの元日時と定期支払いの日付表示は各画面で保持する。表示関数はdatetime-local入力には使わない。明細編集の<code>transactionDateInput</code>／<code>transactionDateToIso</code>は秒・ミリ秒を保持し、UTCへ変換する。新規明細の入力初期値は専用formatterを再利用して分まで表示する。</p>
           <h3>新規明細</h3>
           <p>NewTransactionModalはPAYMENTを登録する。UI初期値は共通費と現在のデフォルト割合で、取引先ルールに一致すると区分・割合を適用する。ルール未一致もUIでは共通費を選び、利用者が区分/割合を変更した後は自動適用を止める。APIと清算計算はRECEIPTも扱うが、新規画面には種別切替を持たない。</p>
           <h3 id="recurring-payments">定期支払いの取得・変更・実行</h3>

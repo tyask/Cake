@@ -1,6 +1,6 @@
 "use client";
 
-import { formatYen, formatJstDateTime } from "@/lib/display-formatters";
+import { formatYen, formatJstDateTime, DateTimePrecision } from "@/lib/display-formatters";
 
 import { expenseClassLabels } from "@/lib/domain-values";
 
@@ -59,7 +59,7 @@ export function MobileTransactionSummary({ item, expanded, onToggle, checked, di
   return <td className={styles.mobileSummary} colSpan={columnCount} data-selection>
     <input className={styles.checkbox} type="checkbox" aria-label={selectionLabel ?? item.merchant + "の明細を選択"} checked={checked} disabled={disabled} onChange={onSelect} />
     <button type="button" className={styles.summaryButton} aria-expanded={expanded} aria-label={item.merchant + "の詳細を" + (expanded ? "閉じる" : "開く")} onClick={onToggle}>
-      <span className={styles.summaryName}><b>{item.merchant}</b><small>{dateLabel ?? formatJstDateTime(item.occurredAt, "minute")} · {item.actorName}{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</small></span>
+      <span className={styles.summaryName}><b>{item.merchant}</b><small>{dateLabel ?? formatJstDateTime(item.occurredAt, DateTimePrecision.Minute)} · {item.actorName}{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</small></span>
       <span className={styles.summaryAmount}><strong>{amountLabel ?? formatYen(item.amountYen)}</strong><small>{status ?? (expenseClassLabels[item.expenseClass])}</small></span>
       <span className={styles.summaryChevron} aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
     </button>
