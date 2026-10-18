@@ -66,7 +66,7 @@ export function SwipeDelete({ children, label, disabled = false, onDelete }: {
     <button ref={action} id={actionId} type="button" className={styles.remove} hidden={!shown} disabled={disabled}
       aria-label={`${label}を削除`} onClick={() => { if (!disabled) onDelete(); }}>削除</button>
     <div className={styles.content} onPointerDown={start} onPointerMove={move}
-      onPointerUp={() => { gesture.current = null; }} onPointerCancel={() => { gesture.current = null; }}
+      onPointerUp={() => { gesture.current = null; }} onPointerCancel={() => { gesture.current = null; moved.current = false; }}
       onClickCapture={event => {
         if (moved.current || shown) { event.preventDefault(); event.stopPropagation(); if (!moved.current) setOpen(false); moved.current = false; }
       }}>

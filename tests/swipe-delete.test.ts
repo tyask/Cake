@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { build } from "esbuild";
 import { chromium, type Locator, type Page } from "playwright";
 
-async function swipe(page: Page, target: Locator, dx = -100, dy = 0) {
+async function swipe(page: Page, target: Locator, dx = -100, dy = 0, cancel = false) {
   await target.scrollIntoViewIfNeeded();
   const box = (await target.boundingBox())!;
   const x = box.x + box.width * .65, y = box.y + box.height / 2;
@@ -13,7 +13,7 @@ async function swipe(page: Page, target: Locator, dx = -100, dy = 0) {
   try {
     await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
     for (let step = 1; step <= 6; step++) await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + dx * step / 6, y: y + dy * step / 6 }] });
-    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await session.send("Input.dispatchTouchEvent", { type: cancel ? "touchCancel" : "touchEnd", touchPoints: [] });
   } finally { await session.detach(); }
 }
 
@@ -59,6 +59,11 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
         const surface = row.locator('[class*="body"]');
         assert.equal(await action.isVisible(), false);
         if (view !== "rules") {
+          await swipe(page, surface, -20, 0, true);
+          const summary = page.getByRole("button", { name: `${name}の詳細を開く`, exact: true });
+          await summary.focus();await page.keyboard.press("Enter");
+          await page.getByRole("button", { name: `${name}の詳細を閉じる`, exact: true }).waitFor();
+          await page.keyboard.press("Enter");
           await swipe(page, surface, -100, -130);assert.equal(await action.isVisible(), false);
           await swipe(page, surface);await action.waitFor();
           assert.equal(await page.getByRole("button", { name: `${name}の詳細を閉じる`, exact: true }).count(), 0, "スワイプで詳細を開かない");
@@ -80,7 +85,8 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
           await page.getByRole("button", { name: "登録中…", exact: true }).waitFor();
           assert.equal(await other.isDisabled(), true);
           await swipe(page, page.locator("[data-import-key]").locator('[class*="body"]'));assert.equal(await page.locator('[data-swipe-open="true"]').count(), 0);
-          while (!releaseWrite) await new Promise(resolve => setTimeout(resolve, 5));releaseWrite();
+          for (let attempt = 0; !releaseWrite && attempt < 200; attempt++) await new Promise(resolve => setTimeout(resolve, 5));
+          assert.ok(releaseWrite);releaseWrite();
           await page.getByRole("button", { name: "ファイルを選択", exact: true }).waitFor();
           assert.equal(writes.length, 1);assert.equal(writes[0].totalRows, 2);
           assert.deepEqual((writes[0].items as { merchant: string }[]).map(item => item.merchant), ["second"]);

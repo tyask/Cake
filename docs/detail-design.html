@@ -679,7 +679,7 @@
           <p>開始・登録成功・省略・失敗・終了は<code>recurring.*</code>の構造化サーバーログで確認する。失敗は固定エラーコードと対象設定IDで確認し、金額・取引先・メモ・SQL本文・認証情報は記録しない。「要確認」は利用不可などで停止した設定で、原因を修正して再開する。過去の未登録分は通常の明細追加で登録する。アプリ内に共通ログ画面は設けない。</p>
           <p>ホームの指標金額はoverflow-wrap: anywhere、次の清算の内部Gridはminmax(0, 1fr)とし、送金額も縮小・折り返しを許可する。桁数の多い金額がページ全体を押し広げてスマートフォンの下部ナビゲーションを妨げないようにする。</p>
           <h3>スマートフォンの削除操作</h3>
-          <p><code>SwipeDelete</code>は幅48rem以下のタッチ・ペン操作で削除ボタンの開閉だけを管理する。10px以上の移動で横方向（横移動が縦の1.3倍超）と縦方向を判定し、横に45px以上動いたら左右に応じて開閉する。<code>touch-action: pan-y pinch-zoom</code>で縦スクロールと拡大を保ち、横移動後のclickによる詳細展開を抑止する。入力・select・textarea・並べ替えハンドルではスワイプを開始しない。別行・一覧外のpointerdown/focus、Escape、PC幅への変更で閉じる。削除操作を開く補助ボタンと、対象名を含む削除ボタンを提供する。</p>
+          <p><code>SwipeDelete</code>は幅48rem以下のタッチ・ペン操作で削除ボタンの開閉だけを管理する。10px以上の移動で横方向（横移動が縦の1.3倍超）と縦方向を判定し、横に45px以上動いたら左右に応じて開閉する。<code>touch-action: pan-y pinch-zoom</code>で縦スクロールと拡大を保ち、横移動後のclickによる詳細展開を抑止する。pointercancelではジェスチャーとclick抑止を解除し、続くキーボード操作を妨げない。入力・select・textarea・並べ替えハンドルではスワイプを開始しない。別行・一覧外のpointerdown/focus、Escape、PC幅への変更で閉じる。削除操作を開く補助ボタンと、対象名を含む削除ボタンを提供する。</p>
           <div class="data-flow">
             <div class="dfd-track" role="img" aria-label="左スワイプまたは補助ボタンで削除枠を開き、削除ボタンを押して画面別の処理へ進む">
               <div class="dfd-node source"><strong>左スワイプ / 補助ボタン</strong><small>画面内の開閉Stateだけ変更</small></div>
