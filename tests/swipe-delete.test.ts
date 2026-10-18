@@ -56,7 +56,8 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(done => server.close(() => done())); throw error; });
   try {
-    for (const view of ["transactions", "import", "rules", "recurring"]) await t.test(view, async () => {
+    for (const entry of ["transactions", "import", "import-paste", "rules", "recurring"]) await t.test(entry, async () => {
+      const view = entry === "import-paste" ? "import" : entry;
       const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }), page = await context.newPage();
       const writes: Record<string, unknown>[] = [], errors: string[] = [];
       let fail = false, archived = false;
@@ -77,7 +78,13 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
           await route.fulfill({ json: path === "/api/recurring-payments" ? { payment: { ...payment, state: "ARCHIVED", revision: 2 } } : { ok: true, transaction: { ...payload, id: payload.transactionId, actorName: "A", source: "MANUAL", settledAt: null, memo: "" } } });
         });
         await page.goto(`${origin}/?view=${view}`);
-        if (view === "import") await page.locator('input[type="file"]').setInputFiles({ name: "swipe.csv", mimeType: "text/csv", buffer: Buffer.from("取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n2026/10/18 12:00:00,100,支払い,first,現金,1\n2026/10/18 12:01:00,200,支払い,second,現金,2") });
+        if (view === "import") {
+          const csv = "取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n2026/10/18 12:00:00,100,支払い,first,現金,1\n2026/10/18 12:01:00,200,支払い,second,現金,2";
+          if (entry === "import-paste") {
+            await page.evaluate(text => Object.defineProperty(navigator, "clipboard", { configurable: true, value: { readText: Promise.resolve.bind(Promise, text) } }), csv);
+            await page.getByRole("button", { name: "貼り付け", exact: true }).click();
+          } else await page.locator('input[type="file"]').setInputFiles({ name: "swipe.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
+        }
         const name = view === "rules" ? "rule1" : view === "recurring" ? "家賃" : "first";
         const reveal = page.getByRole("button", { name: `${name}の削除操作`, exact: true });
         await reveal.waitFor();
@@ -116,7 +123,7 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
           await reveal.focus();await page.keyboard.press("Enter");await other.focus();await page.keyboard.press("Enter");await action.waitFor({ state: "hidden" });
           await page.keyboard.press("Escape");
           await swipe(page, surface);
-          page.once("dialog", dialog => { assert.match(dialog.message(), /first.*取込一覧から削除/);void dialog.dismiss(); });
+          page.once("dialog", dialog => { assert.equal(dialog.message(), "「first」を取込一覧から削除しますか？");void dialog.dismiss(); });
           await action.click();assert.equal(await row.count(), 1);assert.equal(writes.length, 0);
           assert.equal(await card.getByLabel("Aの支払い割合", { exact: true }).inputValue(), "70");
           assert.equal(await page.getByRole("button", { name: "選択した2件を登録", exact: true }).count(), 1);
@@ -129,11 +136,12 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
           assert.ok(releaseWrite);releaseWrite();
           await page.getByRole("button", { name: "ファイルを選択", exact: true }).waitFor();
           assert.equal(writes.length, 1);assert.equal(writes[0].totalRows, 2);
+          assert.equal(writes[0].fileName, entry === "import-paste" ? "PayPay貼り付け.csv" : "swipe.csv");
           assert.deepEqual((writes[0].items as { merchant: string }[]).map(item => item.merchant), ["second"]);
         } else if (view === "recurring") {
           await swipe(page, surface);await action.click();
           const dialog = page.getByRole("dialog", { name: "定期支払いを削除", exact: true });await dialog.waitFor();
-          assert.match((await dialog.textContent())!, /追加済みの明細は残ります/);assert.equal(writes.length, 0);
+          assert.equal(await dialog.locator('[class*="confirmText"]').textContent(), "今後の自動追加を終了します。");assert.equal(writes.length, 0);
           await dialog.getByRole("button", { name: "キャンセル", exact: true }).click();assert.equal(writes.length, 0);
           await reveal.focus();await page.keyboard.press("Enter");await action.click();fail = true;await dialog.getByRole("button", { name: "削除する", exact: true }).click();
           await dialog.getByRole("alert").waitFor();assert.equal(writes.length, 1);assert.equal(await row.count(), 1);
@@ -147,7 +155,10 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
           if (view === "rules") await swipe(page, surface.locator('label').filter({ hasText: "取引先" }).first().locator('span').first());
           else await swipe(page, surface);
           await action.waitFor();
-          page.once("dialog", dialog => dialog.dismiss());await action.click();assert.equal(writes.length, 0);assert.equal(await row.count(), 1);
+          page.once("dialog", dialog => {
+            if (view === "transactions") assert.equal(dialog.message(), "「first」の明細を削除しますか？");
+            void dialog.dismiss();
+          });await action.click();assert.equal(writes.length, 0);assert.equal(await row.count(), 1);
           fail = true;page.once("dialog", dialog => dialog.accept());await action.click();
           await page.getByRole("alert").filter({ hasText: "テスト保存失敗" }).waitFor();assert.equal(writes.length, 1);assert.equal(await row.count(), 1);
           fail = false;if (!await action.isVisible()) { await reveal.focus();await page.keyboard.press("Enter"); }page.once("dialog", dialog => dialog.accept());await action.click();await reveal.waitFor({ state: "hidden" });

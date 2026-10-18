@@ -263,7 +263,7 @@ function RecurringPaymentConfirmation({ action, payment, close, save, reloadLate
       <p className={styles.confirmMerchant}>{payment.currentConfig.merchant}</p>
       {action === "pause" && <p className={styles.confirmText}>今後の自動追加を直ちに停止します。追加済みの明細は残ります。</p>}
       {action === "resume" && <p className={styles.confirmText}>自動追加を再開します。予定日に明細を追加します。停止期間分は追加しません。</p>}
-      {action === "archive" && <p className={styles.confirmText}>今後の自動追加を終了します。追加済みの明細は残ります。この設定は再開できません。</p>}
+      {action === "archive" && <p className={styles.confirmText}>今後の自動追加を終了します。</p>}
       {error && <p className="form-error" role="alert">{error}</p>}{conflict && <button type="button" className="text-button" disabled={saving} onClick={() => { void reloadLatest(payment); }}>最新の設定を確認する</button>}
       <div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={close}>キャンセル</button><button type="submit" className={action === "archive" ? `secondary ${styles.deleteButton}` : "primary"} disabled={saving || conflict}>{saving ? "保存中…" : `${verb}する`}</button></div>
     </form>

@@ -142,7 +142,7 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
     if (bulkBusyRef.current || refreshBusyRef.current || refreshing || targetIds.length === 0) return;
     const ids = [...targetIds];
     const deletePrompt = targetIds !== checkedIds && ids.length === 1
-      ? `「${currentSelected.current.transactions.find(item => item.id === ids[0])?.merchant ?? "対象"}」の明細を削除しますか？この操作は元に戻せません。`
+      ? `「${currentSelected.current.transactions.find(item => item.id === ids[0])?.merchant ?? "対象"}」の明細を削除しますか？`
       : `選択した${ids.length}件の明細を削除しますか？`;
     if (action === "deleteTransactions" && !confirm(deletePrompt)) return;
     bulkBusyRef.current = true;

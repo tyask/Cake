@@ -5,7 +5,7 @@ import { signIn } from "next-auth/react";
 import { useState } from "react";
 import { TestLoginButtons } from "./test-login-buttons";
 
-export function LoginScreen({ testAuth = false, error }: { testAuth?: boolean; error?: string }) {
+export function LoginScreen({ testAuth = false, error, redirectTo = "/" }: { testAuth?: boolean; error?: string; redirectTo?: string }) {
   const [signingIn, setSigningIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const errorMessage = loginError ?? (error === "AccessDenied"
@@ -17,7 +17,7 @@ export function LoginScreen({ testAuth = false, error }: { testAuth?: boolean; e
     setSigningIn(true);
     setLoginError(null);
     try {
-      await signIn("google", { redirectTo: "/" });
+      await signIn("google", { redirectTo });
     } catch {
       setLoginError("ログインできませんでした。もう一度お試しください。");
       setSigningIn(false);
@@ -32,7 +32,7 @@ export function LoginScreen({ testAuth = false, error }: { testAuth?: boolean; e
         </header>
         <div className="login-actions">
           {errorMessage && <p className="form-error login-error" role="alert">{errorMessage}</p>}
-          {testAuth ? <TestLoginButtons /> : <>
+          {testAuth ? <TestLoginButtons redirectTo={redirectTo} /> : <>
             <button className="google-button" disabled={signingIn} onClick={login}>
               <span className="google-mark">G</span>{signingIn ? "ログイン画面へ移動中…" : "Googleでログイン"}
             </button>

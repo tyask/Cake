@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { build } from "esbuild";
 import { chromium, type Page, type Route } from "playwright";
 import type { BootstrapData, BootstrapMetadata, TransactionRecord } from "../lib/types";
+import type { DashboardTab } from "../lib/bootstrap";
 
 function data(id = "a", merchant = "initial"): BootstrapData {
   const user = { id: "user", name: "A", email: "a@example.test", imageUrl: null };
@@ -39,14 +40,14 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(done => server.close(() => done())); throw error; });
-  async function scenario(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) => Promise<void>) {
+  async function scenario(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) => Promise<void>, initialTab?: DashboardTab) {
     await t.test(name, async () => {
-      const f = await fixture();
+      const f = await fixture(initialTab);
       try { await run(f); assert.deepEqual(f.errors, []); }
       finally { await f.context.close(); }
     });
   }
-  async function fixture() {
+  async function fixture(initialTab?: DashboardTab) {
     const context = await browser.newContext({ serviceWorkers: "block" }), page = await context.newPage();
     const requests: Route[] = [], errors: string[] = [];
     page.setDefaultTimeout(5000);
@@ -56,7 +57,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       if (url.origin !== origin) { errors.push("unexpected origin"); await route.abort(); return; }
       if (url.pathname === "/api/app") requests.push(route); else await route.continue();
     });
-    await page.addInitScript(initial => { window.initialData = initial; }, data());
+    await page.addInitScript(({ initial, initialTab }) => { window.initialData = initial; window.initialTab = initialTab; }, { initial: data(), initialTab });
     await page.goto(origin);
     await page.waitForFunction(() => !!window.controller);
     async function take(method = "GET") {
@@ -69,7 +70,17 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
     return { context, page, requests, errors, take, reply };
   }
   try {
+    await scenario("取込から開始すると初回描画からimportを選び、更新はmetadata、homeへの移動はfullを要求する", async f => {
+      await expectState(f.page, { tab: "import", loading: false }); assert.equal(f.requests.length, 0);
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+      let request = await f.take(); assert.equal(new URL(request.request().url()).searchParams.get("scope"), "metadata");
+      await f.reply(request, metadata()); await expectState(f.page, { tab: "import", "selected.workspace.name": "metadata", "selected.transactions.0.merchant": "initial" });
+      await f.page.evaluate(() => window.controller.openTab("home"));
+      request = await f.take(); assert.equal(new URL(request.request().url()).searchParams.has("scope"), false);
+      await f.reply(request, data("a", "home")); await expectState(f.page, { tab: "home", "selected.transactions.0.merchant": "home", loading: false });
+    }, "import");
     await scenario("metadataは同一家計の明細を保持し、homeとworkspace切替はfullを要求する", async f => {
+      await expectState(f.page, { tab: "home" });
       await f.page.evaluate(() => window.controller.openTab("settings"));
       let request = await f.take(); assert.equal(new URL(request.request().url()).searchParams.get("scope"), "metadata");
       await f.reply(request, metadata()); await expectState(f.page, { "selected.workspace.name": "metadata", "selected.transactions.0.merchant": "initial", loading: false });

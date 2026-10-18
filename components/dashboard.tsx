@@ -28,8 +28,8 @@ const navItems: { id: Tab; label: string; icon: string }[] = [
   { id: "settings", label: "設定", icon: "⚙" },
 ];
 
-export function Dashboard({ initialData, testAuth = false }: { initialData: BootstrapData; testAuth?: boolean }) {
-  const { data, selected, tab, loading, refreshing, notice, setNotice, refresh, refreshCurrentView, run, switchWorkspace, openTab } = useDashboardController(initialData);
+export function Dashboard({ initialData, initialTab = "home", testAuth = false }: { initialData: BootstrapData; initialTab?: Tab; testAuth?: boolean }) {
+  const { data, selected, tab, loading, refreshing, notice, setNotice, refresh, refreshCurrentView, run, switchWorkspace, openTab } = useDashboardController(initialData, initialTab);
   const [workspaceModal, setWorkspaceModal] = useState(false);
   const [transactionModal, setTransactionModal] = useState(false);
   return (

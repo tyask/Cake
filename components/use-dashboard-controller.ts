@@ -10,11 +10,11 @@ import type { BootstrapData, BootstrapMetadata, BootstrapScope } from "@/lib/typ
 
 const NOTICE_DURATION_MS = 2_000;
 
-export function useDashboardController(initialData: BootstrapData) {
+export function useDashboardController(initialData: BootstrapData, initialTab: Tab = "home") {
   const [data, setData] = useState(initialData);
   const currentData = useRef(initialData);
-  const [tab, setTab] = useState<Tab>("home");
-  const currentTab = useRef<Tab>("home");
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const currentTab = useRef<Tab>(initialTab);
   const tabGeneration = useRef(0);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
