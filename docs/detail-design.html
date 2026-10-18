@@ -572,8 +572,8 @@
 
             <div class="data-flow" id="flow-csv-actions">
               <div class="data-flow-head"><h4>E. CSVは「選択」と「登録」で到達先が変わる</h4><small>重複照会は専用API、登録はrun</small></div>
-              <div class="dfd-track" role="img" aria-label="ファイル選択、手動貼り付け本文の確認または貼り付けて確認ボタンでブラウザ内のCSV解析とルール適用を行い、外部IDを重複APIへ送り、既存明細の応答をプレビューに反映する。明細の登録は行わない">
-                <div class="dfd-node source"><strong>ファイル選択 / 貼り付けて確認 / 内容を確認</strong><small>File.text / タップ時のreadText / 手動本文<br />共通解析・参加者・ルール適用</small></div>
+              <div class="dfd-track" role="img" aria-label="ファイル選択または貼り付けて確認ボタンでブラウザ内のCSV解析とルール適用を行い、外部IDを重複APIへ送り、既存明細の応答をプレビューに反映する。明細の登録は行わない">
+                <div class="dfd-node source"><strong>ファイル選択 / 貼り付けて確認</strong><small>File.text / タップ時のreadText<br />共通解析・参加者・ルール適用</small></div>
                 <div class="dfd-arrow"><b>→</b><small>workspaceId<br />externalIds</small></div>
                 <div class="dfd-node store"><strong>POST /api/import/duplicates</strong><small>所属確認 → DBの既存ID照会<br />既存の金額・取引先・source</small></div>
                 <div class="dfd-arrow"><b>→</b><small>transactions</small></div>
@@ -586,7 +586,7 @@
                 <div class="dfd-arrow"><b>→</b><small>metadata GET</small></div>
                 <div class="dfd-node output"><strong>登録数通知・プレビュー解除</strong><small>取込タブの情報を更新<br />明細タブを押すとfull GET</small></div>
               </div>
-              <div class="dfd-boundary"><b>送信範囲:</b> CSV本文はブラウザ内だけで解析する。重複照会はworkspace IDと外部ID、登録は選択済み明細・ファイル名・件数を送る。ファイル・手動貼り付け・クリップボード読取は共通の要求IDを使い、古い非同期結果を破棄する。本文はURL・Web Storageへ保存せず、画面起動時のクリップボード読取も行わない。</div>
+              <div class="dfd-boundary"><b>送信範囲:</b> CSV本文はブラウザ内だけで解析する。重複照会はworkspace IDと外部ID、登録は選択済み明細・ファイル名・件数を送る。ファイル・クリップボード読取は共通の要求IDを使い、古い非同期結果を破棄する。本文はURL・Web Storageへ保存せず、画面起動時のクリップボード読取も行わない。</div>
             </div>
           </div>
 
@@ -598,7 +598,7 @@
               <tr><td>明細フォームの「追加する」</td><td>run(saveTransaction)：workspaceId、日時、取引先、方法、金額、actor、区分、割合、メモ。</td><td>B → DB → 確定transactionをdataへ追加。成功後にフォームを閉じる。</td></tr>
               <tr><td>明細のblur / Enter、選択項目の変更</td><td>行の検証 → 保存キュー → run(saveTransaction)：workspaceId、transactionId、明細値。</td><td>B → DB → 確定transactionで対象行を差し替え。</td></tr>
               <tr><td>メモのblur / Ctrl+Enter</td><td>保存キュー → run(saveTransactionMemo)：workspaceId、transactionId、memo。</td><td>B → DB → 対象明細のメモだけ更新。</td></tr>
-              <tr><td>CSVの選択・貼り付け・登録</td><td>手動入力だけでは通信なし。貼り付けて確認はタップ時だけreadTextで本文を取得し、共通確認時に重複APIへ外部ID、登録時はrun(bulkImport)に選択items。</td><td>E。選択・確認時は照会まで、登録時にDB保存。</td></tr>
+              <tr><td>CSVの選択・貼り付け・登録</td><td>貼り付けて確認はタップ時だけreadTextで本文を取得し、共通確認時に重複APIへ外部ID、登録時はrun(bulkImport)に選択items。</td><td>E。選択・確認時は照会まで、登録時にDB保存。</td></tr>
               <tr><td>設定の「変更を保存」／「割合を保存」</td><td>run(updateWorkspace)：workspaceId・name／run(updateWeights)：workspaceId・weights。</td><td>B → DB → settingsのmetadata GET。ルール操作もrunからDB更新後にmetadata GET。</td></tr>
               <tr><td>「清算を完了する」</td><td>confirm → run(completeSettlement)：workspaceId。</td><td>B → サーバーで対象明細を計算・再照合してDB確定 → settlementのfull GET。画面の計算額を送金・保存指示として送らない。</td></tr>
               <tr><td>workspace作成フォームの「作成する」</td><td>run(createWorkspace)：name・type。</td><td>B → DB → 応答workspaceIdの取得。metadataで選択先が変わる場合はfullを追加取得。</td></tr>
@@ -733,8 +733,7 @@
               <tr><td>行の値</td><td>取引先はtrim後1〜240文字。取引方法はtrim後1〜120文字、空ならPayPay。文字数超過行はAPI送信前のプレビューで登録不可にする。区分・割合はtransactionDefaultsのフォールバックをSHAREDとして決める。有効な一致ルールがなければ共有費とワークスペースのデフォルト割合、一致時はルールを優先する。bulkImport APIも費用区分省略時のフォールバックをSHAREDとする。通常明細のPERSONALフォールバックは維持する。ImportPanelにはログイン本人のcurrentUserIdを渡し、支払者actorIdの初期値に使う。支払者・区分・割合の手動変更は維持する。</td></tr>
               <tr><td>重複・衝突</td><td>既存IDとCSV内同一キーの一致行は初期選択OFF。同一CSVの繰返しは最初の一件だけ登録候補。同じキーで金額/取引先が異なる場合、既存sourceがPAYPAY以外の場合は衝突エラーとして登録不可。</td></tr>
               <tr><td>専用API照合</td><td>有効な外部IDをまとめ、最大2000件ずつ選択workspaceへ照合。照合完了前や失敗後に未確認のプレビューは表示しない。ファイル変更時の遅延応答は破棄する。</td></tr>
-              <tr><td>原本・下書き</td><td><code>File.text()</code>または「CSVの内容」のStateから共通解析する。手動貼り付けは「内容を確認」を押すまで通信せず、空本文・支払い行なし・ヘッダー不備や照合失敗は本文を残してエラーを表示する。「貼り付けて確認」はreadCsv内で最初のawaitより前にnavigator.clipboard.readTextを呼び、タップのuser activationを保持する。取得成功時は本文をStateへ反映して同じ解析へ進む。本文は通常表示しない。拒否・非対応では既存本文を保持し、「手動で貼り付ける」を開く固定の案内を表示する。読取やエラーから本文欄を自動展開しない。空や不正な本文・照合失敗でも取得本文を保持する。読み込み中は入力・形式・全入口を無効化する。workspace切替後の読取結果は、本文の反映や照会の開始前に破棄する。貼り付けのファイル名は固定の表示名を使う。サーバーへ送るのは選択済みitems・ファイル名・件数で、CSV本文は送信・保存しない。登録失敗はプレビューを保持し、登録成功時は本文も消去して手動欄を閉じる。ImportPanelは利用者・workspaceに属する画面Stateとし、workspaceやタブの切替で破棄する。取込先の家計名を入力画面とプレビューへ表示する。</td></tr>
-              <tr><td>手動入力欄の表示</td><td>初期状態は閉じ、CSV本文欄と「内容を確認」は描画しない。「手動で貼り付ける」で開き、「手動入力を閉じる」で隠す。aria-expandedとaria-controlsで開閉状態・対象を伝え、展開後の有効な入力欄へフォーカスする。開閉自体は通信せず本文を保持する。「貼り付けて確認」は読取開始時に欄を閉じる。全入口とも解析・照合成功で欄を閉じて確認表へ進むため、キャンセル・やり直す後も本文は非表示のまま保持する。手動入力中の解析・照合失敗では欄を開いたまま保持し、無効状態を解除した描画後にフォーカスする。読み込み中は開閉も無効化し、workspace切替時は本文と開閉状態を破棄する。</td></tr>
+              <tr><td>CSV原本・確認表</td><td><code>File.text()</code>またはタップ時の<code>navigator.clipboard.readText()</code>で取得した本文を共通解析する。readTextはreadCsv内の最初のawaitより前に呼び、タップのuser activationを保持する。CSV本文の入力欄・下書きStateは持たず、原本は読取処理内の一時値として解析し、明細のrowsだけを画面Stateへ反映する。拒否・非対応時はペースト許可の確認と再試行・ファイル選択を案内する。空本文・支払い行なし・ヘッダー不備・照合失敗では確認表を出さずエラーを表示し、再試行はCSVをコピーし直すかファイルを選び直す。読み込み中は形式・両入口を無効化し、ドロップも受け付けない。workspace切替後の読取結果は照会開始前に破棄し、古い照会結果も反映しない。貼り付けのファイル名は固定の表示名を使う。サーバーへ送るのは照会用外部IDと、登録時の選択済みitems・ファイル名・件数で、CSV本文は送信・保存しない。登録失敗は確認表・行選択を保持し、成功時は確認表を解除する。ImportPanelは利用者・workspaceに属する画面Stateとし、workspaceやタブの切替で破棄する。取込先の家計名を入力画面と確認表へ表示する。</td></tr>
               <tr><td>DB登録</td><td>外部IDを正規化し、キー順にTransactionへ追加。同一キーは競合行のロック下でsource・金額・取引先を確認。一致は省略、不一致は履歴も含め全体をロールバック。</td></tr>
             </tbody>
           </table></div>
@@ -938,7 +937,7 @@ BootstrapData extends BootstrapMetadata
             <thead><tr><th>テストファイル群</th><th>主な検証</th></tr></thead>
             <tbody>
               <tr><td>paypay.test.ts / paypay-id.test.ts / import-duplicates.test.ts / paypay-import.test.ts</td><td>支払い抽出、JST日時・外部ID・先頭ゼロ、旧ID正規化、行/既存重複・内容衝突、保存順、Transactionと実挿入件数。</td></tr>
-              <tr><td>import-paste.test.ts</td><td>PC/mobileの実ImportPanelで通常のCSV本文非表示・明示的な手動開閉と本文保持・フォーカス、タップ時だけのclipboard読取と手動貼り付け・ファイル選択の共通処理、拒否・非対応・空本文・遅延読取とworkspace境界、手動確認前の通信なし・原本不送信、本人・ルール・重複、入力/照合/登録失敗からの保持と再試行、成功時の本文消去、workspace切替後の遅延応答破棄を検証する。</td></tr>
+              <tr><td>import-paste.test.ts</td><td>PC/mobileの実ImportPanelでCSV本文・手動入力UIの不在、タップ時だけのclipboard読取とファイル選択の共通処理、拒否・非対応・空/不正CSV・照会失敗からの再コピー/再選択と再試行、原本不送信、本人・ルール・重複、登録失敗時の確認表保持と成功時解除、読み込み中の入口抑止、workspace切替後の遅延読取・照会結果破棄を検証する。</td></tr>
               <tr><td>home-navigation.test.ts</td><td>取込直リンクとworkspace指定の安全な内部URL化、未知・複数tabのhomeへのフォールバック、Google/テストログイン双方への復帰先引き渡しを確認する。実認証後の復帰はPreviewで別途確認する。</td></tr>
               <tr><td>settlement.test.ts / expense-splits.test.ts / split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、受け取り、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>
               <tr><td>transaction-editing.test.ts / transaction-updates.test.ts / transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>

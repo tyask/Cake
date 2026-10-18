@@ -11,16 +11,13 @@ import { PageHeading } from "./dashboard-ui";
 
 const importFormats = { PAYPAY: { label: "PayPay", parse: parsePayPayCsv } };
 const pastedFileName = "PayPay貼り付け.csv";
-const clipboardReadError = "クリップボードを読み取れませんでした。「手動で貼り付ける」を開き、入力欄を長押ししてペーストし、「内容を確認」を押してください。";
+const clipboardReadError = "クリップボードを読み取れませんでした。ペーストを許可して再度試すか、「ファイルを選択」からCSVを取り込んでください。";
 
 export function ImportPanel({ selected, currentUserId, run }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const textRef = useRef<HTMLTextAreaElement>(null);
   const [format, setFormat] = useState<keyof typeof importFormats>("PAYPAY");
   const [rows, setRows] = useState<PayPayPreviewRow[]>([]);
   const [fileName, setFileName] = useState("");
-  const [csvText, setCsvText] = useState("");
-  const [manualPasteOpen, setManualPasteOpen] = useState(false);
   const [actorId, setActorId] = useState(currentUserId);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -30,11 +27,8 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
   const busy = reading || saving;
 
   useEffect(() => () => { fileRequest.current += 1; }, []);
-  useEffect(() => {
-    if (manualPasteOpen && !busy && rows.length === 0) textRef.current?.focus();
-  }, [manualPasteOpen, busy, rows.length]);
 
-  async function readCsv(readText: () => string | Promise<string>, sourceName: string, updateDraft = false) {
+  async function readCsv(readText: () => string | Promise<string>, sourceName: string) {
     if (busy) return;
     const requestId = ++fileRequest.current;
     setReading(true);
@@ -44,8 +38,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
     try {
       const text = await readText();
       if (requestId !== fileRequest.current) return;
-      if (updateDraft) setCsvText(text);
-      if (!text.trim()) throw new Error("CSVの内容が空です。CSVの内容を貼り付けるか、ファイルを選択してください。");
+      if (!text.trim()) throw new Error("CSVの内容が空です。CSVをコピーし直すか、ファイルを選択してください。");
       const parsed = importFormats[format].parse(text, selected.rules, new Set(), selected.members, actorId);
       if (parsed.length === 0) throw new Error("取引内容が「支払い」の行がありません。PayPayの取引履歴を確認してください。");
       const externalIds = [...new Set(parsed.filter(row => !row.error).map(row => row.externalId).filter(Boolean))];
@@ -63,7 +56,6 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
       if (requestId !== fileRequest.current) return;
       setRows(applyPayPayDuplicateChecks(parsed, existing));
       setFileName(sourceName);
-      setManualPasteOpen(false);
       setError(null);
     } catch (failure) {
       if (requestId === fileRequest.current) {
@@ -79,13 +71,11 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
   }
 
   function pasteAndPreview() {
-    if (busy) return;
-    setManualPasteOpen(false);
     // Invoke readText before the first await so Safari retains the tap's activation.
     void readCsv(() => {
       if (!navigator.clipboard?.readText) throw new Error(clipboardReadError);
       return navigator.clipboard.readText().catch(() => { throw new Error(clipboardReadError); });
-    }, pastedFileName, true);
+    }, pastedFileName);
   }
 
   function changeActor(nextActor: string) {
@@ -117,8 +107,6 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
       await run({ action: "bulkImport", workspaceId: selected.workspace.id, fileName, totalRows: rows.length, items }, "明細を取り込みました。");
       setRows([]);
       setFileName("");
-      setCsvText("");
-      setManualPasteOpen(false);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "明細を登録できませんでした。"); }
     finally { setSaving(false); }
   }
@@ -135,20 +123,9 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
       <div className="import-inputs" aria-busy={reading}>
         <section className="panel import-paste" aria-labelledby="import-paste-title">
           <h2 id="import-paste-title">CSVを貼り付けて取込</h2>
-          <p id="import-paste-help">PayPayの共有からショートカットでCSVをコピーし、「貼り付けて確認」を押してください。Safariの確認が出たら「ペースト」を選びます。</p>
+          <p>PayPayの共有からショートカットでCSVをコピーし、「貼り付けて確認」を押してください。Safariの確認が出たら「ペースト」を選びます。</p>
           <button className="primary import-clipboard-button" disabled={busy} onClick={pasteAndPreview}>貼り付けて確認</button>
-          <button className="text-button" disabled={busy} aria-expanded={manualPasteOpen} aria-controls="import-manual-paste"
-            onClick={() => setManualPasteOpen(open => !open)}>{manualPasteOpen ? "手動入力を閉じる" : "手動で貼り付ける"}</button>
-          <div id="import-manual-paste" className="import-manual-paste" hidden={!manualPasteOpen}>
-            {manualPasteOpen && <>
-              <label htmlFor="import-csv-text">CSVの内容</label>
-              <textarea ref={textRef} id="import-csv-text" value={csvText} disabled={busy} rows={7} spellCheck={false} autoCapitalize="none" autoCorrect="off" autoComplete="off"
-                aria-describedby="import-paste-help" placeholder="見出し行を含むCSVの内容を貼り付けてください"
-                onChange={event => { setCsvText(event.target.value); setError(null); }} />
-              <button className="secondary" disabled={busy} onClick={() => void readCsv(() => csvText, pastedFileName)}>内容を確認</button>
-            </>}
-          </div>
-          <small>読み取れない場合は「手動で貼り付ける」を開き、入力欄を長押ししてペーストしてください。登録する明細は確認画面で選べます。</small>
+          <small>読み取れない場合は「ファイルを選択」から取り込めます。登録する明細は確認画面で選べます。</small>
         </section>
         <section className="panel upload-panel"
           onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); choose(event.dataTransfer.files[0]); }}>
