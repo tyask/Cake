@@ -187,35 +187,16 @@ export function createAppStore() {
       const sql = db();
       await sql`SELECT cake_reorder_default_rules(${input.workspaceId}::uuid, ${user.id}, ARRAY(SELECT value::uuid FROM jsonb_array_elements_text(${JSON.stringify(input.ruleIds)}::jsonb)))`;
     },
-    async deleteRule(input: Action<"deleteRule">) {
+    async deleteRules(workspaceId: string, userId: string, ruleIds: readonly string[], requireAll: boolean) {
       const sql = db();
-      await sql.transaction([
-        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
-        sql`DELETE FROM default_rules WHERE id = ${input.ruleId}::uuid AND workspace_id = ${input.workspaceId}::uuid`,
-        sql`WITH ranked AS (SELECT id, (row_number() OVER (ORDER BY sort_order, created_at, id) - 1)::integer AS position FROM default_rules WHERE workspace_id = ${input.workspaceId}::uuid)
-          UPDATE default_rules r SET sort_order = ranked.position FROM ranked WHERE r.id = ranked.id`,
-      ]);
-    },
-    async ruleTargets(input: Action<"deleteRules">, requestedIds: string) {
-      const sql = db();
-      return await sql`
-        SELECT id FROM default_rules
-        WHERE workspace_id = ${input.workspaceId}::uuid
-          AND id = ANY(ARRAY(SELECT value::uuid FROM jsonb_array_elements_text(${requestedIds}::jsonb)))
+      const [row] = await sql`
+        SELECT cake_delete_default_rules(
+          ${workspaceId}::uuid, ${userId},
+          ARRAY(SELECT value::uuid FROM jsonb_array_elements_text(${JSON.stringify(ruleIds)}::jsonb)),
+          ${requireAll}::boolean
+        ) AS deleted
       `;
-    },
-    async deleteRules(input: Action<"deleteRules">, requestedIds: string) {
-      const sql = db();
-      const results = await sql.transaction([
-        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
-        sql`DELETE FROM default_rules
-          WHERE workspace_id = ${input.workspaceId}::uuid
-            AND id = ANY(ARRAY(SELECT value::uuid FROM jsonb_array_elements_text(${requestedIds}::jsonb)))
-          RETURNING id`,
-        sql`WITH ranked AS (SELECT id, (row_number() OVER (ORDER BY sort_order, created_at, id) - 1)::integer AS position FROM default_rules WHERE workspace_id = ${input.workspaceId}::uuid)
-          UPDATE default_rules r SET sort_order = ranked.position FROM ranked WHERE r.id = ranked.id`,
-      ]);
-      return results[1].length;
+      return Number(row.deleted);
     },
   };
 }

@@ -108,12 +108,30 @@ test("ルール更新は同分類で省略した割合とenabledを保持し、�
   await assert.rejects(gone.execute({ action: "updateRule", workspaceId, ruleId, merchantContains: "店", expenseClass: "SHARED" }), /ルールがありません/);
 });
 
-test("個人費ルールの明示割合と一括削除の不足対象を拒否し、存在しない単独削除は成功する", async () => {
-  const f = fixture({ ruleTargets: async () => [], deleteRule: async () => {} });
+test("単件・複数ルール削除は所属確認後に同じstoreへ渡し、応答と全件必須の違いを保つ", async () => {
+  const f = fixture({ deleteRules: async () => 1 });
+  assert.deepEqual(await f.execute({ action: "deleteRule", workspaceId, ruleId }), { ok: true });
+  assert.deepEqual(f.calls, [
+    { name: "requireWorkspaceMember", args: [workspaceId, user.id] },
+    { name: "deleteRules", args: [workspaceId, user.id, [ruleId], false] },
+  ]);
+  f.calls.length = 0;
+  assert.deepEqual(await f.execute({ action: "deleteRules", workspaceId, ruleIds: [ruleId] }), { ok: true, deleted: 1 });
+  assert.deepEqual(f.calls, [
+    { name: "requireWorkspaceMember", args: [workspaceId, user.id] },
+    { name: "deleteRules", args: [workspaceId, user.id, [ruleId], true] },
+  ]);
+});
+
+test("個人費ルールの明示割合と一括削除のDB失敗を拒否し、存在しない単独削除は成功する", async () => {
+  const f = fixture({ deleteRules: async (_workspaceId, _userId, _ids, requireAll) => {
+    if (requireAll) throw new Error("選択したルールが見つかりません。画面を更新して選び直してください。");
+    return 0;
+  } });
   await assert.rejects(f.execute({ action: "createRule", workspaceId, merchantContains: "店", expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } }), /個人費ルールの割合/);
   await assert.rejects(f.execute({ action: "deleteRules", workspaceId, ruleIds: [ruleId] }), /選択したルールが見つかりません/);
   assert.deepEqual(await f.execute({ action: "deleteRule", workspaceId, ruleId }), { ok: true });
-  assert.ok(!f.calls.some(call => call.name === "deleteRules"));
+  assert.equal(f.calls.filter(call => call.name === "deleteRules").length, 2);
 });
 
 test("取込は共有費既定・有効ルールを使い、保存された件数を返す", async () => {

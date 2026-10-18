@@ -30,21 +30,12 @@ export async function rulesService(store: AppStore, user: AppUser, input: Action
     return { ok: true };
   }
 
-  if (input.action === "deleteRule") {
+  if (input.action === "deleteRule" || input.action === "deleteRules") {
     await store.requireWorkspaceMember(input.workspaceId, user.id);
-    await store.deleteRule(input);
-    return { ok: true };
-  }
-
-  if (input.action === "deleteRules") {
-    await store.requireWorkspaceMember(input.workspaceId, user.id);
-    const requestedIds = JSON.stringify(input.ruleIds);
-    const targets = await store.ruleTargets(input, requestedIds);
-    if (targets.length !== input.ruleIds.length) {
-      throw new Error("選択したルールが見つかりません。画面を更新して選び直してください。");
-    }
-    const deleted = await store.deleteRules(input, requestedIds);
-    return { ok: true, deleted };
+    const requireAll = input.action === "deleteRules";
+    const ids = input.action === "deleteRule" ? [input.ruleId] : input.ruleIds;
+    const deleted = await store.deleteRules(input.workspaceId, user.id, ids, requireAll);
+    return requireAll ? { ok: true, deleted } : { ok: true };
   }
 
   const unhandled: never = input;
