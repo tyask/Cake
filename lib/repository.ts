@@ -44,7 +44,7 @@ async function readBootstrapRow(
   const sql = db();
   // These lazy SQL fragments are executed only as part of the aggregate query.
   // Every workspace-specific aggregate is restricted to this authorized selection.
-  // JSON keeps fractional seconds; preserve the old Neon Date -> String DTO precision.
+  // Keep timestamp precision in the response; presentation belongs to the browser.
   const workspaceSelection = sql`
     my_workspaces AS (
       SELECT w.id, w.name, w.type, w.owner_user_id, w.updated_at, w.created_at,
@@ -90,7 +90,7 @@ async function readBootstrapRow(
     COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
         'id', i.id, 'workspace_name', w.name, 'inviter_name', u.name,
-        'expires_at', date_trunc('second', i.expires_at)
+        'expires_at', i.expires_at
       ) ORDER BY i.created_at DESC)
       FROM invitations i
       JOIN workspaces w ON w.id = i.workspace_id
@@ -107,10 +107,10 @@ async function readBootstrapRow(
       SELECT ${commonColumns},
         COALESCE((
           SELECT jsonb_agg(jsonb_build_object(
-            'id', t.id, 'occurred_at', date_trunc('second', t.occurred_at), 'merchant', t.merchant,
+            'id', t.id, 'occurred_at', t.occurred_at, 'merchant', t.merchant,
             'method', t.method, 'type', t.type, 'amount_yen', t.amount_yen,
             'actor_user_id', t.actor_user_id, 'actor_name', u.name,
-            'expense_class', t.expense_class, 'settled_at', date_trunc('second', t.settled_at),
+            'expense_class', t.expense_class, 'settled_at', t.settled_at,
             'external_id', t.external_id, 'source', t.source,
             'split_weights', t.split_weights, 'memo', t.memo
           ) ORDER BY t.occurred_at DESC, t.created_at DESC)
@@ -122,7 +122,7 @@ async function readBootstrapRow(
           SELECT jsonb_agg(jsonb_build_object(
             'id', history.id, 'payer_name', history.payer_name,
             'payee_name', history.payee_name, 'amount_yen', history.amount_yen,
-            'completed_at', date_trunc('second', history.completed_at)
+            'completed_at', history.completed_at
           ) ORDER BY history.completed_at DESC)
           FROM (
             SELECT s.id, payer.name AS payer_name, payee.name AS payee_name,

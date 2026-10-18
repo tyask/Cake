@@ -1,5 +1,7 @@
 "use client";
 
+import { formatYen, formatJstDateTime } from "@/lib/display-formatters";
+
 import { commonExpenseClassLabels, expenseClasses, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH, MAX_WORKSPACE_NAME_LENGTH, workspaceTypeLabels } from "@/lib/domain-values";
 
 import type { AppActionInput, RunAppAction } from "@/lib/app-input";
@@ -36,16 +38,13 @@ import type {
 
 type Tab = DashboardTab;
 
-const money = (value: number) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(value);
-const dateTime = (value: string) => new Intl.DateTimeFormat("ja-JP", {
-  timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
-  hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-}).format(new Date(value));
+// Input initialization keeps its minute precision and input-specific locale.
+const inputDateFormatter = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+});
 const inputDate = (value?: string) => {
   const date = value ? new Date(value) : new Date();
-  const parts = new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
-  }).format(date);
+  const parts = inputDateFormatter.format(date);
   return parts.replace(" ", "T");
 };
 const jstInputToIso = (value: string) => new Date(`${value.length === 16 ? `${value}:00` : value}+09:00`).toISOString();
@@ -274,13 +273,13 @@ function HomePanel({ selected, pending, setTab, add, refreshAction, refreshing }
     <div className="home-actions page-actions">{refreshAction}<button className="primary" disabled={refreshing} onClick={add}>＋ 明細を追加</button></div>
     {pending > 0 && <button className="invite-alert" onClick={() => setTab("settings")}>あなた宛ての招待が{pending}件あります <span>確認する →</span></button>}
     <div className="kpi-grid">
-      <article className="kpi"><span>今月の支払い</span><strong>{money(payments)}</strong><small>{monthTransactions.length}件の取引</small></article>
-      <article className="kpi"><span>未清算の共通費</span><strong>{money(shared)}</strong><small>{selected.transactions.filter((item) => item.expenseClass === "SHARED" && !item.settledAt).length}件が対象</small></article>
+      <article className="kpi"><span>今月の支払い</span><strong>{formatYen(payments)}</strong><small>{monthTransactions.length}件の取引</small></article>
+      <article className="kpi"><span>未清算の共通費</span><strong>{formatYen(shared)}</strong><small>{selected.transactions.filter((item) => item.expenseClass === "SHARED" && !item.settledAt).length}件が対象</small></article>
       <article className="kpi accent"><span>次の清算</span>{selected.settlement?.payerName && selected.settlement.payeeName ? <div className="next-settlement"><div className="settlement-person"><span className="settlement-avatar" aria-hidden="true">{Array.from(selected.settlement.payerName)[0]}</span><div><small>支払う人</small><b>{selected.settlement.payerName}</b></div></div><div className="settlement-transfer"><span className="settlement-arrow" aria-hidden="true">↓</span><strong>{selected.settlement.amountYen.toLocaleString("ja-JP")}<small>円</small></strong></div><div className="settlement-person"><span className="settlement-avatar payee" aria-hidden="true">{Array.from(selected.settlement.payeeName)[0]}</span><div><small>受け取る人</small><b>{selected.settlement.payeeName}</b></div></div></div> : <><strong>清算なし</strong><small>現在差額はありません</small></>}</article>
     </div>
     <div className="content-grid">
       <section className="panel recent"><div className="panel-head"><div><span>RECENT</span><h2>最近の取引</h2></div><button className="text-button" onClick={() => setTab("transactions")}>すべて見る →</button></div>
-        <div className="recent-list">{selected.transactions.slice(0, 6).map((item) => <div className="recent-row" key={item.id}><span className="recent-name"><b>{item.merchant}</b><small>{dateTime(item.occurredAt)} · {item.actorName}</small></span><span className="recent-class">{commonExpenseClassLabels[item.expenseClass]}</span><strong className={item.type === "RECEIPT" ? "positive" : ""}>{money(item.amountYen)}</strong></div>)}{selected.transactions.length === 0 && <Empty text="まだ取引がありません" />}</div>
+        <div className="recent-list">{selected.transactions.slice(0, 6).map((item) => <div className="recent-row" key={item.id}><span className="recent-name"><b>{item.merchant}</b><small>{formatJstDateTime(item.occurredAt)} · {item.actorName}</small></span><span className="recent-class">{commonExpenseClassLabels[item.expenseClass]}</span><strong className={item.type === "RECEIPT" ? "positive" : ""}>{formatYen(item.amountYen)}</strong></div>)}{selected.transactions.length === 0 && <Empty text="まだ取引がありません" />}</div>
       </section>
       <section className="panel quick"><div className="panel-head"><div><span>QUICK ACTIONS</span><h2>すぐにできること</h2></div></div>
         <button disabled={refreshing} onClick={add}><i>＋</i><span><b>明細を追加</b><small>現金や受け取りを手動登録</small></span></button>
@@ -423,10 +422,10 @@ function SettlementPanel({ selected, run, refreshAction, refreshing }: { selecte
   return <>
     <PageHeading eyebrow="SETTLEMENT" title="共通費を清算" description="未清算の共通費から、ふたりの差額を計算します。" action={<div className="page-actions">{refreshAction}</div>} />
     {selected.workspace.type === "PERSONAL" ? <section className="panel"><Empty text="清算は共有ワークスペースで利用できます" /></section> : selected.members.length < 2 ? <section className="panel"><Empty text="相手を招待すると清算計算を利用できます" /></section> : !result ? <section className="panel"><Empty text="現在、清算対象の共通費はありません" /></section> : <>
-      <section className="settlement-hero"><span>今回の清算</span>{result.amountYen > 0 ? <><div className="people-flow"><b>{result.payerName}</b><i>→</i><b>{result.payeeName}</b></div><strong>{money(result.amountYen)}</strong><p>{result.payerName}さんが{result.payeeName}さんへ支払うと、差額が解消されます。</p></> : <><strong>清算不要</strong><p>現在の負担額に差はありません。</p></>}<button className="light-button" disabled={refreshing} onClick={complete}>清算を完了する</button></section>
-      <div className="settlement-grid"><section className="panel"><div className="panel-head"><div><span>CALCULATION</span><h2>計算の内訳</h2></div></div><dl className="summary-list"><div><dt>共通支払い</dt><dd>{money(result.paymentTotal)}</dd></div><div><dt>共通収入</dt><dd>− {money(result.receiptTotal)}</dd></div><div className="total"><dt>正味共通費</dt><dd>{money(result.netTotal)}</dd></div></dl></section><section className="panel"><div className="panel-head"><div><span>ALLOCATION</span><h2>ふたりの負担</h2></div></div>{result.people.map((person) => <div className="person-calc" key={person.userId}><div><b>{person.name}</b><span>明細ごとの割合で計算</span></div><p>実質負担 <b>{money(person.actual)}</b></p><p>目標負担 <b>{money(person.target)}</b></p><p className={person.balance >= 0 ? "positive" : "negative"}>差額 <b>{person.balance >= 0 ? "+" : ""}{money(person.balance)}</b></p></div>)}</section></div>
+      <section className="settlement-hero"><span>今回の清算</span>{result.amountYen > 0 ? <><div className="people-flow"><b>{result.payerName}</b><i>→</i><b>{result.payeeName}</b></div><strong>{formatYen(result.amountYen)}</strong><p>{result.payerName}さんが{result.payeeName}さんへ支払うと、差額が解消されます。</p></> : <><strong>清算不要</strong><p>現在の負担額に差はありません。</p></>}<button className="light-button" disabled={refreshing} onClick={complete}>清算を完了する</button></section>
+      <div className="settlement-grid"><section className="panel"><div className="panel-head"><div><span>CALCULATION</span><h2>計算の内訳</h2></div></div><dl className="summary-list"><div><dt>共通支払い</dt><dd>{formatYen(result.paymentTotal)}</dd></div><div><dt>共通収入</dt><dd>− {formatYen(result.receiptTotal)}</dd></div><div className="total"><dt>正味共通費</dt><dd>{formatYen(result.netTotal)}</dd></div></dl></section><section className="panel"><div className="panel-head"><div><span>ALLOCATION</span><h2>ふたりの負担</h2></div></div>{result.people.map((person) => <div className="person-calc" key={person.userId}><div><b>{person.name}</b><span>明細ごとの割合で計算</span></div><p>実質負担 <b>{formatYen(person.actual)}</b></p><p>目標負担 <b>{formatYen(person.target)}</b></p><p className={person.balance >= 0 ? "positive" : "negative"}>差額 <b>{person.balance >= 0 ? "+" : ""}{formatYen(person.balance)}</b></p></div>)}</section></div>
     </>}
-    {selected.settlementHistory.length > 0 && <section className="panel history"><div className="panel-head"><div><span>HISTORY</span><h2>清算履歴</h2></div></div>{selected.settlementHistory.map((item) => <div key={item.id}><span>{dateTime(item.completedAt)}</span><b>{item.payerName && item.payeeName ? `${item.payerName} → ${item.payeeName}` : "清算不要"}</b><strong>{money(item.amountYen)}</strong></div>)}</section>}
+    {selected.settlementHistory.length > 0 && <section className="panel history"><div className="panel-head"><div><span>HISTORY</span><h2>清算履歴</h2></div></div>{selected.settlementHistory.map((item) => <div key={item.id}><span>{formatJstDateTime(item.completedAt)}</span><b>{item.payerName && item.payeeName ? `${item.payerName} → ${item.payeeName}` : "清算不要"}</b><strong>{formatYen(item.amountYen)}</strong></div>)}</section>}
   </>;
 }
 

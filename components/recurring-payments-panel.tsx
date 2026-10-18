@@ -1,5 +1,7 @@
 "use client";
 
+import { formatYen } from "@/lib/display-formatters";
+
 import { commonExpenseClassLabels, expenseClasses, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/domain-values";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
@@ -15,7 +17,6 @@ import { SplitEditor } from "./split-editor";
 import tableStyles from "./transactions-panel.module.css";
 import styles from "./recurring-payments-panel.module.css";
 
-const money = (value: number) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(value);
 const dateLabel = (date: string) => date.replaceAll("-", "/");
 type StateAction = Extract<RecurringPaymentMutation, { action: "pause" | "resume" | "archive" }>["action"];
 type FormState = { payment?: RecurringPayment };
@@ -147,11 +148,11 @@ function RecurringPaymentRow({ payment, members, busy, onEdit, onAction }: { pay
     <td className={tableStyles.mobileSummary} colSpan={10}><button type="button" className={`${tableStyles.summaryButton} ${styles.summaryButton}`} aria-expanded={expanded}
       aria-label={`${config.merchant}の詳細を${expanded ? "閉じる" : "開く"}`} onClick={() => setExpanded(current => !current)}>
       <span className={tableStyles.summaryName}><b>{config.merchant}</b><small>毎月{config.dayOfMonth}日 · {actorName}</small></span>
-      <span className={tableStyles.summaryAmount}><strong>{money(config.amountYen)}</strong><small>{stateLabel}</small></span><span className={tableStyles.summaryChevron} aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
+      <span className={tableStyles.summaryAmount}><strong>{formatYen(config.amountYen)}</strong><small>{stateLabel}</small></span><span className={tableStyles.summaryChevron} aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
     </button></td>
     <td data-label="毎月の日 / 次回" className={tableStyles.fullCell}><b>毎月{config.dayOfMonth}日</b><small>次回：{payment.nextScheduledOn ? dateLabel(payment.nextScheduledOn) : "—"}</small>
       {config.dayOfMonth >= 29 && <small>その日がない月は月末に追加</small>}</td>
-    <td data-label="取引先"><b>{config.merchant}</b></td><td data-label="方法">{config.method}</td><td data-label="金額（円）">{money(config.amountYen)}</td>
+    <td data-label="取引先"><b>{config.merchant}</b></td><td data-label="方法">{config.method}</td><td data-label="金額（円）">{formatYen(config.amountYen)}</td>
     <td data-label="支払者">{actorName}</td><td data-label="費用区分">{commonExpenseClassLabels[config.expenseClass]}</td>
     <td data-label={`支払い割合（${members.map(member => member.name).join(", ")}）`} className={tableStyles.fullCell}><RecurringSplit config={config} members={members} /></td>
     <td data-label="メモ" className={`${tableStyles.fullCell} ${styles.memo}`}>{config.memo || "—"}</td>
@@ -173,7 +174,7 @@ function RecurringSplit({ config, members }: { config: RecurringPaymentConfig; m
     shares = { percentages: splitAmounts(1000, splitWeights, members), amounts: splitAmounts(config.amountYen, splitWeights, members) };
   } catch { /* Saved membership inconsistencies need review, not a fabricated split. */ }
   if (!shares) return <span className={styles.blocked}>割合を確認してください。</span>;
-  return <span className={tableStyles.settledSplit}>{members.map(member => <span key={member.id}><span>{money(shares.amounts[member.id])}</span><small>{shares.percentages[member.id] / 10}%</small></span>)}</span>;
+  return <span className={tableStyles.settledSplit}>{members.map(member => <span key={member.id}><span>{formatYen(shares.amounts[member.id])}</span><small>{shares.percentages[member.id] / 10}%</small></span>)}</span>;
 }
 
 function RecurringPaymentForm({ selected, currentUserId, data, payment, close, save, reloadLatest }: {
@@ -232,9 +233,9 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
           <p className="ratio-note">{config.expenseClass === "PERSONAL" ? "個人費は支払者の負担が100%になります。" : "割合・金額で設定できます。相手の分は自動計算します。"}</p>
           <button type="button" className="text-button" disabled={!config.actorUserId} onClick={applyDefaults}>取引先のルールを適用</button></div>
       </div><label className={`new-transaction-memo ${styles.memoLabel}`}>メモ<textarea rows={2} maxLength={MAX_TRANSACTION_MEMO_LENGTH} value={config.memo} onChange={event => patch({ memo: event.target.value })} /></label></fieldset>
-      {preview && <div className={styles.preview}><b>毎月{config.dayOfMonth}日 · {money(config.amountYen)}</b><span>{payment ? "変更後の予定" : "初回予定"}：{preview.firstOn && dateLabel(preview.firstOn)}</span><span>{eligible.find(member => member.id === config.actorUserId)?.name ?? "支払者を選択してください"}の支払い · {commonExpenseClassLabels[config.expenseClass]}</span><RecurringSplit config={config} members={selected.members} />
+      {preview && <div className={styles.preview}><b>毎月{config.dayOfMonth}日 · {formatYen(config.amountYen)}</b><span>{payment ? "変更後の予定" : "初回予定"}：{preview.firstOn && dateLabel(preview.firstOn)}</span><span>{eligible.find(member => member.id === config.actorUserId)?.name ?? "支払者を選択してください"}の支払い · {commonExpenseClassLabels[config.expenseClass]}</span><RecurringSplit config={config} members={selected.members} />
         {config.dayOfMonth >= 29 && <small>その日がない月は月末に追加します。</small>}</div>}
-      {payment && <p className={styles.current}>現在：毎月{payment.currentConfig.dayOfMonth}日 / {money(payment.currentConfig.amountYen)} / {payment.currentConfig.merchant}</p>}
+      {payment && <p className={styles.current}>現在：毎月{payment.currentConfig.dayOfMonth}日 / {formatYen(payment.currentConfig.amountYen)} / {payment.currentConfig.merchant}</p>}
       {error && <p className="form-error" role="alert">{error} 入力内容は保持しています。</p>}
       {conflict && payment && <button type="button" className="text-button" disabled={saving} onClick={() => {
         if (window.confirm("入力中の内容を破棄して、最新の設定を読み込みますか？")) void reloadLatest(payment);

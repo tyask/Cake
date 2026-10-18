@@ -59,20 +59,6 @@ function neonResponse(rows: Record<string, unknown>[]) {
   }), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-// Model the aggregate JSON's date_trunc values; source timestamps remain intact.
-function aggregateTimestamps(rows: Row[], keys: string[]): Row[] {
-  return rows.map(row => {
-    const result = { ...row };
-    for (const key of keys) {
-      if (result[key] == null) continue;
-      const date = new Date(String(result[key]));
-      date.setUTCMilliseconds(0);
-      result[key] = date.toISOString();
-    }
-    return result;
-  });
-}
-
 function databaseFixture(t: TestContext, options: FixtureOptions = {}) {
   const previousUrl = process.env.DATABASE_URL;
   process.env.DATABASE_URL = "postgresql://user:password@mock.neon.tech/test";
@@ -115,11 +101,11 @@ function databaseFixture(t: TestContext, options: FixtureOptions = {}) {
       selected_workspace_id: options.selectedWorkspaceId ?? selected?.id ?? null,
       members: selected ? personal ? [members[0]] : options.overrides?.members ?? members : [],
       rules: selected && !personal ? options.overrides?.rules ?? rules : [],
-      pending_invitations: aggregateTimestamps(options.overrides?.pending_invitations ?? invitations, ["expires_at"]),
+      pending_invitations: options.overrides?.pending_invitations ?? invitations,
     };
     if (/\bFROM transactions\b/.test(query)) {
-      aggregate.transactions = aggregateTimestamps(selected && !personal ? options.overrides?.transactions ?? transactions : [], ["occurred_at", "settled_at"]);
-      aggregate.settlement_history = aggregateTimestamps(selected && !personal ? options.overrides?.settlement_history ?? histories : [], ["completed_at"]);
+      aggregate.transactions = selected && !personal ? options.overrides?.transactions ?? transactions : [];
+      aggregate.settlement_history = selected && !personal ? options.overrides?.settlement_history ?? histories : [];
     }
     return neonResponse([aggregate]);
   });
@@ -265,7 +251,7 @@ test("集約した配列の並び順・無効ルール・nullableな履歴・清
   assert.match(sql, /LIMIT 20/);
 });
 
-test("集約JSONの日時は従来の秒精度を保ち、ミリ秒による並び順と招待の有効期限判定は維持する", async (t) => {
+test("集約JSONは全日時のミリ秒を保持し、並び順・nullable・招待の有効期限判定を維持する", async (t) => {
   const recent = { ...transactions[0], id: "recent-fraction", occurred_at: "2026-10-08T09:00:00.900+09:00" };
   const earlier = {
     ...transactions[0], id: "earlier-fraction", occurred_at: "2026-10-08T09:00:00.100+09:00", settled_at: "2026-10-08T09:01:00.662+09:00",
@@ -282,30 +268,30 @@ test("集約JSONの日時は従来の秒精度を保ち、ミリ秒による並�
 
   assert.ok(data.selected);
   assert.deepEqual(data.selected.transactions.map(item => [item.id, item.occurredAt, item.settledAt]), [
-    ["recent-fraction", "2026-10-08T00:00:00.000Z", null],
-    ["earlier-fraction", "2026-10-08T00:00:00.000Z", "2026-10-08T00:01:00.000Z"],
+    ["recent-fraction", "2026-10-08T00:00:00.900Z", null],
+    ["earlier-fraction", "2026-10-08T00:00:00.100Z", "2026-10-08T00:01:00.662Z"],
   ]);
   assert.deepEqual(data.selected.settlementHistory.map(item => [item.id, item.completedAt]), [
-    ["recent-history", "2026-10-07T00:00:00.000Z"],
-    ["earlier-history", "2026-10-07T00:00:00.000Z"],
+    ["recent-history", "2026-10-07T00:00:00.900Z"],
+    ["earlier-history", "2026-10-07T00:00:00.100Z"],
   ]);
-  assert.equal(data.pendingInvitations[0].expiresAt, "2026-10-15T00:00:00.000Z");
+  assert.equal(data.pendingInvitations[0].expiresAt, "2026-10-15T00:00:00.881Z");
   assert.deepEqual(overrides, originalRows);
   assert.equal(queries.length, 1);
   const sql = queries[0].query.replace(/\s+/g, " ");
-  assert.match(sql, /'occurred_at', date_trunc\('second', t\.occurred_at\)/);
-  assert.match(sql, /'settled_at', date_trunc\('second', t\.settled_at\)/);
-  assert.match(sql, /'completed_at', date_trunc\('second', history\.completed_at\)/);
-  assert.match(sql, /'expires_at', date_trunc\('second', i\.expires_at\)/);
-  assert.equal([...sql.matchAll(/\bdate_trunc\(/g)].length, 4);
+  assert.match(sql, /'occurred_at', t\.occurred_at/);
+  assert.match(sql, /'settled_at', t\.settled_at/);
+  assert.match(sql, /'completed_at', history\.completed_at/);
+  assert.match(sql, /'expires_at', i\.expires_at/);
+  assert.doesNotMatch(sql, /\bdate_trunc\(/);
   assert.match(sql, /ORDER BY t\.occurred_at DESC, t\.created_at DESC/);
   assert.match(sql, /ORDER BY history\.completed_at DESC/);
   assert.match(sql, /ORDER BY s\.completed_at DESC LIMIT 20/);
   assert.match(sql, /AND i\.expires_at > now\(\)/);
 
   const metadata = await getBootstrap(user, workspaceId, "metadata");
-  assert.equal(metadata.pendingInvitations[0].expiresAt, "2026-10-15T00:00:00.000Z");
-  assert.equal([...queries[1].query.matchAll(/\bdate_trunc\(/g)].length, 1);
+  assert.equal(metadata.pendingInvitations[0].expiresAt, "2026-10-15T00:00:00.881Z");
+  assert.doesNotMatch(queries[1].query, /\bdate_trunc\(/);
   assert.match(queries[1].query, /AND i\.expires_at > now\(\)/);
 });
 

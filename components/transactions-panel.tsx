@@ -1,5 +1,7 @@
 "use client";
 
+import { formatYen, formatJstDateTime } from "@/lib/display-formatters";
+
 import { expenseClassLabels, expenseClasses, transactionActorLabels, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/domain-values";
 
 import type { RunAppAction } from "@/lib/app-input";
@@ -37,8 +39,6 @@ type TransactionListProps = {
   refreshing: boolean;
 };
 
-const money = (value: number) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(value);
-const dateTime = (value: string) => new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(value));
 const tableColumns = [{ id: "selection", label: "選択" }, ...transactionColumns, { id: "updateStatus", label: "更新状態" }] as const;
 
 function signature(values: TransactionValues): string {
@@ -430,13 +430,13 @@ function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMe
   return <tr data-transaction-id={item.id} data-expanded={expanded} className={styles.settled + " " + styles.transactionRow}>
     <MobileTransactionSummary item={item} expanded={expanded} onToggle={onToggle} checked={false} disabled onSelect={() => {}} columnCount={tableColumns.length} status={item.expenseClass === "PERSONAL" ? "個人費" : "清算済み"} indicator={<SavingIndicator active={updating} />} />
     <td data-label="選択" className={styles.selectionCell} data-selection><input className={styles.checkbox} type="checkbox" aria-label={item.merchant + "の明細を選択"} checked={false} disabled /></td>
-    <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell} title={dateTime(item.occurredAt)}>{dateTime(item.occurredAt)}</td>
+    <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell} title={formatJstDateTime(item.occurredAt)}>{formatJstDateTime(item.occurredAt)}</td>
     <td data-label="取引先"><b>{item.merchant}</b>{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</td>
     <td data-label="方法">{item.method}</td>
-    <td data-label="金額（円）">{money(item.amountYen)}</td>
+    <td data-label="金額（円）">{formatYen(item.amountYen)}</td>
     <td data-label={transactionActorLabels[item.type]}>{item.actorName}</td>
     <td data-label="費用区分">{expenseClassLabels[item.expenseClass]}</td>
-    <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}><span className={styles.settledSplit}>{members.map(member => <span key={member.id}><span>{money(amounts[member.id])}</span><small>{percentages[member.id] / 10}%</small></span>)}</span></td>
+    <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}><span className={styles.settledSplit}>{members.map(member => <span key={member.id}><span>{formatYen(amounts[member.id])}</span><small>{percentages[member.id] / 10}%</small></span>)}</span></td>
     <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={item.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} onError={onMemoError} onSavingChange={onMemoSavingChange} register={registerMemo} />
       {pinnedOutsideFilter && <small className={styles.filterHint}>編集中のため表示</small>}
     </td>
