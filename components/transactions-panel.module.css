@@ -95,6 +95,9 @@
   .selectAllLabel[data-disabled="true"] { color: var(--disabled-ink); }
   .table tbody { display: block; width: 100%; }
   .table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .7rem; width: 100%; margin-bottom: .55rem; padding: .8rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--paper); }
+  .table .transactionRow { position: relative; isolation: isolate; overflow: hidden; }
+  .table .transactionRow > td:not(.mobileSummary) { transition: transform .18s ease; }
+  .table .transactionRow:has([data-swipe-open="true"]) > td:not(.mobileSummary) { transform: translateX(-5rem); }
   .table td { display: block; min-width: 0; padding: 0; border: 0; }
   .table td::before { display: block; margin-bottom: .3rem; color: var(--muted); font-size: .62rem; content: attr(data-label); }
   .table .mobileSummary { display: flex; grid-column: 1 / -1; align-items: center; gap: .65rem; }
@@ -125,6 +128,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .spinner { animation: none; }
+  .table .transactionRow > td { transition: none; }
 }
 
 .settledSplit { display: flex; gap: 1rem; font-size: inherit; }

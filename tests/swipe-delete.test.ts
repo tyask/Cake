@@ -5,6 +5,14 @@ import type { AddressInfo } from "node:net";
 import { build } from "esbuild";
 import { chromium, type Locator, type Page } from "playwright";
 
+async function assertDeletePanel(action: Locator, card: Locator) {
+  const panel = (await action.boundingBox())!, row = (await card.boundingBox())!;
+  assert.ok(Math.abs(panel.y - row.y) <= 2, "削除領域はカード上端から始まる");
+  assert.ok(Math.abs(panel.height - row.height) <= 2, "削除領域はカード全体の高さを使う");
+  assert.ok(Math.abs(panel.x + panel.width - row.x - row.width) <= 2, "削除領域はカード右端に接する");
+  assert.equal(await action.evaluate(element => getComputedStyle(element).borderRadius), "0px");
+}
+
 async function settleScroll(page: Page) {
   await page.evaluate(async () => {
     let previous = window.scrollY, stable = 0;
@@ -77,6 +85,7 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
         assert.ok((await reveal.boundingBox())!.width <= 1, "通常表示では補助操作が行幅を使わない");
         const row = page.locator("[data-swipe-open]").filter({ has: page.getByRole("button", { name: `${name}の削除操作`, exact: true, includeHidden: true }) });
         const action = page.getByRole("button", { name: `${name}を削除`, exact: true });
+        const card = row.locator("xpath=ancestor::*[self::tr or self::li][1]");
         const surface = row.locator('[class*="body"]');
         assert.equal(await action.isVisible(), false);
         if (view !== "rules") {
@@ -84,13 +93,17 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
           const summary = page.getByRole("button", { name: `${name}の詳細を開く`, exact: true });
           await summary.focus();await page.keyboard.press("Enter");
           await page.getByRole("button", { name: `${name}の詳細を閉じる`, exact: true }).waitFor();
-          await page.keyboard.press("Enter");
+          await reveal.focus();await page.keyboard.press("Enter");await action.waitFor();
+          await assertDeletePanel(action, card);
+          await page.keyboard.press("Escape");
+          await page.getByRole("button", { name: `${name}の詳細を閉じる`, exact: true }).focus();await page.keyboard.press("Enter");
           await swipe(page, surface, -100, -130);assert.equal(await action.isVisible(), false);
           await swipe(page, surface);await action.waitFor();
           assert.equal(await page.getByRole("button", { name: `${name}の詳細を閉じる`, exact: true }).count(), 0, "スワイプで詳細を開かない");
           await swipe(page, surface, 100);await action.waitFor({ state: "hidden" });
         }
         await reveal.focus();await page.keyboard.press("Enter");await action.waitFor();
+        await assertDeletePanel(action, card);
         await page.getByRole("button", { name: "一覧の外", exact: true }).click();await action.waitFor({ state: "hidden" });
         await reveal.scrollIntoViewIfNeeded();await reveal.focus();await page.keyboard.press("Enter");await action.waitFor();
         await page.keyboard.press("Escape");await action.waitFor({ state: "hidden" });
@@ -140,6 +153,42 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
         assert.deepEqual(errors, []);
         await page.setViewportSize({ width: 1440, height: 1000 });
         assert.equal(await page.getByRole("button", { name: /の削除操作$/ }).count(), 0, "PCの既存表示を維持");
+      } finally { await context.close(); }
+    });
+    await t.test("取込の固定操作欄がスクロール中も明細より手前で押せる", async () => {
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }), page = await context.newPage();
+      const writes: Record<string, unknown>[] = [];
+      const csv = "取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n" + Array.from({ length: 30 }, (_, index) => `2026/10/18 12:00:00,100,支払い,sticky${index},現金,${index}`).join("\n");
+      try {
+        await page.route("**/api/**", async route => {
+          if (new URL(route.request().url()).pathname === "/api/import/duplicates") await route.fulfill({ json: { transactions: [] } });
+          else { writes.push(route.request().postDataJSON());await route.fulfill({ json: { ok: true } }); }
+        });
+        await page.goto(origin + "/?view=import");
+        async function loadAndScroll() {
+          await page.locator('input[type="file"]').setInputFiles({ name: "sticky.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
+          await page.getByRole("button", { name: "選択した30件を登録", exact: true }).waitFor();
+          const card = page.locator("[data-import-key]").nth(7);
+          await card.getByRole("button", { name: "sticky7の削除操作", exact: true }).focus();await page.keyboard.press("Enter");
+          const footer = page.locator(".sticky-actions"), bar = (await footer.boundingBox())!, row = (await card.boundingBox())!;
+          const scroll = await page.evaluate(() => window.scrollY);
+          await page.evaluate(top => window.scrollTo(0, top), row.y + scroll - (bar.y - 20));await settleScroll(page);
+          const currentRow = (await card.boundingBox())!, currentBar = (await footer.boundingBox())!;
+          assert.ok(currentRow.y < currentBar.y + currentBar.height && currentRow.y + currentRow.height > currentBar.y, "明細と操作欄を実際に重ねる");
+          for (const name of ["キャンセル", "選択した30件を登録"]) {
+            const button = page.getByRole("button", { name, exact: true });
+            assert.equal(await button.evaluate(element => {
+              const rect = element.getBoundingClientRect(), top = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+              return top === element || element.contains(top);
+            }), true, `${name}が最前面にある`);
+          }
+          if (process.env.CAKE_SWIPE_SCREENSHOTS) await page.screenshot({ animations: "disabled", path: ".cake/import-sticky-actions.png" });
+        }
+        await loadAndScroll();await page.getByRole("button", { name: "キャンセル", exact: true }).click();
+        await page.getByRole("button", { name: "ファイルを選択", exact: true }).waitFor();assert.equal(writes.length, 0);
+        await loadAndScroll();await page.getByRole("button", { name: "選択した30件を登録", exact: true }).click();
+        await page.getByRole("button", { name: "ファイルを選択", exact: true }).waitFor();assert.equal(writes.length, 1);
+        assert.equal(writes[0].action, "bulkImport");assert.equal((writes[0].items as unknown[]).length, 30);
       } finally { await context.close(); }
     });
     for (const saveFails of [false, true]) await t.test(`明細の保存待ち${saveFails ? "失敗" : "成功"}`, async () => {
