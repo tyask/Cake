@@ -4,6 +4,7 @@ import {
   transactionActorPatch, transactionDateInput, transactionDateToIso,
   transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues,
 } from "../lib/transaction-editing";
+import { formatJstDateTime } from "../lib/display-formatters";
 import type { TransactionRecord, WorkspaceMember } from "../lib/types";
 
 const members: WorkspaceMember[] = [
@@ -24,6 +25,11 @@ test("一覧の日時はJSTで表示し、日付をまたいでも秒・ミリ�
   assert.equal(transactionDateToIso("2026-10-06T01:01:42"), "2026-10-05T16:01:42.000Z");
   assert.equal(transactionDateToIso("2026-10-05T18:15"), "2026-10-05T09:15:00.000Z");
   assert.equal(transactionDateToIso("2026-10-05T18:15:37.1"), "2026-10-05T09:15:37.100Z");
+  // Display drops subsecond precision; editing must keep it across the JST year boundary.
+  const yearEnd = "2026-12-31T15:00:42.123Z";
+  assert.equal(formatJstDateTime(yearEnd), "2027/01/01 00:00:42");
+  assert.equal(formatJstDateTime(yearEnd, "minute"), "2027/01/01 00:00");
+  assert.equal(transactionDateToIso(transactionDateInput(yearEnd)), yearEnd);
 });
 
 test("存在しない日付や時刻を拒否し、うるう年の日付は保存できる", () => {

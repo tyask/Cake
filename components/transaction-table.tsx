@@ -1,5 +1,7 @@
 "use client";
 
+import { formatYen, formatJstDateTime } from "@/lib/display-formatters";
+
 import { expenseClassLabels } from "@/lib/domain-values";
 
 import type { ReactNode } from "react";
@@ -24,9 +26,6 @@ const columnWidths: Record<TransactionTableColumn, string> = {
   status: styles.settlementColumn,
   updateStatus: styles.updateStatusColumn,
 };
-
-const money = (value: number) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(value);
-const summaryDate = (value: string) => new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
 
 export const transactionSplitLabel = (members: Pick<WorkspaceMember, "name">[]) => `支払い割合（${members.map(member => member.name).join(", ")}）`;
 
@@ -60,8 +59,8 @@ export function MobileTransactionSummary({ item, expanded, onToggle, checked, di
   return <td className={styles.mobileSummary} colSpan={columnCount} data-selection>
     <input className={styles.checkbox} type="checkbox" aria-label={selectionLabel ?? item.merchant + "の明細を選択"} checked={checked} disabled={disabled} onChange={onSelect} />
     <button type="button" className={styles.summaryButton} aria-expanded={expanded} aria-label={item.merchant + "の詳細を" + (expanded ? "閉じる" : "開く")} onClick={onToggle}>
-      <span className={styles.summaryName}><b>{item.merchant}</b><small>{dateLabel ?? summaryDate(item.occurredAt)} · {item.actorName}{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</small></span>
-      <span className={styles.summaryAmount}><strong>{amountLabel ?? money(item.amountYen)}</strong><small>{status ?? (expenseClassLabels[item.expenseClass])}</small></span>
+      <span className={styles.summaryName}><b>{item.merchant}</b><small>{dateLabel ?? formatJstDateTime(item.occurredAt, "minute")} · {item.actorName}{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</small></span>
+      <span className={styles.summaryAmount}><strong>{amountLabel ?? formatYen(item.amountYen)}</strong><small>{status ?? (expenseClassLabels[item.expenseClass])}</small></span>
       <span className={styles.summaryChevron} aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
     </button>
     {indicator && <span className={styles.summaryUpdateStatus}>{indicator}</span>}
