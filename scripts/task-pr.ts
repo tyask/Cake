@@ -13,7 +13,7 @@ import { assertVerificationControl, verificationApi } from "./preview-verify-com
 
 type TaskPrOptions = { args?: readonly string[]; cwd?: string; execute?: WorkflowExecutor; log?: (message: string) => void };
 
-function prArguments(args: readonly string[]): { title: string; verificationFile: string; draft: boolean; remoteProofPath?: string; targetWorktree?: string } {
+function prArguments(args: readonly string[]): { title: string; changesFile: string; verificationFile: string; draft: boolean; remoteProofPath?: string; targetWorktree?: string } {
   const values = new Map<string, string>();
   let draft = false;
   for (let index = 0; index < args.length; index += 1) {
@@ -24,38 +24,44 @@ function prArguments(args: readonly string[]): { title: string; verificationFile
       continue;
     }
     const value = args[++index];
-    if (!["--title", "--verification-file", "--remote-proof", "--target-worktree"].includes(key) || values.has(key)
+    if (!["--title", "--changes-file", "--verification-file", "--remote-proof", "--target-worktree"].includes(key) || values.has(key)
       || value === undefined || !value.trim() || value.startsWith("--")) {
-      throw new Error("npm run task:pr -- --title '変更内容' --verification-file /path/report.md を指定してください。");
+      throw new Error("npm run task:pr -- --title '変更内容' --changes-file /path/changes.md --verification-file /path/report.md を指定してください。");
     }
     values.set(key, value);
   }
   const title = values.get("--title")?.trim();
+  const changesFile = values.get("--changes-file");
   const verificationFile = values.get("--verification-file");
-  if (values.size !== 2 + Number(values.has('--remote-proof')) + Number(values.has('--target-worktree')) || !title || title.length > 240 || /[\r\n\0]/.test(title) || !verificationFile
+  if (values.size !== 3 + Number(values.has('--remote-proof')) + Number(values.has('--target-worktree')) || !title || title.length > 240 || /[\r\n\0]/.test(title) || !changesFile || !verificationFile
     || draft && values.has('--remote-proof') || values.has('--target-worktree') && !values.has('--remote-proof')) {
-    throw new Error("PRタイトルと検証結果ファイルを指定してください。タイトルは改行なしの240文字以内にしてください。");
+    throw new Error("PRタイトル・変更内容ファイル・検証結果ファイルを指定してください。タイトルは改行なしの240文字以内にしてください。");
   }
-  return { title, verificationFile, draft, remoteProofPath: values.get('--remote-proof'), targetWorktree: values.get('--target-worktree') };
+  return { title, changesFile, verificationFile, draft, remoteProofPath: values.get('--remote-proof'), targetWorktree: values.get('--target-worktree') };
+}
+
+async function readPrTextFile(cwd: string, path: string, label: string): Promise<string> {
+  try {
+    const file = resolve(cwd, path), metadata = await stat(file);
+    if (!metadata.isFile() || metadata.size > 1_000_000) throw new Error();
+    const value = (await readFile(file, "utf8")).trim();
+    if (!value || value.includes("\0")) throw new Error();
+    return value;
+  } catch {
+    throw new Error(`${label}ファイルを読み込めませんでした。非空のテキストファイル（1MB以内）を指定してください。`);
+  }
 }
 
 export async function runTaskPr({
   args = [], cwd = process.cwd(), execute = executeWorkflowCommand, log = console.log,
 }: TaskPrOptions = {}): Promise<{ url: string; existing: boolean }> {
-  const { title, verificationFile, draft, remoteProofPath, targetWorktree } = prArguments(args);
+  const { title, changesFile, verificationFile, draft, remoteProofPath, targetWorktree } = prArguments(args);
+  const [changes, verification] = await Promise.all([
+    readPrTextFile(cwd, changesFile, "変更内容"), readPrTextFile(cwd, verificationFile, "検証結果"),
+  ]);
   const proofPath = remoteProofPath ? resolve(cwd, remoteProofPath) : undefined;
   if (targetWorktree) await assertVerificationControl(cwd, execute, verificationApi(cwd, execute));
   const head = await cleanTaskHead(targetWorktree ? resolve(cwd, targetWorktree) : cwd, execute);
-  let verification: string;
-  try {
-    const reportFile = resolve(cwd, verificationFile);
-    const metadata = await stat(reportFile);
-    if (!metadata.isFile() || metadata.size > 1_000_000) throw new Error();
-    verification = (await readFile(reportFile, "utf8")).trim();
-    if (!verification || verification.includes("\0")) throw new Error();
-  } catch {
-    throw new Error("検証結果ファイルを読み込めませんでした。非空のテキストファイル（1MB以内）を指定してください。");
-  }
   let existing = await taskPullRequests(head, execute);
   if (draft && existing[0] && !existing[0].isDraft) throw new Error("既存PRはdraftではありません。Previewを検証し、--draftなしで更新してください。");
   let remote = await commandOutput(execute, "git", ["ls-remote", "--heads", "origin", `refs/heads/${head.branch}`], head.cwd,
@@ -88,7 +94,7 @@ export async function runTaskPr({
     const proof = await readyPreview(current, head.cwd, execute, proofPath);
     evidence = `## Preview\n\n- URL: ${proof.deployment.url}\n- ブランチ: ${head.branch}\n- 検証commit: ${head.sha}\n- Deployment: ${proof.deployment.id}\n- DB branch: ${proof.deployment.database!.branchId}\n- DB endpoint: ${proof.deployment.database!.endpointId}\n- 画面確認: ${proof.cases.join(', ')}\n- 実クリック: ${proof.clicks.length}回\n`;
   }
-  const body = `## 変更内容\n\n${title}\n\n${evidence}\n## 検証結果\n\n${verification}\n`;
+  const body = `## 変更内容\n\n${changes}\n\n${evidence}\n## 検証結果\n\n${verification}\n`;
   if (existingUrl) {
     await updateTaskPullRequest(head, existing[0].number, title, body, execute);
     if (!draft && existing[0].isDraft) {

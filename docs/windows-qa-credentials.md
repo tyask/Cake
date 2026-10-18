@@ -72,7 +72,7 @@ Vercel tokenを供給するのは専用preflight/QA子プロセスだけ。Git/g
 
 ```powershell
 # QA・最新CI・対象照合・差分レビューを完了し、マージ可能と判断したら実行する
-npm.cmd run task:pr -- --title '変更内容' --verification-file '.cake\report.md'
+npm.cmd run task:pr -- --title '変更内容' --changes-file '.cake\changes.md' --verification-file '.cake\report.md'
 ```
 
 **別の対象checkoutを最新mainのcontrolから管理する `task:pr --target-worktree` はremote proof必須。** この共通ランチャーのローカル証跡は `qa:verify:ci` のremote proofではなく、代用できない。別checkoutからのReady手順は[Readyと別checkout管理の条件](development-workflow.md#6-readymergecloseと削除確認)に従う。merge/closeと資源cleanupの承認も別途確認する。

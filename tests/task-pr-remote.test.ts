@@ -14,6 +14,7 @@ import { verifyChecksFixture, verifyProofFixture } from './preview-verify-fixtur
 type Mode = 'success' | 'old-target-head' | 'old-proof-head' | 'wrong-deployment' | 'changed-deployment-operation'
   | 'latest-push-failed' | 'latest-pr-failed' | 'dirty-control' | 'non-main-control' | 'missing-capability';
 const silent = () => {};
+const changes = '明細一覧の一括操作で繰り返すDB処理を減らします。\n\n### 修正内容\n\n参加者の集約を一回にまとめ、適用結果を維持します。`SQL`と$(literal)は本文として保持します。';
 
 /** Exercise the real control module and both receipt readers; only Git/GitHub I/O is stubbed. */
 async function fixture(mode: Mode = 'success') {
@@ -25,6 +26,7 @@ async function fixture(mode: Mode = 'success') {
   await writeFile(join(target, 'scripts/task-pr.ts'), `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(executed)}, 'untrusted');\nthrow new Error('old target code must never run');\n`);
   await writeFile(join(target, 'package.json'), JSON.stringify({ scripts: { 'task:pr': 'node --import tsx scripts/task-pr.ts' } }));
   await writeFile(join(control, 'report.md'), 'Local checks passed. External QA comes from the exact verified Actions notice.\n');
+  await writeFile(join(control, 'changes.md'), `\n${changes}\n`);
 
   const verified = verifyChecksFixture(), s = verified.receipt.source;
   const proofPath = join(control, '.cake', `verify-${s.pr}.json`);
@@ -117,7 +119,7 @@ async function fixture(mode: Mode = 'success') {
     return { status: 0, signal: null, stdout: typeof value === 'string' ? value : JSON.stringify(value) };
   };
   const options = { cwd: control, execute, log: silent,
-    args: ['--title', 'Actions QA acceptance', '--verification-file', 'report.md', '--remote-proof', `.cake/verify-${s.pr}.json`, '--target-worktree', target] };
+    args: ['--title', 'Actions QA acceptance', '--changes-file', 'changes.md', '--verification-file', 'report.md', '--remote-proof', `.cake/verify-${s.pr}.json`, '--target-worktree', target] };
   return { directory, control, target, executed, verified, status, mutations, history, events, options, body: () => updatedBody };
 }
 
@@ -135,6 +137,8 @@ test('trusted main task:pr revalidates remote evidence and current status/CI bef
     assert.ok(f.body().includes(`- Deployment: ${f.verified.deployment.id}`));
     assert.ok(f.body().includes(`- DB endpoint: ${f.verified.deployment.database!.endpointId}`));
     assert.ok(f.body().includes('- 実クリック: 16回'));
+    assert.equal(f.body().split('## Preview\n')[0], `## 変更内容\n\n${changes}\n\n`);
+    assert.ok(f.body().endsWith(`## 検証結果\n\n${(await readFile(join(f.control, 'report.md'), 'utf8')).trim()}\n`));
     assert.ok(f.history.every(call => call.command === 'git' || call.command === 'gh'));
     assert.equal(f.history.some(call => call.command === 'git' && call.args[0] === 'push'), false);
     await assert.rejects(readFile(f.executed));
@@ -170,10 +174,55 @@ test('task:pr without remote flags retains its local browser-proof path', async 
     await writeFile(join(f.target, '.cake/verification.json'), JSON.stringify({ protocol: 'cake-preview-browser/v1',
       source: f.verified.receipt.source, deployment: f.verified.deployment, ...verifyProofFixture(), success: true }));
     await runTaskPr({ cwd: f.target, execute: f.options.execute, log: silent,
-      args: ['--title', 'Local QA acceptance', '--verification-file', join(f.control, 'report.md')] });
+      args: ['--title', 'Local QA acceptance', '--changes-file', join(f.control, 'changes.md'), '--verification-file', join(f.control, 'report.md')] });
     assert.deepEqual(f.mutations, { dispatch: 1, update: 1, ready: 1 });
     assert.equal(f.events.includes('capability-read'), false);
     assert.equal(f.events.includes('verify-notice'), false);
     assert.equal(f.verified.calls.includes('actions/runs/123'), false);
+    assert.ok(f.body().startsWith(`## 変更内容\n\n${changes}\n\n## Preview\n`));
   } finally { await rm(f.directory, { recursive: true, force: true }); }
+});
+
+test('draft作成でも変更説明と検証報告を別章へ反映し、タイトルで説明を上書きしない', async () => {
+  const f = await fixture(); let createdBody = '', createdPath = '';
+  try {
+    const execute: WorkflowExecutor = async (command, args, cwd) => {
+      if (command === 'gh' && args[0] === 'pr' && args[1] === 'list') return { status: 0, signal: null, stdout: '[]' };
+      if (command === 'gh' && args[0] === 'pr' && args[1] === 'create') {
+        assert.ok(args.includes('--draft')); assert.equal(cwd, f.target);
+        createdPath = args[args.indexOf('--body-file') + 1]; createdBody = await readFile(createdPath, 'utf8');
+        return { status: 0, signal: null, stdout: `https://github.com/${config.repository}/pull/71` };
+      }
+      return f.options.execute(command, args, cwd);
+    };
+    assert.deepEqual(await runTaskPr({ cwd: f.target, execute, log: silent,
+      args: ['--draft', '--title', '一括操作を改善する', '--changes-file', join(f.control, 'changes.md'), '--verification-file', join(f.control, 'report.md')] }),
+    { url: `https://github.com/${config.repository}/pull/71`, existing: false });
+    assert.ok(createdBody.startsWith(`## 変更内容\n\n${changes}\n\n## Preview\n`));
+    assert.ok(createdBody.includes('未検証。'));
+    assert.ok(createdBody.endsWith(`## 検証結果\n\n${(await readFile(join(f.control, 'report.md'), 'utf8')).trim()}\n`));
+    assert.deepEqual(f.mutations, { dispatch: 0, update: 0, ready: 0 });
+    await assert.rejects(readFile(createdPath));
+  } finally { await rm(f.directory, { recursive: true, force: true }); }
+});
+
+test('変更説明の不足・不正ファイルはGit/GitHub操作より前に拒否する', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'cake-task-pr-changes-'));
+  try {
+    await writeFile(join(directory, 'report.md'), '検証結果');
+    await writeFile(join(directory, 'empty.md'), ' \n\t');
+    await writeFile(join(directory, 'nul.md'), '変更内容\0');
+    await writeFile(join(directory, 'large.md'), 'x'.repeat(1_000_001));
+    const base = ['--draft', '--title', '変更内容の説明を改善する', '--verification-file', 'report.md'];
+    for (const [name, extra, pattern] of [
+      ['引数なし', [], /変更内容ファイル/],
+      ...['missing.md', 'empty.md', 'nul.md', 'large.md', '.'].map(file => [file, ['--changes-file', file], /変更内容ファイルを読み込めません/] as const),
+      ['重複指定', ['--changes-file', 'empty.md', '--changes-file', 'nul.md'], /--changes-file/],
+    ] as const) await t.test(name, async () => {
+      let calls = 0;
+      await assert.rejects(runTaskPr({ cwd: directory, args: [...base, ...extra], log: silent,
+        execute: async () => { calls++; throw new Error('外部操作は許可しない'); } }), pattern);
+      assert.equal(calls, 0);
+    });
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
