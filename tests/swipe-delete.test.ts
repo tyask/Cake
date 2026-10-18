@@ -5,16 +5,35 @@ import type { AddressInfo } from "node:net";
 import { build } from "esbuild";
 import { chromium, type Locator, type Page } from "playwright";
 
+async function settleScroll(page: Page) {
+  await page.evaluate(async () => {
+    let previous = window.scrollY, stable = 0;
+    for (let frame = 0; frame < 180; frame++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      const current = window.scrollY;
+      stable = current === previous ? stable + 1 : 0;previous = current;
+      if (stable >= 4) return;
+    }
+    throw new Error("スクロールが停止しませんでした。");
+  });
+}
+
 async function swipe(page: Page, target: Locator, dx = -100, dy = 0, cancel = false) {
+  await settleScroll(page);
   await target.scrollIntoViewIfNeeded();
+  await settleScroll(page);
   const box = (await target.boundingBox())!;
   const x = box.x + box.width * .65, y = box.y + box.height / 2;
   const session = await page.context().newCDPSession(page);
   try {
     await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
-    for (let step = 1; step <= 6; step++) await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + dx * step / 6, y: y + dy * step / 6 }] });
+    for (let step = 1; step <= 6; step++) {
+      await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + dx * step / 6, y: y + dy * step / 6 }] });
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+    }
     await session.send("Input.dispatchTouchEvent", { type: cancel ? "touchCancel" : "touchEnd", touchPoints: [] });
   } finally { await session.detach(); }
+  await settleScroll(page);
 }
 
 test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC表示を検証する", async t => {
