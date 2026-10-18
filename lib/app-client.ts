@@ -6,4 +6,3 @@ export async function postAction(payload: AppActionInput) {
   if (!response.ok) throw new Error(result.error ?? "処理に失敗しました。");
   return result;
 }
-

@@ -88,4 +88,3 @@ export function NewTransactionModal({ selected, currentUserId, close, run }: { s
     </form>
   </Modal>;
 }
-

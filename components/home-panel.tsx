@@ -31,4 +31,3 @@ export function HomePanel({ selected, pending, setTab, add, refreshAction, refre
     </div>
   </>;
 }
-

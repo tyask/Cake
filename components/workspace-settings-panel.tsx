@@ -81,4 +81,3 @@ export function SettingsPanel({ selected, currentUserId, run, afterDelete }: { s
     </section>
   </>;
 }
-
