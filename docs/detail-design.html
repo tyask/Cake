@@ -689,14 +689,14 @@
               <div class="dfd-node process"><strong>削除ボタンを押す</strong><small>対象ID / keyを呼出元へ渡す</small></div>
             </div>
             <div class="flow-branches" role="group" aria-label="画面ごとの削除経路">
-              <div class="dfd-node output"><strong>ファイル取り込み</strong><p>確認なし → 該当keyをローカルrowsから除去 → 登録時に残った選択行だけbulkImportへ送信。</p></div>
+              <div class="dfd-node output"><strong>ファイル取り込み</strong><p>対象名を含む確認 → 承認時だけ該当keyをローカルrowsから除去 → 登録時に残った選択行だけbulkImportへ送信。</p></div>
               <div class="dfd-node process"><strong>未清算明細</strong><p>確認 → 対象IDだけfreeze / flush / キュー → deleteTransactions → DBで最新の未清算状態を検証。</p></div>
               <div class="dfd-node process"><strong>デフォルトルール</strong><p>確認 → 対象IDだけ構造操作キュー → deleteRules → DBで削除・残存順序再採番。</p></div>
               <div class="dfd-node process"><strong>定期支払い</strong><p>既存の削除確認ダイアログ → archive / expectedRevisionを送信 → DBでrevisionを確認。</p></div>
             </div>
             <p>サーバー更新は成功応答を既存の状態管理で反映し、失敗時は対象行・入力を保持する。</p>
           </div>
-          <p>単件の明細・ルール削除はチェック状態を書き換えず対象ID配列を既存の一括操作へ渡し、他行の選択を保持する。明細は保存待ちと入力をflushしてから最新の未清算対象を再確認する。ルールの保存中・構造更新中・並べ替え中はスワイプ削除を無効にし、既存キューで編集と削除を直列化する。取り込み行の除外ではAPIを呼ばず、元の読込件数を別Stateに保持して取込履歴のtotalRowsへ渡す。ファイルを再度読み込むと除外もリセットする。取り込み登録中は行削除を無効にする。</p>
+          <p>単件の明細・ルール削除はチェック状態を書き換えず対象ID配列を既存の一括操作へ渡し、他行の選択を保持する。明細は保存待ちと入力をflushしてから最新の未清算対象を再確認する。ルールの保存中・構造更新中・並べ替え中はスワイプ削除を無効にし、既存キューで編集と削除を直列化する。取り込み行は確認ポップアップの承認後にだけ除外する。キャンセル時は行・入力・選択を保持し、除外ではAPIを呼ばず、元の読込件数を別Stateに保持して取込履歴のtotalRowsへ渡す。ファイルを再度読み込むと除外もリセットする。取り込み登録中は行削除を無効にする。</p>
           <h3>明細編集・一括操作</h3>
           <ul>
             <li>文字・日時・金額・割合は欄を離れるかEnterで保存。選択項目は変更時に保存。入力検証後、保存キューで順番に実行し、失敗時の下書きと再試行を保持する。</li>

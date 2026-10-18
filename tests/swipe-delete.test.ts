@@ -110,11 +110,17 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
         assert.equal(await reveal.evaluate(element => element === document.activeElement), true);
         if (process.env.CAKE_SWIPE_SCREENSHOTS) { await reveal.focus();await page.keyboard.press("Enter");await page.screenshot({ animations: "disabled", path: `.cake/swipe-open-${view}.png` });await page.keyboard.press("Escape"); }
         if (view === "import") {
-          page.on("dialog", () => { errors.push("取込で不要な確認"); });
+          await card.getByRole("button", { name: "firstの詳細を開く", exact: true }).click();
+          await card.getByLabel("Aの支払い割合", { exact: true }).fill("70");
           const other = page.getByRole("button", { name: "secondの削除操作", exact: true });
           await reveal.focus();await page.keyboard.press("Enter");await other.focus();await page.keyboard.press("Enter");await action.waitFor({ state: "hidden" });
           await page.keyboard.press("Escape");
-          await swipe(page, surface);await action.click();await reveal.waitFor({ state: "hidden" });
+          await swipe(page, surface);
+          page.once("dialog", dialog => { assert.match(dialog.message(), /first.*取込一覧から削除/);void dialog.dismiss(); });
+          await action.click();assert.equal(await row.count(), 1);assert.equal(writes.length, 0);
+          assert.equal(await card.getByLabel("Aの支払い割合", { exact: true }).inputValue(), "70");
+          assert.equal(await page.getByRole("button", { name: "選択した2件を登録", exact: true }).count(), 1);
+          page.once("dialog", dialog => dialog.accept());await action.click();await reveal.waitFor({ state: "hidden" });
           assert.equal(writes.length, 0);hold = true;await page.getByRole("button", { name: "選択した1件を登録", exact: true }).click();
           await page.getByRole("button", { name: "登録中…", exact: true }).waitFor();
           assert.equal(await other.isDisabled(), true);

@@ -61,6 +61,13 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
     }
   }
 
+  function removePreviewRow(key: string) {
+    if (saving) return;
+    const row = rows.find(item => item.key === key);
+    if (!row || !confirm(`「${row.merchant || "取引先未設定"}」を取込一覧から削除しますか？保存済みの明細は変更されません。`)) return;
+    setRows(current => current.filter(item => item.key !== key));
+  }
+
   function changeActor(nextActor: string) {
     setActorId(nextActor);
     setRows((current) => current.map((row) => row.expenseClass === "PERSONAL"
@@ -122,7 +129,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
         <button disabled={saving} onClick={() => bulk("PERSONAL")}>個人費に変更</button><button disabled={saving} onClick={() => bulk("SHARED")}>共通費に変更</button>
         <button disabled={saving} className="text-button" onClick={() => { setRows([]); setFileName(""); }}>やり直す</button>
       </div>
-      <ImportPreviewTable onDelete={key => { if (!saving) setRows(current => current.filter(row => row.key !== key)); }} rows={rows} members={selected.members} actorId={actorId} saving={saving}
+      <ImportPreviewTable onDelete={removePreviewRow} rows={rows} members={selected.members} actorId={actorId} saving={saving}
         onSelect={(key, checked) => setRows(current => current.map(row => row.key === key ? { ...row, selected: checked } : row))}
         onSelectAll={checked => setRows(current => current.map(row => row.error || row.duplicate ? row : { ...row, selected: checked }))}
         onChangeClass={(key, expenseClass) => setRows(current => current.map(row => row.key === key ? changeClass(row, expenseClass) : row))}
