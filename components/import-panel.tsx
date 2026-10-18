@@ -26,6 +26,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
   const inputRef = useRef<HTMLInputElement>(null);
   const [format, setFormat] = useState<keyof typeof importFormats>("PAYPAY");
   const [rows, setRows] = useState<PayPayPreviewRow[]>([]);
+  const [totalRows, setTotalRows] = useState(0);
   const [fileName, setFileName] = useState("");
   const [actorId, setActorId] = useState(currentUserId);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +66,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
       }
       if (requestId !== fileRequest.current) return;
       setRows(applyPayPayDuplicateChecks(parsed, existing));
+      setTotalRows(parsed.length);
       setFileName(sourceName);
       setError(null);
     } catch (failure) {
@@ -74,6 +76,13 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
     } finally {
       if (requestId === fileRequest.current) setReading(false);
     }
+  }
+
+  function removePreviewRow(key: string) {
+    if (saving) return;
+    const row = rows.find(item => item.key === key);
+    if (!row || !confirm(`「${row.merchant || "取引先未設定"}」を取込一覧から削除しますか？`)) return;
+    setRows(current => current.filter(item => item.key !== key));
   }
 
   function choose(file?: File) {
@@ -114,7 +123,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
         splitWeights: validateSplitWeights(row.splitWeights, selected.members, row.expenseClass, actorId),
       }));
       if (items.length === 0) { setError("登録する行を選択してください。"); return; }
-      await run({ action: "bulkImport", workspaceId: selected.workspace.id, fileName, totalRows: rows.length, items }, "明細を取り込みました。");
+      await run({ action: "bulkImport", workspaceId: selected.workspace.id, fileName, totalRows, items }, "明細を取り込みました。");
       setRows([]);
       setFileName("");
     } catch (failure) { setError(failure instanceof Error ? failure.message : "明細を登録できませんでした。"); }
@@ -160,7 +169,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
         <button disabled={saving} onClick={() => bulk("PERSONAL")}>個人費に変更</button><button disabled={saving} onClick={() => bulk("SHARED")}>共通費に変更</button>
         <button disabled={saving} className="text-button" onClick={() => { setRows([]); setFileName(""); }}>やり直す</button>
       </div>
-      <ImportPreviewTable rows={rows} members={selected.members} actorId={actorId} saving={saving}
+      <ImportPreviewTable onDelete={removePreviewRow} rows={rows} members={selected.members} actorId={actorId} saving={saving}
         onSelect={(key, checked) => setRows(current => current.map(row => row.key === key ? { ...row, selected: checked } : row))}
         onSelectAll={checked => setRows(current => current.map(row => row.error || row.duplicate ? row : { ...row, selected: checked }))}
         onChangeClass={(key, expenseClass) => setRows(current => current.map(row => row.key === key ? changeClass(row, expenseClass) : row))}

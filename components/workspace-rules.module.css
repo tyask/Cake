@@ -45,6 +45,10 @@
   .createLine .addButton { grid-column: 2; grid-row: 3; }
 }
 
+@media (max-width: 48rem) {
+  .rule { isolation: isolate; overflow: hidden; }
+}
+
 @media (max-width: 600px) {
   .description, .error, .create, .toolbar, .list, .empty, .footnote { margin-left: .85rem; margin-right: .85rem; }
   .create, .rule { padding: .6rem; }
