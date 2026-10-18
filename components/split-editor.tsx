@@ -8,7 +8,7 @@ import { useId, useState } from "react";
 import { changeSplitAmount, equalSplitWeights, splitAmounts } from "@/lib/split-allocations";
 import type { SplitWeights, WorkspaceMember } from "@/lib/types";
 
-export function SplitEditor({ members, value, onChange, onCommit, amountYen, disabled = false, compact = false, inline = false, allowEqualSplit = false, label = "負担割合" }: {
+export function SplitEditor({ members, value, onChange, onCommit, amountYen, disabled = false, compact = false, inline = false, label = "負担割合" }: {
   members: WorkspaceMember[];
   value: SplitWeights;
   onChange?: (value: SplitWeights) => void;
@@ -17,7 +17,6 @@ export function SplitEditor({ members, value, onChange, onCommit, amountYen, dis
   disabled?: boolean;
   compact?: boolean;
   inline?: boolean;
-  allowEqualSplit?: boolean;
   label?: string;
 }) {
   const id = useId();
@@ -48,7 +47,7 @@ export function SplitEditor({ members, value, onChange, onCommit, amountYen, dis
   }
   function changeMode(nextMode: string) {
     if (nextMode === "EQUAL") {
-      if (!allowEqualSplit || disabled || !onChange || members.length !== 2) return;
+      if (disabled || !onChange || members.length !== 2) return;
       onChange(equalSplitWeights(members));
       setMode("RATIO");
       onCommit?.();
@@ -82,7 +81,7 @@ export function SplitEditor({ members, value, onChange, onCommit, amountYen, dis
         ))}
         {inline && transactionSplit && <select aria-label={`${label}の単位`} value={mode} onChange={(event) => changeMode(event.target.value)}>
           <option value="RATIO">%</option><option value="AMOUNT" disabled={!validAmount}>円</option>
-          {allowEqualSplit && <option value="EQUAL" disabled={members.length !== 2 || !onChange}>1:1</option>}
+          <option value="EQUAL" disabled={members.length !== 2 || !onChange}>1:1</option>
         </select>}
       </div>
       {total <= 0 && <p className="form-error">どちらかの割合を1以上にしてください。</p>}

@@ -79,7 +79,7 @@ function ImportPreviewRow({ row, members, actorId, saving, onSelect, onChangeCla
       {expenseClasses.map(value => <option key={value} value={value}>{expenseClassLabels[value]}</option>)}
     </select></td>
     <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}>
-      <SplitEditor compact inline allowEqualSplit label="支払い割合" members={members} value={row.splitWeights} amountYen={row.amountYen}
+      <SplitEditor compact inline label="支払い割合" members={members} value={row.splitWeights} amountYen={row.amountYen}
         disabled={disabled || row.expenseClass === "PERSONAL"} onChange={value => onChangeSplit(row.key, value)} />
     </td>
     <td data-label="状態"><span className={invalid ? styles.error : styles.muted}>{status}</span></td>
