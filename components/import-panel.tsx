@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { RunAppAction } from "@/lib/app-input";
 import { defaultSplitWeights, personalSplitWeights, validateSplitWeights } from "@/lib/expense-splits";
 import { parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
@@ -13,8 +13,16 @@ import { ImportHelpDialog } from "./import-help-dialog";
 const importFormats = { PAYPAY: { label: "PayPay", parse: parsePayPayCsv } };
 const pastedFileName = "PayPay貼り付け.csv";
 const clipboardReadError = "クリップボードを読み取れませんでした。ペーストを許可して再度試すか、「ファイルを選択」からCSVを取り込んでください。";
+const subscribeToBrowser = () => () => {};
+const getServerSafariSnapshot = () => false;
+function getSafariSnapshot() {
+  const userAgent = navigator.userAgent;
+  return /Version\/[\d.]+.*Safari\//.test(userAgent)
+    && !/Chrome|Chromium|CriOS|FxiOS|Edg|OPR|OPiOS|OPT\/|Android|DuckDuckGo|Ddg|GSA|YaBrowser|YxiOS|Brave/i.test(userAgent);
+}
 
 export function ImportPanel({ selected, currentUserId, run }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction }) {
+  const isSafari = useSyncExternalStore(subscribeToBrowser, getSafariSnapshot, getServerSafariSnapshot);
   const inputRef = useRef<HTMLInputElement>(null);
   const [format, setFormat] = useState<keyof typeof importFormats>("PAYPAY");
   const [rows, setRows] = useState<PayPayPreviewRow[]>([]);
@@ -126,7 +134,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
         <section className="panel import-paste" aria-labelledby="import-paste-title">
           <h2 id="import-paste-title">クリップボードから貼り付け</h2>
           <button className="primary import-clipboard-button" disabled={busy} onClick={pasteAndPreview}>貼り付け</button>
-          <small>※Safariの確認が出たら「ペースト」を選んでください</small>
+          {isSafari && <small>※Safariの確認が出たら「ペースト」を選んでください</small>}
           <button type="button" className="text-button import-help-button" disabled={busy} aria-haspopup="dialog"
             onClick={event => { event.currentTarget.focus(); setHelpUrl(new URL("/?tab=import", window.location.origin).href); }}>ヘルプ</button>
         </section>

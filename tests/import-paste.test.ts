@@ -27,11 +27,14 @@ const csv = "\uFEFF" + header + "\r\n" + [
 const duplicateResult = { externalIds: [], transactions: [{
   externalId: "PayPay_20261018120244_00001236", merchant: "保存済みのお店", amountYen: 990, source: "PAYPAY",
 }] };
+const safariNote = "※Safariの確認が出たら「ペースト」を選んでください";
+const macSafari = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+const iphoneSafari = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
 type Request = { path: string; payload: Record<string, unknown> };
 type ClipboardSetup = { mode: Window["importPasteClipboardMode"]; text?: string };
 
-async function openFixture(browser: Browser, origin: string, width: number, api: (route: Route, request: Request) => Promise<void>, clipboard: ClipboardSetup = { mode: "reject" }) {
-  const context = await browser.newContext({ viewport: { width, height: 1000 }, serviceWorkers: "block" });
+async function openFixture(browser: Browser, origin: string, width: number, api: (route: Route, request: Request) => Promise<void>, clipboard: ClipboardSetup = { mode: "reject" }, userAgent?: string) {
+  const context = await browser.newContext({ viewport: { width, height: 1000 }, serviceWorkers: "block", ...(userAgent ? { userAgent } : {}) });
   const page = await context.newPage(), requests: Request[] = [], errors: string[] = [];
   page.setDefaultTimeout(10000);
   page.on("pageerror", error => errors.push(error.message));
@@ -108,16 +111,47 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(done => server.close(() => done())); throw error; });
   try {
+    await t.test("Safariの確認注記はmacOS・iPhoneのSafariだけに表示する", async () => {
+      const agents = [
+        ["macOS Safari", macSafari, true, 1440],
+        ["iPhone Safari", iphoneSafari, true, 390],
+        ["desktop Chrome", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36", false, 1440],
+        ["iPhone Chrome", iphoneSafari.replace("Version/18.0", "CriOS/130.0.6723.90"), false, 390],
+        ["iPhone Firefox", iphoneSafari.replace("Version/18.0", "FxiOS/131.0"), false, 390],
+        ["iPhone Edge", iphoneSafari.replace("Version/18.0", "Version/18.0 EdgiOS/130.0.2849.68"), false, 390],
+        ["iPhone Opera", iphoneSafari.replace("Version/18.0", "Version/18.0 OPiOS/3.2.5"), false, 390],
+        ["Android Chrome", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36", false, 390],
+      ] as const;
+      for (const [name, userAgent, showNote, width] of agents) {
+        const { page, requests, errors, context } = await openFixture(browser, origin, width, route => route.abort(), { mode: "reject" }, userAgent);
+        try {
+          const paste = page.getByRole("button", { name: "貼り付け", exact: true });
+          await paste.waitFor();
+          const note = page.getByText(safariNote, { exact: true });
+          if (showNote) await note.waitFor();
+          else await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+          assert.equal(await note.count(), showNote ? 1 : 0, name);
+          assert.equal(await paste.isEnabled(), true, name);
+          assert.equal(await page.getByRole("button", { name: "ヘルプ", exact: true }).isEnabled(), true, name);
+          assert.equal(await page.evaluate(() => window.importPasteClipboardReads), 0, name);
+          assert.deepEqual(await page.evaluate(() => window.importPasteClipboardWrites), [], name);
+          assert.equal(requests.length, 0, name);
+          assert.deepEqual(errors, [], name);
+        } finally { await context.close(); }
+      }
+    });
+
     for (const [name, width] of [["PC", 1440], ["mobile", 390]] as const) {
       await t.test(`${name}: ヘルプでショートカットの設定を確認し、閉じると元の操作へ戻る`, async () => {
-        const { page, requests, errors, context } = await openFixture(browser, origin, width, route => route.abort());
+        const { page, requests, errors, context } = await openFixture(browser, origin, width, route => route.abort(), { mode: "reject" }, width < 700 ? iphoneSafari : macSafari);
         try {
           await page.setViewportSize({ width, height: width < 700 ? 600 : 800 });
           await page.evaluate(() => history.replaceState({}, "", "/?tab=import&workspaceId=workspace&csv=synthetic-csv&auth=synthetic-auth#synthetic-fragment"));
           await assertNoManualInput(page);
           assert.equal(await page.getByRole("heading", { name: "クリップボードから貼り付け", exact: true }).count(), 1);
           const paste = page.getByRole("button", { name: "貼り付け", exact: true });
-          assert.equal(await paste.evaluate(button => button.nextElementSibling?.textContent), "※Safariの確認が出たら「ペースト」を選んでください");
+          await page.getByText(safariNote, { exact: true }).waitFor();
+          assert.equal(await paste.evaluate(button => button.nextElementSibling?.textContent), safariNote);
           const help = page.getByRole("button", { name: "ヘルプ", exact: true });
           assert.equal(await help.getAttribute("aria-haspopup"), "dialog");
           await help.click();
