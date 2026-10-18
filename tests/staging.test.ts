@@ -34,6 +34,7 @@ test('常設Previewは専用branch・kind・予約ID・DBを照合し、PR用と
   assert.equal(provisioningBuild({ ...environment, CAKE_PREVIEW_PHASE: 'provisioning', CAKE_PREVIEW_DATABASE_BRANCH_ID: '', CAKE_PREVIEW_DATABASE_HOST_SHA256: '' }), true);
 });
 function fixture() {
+  let comparison = 'ahead';
   let mirror: string | undefined, main = sha, protection = 'all_except_custom_domains', alias: unknown = null;
   const writes: {provider: string; path: string; method: string; body: unknown}[] = [];
   const deployments: Record<string, unknown>[] = [], branches: unknown[] = [], endpoints: unknown[] = [];
@@ -46,7 +47,7 @@ function fixture() {
       if (path.endsWith('/git/ref/heads/main')) return {object: {sha: main}};
       if (path.endsWith(`/git/ref/heads/${staging.branch}`)) return mirror ? {object: {sha: mirror}} : null;
       if (method === 'POST' || method === 'PATCH') { mirror = (body as {sha:string}).sha; return {}; }
-      if (path.includes('/compare/')) return {status: 'ahead'};
+      if (path.includes('/compare/')) return {status: comparison};
       if (path.endsWith('/branches/main')) return {commit: {sha: main}};
       if (path.includes('/contents/vercel.json?')) return {type: 'file', encoding: 'base64', content: Buffer.from(JSON.stringify({git: {deploymentEnabled: {'**': false, main: true}}})).toString('base64')};
     }
@@ -78,7 +79,7 @@ function fixture() {
   };
   const provider = new StagingProvider(api), service = new PreviewService(provider, async()=>{});
   return {provider, service, writes, deployments, setMain:(value:string)=>{main=value;}, setMirror:(value:string)=>{mirror=value;},
-    unprotect:()=>{protection='none';}, setAlias:(value:unknown)=>{alias=value;}};
+    diverge:()=>{comparison='diverged';}, unprotect:()=>{protection='none';}, setAlias:(value:unknown)=>{alias=value;}};
 }
 test('mainをfast-forward同期し、Native準備→application→固定alias、次のmainでも同じDB・世代を保持する', async () => {
   const f = fixture(); await f.provider.sync(source);
@@ -96,7 +97,7 @@ test('mainをfast-forward同期し、Native準備→application→固定alias、
 test('保護なし・mainの変化・管理外branch/aliasでは書込や上書きを停止する', async () => {
   const unprotected=fixture(); unprotected.unprotect(); await assert.rejects(unprotected.provider.sync(source),/PROTECTION/); assert.equal(unprotected.writes.length,0);
   const stale=fixture(); stale.setMain('b'.repeat(40)); await assert.rejects(stale.provider.sync(source),/SOURCE_CHANGED/); assert.equal(stale.writes.length,0);
-  const branch=fixture(); branch.setMirror('c'.repeat(40)); await assert.rejects(branch.provider.sync(source),/UNOWNED/); assert.equal(branch.writes.length,0);
+  const branch=fixture(); branch.setMirror('c'.repeat(40)); branch.diverge(); await assert.rejects(branch.provider.sync(source),/NON_FAST_FORWARD/); assert.equal(branch.writes.length,0);
   const alias=fixture(); await alias.provider.sync(source); const deployed=await alias.service.deploy(source,generation);
   alias.setAlias({projectId:'other',deploymentId:'dpl_other'});
   await assert.rejects(alias.provider.alias(source,deployed.deployment as Deployment),/ALIAS_CONFLICT/);
@@ -135,4 +136,13 @@ test('固定URLは匿名アクセスがVercel認証で拒否されることを�
     await assertAnonymousProtection(async()=>response);
   for (const response of [new Response('public',{status:200}), new Response(null,{status:307,headers:{location:'/login'}}),new Response(null,{status:307,headers:{location:'https://other.example/login'}})])
     await assert.rejects(assertAnonymousProtection(async()=>response),/PUBLIC_ACCESS/);
+});
+
+
+test('初回mirror作成後にmainが進んでもDeployment未作成の状態からfast-forward復旧できる', async () => {
+  const f=fixture(); await f.provider.sync(source);
+  const next={...source,sha:'b'.repeat(40)}; f.setMain(next.sha);
+  await f.provider.sync(next);
+  assert.deepEqual(f.writes.at(-1)?.body,{sha:next.sha,force:false});
+  assert.equal(f.deployments.length,0);
 });

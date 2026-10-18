@@ -38,9 +38,10 @@ export class StagingProvider extends PreviewProvider {
     } else {
       const previous = text(object(object(value).object).sha);
       if (previous !== expected.sha) {
-        // Existing non-managed branches must not be silently appropriated.
+        // A first run may have created the mirror but stopped before its first
+        // Deployment. Permit recovery only along main history, without force.
         const deployments = await this.deployments(expected);
-        if (!deployments.some(d => d.sha === previous)) throw new Error('PREVIEW_STAGING_UNOWNED');
+        if (!deployments.length && await this.database(expected, 0)) throw new Error('PREVIEW_STAGING_UNOWNED');
         const comparison = object(await this.api('github', `/repos/${config.repository}/compare/${previous}...${expected.sha}`));
         if (comparison.status !== 'ahead') throw new Error('PREVIEW_STAGING_NON_FAST_FORWARD');
         await this.api('github', path, 'PATCH', { sha: expected.sha, force: false });

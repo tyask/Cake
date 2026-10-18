@@ -121,7 +121,7 @@ QAのAはテスト管理者・共有OWNER、Bは一般・MEMBER。正規QA用ロ
 
 常設Previewは `https://cake-main-preview-fumin1.vercel.app` を固定URLとし、Neon Nativeの `preview/cake-main-preview` を継続利用する。PR closeによるcleanupの対象にはしない。`CAKE_PREVIEW_KIND=main`・予約ID `CAKE_PREVIEW_PR=0`・固定branch・完全SHA・DB世代・endpoint・本番host分離を検査する。DB markerのpr=0は常設専用で、通常PRは正整数のみを受け付ける。A/BはPRと同じ固定identityで、初回seed後のデータと名前・権限は更新時に上書きしない。
 
-デプロイ前にVercel認証保護を確認し、PC/mobile × A/Bの正式ブラウザ検証と前後status照合に成功してから固定aliasを更新する。成功結果は `cake-staging/v1` の標準noticeにmain SHA・Deployment・DB branch/endpoint・generation・ブラウザ観測を記録する。古いmain、DB消失、管理外branch/alias、応答不明では停止し、盲目的な再作成・削除をしない。再runは同じoperationを照合する。通常のPR用receipt・Ready証拠とは区別する。
+デプロイ前にVercel認証保護を確認し、PC/mobile × A/Bの正式ブラウザ検証と前後status照合に成功してから固定aliasを更新する。成功結果は `cake-staging/v1` の標準noticeにmain SHA・Deployment・DB branch/endpoint・generation・ブラウザ観測を記録する。古いmain、DB消失、main履歴から分岐したmirror/管理外alias、応答不明では停止し、盲目的な再作成・削除をしない。再runは同じoperationを照合する。通常のPR用receipt・Ready証拠とは区別する。
 
 固定URLはVercel認証で保護し、保護設定を解除しない。URLを知るだけでは閲覧できず、Vercelのアクセス権または共有の許可が必要となる。新しい共有リンクは自動発行しない。Production用カスタムドメインは常設Previewへ付け替えない。
 
