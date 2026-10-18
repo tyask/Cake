@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights } from "../lib/expense-splits";
+import { defaultSplitWeights, matchingDefaultRule, personalSplitWeights, transactionDefaults, validateSplitWeights } from "../lib/expense-splits";
+import { defaultRuleCases } from "./fixtures/default-rule-cases";
 import type { DefaultRule } from "../lib/types";
 
 const members = [{ id: "a", weight: 6 }, { id: "b", weight: 4 }];
@@ -8,6 +9,19 @@ const rule = (overrides: Partial<DefaultRule> = {}): DefaultRule => ({
   id: "rule", merchantContains: "スーパー", expenseClass: "SHARED", sortOrder: 0,
   splitWeights: null, enabled: true, ...overrides,
 });
+
+for (const fixture of defaultRuleCases) {
+  test(`デフォルト判定: ${fixture.name}`, () => {
+    const rules = structuredClone(fixture.rules);
+    for (const item of rules) Object.freeze(item);
+    Object.freeze(rules);
+    assert.equal(matchingDefaultRule(fixture.merchant, rules)?.id, fixture.matchedId);
+    assert.deepEqual(transactionDefaults(fixture.merchant, rules, members, "b", "SHARED"), {
+      expenseClass: fixture.expenseClass, splitWeights: fixture.splitWeights,
+    });
+    assert.deepEqual(rules, fixture.rules);
+  });
+}
 
 test("共有費はデフォルト割合をコピーし、0の割合も保持する", () => {
   const source = [{ id: "a", weight: 0 }, { id: "b", weight: 5 }];

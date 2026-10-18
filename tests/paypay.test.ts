@@ -2,11 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { defaultExpenseClass, parsePayPayCsv, payPayDateToIso } from "../lib/paypay";
 import type { WorkspaceMember } from "../lib/types";
+import { defaultRuleCases } from "./fixtures/default-rule-cases";
 
 const members: WorkspaceMember[] = [
   { id: "a", email: "a@example.com", name: "A", imageUrl: null, weight: 6, role: "OWNER" },
   { id: "b", email: "b@example.com", name: "B", imageUrl: null, weight: 4, role: "MEMBER" },
 ];
+
+for (const fixture of defaultRuleCases) {
+  test(`CSVのデフォルト判定: ${fixture.name}`, () => {
+    const csv = `取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n2026/10/10 10:00:00,101,支払い,${fixture.merchant},現金,fixture`;
+    const [row] = parsePayPayCsv(csv, fixture.rules, new Set(), members, "b");
+    assert.equal(row.error, null);
+    assert.equal(row.selected, true);
+    assert.equal(row.expenseClass, fixture.expenseClass);
+    assert.deepEqual(row.splitWeights, fixture.splitWeights);
+  });
+}
 
 test("サンプルCSVから支払い行だけを抽出する", () => {
   const csv = [

@@ -3,6 +3,7 @@ import test from "node:test";
 import { recurringFormConfig, recurringFormDefaults, recurringFormPreview } from "../lib/recurring-payment-form";
 import type { RecurringPayment } from "../lib/recurring-payment-types";
 import type { WorkspaceMetadata } from "../lib/types";
+import { defaultRuleCases, ruleMembers } from "./fixtures/default-rule-cases";
 
 const selected: WorkspaceMetadata = { workspace: { id: "w", name: "家計", type: "SHARED", ownerUserId: "a", memberCount: 2 },
   members: [{ id: "a", email: "a@test", name: "A", imageUrl: null, role: "OWNER", weight: 1 },
@@ -11,6 +12,18 @@ const config = { dayOfMonth: 27, merchant: "家賃", method: "振込", amountYen
 const payment: RecurringPayment = { id: "r", workspaceId: "w", state: "ACTIVE", revision: 2, authorizedById: "a",
   currentConfig: config,
   nextScheduledOn: "2026-10-27", blockedReason: null };
+
+for (const fixture of defaultRuleCases) {
+  test(`定期支払いのデフォルト判定: ${fixture.name}`, () => {
+    let merchantReads = 0;
+    const rules = fixture.rules.map(rule => ({ ...rule, get merchantContains() { merchantReads++; return rule.merchantContains; } }));
+    const workspace = { ...selected, rules, members: selected.members.map((member, i) => ({ ...member, weight: ruleMembers[i].weight })) };
+    assert.deepEqual(recurringFormDefaults(workspace, fixture.merchant, "b"), {
+      expenseClass: fixture.expenseClass, splitWeights: fixture.splitWeights,
+    });
+    assert.ok(merchantReads <= rules.length, "一致確認のためにルールを二度走査しない");
+  });
+}
 
 test("editing starts with the current saved amount and day and copies split weights", () => {
   const draft = recurringFormConfig(selected, "a", ["a", "b"], "2026-10-10", payment);

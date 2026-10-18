@@ -61,9 +61,14 @@ export function personalSplitWeights(members: readonly { id: string }[], actorUs
 }
 
 export function matchingDefaultRule(merchant: string, rules: readonly DefaultRule[]): DefaultRule | undefined {
-  return [...rules]
-    .sort((a, b) => a.sortOrder - b.sortOrder)
-    .find((rule) => rule.enabled && merchant.includes(rule.merchantContains));
+  let match: DefaultRule | undefined;
+  for (const rule of rules) {
+    // Only a smaller sortOrder replaces the match; ties preserve input order.
+    if (rule.enabled && (!match || rule.sortOrder < match.sortOrder) && merchant.includes(rule.merchantContains)) {
+      match = rule;
+    }
+  }
+  return match;
 }
 
 export function transactionDefaults(

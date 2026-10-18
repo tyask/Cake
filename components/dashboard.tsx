@@ -17,7 +17,7 @@ import { ImportPreviewTable } from "./import-preview-table";
 import { TransactionsPanel } from "./transactions-panel";
 import { RecurringPaymentsPanel } from "./recurring-payments-panel";
 import { RefreshButton } from "./refresh-button";
-import { defaultSplitWeights, matchingDefaultRule, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
+import { defaultSplitWeights, personalSplitWeights, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
 import { parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
 import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
 import { applyTransactionUpdate } from "@/lib/transaction-updates";
@@ -523,9 +523,7 @@ function NewTransactionModal({ selected, currentUserId, close, run }: { selected
   const [error, setError] = useState<string | null>(null);
 
   function applyDefaults(nextMerchant = merchant, nextActor = actorUserId) {
-    const defaults = matchingDefaultRule(nextMerchant, selected.rules)
-      ? transactionDefaults(nextMerchant, selected.rules, selected.members, nextActor)
-      : { expenseClass: "SHARED" as const, splitWeights: defaultSplitWeights(selected.members) };
+    const defaults = transactionDefaults(nextMerchant, selected.rules, selected.members, nextActor, "SHARED");
     setExpenseClass(defaults.expenseClass);
     setSplitWeights(defaults.splitWeights);
   }
