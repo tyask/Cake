@@ -23,7 +23,7 @@ function encoded(rows: Row[]) {
   return { fields, rows: rows.map(row => fields.map(({ name, dataTypeID }) => row[name] == null ? null : dataTypeID === 16 ? row[name] ? "t" : "f" : dataTypeID === 3802 ? JSON.stringify(row[name]) : String(row[name]))) };
 }
 
-function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean; rules?: Row[] } = {}) {
+function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean; rules?: Row[]; deleteError?: string } = {}) {
   const previous = { url: process.env.DATABASE_URL, logging: process.env.DB_QUERY_LOG, fetch: neonConfig.fetchFunction };
   process.env.DATABASE_URL = "postgresql://user:password@mock.neon.tech/app_service_test";
   process.env.DB_QUERY_LOG = "off";
@@ -50,6 +50,7 @@ function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean;
       .map(row => ({ expense_class: row.expense_class, split_weights: row.split_weights, enabled: row.enabled }));
     if (/SELECT expense_class/.test(query)) return [transaction];
     if (/cake_bulk_transactions/.test(query)) return [{ result: { affected: 1, transactions: [{ id: transactionId, occurredAt: "2026-10-10T00:00:00+00:00" }] } }];
+    if (/cake_delete_default_rules/.test(query)) return [{ deleted: 1 }];
     if (/RETURNING imported_rows, skipped_rows/.test(query)) return [{ imported_rows: 1, skipped_rows: 0 }];
     if (/RETURNING id, memo/.test(query)) return [{ id: transactionId, memo: "メモ" }];
     if (/RETURNING \*/.test(query)) return [transaction];
@@ -62,6 +63,7 @@ function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean;
     const body = JSON.parse(String(init.body)) as Query & { queries?: Query[] };
     const queries = body.queries ?? [body];
     trips.push({ queries, transaction: Boolean(body.queries) });
+    if (options.deleteError && /cake_delete_default_rules/.test(body.query)) return new Response(JSON.stringify({ message: options.deleteError, code: "P0001" }), { status: 400 });
     if (options.fail) return new Response(JSON.stringify({ message: "fixture database failure", code: "P0001" }), { status: 400 });
     const result = body.queries ? { results: queries.map(query => encoded(rows(query.query, query.params))) } : encoded(rows(body.query, body.params));
     return new Response(JSON.stringify(result), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -89,8 +91,8 @@ const cases: { input: Row; counts: number[]; transactions?: number[]; result?: R
   { input: { action: "createRule", workspaceId, merchantContains: "店", expenseClass: "SHARED" }, counts: [1, 1, 2], transactions: [2] },
   { input: { action: "updateRule", workspaceId, ruleId, merchantContains: "店", expenseClass: "SHARED" }, counts: [1, 1, 1, 2], transactions: [3] },
   { input: { action: "reorderRules", workspaceId, ruleIds: [ruleId] }, counts: [1, 1] },
-  { input: { action: "deleteRule", workspaceId, ruleId }, counts: [1, 3], transactions: [1] },
-  { input: { action: "deleteRules", workspaceId, ruleIds: [ruleId] }, counts: [1, 1, 3], transactions: [2], result: { ok: true, deleted: 1 } },
+  { input: { action: "deleteRule", workspaceId, ruleId }, counts: [1, 1], result: { ok: true } },
+  { input: { action: "deleteRules", workspaceId, ruleIds: [ruleId] }, counts: [1, 1], result: { ok: true, deleted: 1 } },
   { input: { action: "bulkImport", workspaceId, fileName: "qa.csv", totalRows: 1, items: [{ occurredAt: save.occurredAt, merchant: "店", method: "PayPay", amountYen: 300, actorUserId: "a", externalId: "123" }] }, counts: [1, 1, 1, 4], transactions: [3], result: { ok: true, imported: 1, skipped: 0 } },
   { input: { action: "completeSettlement", workspaceId }, counts: [1, 4], transactions: [1] },
 ];
@@ -121,6 +123,11 @@ for (const [index, scenario] of cases.entries()) {
       assert.doesNotMatch(f.trips[0].queries[0].query, /default_rules|invitations|settlements|my_workspaces/);
       assert.match(queries[3].query, /UPDATE transactions SET settled_at/);
       assert.deepEqual(JSON.parse(String(queries[0].params[2])), [{ id: transactionId, actorUserId: "a", type: "PAYMENT", amountYen: 300, expenseClass: "SHARED", splitWeights: { a: 1, b: 1 } }]);
+    }
+    if (scenario.input.action === "deleteRule" || scenario.input.action === "deleteRules") {
+      assert.match(f.trips[1].queries[0].query, /cake_delete_default_rules/);
+      assert.deepEqual(f.trips[1].queries[0].params, [workspaceId, user.id, JSON.stringify([ruleId]), String(scenario.input.action === "deleteRules")]);
+      assert.ok(f.trips.every(trip => trip.queries.every(q => !/SELECT id FROM default_rules/.test(q.query))), "トランザクション外の対象確認は行わない");
     }
     if (scenario.input.action === "updateProfile") {
       assert.match(f.trips[0].queries[0].query, /WHERE id = \$\d+ AND email = \$\d+ AND is_enabled = true/);
@@ -158,6 +165,15 @@ test("SQL実行失敗を成功JSONに変換しない", async (t) => {
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), { error: "fixture database failure" });
   assert.equal(f.trips.length, 1);
+});
+
+test("ルール削除DB関数の対象不足は既存のHTTP400・日本語応答を保つ", async t => {
+  const error = "選択したルールが見つかりません。画面を更新して選び直してください。";
+  const f = fixture(t, { deleteError: error });
+  const response = await f.post({ action: "deleteRules", workspaceId, ruleIds: [ruleId, transactionId] });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error });
+  assert.equal(f.trips.length, 2);
 });
 
 test("ルール作成は参加者だけ、更新はworkspaceとIDで限定した3項目だけを取得する", async t => {

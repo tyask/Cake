@@ -452,7 +452,7 @@
               <tr><td><code>deleteTransactions</code> / <code>applyTransactionRules</code></td><td>所属、transaction UUID配列1〜5000件、大小文字を正規化した重複なし。</td><td>DB関数で全選択の存在・未清算を検証し、全件削除/現在ルール適用。<code>{ ok, deleted }</code> / <code>{ ok, applied, appliedTransactions }</code>。</td></tr>
               <tr><td><code>createRule</code> / <code>updateRule</code></td><td>所属、merchantContains 1〜120、class、任意splitWeights/null、任意enabled。更新はrule UUID。</td><td>新規はsort_order末尾、enabled既定true。共有割合nullは現在のデフォルトを利用、個人費ルールはnull。更新時に省略した割合は区分同一なら保持。<code>{ ok }</code>。</td></tr>
               <tr><td><code>reorderRules</code></td><td>所属、全rule UUID配列最大5000。</td><td>DB関数で現在の全ルールとの完全一致・重複なしを確認し、sort_orderを0始まりで更新。<code>{ ok }</code>。</td></tr>
-              <tr><td><code>deleteRule</code> / <code>deleteRules</code></td><td>所属、単一UUIDまたは重複のない配列1〜5000。複数削除は全対象の存在確認。</td><td>対象workspace内だけ削除しsort_orderを詰める。<code>{ ok }</code> / <code>{ ok, deleted }</code>。</td></tr>
+              <tr><td><code>deleteRule</code> / <code>deleteRules</code></td><td>所属、単一UUIDまたは重複のない配列1〜5000。複数削除は全対象の存在確認。</td><td>共通DB関数でworkspaceをロックし、最新所属・全対象確認・削除・sort_order再採番を原子的に実行。単件不存在は成功、複数の一部不存在は全件中止。対象workspace内だけ操作する。<code>{ ok }</code> / <code>{ ok, deleted }</code>。</td></tr>
               <tr><td><code>bulkImport</code></td><td>所属、fileName 1〜240、totalRows非負、items最大2000。各actor・class・割合・金額・ISO日時・外部IDを検証。</td><td>PAYPAY/PAYMENT明細とbatchを同一Transactionで登録。外部ID順で登録し一致重複は省略、不一致は全体を中止。<code>{ ok, imported, skipped }</code>。</td></tr>
               <tr><td><code>completeSettlement</code></td><td>workspace UUID・所属、最新full参照で対象明細あり。</td><td>対象計算値をロック下で再照合し、履歴・関連行・settled_atを一括保存。<code>{ ok }</code>。</td></tr>
             </tbody>
@@ -641,7 +641,7 @@ amountYen         = abs(payer.balance)</div>
           <div class="note"><code>requireWorkspaceMember(workspaceId, userId)</code>はworkspacesとworkspace_membersをJOINし、所属がなければ認可例外。scopeや指定IDはユーザーの所属を広げない。</div>
           <h3>アプリAPIの処理境界</h3>
           <p><code>app/api/app/route.ts</code>は実装を配線し、<code>appHandlers()</code>が認証、共有schemaによるparse、サービス呼出し、HTTP応答を担当する。<code>createAppService(store)</code>はactionを用途別サービスへ振り分け、所属・担当者・割合・招待条件・清算Snapshotを検証する。DB依存はstoreから注入し、SQLは<code>createAppStore()</code>と既存のrepository・user-access・paypay-importが実行する。サービスはRequest/ResponseやSQL clientを扱わない。</p>
-          <p>GETの通常2 SQL、各操作の所属確認、表示名更新時の有効利用者再確認、DB関数内の最新権限・清算Snapshot照合を維持する。明細保存のworkspace更新と明細更新、ルール更新/再採番、清算のSnapshot照合・履歴・関連・明細更新は従来のTransaction境界で実行する。一括ルール削除の対象SELECTは書込Transaction前に行う。workspace削除は、対象清算の関連行を先に除去するCTEの結果を消費してからworkspaceを削除し、明細・清算などのCASCADEを同じ一回のSQLで完了する。途中で制約違反が起きれば関連行の削除もrollbackする。</p>
+          <p>GETの通常2 SQL、各操作の所属確認、表示名更新時の有効利用者再確認、DB関数内の最新権限・清算Snapshot照合を維持する。明細保存のworkspace更新と明細更新、ルール更新/再採番、清算のSnapshot照合・履歴・関連・明細更新は従来のTransaction境界で実行する。単件・複数ルール削除は共通storeから<code>cake_delete_default_rules</code>を一回呼び、workspace行更新ロック→actorのmember行FOR SHARE→対象ID順FOR UPDATE→全対象確認→削除→残存順序再採番を同じTransactionで行う。全対象不足や後続エラーはworkspace更新も含めてrollbackする。単件不存在だけは0件成功とする。workspace削除は、対象清算の関連行を先に除去するCTEの結果を消費してからworkspaceを削除し、明細・清算などのCASCADEを同じ一回のSQLで完了する。途中で制約違反が起きれば関連行の削除もrollbackする。</p>
           <h3>清算専用取得</h3>
           <p><code>settlement-store.ts</code>の<code>settlementContext(workspaceId, userId)</code>は所属確認を含む1 SQLで対象workspaceの種別、参加者のID・名前・現在の重み、未清算SHARED明細のID・担当者・種別・金額・費用区分・保存割合だけを取得する。参加者順はjoined_at・user_id、明細順はoccurred_at DESC・created_at DESCでfull取得と揃える。ルール・招待・履歴・他workspace一覧・個人費・清算済み明細を転送せず、初期workspaceも作成しない。</p>
           <p>清算POSTは利用可否確認1 SQL、専用取得1 SQL、固定4 SQLのNeon Transactionという3回の通信で完了する。サービスは同じ<code>calculateSettlement()</code>を再利用し、対象IDをSetで照合してSnapshotをID順に固定する。保存時のworkspaceロック・最新の所属確認・Snapshot照合と一明細一清算のUNIQUE制約を維持する。通常の画面/<code>GET /api/app</code>の2 SQL契約は変えない。</p>
@@ -653,7 +653,7 @@ amountYen         = abs(payer.balance)</div>
 
         <section id="database">
           <h2>10. データベース物理設計</h2>
-          <p class="lead">PostgreSQL。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜011の順次適用後を指す。</p>
+          <p class="lead">PostgreSQL。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜012の順次適用後を指す。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>テーブル</th><th>主キー</th><th>主要列・制約・Index</th><th>参照・削除</th></tr></thead>
             <tbody>
@@ -681,6 +681,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>cake_complete_saved_split</code> / <code>cake_complete_split_weights</code></td><td>個人費はactor1/ほか0、旧アプリの共通費INSERTは現在デフォルトを補完。保存済みJSONへ不足参加者ID:0を加える。</td></tr>
               <tr><td><code>cake_extend_saved_splits_for_member</code></td><td>新member参加後、既存明細と明示ルールへ新ID:0を追加し、旧参加者の保存割合を維持。清算済み明細にも不足キーを補う。</td></tr>
               <tr><td><code>cake_reorder_default_rules</code></td><td>workspace行ロック・所属・現在全ルールとの完全一致を確認し、sort_orderを0始まりで再採番。</td></tr>
+              <tr><td><code>cake_delete_default_rules</code></td><td>単件/複数の共通削除。1〜5000件・UUIDとしての一意性を確認し、workspace→actorのmember FOR SHARE→対象ID順FOR UPDATEでロックする。全件必須モードは不足時に中止、単件モードは不存在0件成功。削除後はsort_order/created_at/id順を0始まりへ再採番し、互換Triggerでpriorityも同期する。旧並べ替え関数・旧版の削除SQLを保持する。</td></tr>
               <tr><td><code>cake_assert_settlement_snapshot</code></td><td>workspace行ロック・所属・全未清算SHARED明細の計算値Snapshot一致を同じTransactionで確認。</td></tr>
               <tr><td><code>cake_bulk_transactions</code></td><td>operationと1〜5000件の一意IDを検証。workspace行ロック、member FOR SHARE、対象をID順FOR UPDATE。全件存在・未清算を確認後、DELETEまたはAPPLY_RULESを実行し、ロック中の確定値を返す。</td></tr>
               <tr><td><code>cake_normalize_paypay_external_id</code> / <code>cake_assert_paypay_duplicate</code></td><td>PayPay INSERT時の旧ID正規化と、ON CONFLICT条件でのsource・金額・取引先照合。</td></tr>
@@ -702,6 +703,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>009_recurring_payment_immediate_changes.sql</td><td>旧変更予約を現在設定へ反映してclearし、revisionを更新する。処理予定日を現在の設定日と適用時刻の09:00境界から再計算し、編集・再開・生成関数を007・008と同じ現行仕様へ揃える。旧適用月は既定値0001-01-01、既存値は保持する。追加済み明細と旧成功月は変更しない。</td></tr>
               <tr><td>010_recurring_payment_remove_start_on.sql</td><td>既存Previewの開始日カラムstart_onがあれば削除する。旧開始日Triggerをworkspace_idの変更禁止へ置き換え、開始日に依存していた複合CHECKを残る月列の月初CHECKへ置き換える。新規DBでは列がなく、既存の月初制約を重複して追加しない。現行アプリは削除列を参照しない。既存設定と追加済み明細は保持する。</td></tr>
               <tr><td>011_recurring_payment_next_scheduled_on.sql</td><td>既存DBへ処理予定日next_scheduled_onと計算関数を追加する。未設定の予定日は設定日と適用時刻の日本時間09:00境界から初期化し、NOT NULLにする。追加・編集・再開・生成関数を現行仕様へ揃える。成功月は予定判定・生成に使わず、追加済み明細と旧列の値は保持する。</td></tr>
+              <tr><td>012_delete_default_rules.sql</td><td>単件・複数の共通削除関数を追加。既存表・既存DB関数の引数・旧アプリの呼出しは変更せず、全対象確認をworkspaceロック後へ移す。</td></tr>
             </tbody>
           </table></div>
           <p><code>scripts/setup-db.mjs</code>は環境に応じたDB接続（PreviewはCAKE_TEST_DATABASE_URL、それ以外はDATABASE_URL）を確認し、番号付きSQLをファイル名順に適用する。schema_migrationsを作成し、各SQLと適用履歴を同じDO文/Transaction内で実行。共通advisory lockで同時適用を防ぎ、適用済みファイルを省略する。再実行しても利用者/権限を初期状態へ戻さない。</p>
@@ -786,6 +788,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>settlement.test.ts / expense-splits.test.ts / split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、受け取り、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>
               <tr><td>transaction-editing.test.ts / transaction-updates.test.ts / transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>
               <tr><td>transaction-filters.test.ts / transaction-filter-storage.test.ts / transaction-list.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗、多数候補・非表示選択・条件外行の保持。</td></tr>
+              <tr><td>rule-deletion.test.ts / scripts/rule-deletion-scenarios.ts</td><td>共通削除の実SQL、単件/複数/全件・不存在・他workspace・重複UUID・認可・残存順序・旧版互換と全体rollback。一時PostgreSQLと専用Preview DBで同じシナリオを使い、独立した二つの実DB sessionで同時削除/並べ替え/所属解除のロック待機と確定結果を確認する。</td></tr>
               <tr><td>rule-order.test.ts</td><td>楽観順序の組み立てと解除、多数ルール、外部追加・削除、未知・重複ID、入力配列の維持。</td></tr>
               <tr><td>domain-schemas.test.ts / app-input.typecheck.ts</td><td>入口間の金額・文字数・割合境界、全actionの入力、既存の省略・strict/strip契約、共有入力の実行時依存境界。型検査では不一致payload・未知action・有限ログ値の拒否を確認する。</td></tr>
               <tr><td>user-access.test.ts / user-profile.test.ts</td><td>確認済みGoogleメールと事前登録、内部ID、有効状態・権限再確認、テストモード、表示名保持・本人更新schema。</td></tr>

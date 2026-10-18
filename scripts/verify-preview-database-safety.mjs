@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { previewDatabaseIdentity, previewDatabaseGuardSql } from '../lib/database-connection.mjs';
-import { PREVIEW_FIXTURE_GUARD_REVISION, PREVIEW_FIXTURE_SCHEMA_SHA256, previewFixtureCatalogFingerprintSql } from '../lib/preview-fixture-base.mjs';
+import { PREVIEW_FIXTURE_GUARD_REVISION, PREVIEW_FIXTURE_SCHEMA_SHA256, PREVIEW_FIXTURE_MIGRATIONS, previewFixtureCatalogFingerprintSql } from '../lib/preview-fixture-base.mjs';
 import { setupDatabase } from './setup-db.mjs';
 import { seedTestUsers, testSeedSql } from './seed-test-users.ts';
 
@@ -20,6 +21,12 @@ const moduleUrl = pathToFileURL(resolve(args[1]));
 const { PGlite } = await import(moduleUrl.href);
 const { pgcrypto } = await import(new URL('contrib/pgcrypto.js', moduleUrl).href);
 
+const migrationDirectory = new URL('../db/migrations/', import.meta.url);
+const migrationCount = readdirSync(migrationDirectory).filter(name => /^\d+_[a-z0-9_]+\.sql$/.test(name)).length;
+// The Native parent remains the approved 001..011 schema. Later application
+// migrations are tested after the exact baseline has been claimed.
+const baselineDirectory = mkdtempSync(join(tmpdir(), 'cake-fixture-baseline-'));
+for (const { name } of PREVIEW_FIXTURE_MIGRATIONS) writeFileSync(join(baselineDirectory, name), readFileSync(new URL(name, migrationDirectory)));
 const db = new PGlite({ extensions: { pgcrypto } });
 let memoryDatabases = 1;
 const databaseName = (await db.query('SELECT current_database() AS name')).rows[0].name;
@@ -132,7 +139,7 @@ try {
   }
   await check('All real migrations execute and Preview omits production administrator', async () => {
     await setupDatabase(environment, { connect: () => ({ query: (sql) => db.query(sql) }) });
-    assert.equal(await scalar('SELECT COUNT(*)::int FROM schema_migrations'), 11);
+    assert.equal(await scalar('SELECT COUNT(*)::int FROM schema_migrations'), migrationCount);
     assert.equal(await scalar('SELECT COUNT(*)::int FROM app_users'), 0);
   });
   await check('Business data before initial seed rejects without marker completion', async () => {
@@ -195,7 +202,7 @@ try {
     const localEnvironment = { ...environment, CAKE_TEST_DATABASE_URL: `postgresql://fake:fake@ep-test.ap-southeast-1.aws.neon.tech/${localDatabaseName}` };
     await check('Legacy local seed has exact non-administrator fixtures in a separate empty DB', async () => {
       await setupDatabase(localEnvironment, { connect: () => ({ query: (sql) => localDb.query(sql) }) });
-      assert.equal(await scalar('SELECT COUNT(*)::int FROM schema_migrations', localDb), 11);
+      assert.equal(await scalar('SELECT COUNT(*)::int FROM schema_migrations', localDb), migrationCount);
       assert.equal(await scalar('SELECT COUNT(*)::int FROM app_users', localDb), 0);
       await localDb.query(testSeedSql({}));
       await assertFixtures(localDb, ['test-a@cake.local', 'test-b@cake.local'], false);
@@ -227,11 +234,11 @@ try {
   try {
     const inheritedEnvironment = { ...environment, CAKE_TEST_DATABASE_URL: `postgresql://fake:fake@ep-test.ap-southeast-1.aws.neon.tech/${await scalar('SELECT current_database()', inheritedDb)}` };
     const inheritedIdentity = previewDatabaseIdentity(inheritedEnvironment);
-    await setupDatabase(inheritedEnvironment, { connect: () => ({ query: (sql) => inheritedDb.query(sql) }) });
+    await setupDatabase(inheritedEnvironment, { migrationDirectory: baselineDirectory, connect: () => ({ query: (sql) => inheritedDb.query(sql) }) });
     await inheritedDb.query(testSeedSql(inheritedEnvironment));
     await inheritedDb.exec(`DROP TABLE cake_preview_database_identity; UPDATE app_user_access_guard SET revision=${PREVIEW_FIXTURE_GUARD_REVISION}`);
     await assertFixtures(inheritedDb, ['test-a@cake.local', 'test-b@cake.local'], true);
-    assert.equal(await scalar('SELECT COUNT(*)::int FROM schema_migrations', inheritedDb), 11);
+    assert.equal(await scalar('SELECT COUNT(*)::int FROM schema_migrations', inheritedDb), PREVIEW_FIXTURE_MIGRATIONS.length);
     await inheritedDb.exec('BEGIN; SET LOCAL search_path=pg_catalog,public');
     try { assert.equal(await scalar(previewFixtureCatalogFingerprintSql(), inheritedDb), PREVIEW_FIXTURE_SCHEMA_SHA256); }
     finally { await inheritedDb.exec('ROLLBACK'); }
@@ -300,7 +307,7 @@ try {
     });
     await check('Approved canonical fixture base claims a seeded Preview without repairing inherited rows', async () => {
       const before = await databaseSnapshot(inheritedDb, true);
-      await setupDatabase(inheritedEnvironment, { connect: () => ({ query: (sql) => inheritedDb.query(sql) }) });
+      await setupDatabase(inheritedEnvironment, { migrationDirectory: baselineDirectory, connect: () => ({ query: (sql) => inheritedDb.query(sql) }) });
       await inheritedDb.query(testSeedSql(inheritedEnvironment));
       assert.equal(await databaseSnapshot(inheritedDb, true), before);
       assert.equal(await scalar('SELECT COUNT(*)::int FROM cake_preview_database_identity', inheritedDb), 1);
@@ -309,6 +316,14 @@ try {
         version: 2, repository: inheritedIdentity.repository, pr: inheritedIdentity.pr, source_branch: inheritedIdentity.sourceBranch,
         generation: inheritedIdentity.generation, branch_id: inheritedIdentity.branchId, database_host: inheritedIdentity.databaseHost, database_name: inheritedIdentity.databaseName,
       }]);
+    });
+    await check('Claimed baseline applies later migrations without changing inherited business rows', async () => {
+      const before = await fixtureSnapshot(inheritedDb);
+      await setupDatabase(inheritedEnvironment, { connect: () => ({ query: (sql) => inheritedDb.query(sql) }) });
+      await inheritedDb.query(testSeedSql(inheritedEnvironment));
+      assert.equal(await fixtureSnapshot(inheritedDb), before);
+      assert.equal(await scalar('SELECT COUNT(*)::int FROM schema_migrations', inheritedDb), migrationCount);
+      assert.equal(await scalar("SELECT to_regprocedure('cake_delete_default_rules(uuid,text,uuid[],boolean)') IS NOT NULL", inheritedDb), true);
     });
     await check('A foreign Preview generation cannot claim the canonical fixture base with an existing marker', async () => {
       const before = await databaseSnapshot(inheritedDb);
@@ -340,7 +355,7 @@ try {
       const bootstrapEmail = migration.match(/VALUES \(gen_random_uuid\(\)::text, '([^']+)'/)?.[1];
       assert.ok(bootstrapEmail);
       assert.deepEqual((await productionDb.query('SELECT email,name,is_admin,is_enabled FROM app_users')).rows, [{ email: bootstrapEmail, name: '管理者', is_admin: true, is_enabled: true }]);
-      assert.equal(await scalar('SELECT COUNT(*)::int FROM schema_migrations', productionDb), 11);
+      assert.equal(await scalar('SELECT COUNT(*)::int FROM schema_migrations', productionDb), migrationCount);
       assert.equal(await scalar("SELECT to_regclass('public.cake_preview_database_identity') IS NULL", productionDb), true);
       const before = await databaseSnapshot(productionDb);
       let clients = 0;
@@ -349,8 +364,8 @@ try {
       assert.equal(await databaseSnapshot(productionDb), before);
     });
   } finally { await productionDb.close(); }
-  console.log(JSON.stringify({ engine: 'PGlite', databaseName, memoryDatabases, migrations: 11, cases: outcomes.length, outcomes }, null, 2));
+  console.log(JSON.stringify({ engine: 'PGlite', databaseName, memoryDatabases, migrations: migrationCount, cases: outcomes.length, outcomes }, null, 2));
 } catch {
   console.log(JSON.stringify({ engine: 'PGlite', databaseName, memoryDatabases, cases: outcomes.length, outcomes, error: 'Local SQL validation failed; raw SQL error omitted.' }, null, 2));
   process.exitCode = 1;
-} finally { await db.close(); }
+} finally { await db.close(); rmSync(baselineDirectory, { recursive: true, force: true }); }
