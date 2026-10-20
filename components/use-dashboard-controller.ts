@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AppActionInput } from "@/lib/app-input";
 import { postAction } from "@/lib/app-client";
 import { applyTransactionUpdate } from "@/lib/transaction-updates";
+import { applyCategoryUpdate } from "@/lib/category-updates";
 import { bootstrapScopeForTab, mergeBootstrapMetadata, type DashboardTab as Tab } from "@/lib/bootstrap";
 import { canApplyBootstrapResponse, isDashboardViewCurrent, isWorkspaceViewCurrent } from "@/lib/dashboard-requests";
 import type { BootstrapData, BootstrapMetadata, BootstrapScope } from "@/lib/types";
@@ -113,7 +114,15 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
       const result = await postAction(payload);
       if (isCurrentView()) {
         dataRevision.current += 1;
-        if (payload.action === "saveTransaction" && result.transaction && originWorkspaceId) {
+        if ((payload.action === "createCategory" || payload.action === "updateCategory") && result.category && originWorkspaceId) {
+          updateData(current => isCurrentView() ? applyCategoryUpdate(current, originWorkspaceId, { category: result.category }) : current);
+          if (shouldNotify()) setNotice(success);
+        } else if (payload.action === "archiveCategory" && result.archivedCategoryIds && typeof result.archivedAt === "string" && originWorkspaceId) {
+          updateData(current => isCurrentView() ? applyCategoryUpdate(current, originWorkspaceId, {
+            archivedCategoryIds: result.archivedCategoryIds, archivedAt: result.archivedAt,
+          }) : current);
+          if (shouldNotify()) setNotice(success);
+        } else if (payload.action === "saveTransaction" && result.transaction && originWorkspaceId) {
           updateData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, { transaction: result.transaction }) : current);
           if (shouldNotify()) setNotice(success);
         } else if (payload.action === "saveTransactionMemo" && result.transactionId && typeof result.memo === "string" && originWorkspaceId) {

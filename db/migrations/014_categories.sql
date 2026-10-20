@@ -164,7 +164,7 @@ BEGIN
         WHERE workspace_id = target_workspace AND id IN (SELECT id FROM branch) AND archived_at IS NULL
         RETURNING id
     ) SELECT COALESCE(jsonb_agg(id ORDER BY id), '[]'::jsonb) INTO archived_ids FROM archived;
-    RETURN jsonb_build_object('archivedCategoryIds', archived_ids);
+    RETURN jsonb_build_object('archivedCategoryIds', archived_ids, 'archivedAt', now());
   END IF;
   RETURN jsonb_build_object('category', jsonb_build_object(
     'id', saved.id, 'parentId', saved.parent_id, 'name', saved.name, 'colorHex', saved.color_hex,

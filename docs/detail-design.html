@@ -458,7 +458,7 @@
               <tr><td><code>updateWeights</code></td><td>共有workspace・所属、現在の全参加者1〜2件、ID重複なし。整数0〜2147483647、合計は正。</td><td>workspaceとmemberのデフォルトweight更新。保存済み明細の割合は変えない。<code>{ ok }</code>。</td></tr>
               <tr><td><code>saveTransaction</code></td><td>workspace/任意transaction UUID、ISO日時、merchant 1〜240、method 1〜120、1〜2147483647の整数円、type、参加者actor、任意class/split。新規だけ任意memo。</td><td>新規はMANUALとmanual_UUID。既存は未清算行だけ更新し、既存割合の省略時は可能な限り保持。所属者別割合を検証。<code>{ ok, transaction }</code>は確定DB行のDTO。</td></tr>
               <tr><td><code>createCategory</code> / <code>updateCategory</code></td><td>workspaceId、parentId（追加）/categoryId（編集）、trim後1〜40文字のname、6桁colorHex。共有schemaで検証。</td><td>workspaceロック後に最新所属と親・対象の使用可否を確認。同親の使用中同名を拒否。<code>{ ok, category }</code>。</td></tr>
-              <tr><td><code>archiveCategory</code></td><td>workspaceId、categoryId。</td><td>子孫を集合単位で使用停止。明細参照は維持。<code>{ ok, archivedCategoryIds }</code>。</td></tr>
+              <tr><td><code>archiveCategory</code></td><td>workspaceId、categoryId。</td><td>子孫を集合単位で使用停止。明細参照は維持。<code>{ ok, archivedCategoryIds, archivedAt }</code>。</td></tr>
               <tr><td><code>saveTransactionCategory</code></td><td>workspaceId、transactionId、nullable categoryId。</td><td>清算済みもカテゴリと確認状態・監査列だけ更新。<code>{ ok, transactionId, categoryId, categoryConfirmed }</code>。</td></tr>
               <tr><td><code>saveTransactionMemo</code></td><td>strict入力: action、workspace UUID、transaction UUID、memo最大2000文字。</td><td>清算済みも更新可能。メモ・監査項目だけ更新。<code>{ ok, transactionId, memo }</code>。既存saveTransactionへmemoを含めると拒否。</td></tr>
               <tr><td><code>deleteTransaction</code></td><td>workspace/transaction UUID・所属。</td><td>未清算の対象行だけ削除。0件なら業務例外。<code>{ ok }</code>。</td></tr>
@@ -741,14 +741,14 @@
 
         <section id="categories">
           <h2>集計用カテゴリ</h2>
-          <p><code>CategorySettings</code>が名前と色のdraft、折りたたみ、使用停止表示を所有し、保存済みカテゴリはDashboardのdataに一元化する。名前・色は共通schema、基本色と濃淡は<code>categories.ts</code>の9系統×5色を使う。カテゴリはnullable parentIdによる隣接リストで、パスは取得後に組み立てる。表示一覧と明細の選択肢はカテゴリ更新時に一度準備し、無制限の階層は反復処理で辿る。親の変更はAPIで受け付けず、DBでも所属と親を固定する。</p>
+          <p><code>CategorySettings</code>が名前と色のdraft、折りたたみ、使用停止表示を所有し、保存済みカテゴリはDashboardのdataに一元化する。追加・編集・使用停止は確定応答をカテゴリ一覧へ直接反映し、別の明細保存が再取得のrevisionを進めても確定カテゴリを失わない。初回・タブ切替・手動更新の取得では使用停止済みと祖先も含める。名前・色は共通schema、基本色と濃淡は<code>categories.ts</code>の9系統×5色を使う。カテゴリはnullable parentIdによる隣接リストで、パスは取得後に組み立てる。表示一覧と明細の選択肢はカテゴリ更新時に一度準備し、無制限の階層は反復処理で辿る。親の変更はAPIで受け付けず、DBでも所属と親を固定する。</p>
           <div class="data-flow">
-            <div class="dfd-track" role="img" aria-label="カテゴリ設定の編集はローカルプレビューのみ。保存時にapp APIからカテゴリSQL関数へ進み、metadata再取得後にツリーを反映する">
+            <div class="dfd-track" role="img" aria-label="カテゴリ設定の編集はローカルプレビューのみ。保存時にapp APIからカテゴリSQL関数へ進み、確定応答でカテゴリ一覧だけを反映する">
               <div class="dfd-node source"><strong>名前・色を編集</strong><small>draftと背景プレビューのみ更新</small></div>
               <div class="dfd-arrow"><b>→</b><small>保存 / 使用停止</small></div>
               <div class="dfd-node store"><strong>POST /api/app</strong><small>categoriesService → mutateCategory<br />workspaceロック・最新所属・全対象検証</small></div>
-              <div class="dfd-arrow"><b>→</b><small>metadata GET</small></div>
-              <div class="dfd-node output"><strong>カテゴリ一覧を反映</strong><small>使用停止済みと祖先も取得<br />失敗時は入力・エラーを保持</small></div>
+              <div class="dfd-arrow"><b>→</b><small>確定応答の局所反映</small></div>
+              <div class="dfd-node output"><strong>カテゴリ一覧を反映</strong><small>カテゴリと使用停止日時を反映<br />失敗時は入力・エラーを保持</small></div>
             </div>
             <div class="dfd-track" role="img" aria-label="明細のカテゴリ選択は既存保存キューからカテゴリ専用APIへ送り、確定したカテゴリと確認状態だけを画面に反映する">
               <div class="dfd-node source"><strong>明細でカテゴリを選択</strong><small>未分類または任意階層のID</small></div>

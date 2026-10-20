@@ -103,6 +103,21 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.reply(currentA, data("a", "returned")); await expectState(f.page, { "selected.transactions.0.merchant": "returned" });
       await f.reply(oldB, data("b", "stale")); await expectState(f.page, { "selected.workspace.id": "a", "selected.transactions.0.merchant": "returned", loading: false });
     });
+    await scenario("カテゴリ追加は明細保存と重なっても確定値を直接反映し、追加GETに依存しない", async f => {
+      const category = { id: "food", parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "createCategory", workspaceId: "a", parentId: null, name: "食費", colorHex: "#f97316" }, "category"); });
+      const categoryPost = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: null }, ""); });
+      const transactionPost = await f.take("POST");
+      await f.reply(categoryPost, { ok: true, category });
+      await f.reply(transactionPost, { ok: true, transactionId: "transaction-a", categoryId: null, categoryConfirmed: false });
+      await expectState(f.page, { "selected.categories.0.id": "food", "selected.transactions.0.categoryId": null, loading: false });
+      assert.equal(f.requests.length, 0);
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "archiveCategory", workspaceId: "a", categoryId: "food" }, "archive"); });
+      await f.reply(await f.take("POST"), { ok: true, archivedCategoryIds: ["food"], archivedAt: "2026-10-20T00:00:00.123Z" });
+      await expectState(f.page, { "selected.categories.0.archivedAt": "2026-10-20T00:00:00.123Z", loading: false });
+      assert.equal(f.requests.length, 0);
+    });
     await scenario("保存開始前のGETは保存確定後の明細を上書きしない", async f => {
       await f.page.evaluate(() => window.controller.openTab("transactions")); const older = await f.take();
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransaction", workspaceId: "a", occurredAt: "2026-10-18T00:00:42.123Z", merchant: "saved", method: "現金", type: "PAYMENT", amountYen: 200, actorUserId: "user" }, "saved"); });
