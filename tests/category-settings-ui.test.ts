@@ -148,6 +148,29 @@ test("カテゴリ設定のマウス・タッチ移動、入力保持、拒否�
           await moveForm.getByRole("button", { name: "この位置へ移動", exact: true }).click();
           await waitParent("leaf", "fresh");
         } else {
+          const beforeClipped = writes.length;
+          const treeScroll = page.locator("[data-category-tree-scroll]");
+          for (const delay of [0, 3, 6, 9]) {
+            await treeScroll.evaluate(element => { element.scrollTop = 0; });
+            const clippedSource = page.locator('[data-category-move-handle="grocery"]');
+            await clippedSource.scrollIntoViewIfNeeded();
+            const sourceBox = (await clippedSource.boundingBox())!;
+            await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+            await page.mouse.down();
+            await page.mouse.move(sourceBox.x + sourceBox.width / 2 - 8, sourceBox.y + sourceBox.height / 2);
+            await page.locator('[data-category-id="grocery"][data-category-dragging="true"]').waitFor();
+            const clipBox = (await treeScroll.boundingBox())!;
+            const clippedTarget = (await page.locator('[data-category-drop-id="books"][data-category-drop-position="inside"]').boundingBox())!;
+            assert.ok(clippedTarget.y >= clipBox.y + clipBox.height, "対象行はツリーのoverflowで完全に隠れている");
+            await page.mouse.move(clippedTarget.x + clippedTarget.width / 2, clippedTarget.y + clippedTarget.height / 2);
+            if (delay) await page.waitForTimeout(delay);
+            await page.mouse.up();
+            await page.locator('[data-category-id="grocery"][data-category-dragging="true"]').waitFor({ state: "hidden" });
+            await page.waitForTimeout(60);
+            assert.equal(await page.locator("[data-category-drop-over]").count(), 0);
+            assert.equal(writes.length, beforeClipped, `ツリー外の隠れた行で${delay}ms後に離しても保存しない`);
+            assert.equal(saved.find(row => row.id === "grocery")!.parentId, "food");
+          }
           assert.match((await drag(page, "movie", "books", "inside", true))!, /書籍.*子カテゴリ/);
           await waitParent("movie", "books");
           assert.equal(writes.at(-1)?.parentId, "books");

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
-import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type CollisionDetection } from "@dnd-kit/core";
 import type { RunAppAction } from "@/lib/app-input";
 import { categoryColorSchema, categoryNameSchema } from "@/lib/category-input";
 import { CATEGORY_NAME_MAX_LENGTH, CATEGORY_PALETTE, categoryPath, flattenCategories, suggestCategoryColor } from "@/lib/categories";
@@ -33,6 +33,7 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
   const pending = useRef(false);
   const nameInput = useRef<HTMLInputElement>(null);
   const moveInput = useRef<HTMLSelectElement>(null);
+  const treeScroll = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
@@ -44,6 +45,15 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [hoverTarget, setHoverTarget] = useState<CategoryMoveTarget | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const treeCollisions = useCallback<CollisionDetection>(args => {
+    const bounds = treeScroll.current?.getBoundingClientRect();
+    const point = args.pointerCoordinates;
+    // dnd-kit measures offscreen descendants too. Only the visible tree can
+    // accept a drop; rects below an overflow clip must never become targets.
+    if (!bounds || !point || point.x < Math.max(0, bounds.left) || point.x >= Math.min(document.documentElement.clientWidth, bounds.right)
+      || point.y < Math.max(0, bounds.top) || point.y >= Math.min(window.innerHeight, bounds.bottom)) return [];
+    return pointerWithin(args);
+  }, []);
   const prepared = useMemo(() => {
     const flat = flattenCategories(categories);
     const byId = new Map(categories.map(category => [category.id, category]));
@@ -223,7 +233,7 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
           <p className={styles.moveNotice} role="status">{moveDestination.error ?? (moveDestination.unchanged ? "現在と同じ位置です。" : moveDestination.label)}</p>
           <button type="submit" className="secondary" disabled={busy || !!moveDestination.error || moveDestination.unchanged}>{busy ? "保存中…" : "この位置へ移動"}</button>
         </form>}
-        <DndContext id={`${formId}-category-drag`} sensors={sensors} collisionDetection={pointerWithin}
+        <DndContext id={`${formId}-category-drag`} sensors={sensors} collisionDetection={treeCollisions}
           onDragStart={({ active }) => { setDragId(String(active.id)); setHoverTarget(null); }}
           onDragOver={({ over }) => setHoverTarget(over?.data.current?.target ?? null)}
           onDragCancel={() => { setDragId(null); setHoverTarget(null); }}
@@ -246,7 +256,7 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
               onDragCancel: () => "カテゴリの移動をキャンセルしました。",
             },
           }}>
-          <div className={styles.treeScroll}>
+          <div ref={treeScroll} data-category-tree-scroll className={styles.treeScroll}>
             <ul className={styles.tree} aria-label="カテゴリ一覧">
               {prepared.visible.map(({ category, depth, path }) => <CategoryTreeRow key={category.id} category={category} depth={depth} path={path} selected={editor?.categoryId === category.id}
                 busy={busy} dragging={!!dragId} collapsed={collapsed.has(category.id)} hasChildren={prepared.parents.has(category.id)} destination={moving.destination}

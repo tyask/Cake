@@ -115,11 +115,13 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
       if (isCurrentView()) {
         dataRevision.current += 1;
         if ((payload.action === "createCategory" || payload.action === "updateCategory") && result.category && originWorkspaceId) {
-          updateData(current => isCurrentView() ? applyCategoryUpdate(current, originWorkspaceId, { category: result.category }) : current);
+          updateData(current => isCurrentView() ? applyCategoryUpdate(current, originWorkspaceId, {
+            category: result.category, ancestorCategories: result.ancestorCategories,
+          }) : current);
           if (shouldNotify()) setNotice(success);
         } else if (payload.action === "archiveCategory" && result.archivedCategories && originWorkspaceId) {
           updateData(current => isCurrentView() ? applyCategoryUpdate(current, originWorkspaceId, {
-            archivedCategories: result.archivedCategories,
+            archivedCategories: result.archivedCategories, ancestorCategories: result.ancestorCategories,
           }) : current);
           if (shouldNotify()) setNotice(success);
         } else if (payload.action === "moveCategory" && result.movedCategories && originWorkspaceId) {

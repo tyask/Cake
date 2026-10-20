@@ -1,6 +1,7 @@
 import type { BootstrapData, Category } from "./types";
 
-type CategoryUpdate = { category: Category } | { archivedCategories: Category[] } | { movedCategories: Category[] };
+type CategoryUpdate = ({ category: Category } | { archivedCategories: Category[] } | { movedCategories: Category[] })
+  & { ancestorCategories?: Category[] };
 
 /** Adopt acknowledged metadata without a GET that another save could invalidate. */
 export function applyCategoryUpdate(data: BootstrapData, workspaceId: string, update: CategoryUpdate): BootstrapData {
@@ -9,7 +10,7 @@ export function applyCategoryUpdate(data: BootstrapData, workspaceId: string, up
   const categories = new Map(selected.categories.map(category => [category.id, category]));
   const acknowledged = "category" in update ? [update.category]
     : "archivedCategories" in update ? update.archivedCategories : update.movedCategories;
-  for (const category of acknowledged) {
+  for (const category of [...acknowledged, ...(update.ancestorCategories ?? [])]) {
     const current = categories.get(category.id);
     if (!current || current.revision < category.revision) categories.set(category.id, category);
   }

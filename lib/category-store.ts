@@ -3,9 +3,10 @@ import type { AppUser, Category } from "./types";
 import type { Action } from "./app-services/types";
 
 type CategoryAction = Action<"createCategory" | "updateCategory" | "archiveCategory" | "moveCategory" | "saveTransactionCategory">;
-type CategoryMutationResult = { category: Category } | { archivedCategoryIds: string[]; archivedCategories: Category[] }
+type CategoryMutationResult = ({ category: Category } | { archivedCategoryIds: string[]; archivedCategories: Category[] }
   | { movedCategories: Category[] }
-  | { transactionId: string; categoryId: string | null; categoryConfirmed: boolean; categoryRevision: number };
+  | { transactionId: string; categoryId: string | null; categoryConfirmed: boolean; categoryRevision: number })
+  & { ancestorCategories?: Category[] };
 
 export function createCategoryStore() {
   return {
@@ -22,7 +23,7 @@ export function createCategoryStore() {
         createCategory: "CREATE", updateCategory: "UPDATE", archiveCategory: "ARCHIVE", saveTransactionCategory: "ASSIGN",
       }[input.action];
       const [row] = await sql`
-        SELECT cake_mutate_category(
+        SELECT cake_mutate_category_with_ancestors(
           ${input.workspaceId}::uuid, ${user.id}, ${operation},
           ${"categoryId" in input ? input.categoryId : null}::uuid,
           ${"parentId" in input ? input.parentId : null}::uuid,

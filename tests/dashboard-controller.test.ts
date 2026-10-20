@@ -169,6 +169,24 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
         "selected.categories.2.parentId": "daily", "selected.categories.2.revision": 3, loading: false });
       assert.equal(f.requests.length, 0, "移動確定後の追加GETは不要");
     });
+    await scenario("カテゴリ編集・停止も確定祖先を直接反映し、他ブラウザの親子移動と古い親を混ぜない", async f => {
+      const z = { id: "z", revision: 1, parentId: null, name: "Z", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+      const y = { ...z, id: "y", parentId: "z", name: "Y" };
+      const initial = data(); initial.selected!.categories = [z, y];
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+      await f.reply(await f.take(), initial);
+      await expectState(f.page, { "selected.categories.1.parentId": "z" });
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "updateCategory", workspaceId: "a", categoryId: "z", name: "改名Z", colorHex: "#f97316" }, ""); });
+      await f.reply(await f.take("POST"), { ok: true, category: { ...z, parentId: "y", name: "改名Z", revision: 3 },
+        ancestorCategories: [{ ...y, parentId: null, revision: 3 }] });
+      await expectState(f.page, { "selected.categories.0.parentId": "y", "selected.categories.1.parentId": null, loading: false });
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "archiveCategory", workspaceId: "a", categoryId: "z" }, ""); });
+      await f.reply(await f.take("POST"), { ok: true, archivedCategoryIds: ["z"],
+        archivedCategories: [{ ...z, parentId: "y", name: "改名Z", revision: 4, archivedAt: "2026-10-20T00:00:00Z" }],
+        ancestorCategories: [{ ...y, parentId: null, name: "最新Y", revision: 4 }] });
+      await expectState(f.page, { "selected.categories.0.archivedAt": "2026-10-20T00:00:00Z", "selected.categories.1.name": "最新Y", loading: false });
+      assert.equal(f.requests.length, 0);
+    });
     await scenario("workspace切替後のカテゴリ移動応答を破棄し、現在の家計へ兄弟を混ぜない", async f => {
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "moveCategory", workspaceId: "a", categoryId: "food", parentId: null, beforeCategoryId: null }, "古い移動通知"); });
       const post = await f.take("POST");

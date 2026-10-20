@@ -13,6 +13,8 @@ const ruleId = "00000000-0000-4000-8000-000000000003";
 const user = { id: "a", email: "a@example.com", name: "A", imageUrl: null };
 const memberRows = [{ user_id: "a", id: "a", weight: 1, name: "A", email: user.email, role: "OWNER" }, { user_id: "b", id: "b", weight: 1, name: "B", email: "b@example.com", role: "MEMBER" }];
 const ruleRow = { id: ruleId, merchant_contains: "店", expense_class: "SHARED", sort_order: 0, split_weights: { a: 1, b: 1 }, enabled: true };
+const category = { id: ruleId, parentId: transactionId, name: "食費", colorHex: "#f97316", revision: 2, sortOrder: 0, archivedAt: null };
+const ancestorCategory = { ...category, id: transactionId, parentId: null, name: "親" };
 const transaction = { id: transactionId, occurred_at: "2026-10-10T00:00:00Z", merchant: "店", method: "現金", type: "PAYMENT", amount_yen: 300, actor_user_id: "a", actor_name: "A", expense_class: "SHARED", split_weights: { a: 1, b: 1 }, memo: "メモ", external_id: "manual_fixture", source: "MANUAL", settled_at: null };
 type Row = Record<string, unknown>;
 type Query = { query: string; params: unknown[] };
@@ -52,6 +54,9 @@ function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean;
     if (/cake_bulk_transactions/.test(query)) return [{ result: { affected: 1, transactions: [{ id: transactionId, occurredAt: "2026-10-10T00:00:00+00:00" }] } }];
     if (/cake_delete_default_rules/.test(query)) return [{ deleted: 1 }];
     if (/cake_move_category/.test(query)) return [{ result: { movedCategories: [] } }];
+    if (/cake_mutate_category_with_ancestors/.test(query)) return [{ result: params[2] === "ARCHIVE"
+      ? { archivedCategoryIds: [category.id], archivedCategories: [category], ancestorCategories: [ancestorCategory] }
+      : { category, ancestorCategories: [ancestorCategory] } }];
     if (/RETURNING imported_rows, skipped_rows/.test(query)) return [{ imported_rows: 1, skipped_rows: 0 }];
     if (/RETURNING id, memo/.test(query)) return [{ id: transactionId, memo: "メモ" }];
     if (/RETURNING \*/.test(query)) return [options.transaction ?? transaction];
@@ -87,6 +92,9 @@ const cases: { input: Row; counts: number[]; transactions?: number[]; result?: R
   { input: { ...save, transactionId, splitWeights: { a: 1, b: 0 } }, counts: [1, 1, 1, 2], transactions: [3] },
   { input: { action: "saveTransactionMemo", workspaceId, transactionId, memo: "メモ" }, counts: [1, 2], transactions: [1], result: { ok: true, transactionId, memo: "メモ" } },
   { input: { action: "moveCategory", workspaceId, categoryId: transactionId, parentId: null, beforeCategoryId: ruleId }, counts: [1], result: { ok: true, movedCategories: [] } },
+  { input: { action: "createCategory", workspaceId, parentId: transactionId, name: "食費", colorHex: "#f97316" }, counts: [1], result: { ok: true, category, ancestorCategories: [ancestorCategory] } },
+  { input: { action: "updateCategory", workspaceId, categoryId: ruleId, name: "食費", colorHex: "#f97316" }, counts: [1], result: { ok: true, category, ancestorCategories: [ancestorCategory] } },
+  { input: { action: "archiveCategory", workspaceId, categoryId: ruleId }, counts: [1], result: { ok: true, archivedCategoryIds: [category.id], archivedCategories: [category], ancestorCategories: [ancestorCategory] } },
   { input: { action: "deleteTransaction", workspaceId, transactionId }, counts: [1, 2], transactions: [1] },
   { input: { action: "deleteTransactions", workspaceId, transactionIds: [transactionId] }, counts: [1, 1], result: { ok: true, deleted: 1 } },
   { input: { action: "applyTransactionRules", workspaceId, transactionIds: [transactionId] }, counts: [1, 1], result: { ok: true, applied: 1, appliedTransactions: [{ id: transactionId, occurredAt: "2026-10-10T00:00:00.000Z" }] } },
@@ -100,7 +108,7 @@ const cases: { input: Row; counts: number[]; transactions?: number[]; result?: R
 ];
 
 for (const [index, scenario] of cases.entries()) {
-  test(`全19操作のSQL往復・Transaction境界・成功応答: ${index + 1} ${scenario.input.action}`, async (t) => {
+  test(`アプリ操作のSQL往復・Transaction境界・成功応答: ${index + 1} ${scenario.input.action}`, async (t) => {
     const f = fixture(t);
     const response = await f.post(scenario.input);
     const body = await response.json();
@@ -137,6 +145,12 @@ for (const [index, scenario] of cases.entries()) {
     if (scenario.input.action === "moveCategory") {
       assert.match(f.trips[0].queries[0].query, /cake_move_category/);
       assert.deepEqual(f.trips[0].queries[0].params, [workspaceId, user.id, transactionId, null, ruleId]);
+    }
+    if (["createCategory", "updateCategory", "archiveCategory"].includes(String(scenario.input.action))) {
+      assert.match(f.trips[0].queries[0].query, /cake_mutate_category_with_ancestors/);
+      assert.deepEqual(f.trips[0].queries[0].params, [workspaceId, user.id,
+        scenario.input.action === "createCategory" ? "CREATE" : scenario.input.action === "updateCategory" ? "UPDATE" : "ARCHIVE",
+        scenario.input.categoryId ?? null, scenario.input.parentId ?? null, scenario.input.name ?? null, scenario.input.colorHex ?? null, null]);
     }
   });
 }

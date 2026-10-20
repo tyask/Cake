@@ -4,7 +4,9 @@ import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
-import type { Category } from "../lib/types";
+import { categoryPath, flattenCategories } from "../lib/categories";
+import { applyCategoryUpdate } from "../lib/category-updates";
+import type { BootstrapData, Category } from "../lib/types";
 
 test("カテゴリ移動は兄弟順・任意階層・参照・revisionを同じTransactionで確定する", async t => {
   const sql = new PGlite({ extensions: { pgcrypto } });
@@ -59,7 +61,7 @@ test("カテゴリ移動は兄弟順・任意階層・参照・revisionを同じ
     assert.deepEqual((await siblings(source.id)).map(row => [row.id, row.sort_order, row.revision]), [
       [moving.id, 0, 2], [first.id, 1, 2], [last.id, 2, 1], [stopped.id, 3, 2],
     ]);
-    assert.deepEqual(new Set(response.map(category => category.id)), new Set([first.id, moving.id, last.id, stopped.id]));
+    assert.deepEqual(new Set(response.map(category => category.id)), new Set([source.id, first.id, moving.id, last.id, stopped.id]));
     assert.equal(response.find(category => category.id === stopped.id)!.archivedAt !== null, true);
     const before = await snapshot();
     await move(moving.id, source.id, first.id);
@@ -77,7 +79,7 @@ test("カテゴリ移動は兄弟順・任意階層・参照・revisionを同じ
     assert.deepEqual((await siblings(source.id)).map(row => row.id), [first.id, last.id, stopped.id]);
     assert.deepEqual((await siblings(destination.id)).map(row => row.id), [destinationFirst.id, moving.id, destinationLast.id]);
     assert.deepEqual((await siblings(destination.id)).map(row => row.sort_order), [0, 1, 2]);
-    assert.deepEqual(new Set(response.map(category => category.id)), new Set([...sourceBefore, ...destinationBefore].map(category => category.id)));
+    assert.deepEqual(new Set(response.map(category => category.id)), new Set([source, destination, ...sourceBefore, ...destinationBefore].map(category => category.id)));
     const acknowledged = response.find(category => category.id === moving.id)!;
     assert.equal(acknowledged.parentId, destination.id);
     assert.equal(acknowledged.revision, sourceBefore.find(category => category.id === moving.id)!.revision + 1);
@@ -142,5 +144,50 @@ test("カテゴリ移動は兄弟順・任意階層・参照・revisionを同じ
     await assert.rejects(move(moving.id, source.id, first.id), /fixture_move_failure/);
     assert.deepEqual(await snapshot(), before);
     await sql.exec("ALTER TABLE categories DROP CONSTRAINT fixture_move_failure");
+  });
+
+  await t.test("別ブラウザが親子を逆転させた後の古い画面でも全metadata操作の応答で最新祖先を反映する", async () => {
+    const sharedWorkspace = randomUUID();
+    await sql.query("INSERT INTO workspaces(id,name,type,owner_user_id) VALUES ($1,'別ブラウザの移動','SHARED','a')", [sharedWorkspace]);
+    await sql.query("INSERT INTO workspace_members(workspace_id,user_id,role) VALUES ($1,'a','OWNER'),($1,'b','MEMBER')", [sharedWorkspace]);
+    const p = await create("P", null, sharedWorkspace), x = await create("X", p.id, sharedWorkspace);
+    const z = await create("Z", null, sharedWorkspace), y = await create("Y", z.id, sharedWorkspace);
+    const stale = { selected: { workspace: { id: sharedWorkspace }, categories: [p, x, z, y] } } as BootstrapData;
+    await move(y.id, null, null, "b", sharedWorkspace);
+    await move(z.id, y.id, null, "b", sharedWorkspace);
+    const movedCategories = await move(x.id, y.id, null, "a", sharedWorkspace);
+    assert.ok(movedCategories.some(category => category.id === y.id && category.parentId === null), "移動先の親自身の最新DTOを返す");
+    const moved = applyCategoryUpdate(stale, sharedWorkspace, { movedCategories });
+    assert.equal(flattenCategories(moved.selected!.categories).length, 4);
+    assert.deepEqual(categoryPath(moved.selected!.categories, x.id).map(category => category.name), ["Y", "X"]);
+    assert.deepEqual(categoryPath(moved.selected!.categories, z.id).map(category => category.name), ["Y", "Z"]);
+
+    async function metadataMutation(operation: string, categoryId: string | null, parentId: string | null, name: string | null) {
+      return (await sql.query<{ result: { category: Category; archivedCategories: Category[]; ancestorCategories: Category[] } }>(
+        "SELECT cake_mutate_category_with_ancestors($1::uuid,'a',$2,$3::uuid,$4::uuid,$5,'#f59e0b') AS result",
+        [sharedWorkspace, operation, categoryId, parentId, name],
+      )).rows[0].result;
+    }
+    const updated = await metadataMutation("UPDATE", z.id, null, "改名Z");
+    const renamed = applyCategoryUpdate(stale, sharedWorkspace, updated);
+    assert.equal(flattenCategories(renamed.selected!.categories).length, 4);
+    assert.deepEqual(categoryPath(renamed.selected!.categories, z.id).map(category => category.name), ["Y", "改名Z"]);
+    const created = await metadataMutation("CREATE", null, z.id, "追加した子");
+    const added = applyCategoryUpdate(stale, sharedWorkspace, created);
+    assert.equal(flattenCategories(added.selected!.categories).length, 5);
+    assert.deepEqual(categoryPath(added.selected!.categories, created.category.id).map(category => category.name), ["Y", "改名Z", "追加した子"]);
+    assert.deepEqual(new Set(created.ancestorCategories.map(category => category.id)), new Set([y.id, z.id]), "新しい子の祖先全体をrootまで返す");
+    const archived = await metadataMutation("ARCHIVE", z.id, null, null);
+    const stopped = applyCategoryUpdate(stale, sharedWorkspace, archived);
+    assert.equal(flattenCategories(stopped.selected!.categories).length, 5);
+    assert.ok(stopped.selected!.categories.find(category => category.id === z.id)!.archivedAt);
+    assert.deepEqual(categoryPath(stopped.selected!.categories, created.category.id).map(category => category.name), ["Y", "改名Z", "追加した子"]);
+    const repeatedArchive = applyCategoryUpdate(stopped, sharedWorkspace, created);
+    assert.deepEqual(repeatedArchive.selected!.categories, stopped.selected!.categories, "古い作成の祖先DTOでも新しい停止状態を戻さない");
+    const assigned = (await sql.query<{ result: Record<string, unknown> }>(
+      "SELECT cake_mutate_category_with_ancestors($1::uuid,'a','ASSIGN',$2::uuid,NULL,NULL,NULL,$3::uuid) AS result",
+      [workspace, child.id, transactionId],
+    )).rows[0].result;
+    assert.equal("ancestorCategories" in assigned, false, "明細のカテゴリ保存はmetadata取得を増やさない");
   });
 });

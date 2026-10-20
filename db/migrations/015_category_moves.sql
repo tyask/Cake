@@ -123,16 +123,65 @@ BEGIN
     UPDATE workspaces SET updated_at = now() WHERE id = target_workspace;
   END IF;
 
-  -- Include unchanged and previously unseen siblings as well. Revisions let
-  -- clients merge this acknowledgement after newer rename/archive/move replies.
+  -- Every acknowledged path must reach its latest root. Another browser may
+  -- have moved either parent since this client's last metadata fetch.
+  WITH RECURSIVE acknowledged AS (
+    SELECT id, parent_id FROM categories WHERE workspace_id = target_workspace
+      AND (parent_id IS NOT DISTINCT FROM saved.parent_id OR parent_id IS NOT DISTINCT FROM parent_category)
+    UNION
+    SELECT c.id, c.parent_id FROM categories c JOIN acknowledged a ON c.id = a.parent_id
+      WHERE c.workspace_id = target_workspace
+  )
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'id', id, 'parentId', parent_id, 'name', name, 'colorHex', color_hex,
-    'sortOrder', sort_order, 'archivedAt', archived_at, 'revision', revision
-  ) ORDER BY id), '[]'::jsonb) INTO moved_categories FROM categories
-    WHERE workspace_id = target_workspace AND (parent_id IS NOT DISTINCT FROM saved.parent_id
-      OR parent_id IS NOT DISTINCT FROM parent_category);
+    'id', c.id, 'parentId', c.parent_id, 'name', c.name, 'colorHex', c.color_hex,
+    'sortOrder', c.sort_order, 'archivedAt', c.archived_at, 'revision', c.revision
+  ) ORDER BY c.id), '[]'::jsonb) INTO moved_categories
+    FROM categories c JOIN acknowledged a ON c.id = a.id WHERE c.workspace_id = target_workspace;
   RETURN jsonb_build_object('movedCategories', moved_categories);
 EXCEPTION WHEN unique_violation THEN
   RAISE EXCEPTION '同じ階層に同じ名前のカテゴリがあります。';
 END;
 $cake_move_category$ LANGUAGE plpgsql;
+
+-- Preserve migration 014's function for existing deployments. Current metadata
+-- writes acknowledge all ancestors too, in the same workspace-locked operation.
+CREATE FUNCTION cake_mutate_category_with_ancestors(
+  target_workspace uuid, actor_id text, operation text,
+  target_category uuid DEFAULT NULL, parent_category uuid DEFAULT NULL,
+  category_name text DEFAULT NULL, category_color text DEFAULT NULL,
+  target_transaction uuid DEFAULT NULL
+)
+RETURNS jsonb AS $cake_mutate_category_with_ancestors$
+DECLARE
+  result jsonb;
+  category_ids uuid[];
+  ancestor_categories jsonb;
+BEGIN
+  result := cake_mutate_category(target_workspace, actor_id, operation,
+    target_category, parent_category, category_name, category_color, target_transaction);
+  -- Transaction assignment does not return category metadata or need this read.
+  IF operation = 'ASSIGN' THEN
+    RETURN result;
+  END IF;
+  IF result ? 'category' THEN
+    category_ids := ARRAY[(result->'category'->>'id')::uuid];
+  ELSE
+    SELECT array_agg((value->>'id')::uuid) INTO category_ids
+      FROM jsonb_array_elements(result->'archivedCategories');
+  END IF;
+  WITH RECURSIVE ancestors AS (
+    SELECT p.id, p.parent_id FROM categories c JOIN categories p ON p.id = c.parent_id
+      AND p.workspace_id = target_workspace
+      WHERE c.workspace_id = target_workspace AND c.id = ANY(category_ids)
+    UNION
+    SELECT c.id, c.parent_id FROM categories c JOIN ancestors a ON c.id = a.parent_id
+      WHERE c.workspace_id = target_workspace
+  )
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+    'id', c.id, 'parentId', c.parent_id, 'name', c.name, 'colorHex', c.color_hex,
+    'sortOrder', c.sort_order, 'archivedAt', c.archived_at, 'revision', c.revision
+  ) ORDER BY c.id), '[]'::jsonb) INTO ancestor_categories
+    FROM categories c JOIN ancestors a ON c.id = a.id WHERE c.workspace_id = target_workspace;
+  RETURN result || jsonb_build_object('ancestorCategories', ancestor_categories);
+END;
+$cake_mutate_category_with_ancestors$ LANGUAGE plpgsql;
