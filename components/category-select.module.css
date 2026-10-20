@@ -1,0 +1,10 @@
+.control { position: relative; min-width: 0; border: 1px solid var(--line-strong); border-radius: .45rem; color: var(--ink); background: var(--paper); font: inherit; }
+.control:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+.current { display: flex; align-items: center; gap: .4rem; min-width: 0; min-height: 2rem; padding: .35rem .45rem; font: inherit; }
+.swatch { width: .65rem; height: .65rem; flex-shrink: 0; border: 1px solid #0002; border-radius: 50%; }
+.name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chevron { margin-left: auto; color: var(--muted); }
+.select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.control[data-disabled="true"] { color: var(--disabled-ink); background: var(--surface-disabled); }
+.select:disabled { cursor: not-allowed; }
+@media (max-width: 48rem) { .current { min-height: 2.3rem; } }

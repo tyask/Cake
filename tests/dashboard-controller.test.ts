@@ -11,15 +11,15 @@ function data(id = "a", merchant = "initial"): BootstrapData {
   const user = { id: "user", name: "A", email: "a@example.test", imageUrl: null };
   const workspaces = ["a", "b", "c"].map(id => ({ id, name: id, type: "PERSONAL" as const, ownerUserId: user.id, memberCount: 1 }));
   return { user, workspaces, pendingInvitations: [], selected: {
-    workspace: workspaces.find(w => w.id === id)!, members: [{ ...user, weight: 1, role: "OWNER" }], rules: [],
+    workspace: workspaces.find(w => w.id === id)!, members: [{ ...user, weight: 1, role: "OWNER" }], categories: [], rules: [],
     transactions: [{ id: "transaction-" + id, occurredAt: "2026-10-18T00:00:42.123Z", merchant, method: "現金", type: "PAYMENT",
       amountYen: 100, actorUserId: user.id, actorName: user.name, expenseClass: "PERSONAL", splitWeights: { user: 1 }, settledAt: null,
-      memo: "original", externalId: "manual-" + id, source: "MANUAL" }], settlement: null, settlementHistory: [],
+      memo: "original", externalId: "manual-" + id, source: "MANUAL", categoryId: null, categoryConfirmed: false }], settlement: null, settlementHistory: [],
   } };
 }
 function metadata(id = "a"): BootstrapMetadata {
-  const full = data(id), { workspace, members, rules } = full.selected!;
-  return { ...full, selected: { workspace: { ...workspace, name: "metadata" }, members, rules } };
+  const full = data(id), { workspace, members, rules, categories } = full.selected!;
+  return { ...full, selected: { workspace: { ...workspace, name: "metadata" }, members, rules, categories } };
 }
 async function expectState(page: Page, expected: Record<string, unknown>) {
   await page.waitForFunction(expected => Object.entries(expected).every(([path, wanted]) => {

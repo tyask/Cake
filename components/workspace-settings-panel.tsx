@@ -8,6 +8,7 @@ import type { SplitWeights, WorkspaceData } from "@/lib/types";
 import { SplitEditor } from "./split-editor";
 import { RecurringPaymentsPanel } from "./recurring-payments-panel";
 import { WorkspaceRules } from "./workspace-rules";
+import { CategorySettings } from "./category-settings";
 
 export function SettingsPanel({ selected, currentUserId, run, afterDelete }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction; afterDelete: () => Promise<void> }) {
   const [name, setName] = useState(selected.workspace.name);
@@ -72,6 +73,7 @@ export function SettingsPanel({ selected, currentUserId, run, afterDelete }: { s
         {error && <p className="settings-error form-error" role="alert">{error}</p>}
       </section>
     </div>
+    <CategorySettings categories={selected.categories} workspaceId={selected.workspace.id} run={run} />
     <RecurringPaymentsPanel selected={selected} currentUserId={currentUserId} />
     <WorkspaceRules selected={selected} run={run} />
     <section className="panel danger-zone">

@@ -64,7 +64,7 @@ test("通常保存はDB確定値のDTOと担当者名を返し、個人費既定
   const result = await f.execute(save);
   assert.deepEqual(result, { ok: true, transaction: {
     id: transactionId, occurredAt: "2026-10-10T00:00:00.000Z", merchant: "店", method: "現金", type: "PAYMENT", amountYen: 300,
-    actorUserId: "a", actorName: "A", expenseClass: "SHARED", splitWeights: { a: 5, b: 2 }, settledAt: null, externalId: "manual_id", source: "MANUAL", memo: "保存メモ",
+    actorUserId: "a", actorName: "A", expenseClass: "SHARED", splitWeights: { a: 5, b: 2 }, settledAt: null, externalId: "manual_id", source: "MANUAL", categoryId: null, categoryConfirmed: false, memo: "保存メモ",
   } });
   assert.deepEqual(f.calls[3].args[2], { expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } });
   assert.match(String(f.calls[3].args[3]), /^[a-f0-9-]{36}$/);

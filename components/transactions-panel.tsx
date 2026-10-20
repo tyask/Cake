@@ -8,7 +8,7 @@ import type { RunAppAction } from "@/lib/app-input";
 
 import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/autosave";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { transactionActorPatch, transactionDateInput, transactionDateToIso, transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues } from "@/lib/transaction-editing";
 import type { ExpenseClass, TransactionRecord, WorkspaceData, WorkspaceMember } from "@/lib/types";
 import styles from "./transactions-panel.module.css";
@@ -24,6 +24,9 @@ import { createTransactionFilterMatcher, transactionColumns, transactionFilterOp
 import { transactionListView } from "@/lib/transaction-list";
 import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } from "./transaction-table";
 import { useTransactionFilters } from "./use-transaction-filters";
+import { categoryBackground } from "@/lib/categories";
+import { prepareCategoryChoices, type CategoryChoices } from "./category-select";
+import { TransactionCategoryEditor, type SaveTransactionCategory, type TransactionCategoryHandle } from "./transaction-category-editor";
 
 type RunAction = RunAppAction;
 type SaveTransaction = (id: string, getValues: () => { values: TransactionValues; base: TransactionValues }, accept: (values: TransactionValues) => void) => Promise<void>;
@@ -39,7 +42,7 @@ type TransactionListProps = {
   refreshing: boolean;
 };
 
-const tableColumns = [{ id: "selection", label: "選択" }, ...transactionColumns, { id: "updateStatus", label: "更新状態" }] as const;
+const tableColumns = [{ id: "selection", label: "選択" }, ...transactionColumns.slice(0, 2), { id: "category", label: "カテゴリ" }, ...transactionColumns.slice(2), { id: "updateStatus", label: "更新状態" }] as const;
 
 function signature(values: TransactionValues): string {
   return JSON.stringify([values.occurredAt, values.merchant, values.method, values.type, values.amountYen, values.actorUserId, values.expenseClass, Object.entries(values.splitWeights).sort(([a], [b]) => a.localeCompare(b))]);
@@ -55,6 +58,8 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
   const [filterColumn, setFilterColumn] = useState<TransactionColumn | null>(null);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => new Set());
   const [memoPinnedIds, setMemoPinnedIds] = useState<Set<string>>(() => new Set());
+  const [categoryPinnedIds, setCategoryPinnedIds] = useState<Set<string>>(() => new Set());
+  const [categoryDisplay, setCategoryDisplay] = useState<"root" | "full">("full");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [pending, setPending] = useState(0);
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
@@ -86,10 +91,20 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
       return next;
     });
   }, []);
+  const onCategoryPin = useCallback((id: string, pinned: boolean) => {
+    setCategoryPinnedIds(current => {
+      if (current.has(id) === pinned) return current;
+      const next = new Set(current);
+      if (pinned) next.add(id); else next.delete(id);
+      return next;
+    });
+  }, []);
+  const categoryChoices = useMemo(() => prepareCategoryChoices(selected.categories), [selected.categories]);
+  const metadataPinnedIds = useMemo(() => new Set([...memoPinnedIds, ...categoryPinnedIds]), [memoPinnedIds, categoryPinnedIds]);
   const matches = useMemo(() => createTransactionFilterMatcher(columnFilters, selected.members), [columnFilters, selected.members]);
   const { visible, visibleEditable, outsideFilterIds, checkedIds, hiddenCheckedCount, selectionChecked } = useMemo(
-    () => transactionListView(selected.transactions, matches, pinnedIds, memoPinnedIds, selectedIds),
-    [selected.transactions, matches, pinnedIds, memoPinnedIds, selectedIds],
+    () => transactionListView(selected.transactions, matches, pinnedIds, metadataPinnedIds, selectedIds),
+    [selected.transactions, matches, pinnedIds, metadataPinnedIds, selectedIds],
   );
   const busy = bulkAction !== null || preparingRefresh || refreshing;
   const filteredColumns = transactionColumns.filter(column => columnFilters[column.id] !== undefined);
@@ -117,6 +132,10 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
   const saveMemo: SaveTransactionMemo = (transactionId, memo) => enqueue(async () => {
     const result = await run({ action: "saveTransactionMemo", workspaceId: selected.workspace.id, transactionId, memo }, "") as { memo: string };
     return transactionMemoSchema.parse(result.memo);
+  });
+  const saveCategory: SaveTransactionCategory = (transactionId, categoryId) => enqueue(async () => {
+    const result = await run({ action: "saveTransactionCategory", workspaceId: selected.workspace.id, transactionId, categoryId }, "") as { categoryId: string | null };
+    return result.categoryId;
   });
 
   function toggle(id: string) {
@@ -196,15 +215,16 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
       })}</div>}
       <div className={styles.bulkBar}>
         <span>{visible.length}件・{checkedIds.length}件選択{hiddenCheckedCount > 0 && "（非表示" + hiddenCheckedCount + "件を含む）"}</span>
+        <label className={styles.categoryDisplay}>カテゴリ表示<select aria-label="カテゴリの表示範囲" disabled={busy} value={categoryDisplay} onChange={event => setCategoryDisplay(event.target.value as "root" | "full")}><option value="root">大分類</option><option value="full">小分類（全階層）</option></select></label>
         <button type="button" disabled={busy || checkedIds.length === 0} onClick={() => { void performBulk("applyTransactionRules"); }}>{bulkAction === "applyTransactionRules" ? "適用中…" : "共有費ルールの適用"}</button>
         <button type="button" disabled={busy || filteredColumns.length === 0} onClick={() => setColumnFilters({})}>絞り込みをすべて解除</button>
         <button type="button" className={styles.bulkDelete} disabled={busy || checkedIds.length === 0} onClick={() => { void performBulk("deleteTransactions"); }}>{bulkAction === "deleteTransactions" ? "削除中…" : "削除"}</button>
       </div>
       {bulkError && <p role="alert" className={styles.bulkError}>{bulkError}</p>}
       {bulkNotice && <p role="status" className={styles.bulkNotice}>{bulkNotice}</p>}
-      <p className={styles.note}>清算済みの明細はメモのみ編集できます。メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。全選択チェックを外すと非表示の選択も解除します。編集中の明細は編集を終えるまで表示します。</p>
-      <TransactionTable columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => <th key={column.id}><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
-        {visible.map((item) => <EditableTransaction key={item.id} item={item} members={selected.members} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} onDelete={() => { void performBulk("deleteTransactions", [item.id]); }} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} />)}
+      <p className={styles.note}>清算済みの明細もカテゴリとメモを編集できます。カテゴリは選択時、メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。全選択チェックを外すと非表示の選択も解除します。編集中の明細は編集を終えるまで表示します。</p>
+      <TransactionTable columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => <Fragment key={column.id}><th><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th>{column.id === "merchant" && <th>カテゴリ</th>}</Fragment>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
+        {visible.map((item) => <EditableTransaction key={item.id} item={item} members={selected.members} categoryChoices={categoryChoices} categoryDisplay={categoryDisplay} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} onDelete={() => { void performBulk("deleteTransactions", [item.id]); }} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} onSaveCategory={saveCategory} onCategoryPin={onCategoryPin} />)}
       </TransactionTable>
       {visible.length === 0 && <p className={styles.empty}>条件に一致する明細がありません。</p>}
     </section>
@@ -215,9 +235,11 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
   </>;
 }
 
-function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy, applyingRules, onSelect, onDelete, register, onPin, onSave, onSaveMemo, onMemoPin }: {
+function EditableTransaction({ item, members, categoryChoices, categoryDisplay, pinnedOutsideFilter, checked, busy, applyingRules, onSelect, onDelete, register, onPin, onSave, onSaveMemo, onMemoPin, onSaveCategory, onCategoryPin }: {
   item: TransactionRecord;
   members: WorkspaceMember[];
+  categoryChoices: CategoryChoices;
+  categoryDisplay: "root" | "full";
   pinnedOutsideFilter: boolean;
   checked: boolean;
   busy: boolean;
@@ -229,10 +251,13 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
   onSave: SaveTransaction;
   onSaveMemo: SaveTransactionMemo;
   onMemoPin: (id: string, pinned: boolean) => void;
+  onSaveCategory: SaveTransactionCategory;
+  onCategoryPin: (id: string, pinned: boolean) => void;
 }) {
   const [changes, setChanges] = useState<Partial<TransactionValues>>({});
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const [memoSaving, setMemoSaving] = useState(false);
+  const [categorySaving, setCategorySaving] = useState(false);
   const changesRef = useRef<Partial<TransactionValues>>({});
   const [dateDraft, setDateDraft] = useState<string | null>(null);
   const dateDraftRef = useRef<string | null>(null);
@@ -243,8 +268,13 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
   const inFlight = useRef(new Set<Promise<void>>());
   const frozenRef = useRef(false);
   const memoHandle = useRef<TransactionMemoHandle | null>(null);
+  const categoryHandle = useRef<TransactionCategoryHandle | null>(null);
   const registerMemo = useCallback((handle: TransactionMemoHandle | null) => {
     memoHandle.current = handle;
+    handle?.freeze(frozenRef.current);
+  }, []);
+  const registerCategory = useCallback((handle: TransactionCategoryHandle | null) => {
+    categoryHandle.current = handle;
     handle?.freeze(frozenRef.current);
   }, []);
   const [error, setError] = useState<string | null>(null);
@@ -348,11 +378,12 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
     else if (Object.keys(changesRef.current).length > 0 || dateDraftRef.current !== null || errorRef.current) throw new Error("清算済みの明細は変更できません。入力内容は保持しています。");
     while (inFlight.current.size > 0) await Promise.all([...inFlight.current]);
     await memoHandle.current?.flush();
+    await categoryHandle.current?.flush();
   }
 
   useLayoutEffect(() => {
     register(item.id, {
-      freeze: (value) => { frozenRef.current = value; memoHandle.current?.freeze(value); },
+      freeze: (value) => { frozenRef.current = value; memoHandle.current?.freeze(value); categoryHandle.current?.freeze(value); },
       flush,
       acceptRules: (values) => {
         acceptSaved(values);
@@ -391,17 +422,23 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
     if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); requestCommit(); }
   }
 
-  if (item.settledAt) return <SettledTransaction item={item} members={members} busy={busy} pinnedOutsideFilter={pinnedOutsideFilter} onSaveMemo={onSaveMemo} onMemoPin={onMemoPin} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} onMemoError={() => setMobileExpanded(true)} updating={pending > 0 || memoSaving} onMemoSavingChange={setMemoSaving} registerMemo={registerMemo} />;
+  const category = categoryChoices.byId.get(item.categoryId ?? "");
+  const tint = category ? categoryBackground(category.colorHex) : undefined;
+  const rowStyle: CSSProperties | undefined = tint ? { backgroundColor: tint, "--swipe-surface": tint } as CSSProperties : undefined;
+  const categoryLabel = category ? (categoryDisplay === "root" ? category.rootLabel : category.label) + (category.archived ? "（使用停止）" : "") : "未分類";
+  const categoryEditor = <TransactionCategoryEditor id={item.id} merchant={draft.merchant} categoryId={item.categoryId} choices={categoryChoices} display={categoryDisplay} disabled={busy} onSave={onSaveCategory} onPin={onCategoryPin} onError={() => setMobileExpanded(true)} onSavingChange={setCategorySaving} register={registerCategory} />;
+  if (item.settledAt) return <SettledTransaction item={item} members={members} busy={busy} pinnedOutsideFilter={pinnedOutsideFilter} onSaveMemo={onSaveMemo} onMemoPin={onMemoPin} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} onMemoError={() => setMobileExpanded(true)} updating={pending > 0 || memoSaving || categorySaving} onMemoSavingChange={setMemoSaving} registerMemo={registerMemo} categoryEditor={categoryEditor} categoryLabel={categoryLabel} rowStyle={rowStyle} />;
 
   const currentValues = () => ({ ...baseRef.current, ...changesRef.current });
-  const updating = pending > 0 || applyingRules || memoSaving;
-  return <><tr ref={rowRef} className={styles.transactionRow} data-transaction-id={item.id} data-expanded={mobileExpanded}
+  const updating = pending > 0 || applyingRules || memoSaving || categorySaving;
+  return <><tr ref={rowRef} className={styles.transactionRow} style={rowStyle} data-transaction-id={item.id} data-expanded={mobileExpanded}
     onFocusCapture={(event) => syncPin(editorFocused(event.target))}
     onBlurCapture={(event) => syncPin(editorFocused(event.relatedTarget))}>
-    <MobileTransactionSummary item={{ ...item, ...draft, actorName: members.find(member => member.id === draft.actorUserId)?.name ?? item.actorName }} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} checked={checked} disabled={busy} onSelect={() => onSelect(item.id)} columnCount={tableColumns.length} onDelete={onDelete} deleteDisabled={busy} indicator={<SavingIndicator active={updating} />} />
+    <MobileTransactionSummary item={{ ...item, ...draft, actorName: members.find(member => member.id === draft.actorUserId)?.name ?? item.actorName }} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} checked={checked} disabled={busy} onSelect={() => onSelect(item.id)} columnCount={tableColumns.length} categoryLabel={categoryLabel} onDelete={onDelete} deleteDisabled={busy} indicator={<SavingIndicator active={updating} />} />
     <td data-label="選択" className={styles.selectionCell} data-selection><input className={styles.checkbox} type="checkbox" aria-label={item.merchant + "の明細を選択"} checked={checked} disabled={busy} onChange={() => onSelect(item.id)} /></td>
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell}><input aria-label="取引日時" type="datetime-local" step="0.001" required value={dateDraft ?? transactionDateInput(draft.occurredAt)} title={dateDraft ?? transactionDateInput(draft.occurredAt)} disabled={busy} onChange={(event) => changeDate(event.target.value)} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
     <td data-label="取引先"><input aria-label="取引先" required maxLength={MAX_MERCHANT_LENGTH} value={draft.merchant} disabled={busy} onChange={(event) => change({ merchant: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} />{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</td>
+    <td data-label="カテゴリ" className={styles.categoryCell + " " + styles.fullCell}>{categoryEditor}</td>
     <td data-label="方法"><input aria-label="取引方法" required maxLength={MAX_METHOD_LENGTH} value={draft.method} disabled={busy} onChange={(event) => change({ method: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
     <td data-label="金額（円）"><input aria-label="金額（円）" type="number" required min="1" max={MAX_AMOUNT_YEN} step="1" value={draft.amountYen} disabled={busy} onChange={(event) => change({ amountYen: Number(event.target.value) })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
     <td data-label={transactionActorLabels[draft.type]}><select aria-label={transactionActorLabels[draft.type]} value={draft.actorUserId} disabled={busy} onChange={(event) => change(transactionActorPatch(currentValues(), event.target.value, members), true)}>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></td>
@@ -422,20 +459,24 @@ function EditableTransaction({ item, members, pinnedOutsideFilter, checked, busy
   </>;
 }
 
-function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMemo, onMemoPin, expanded, onToggle, onMemoError, updating, onMemoSavingChange, registerMemo }: {
+function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMemo, onMemoPin, expanded, onToggle, onMemoError, updating, onMemoSavingChange, registerMemo, categoryEditor, categoryLabel, rowStyle }: {
   item: TransactionRecord; members: WorkspaceMember[]; busy: boolean; pinnedOutsideFilter: boolean;
   onSaveMemo: SaveTransactionMemo; onMemoPin: (id: string, pinned: boolean) => void;
   expanded: boolean; onToggle: () => void; onMemoError: () => void;
   updating: boolean; onMemoSavingChange: (saving: boolean) => void;
   registerMemo: (handle: TransactionMemoHandle | null) => void;
+  categoryEditor: ReactNode;
+  categoryLabel: string;
+  rowStyle: CSSProperties | undefined;
 }) {
   const amounts = splitAmounts(item.amountYen, item.splitWeights, members);
   const percentages = splitAmounts(1000, item.splitWeights, members);
-  return <tr data-transaction-id={item.id} data-expanded={expanded} className={styles.settled + " " + styles.transactionRow}>
-    <MobileTransactionSummary item={item} expanded={expanded} onToggle={onToggle} checked={false} disabled onSelect={() => {}} columnCount={tableColumns.length} status={item.expenseClass === "PERSONAL" ? "個人費" : "清算済み"} indicator={<SavingIndicator active={updating} />} />
+  return <tr data-transaction-id={item.id} data-expanded={expanded} className={styles.settled + " " + styles.transactionRow} style={rowStyle}>
+    <MobileTransactionSummary item={item} expanded={expanded} onToggle={onToggle} checked={false} disabled onSelect={() => {}} columnCount={tableColumns.length} categoryLabel={categoryLabel} status={item.expenseClass === "PERSONAL" ? "個人費" : "清算済み"} indicator={<SavingIndicator active={updating} />} />
     <td data-label="選択" className={styles.selectionCell} data-selection><input className={styles.checkbox} type="checkbox" aria-label={item.merchant + "の明細を選択"} checked={false} disabled /></td>
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell} title={formatJstDateTime(item.occurredAt)}>{formatJstDateTime(item.occurredAt)}</td>
     <td data-label="取引先"><b>{item.merchant}</b>{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</td>
+    <td data-label="カテゴリ" className={styles.categoryCell + " " + styles.fullCell}>{categoryEditor}</td>
     <td data-label="方法">{item.method}</td>
     <td data-label="金額（円）">{formatYen(item.amountYen)}</td>
     <td data-label={transactionActorLabels[item.type]}>{item.actorName}</td>

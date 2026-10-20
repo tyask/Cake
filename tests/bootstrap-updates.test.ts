@@ -14,12 +14,12 @@ function fixture(): { current: BootstrapData; metadata: BootstrapMetadata } {
   const transactions: TransactionRecord[] = [{
     id: "transaction", occurredAt: "2026-10-08T00:00:00.000Z", merchant: "スーパー", method: "現金",
     memo: "保存済み", type: "PAYMENT", amountYen: 1000, actorUserId: user.id, actorName: "A",
-    expenseClass: "SHARED", splitWeights: { a: 1, b: 1 }, settledAt: null, externalId: "manual", source: "MANUAL",
+    expenseClass: "SHARED", splitWeights: { a: 1, b: 1 }, settledAt: null, externalId: "manual", source: "MANUAL", categoryId: null, categoryConfirmed: false,
   }];
   const current: BootstrapData = {
     user, workspaces: [workspace], pendingInvitations: [],
     selected: {
-      workspace, members, transactions, rules: [], settlement: calculateSettlement(members, transactions),
+      workspace, members, transactions, categories: [], rules: [], settlement: calculateSettlement(members, transactions),
       settlementHistory: [{ id: "history", payerName: "B", payeeName: "A", amountYen: 200, completedAt: "2026-10-07T00:00:00.000Z" }],
     },
   };
@@ -29,7 +29,7 @@ function fixture(): { current: BootstrapData; metadata: BootstrapMetadata } {
     pendingInvitations: [{ id: "invite", workspaceName: "別の家計", inviterName: "C", expiresAt: "2026-10-15T00:00:00.000Z" }],
     selected: {
       workspace: updatedWorkspace, members: members.map(member => ({ ...member, imageUrl: `${member.id}.png` })),
-      rules: [{ id: "rule", merchantContains: "スーパー", expenseClass: "SHARED", sortOrder: 0, splitWeights: { a: 1, b: 1 }, enabled: true }],
+      categories: [], rules: [{ id: "rule", merchantContains: "スーパー", expenseClass: "SHARED", sortOrder: 0, splitWeights: { a: 1, b: 1 }, enabled: true }],
     },
   };
   return { current, metadata };

@@ -8,6 +8,7 @@ import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
 import type { ExpenseClass, SplitWeights, WorkspaceData } from "@/lib/types";
 import { SplitEditor } from "./split-editor";
 import { Modal } from "./dashboard-ui";
+import { CategorySelect, prepareCategoryChoices } from "./category-select";
 
 // Input initialization keeps its minute precision and input-specific locale.
 const inputDateFormatter = new Intl.DateTimeFormat("sv-SE", {
@@ -22,6 +23,7 @@ const jstInputToIso = (value: string) => new Date(`${value.length === 16 ? `${va
 
 export function NewTransactionModal({ selected, currentUserId, close, run }: { selected: WorkspaceData; currentUserId: string; close: () => void; run: RunAppAction }) {
   const matchRule = useMemo(() => prepareDefaultRuleMatcher(selected.rules), [selected.rules]);
+  const categoryChoices = useMemo(() => prepareCategoryChoices(selected.categories), [selected.categories]);
   const initialActor = selected.members.some((member) => member.id === currentUserId) ? currentUserId : selected.members[0]?.id ?? "";
   const [occurredAt, setOccurredAt] = useState(inputDate());
   const [merchant, setMerchant] = useState("");
@@ -31,6 +33,7 @@ export function NewTransactionModal({ selected, currentUserId, close, run }: { s
   const [expenseClass, setExpenseClass] = useState<ExpenseClass>("SHARED");
   const [splitWeights, setSplitWeights] = useState<SplitWeights>(() => defaultSplitWeights(selected.members));
   const [memo, setMemo] = useState("");
+  const [categoryId, setCategoryId] = useState<string | null>(null);
   const [customized, setCustomized] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +52,7 @@ export function NewTransactionModal({ selected, currentUserId, close, run }: { s
       try {
         validateSplitWeights(splitWeights, selected.members, expenseClass, actorUserId);
         await run({ action: "saveTransaction", workspaceId: selected.workspace.id,
-          occurredAt: jstInputToIso(occurredAt), merchant, method, type: "PAYMENT", amountYen, actorUserId, expenseClass, splitWeights, memo },
+          occurredAt: jstInputToIso(occurredAt), merchant, method, type: "PAYMENT", amountYen, actorUserId, expenseClass, splitWeights, memo, categoryId },
         "明細を追加しました。");
         close();
       } catch (failure) {
@@ -75,6 +78,7 @@ export function NewTransactionModal({ selected, currentUserId, close, run }: { s
           setSplitWeights(nextClass === "PERSONAL" ? personalSplitWeights(selected.members, actorUserId) : defaultSplitWeights(selected.members));
           setCustomized(true);
         }}>{expenseClasses.map(value => <option key={value} value={value}>{commonExpenseClassLabels[value]}</option>)}</select></label>
+        <label className="full">カテゴリ<CategorySelect choices={categoryChoices} value={categoryId} onChange={setCategoryId} disabled={saving} /></label>
         <div className="full">
           <SplitEditor inline label={`支払い割合（${selected.members.map((member) => member.name).join(", ")}）`} amountYen={amountYen} members={selected.members} value={splitWeights}
             disabled={expenseClass === "PERSONAL" || saving} onChange={(next) => { setSplitWeights(next); setCustomized(true); }} />

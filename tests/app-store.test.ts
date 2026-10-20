@@ -37,7 +37,7 @@ function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean;
     if (/WITH authorized AS/.test(query)) return [{ authorized: !options.forbidden, workspace_type: "SHARED", members: memberRows, transactions: [{ id: transactionId, actorUserId: "a", type: "PAYMENT", amountYen: 300, expenseClass: "SHARED", splitWeights: { a: 1, b: 1 } }] }];
     if (/WITH\s+my_workspaces AS/.test(query)) return [{
       workspaces: [{ id: workspaceId, name: "QA", type: "SHARED", owner_user_id: "a", member_count: 2 }], selected_workspace_id: workspaceId,
-      members: memberRows, rules: [ruleRow], transactions: [options.transaction ?? transaction], pending_invitations: [], settlement_history: [],
+      categories: [], members: memberRows, rules: [ruleRow], transactions: [options.transaction ?? transaction], pending_invitations: [], settlement_history: [],
     }];
     if (/SELECT \* FROM app_users|UPDATE app_users SET name/.test(query)) return [{ id: user.id, email: user.email, name: user.name, image_url: null, is_enabled: true, is_admin: false }];
     if (/SELECT w.id, w.name, w.type, w.owner_user_id/.test(query)) return options.forbidden ? [] : [{ id: workspaceId, name: "QA", type: "SHARED" }];

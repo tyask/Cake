@@ -6,6 +6,7 @@ import {
 import { MAX_PAYPAY_EXTERNAL_ID_LENGTH } from "./paypay-id";
 import { transactionMemoInputSchema, transactionMemoSchema } from "./transaction-memo";
 import { updateProfileInputSchema } from "./user-profile";
+import { archiveCategoryInputSchema, categoryIdSchema, createCategoryInputSchema, saveTransactionCategoryInputSchema, updateCategoryInputSchema } from "./category-input";
 
 const workspaceShape = { workspaceId: workspaceIdSchema };
 const transactionIdsSchema = z.array(z.string().uuid()).min(1).max(5000)
@@ -17,8 +18,9 @@ const ruleShape = {
 const optionalSplitShape = { expenseClass: expenseClassSchema.optional(), splitWeights: splitWeightsSchema.optional() };
 export const saveTransactionInputSchema = z.object({
   action: z.literal("saveTransaction"), ...workspaceShape, transactionId: z.string().uuid().optional(),
-  ...transactionFields, ...optionalSplitShape, memo: transactionMemoSchema.optional(),
-}).refine(input => !input.transactionId || input.memo === undefined, "メモの更新は専用の保存処理を使用してください。");
+  ...transactionFields, ...optionalSplitShape, memo: transactionMemoSchema.optional(), categoryId: categoryIdSchema.optional(),
+}).refine(input => !input.transactionId || input.memo === undefined, "メモの更新は専用の保存処理を使用してください。")
+  .refine(input => !input.transactionId || input.categoryId === undefined, "カテゴリの更新は専用の保存処理を使用してください。");
 // CSV imports are always PAYMENT; retain the existing policy of stripping type.
 export const payPayImportItemSchema = z.object(transactionFields).omit({ type: true }).extend({
   externalId: z.string().trim().min(1).max(MAX_PAYPAY_EXTERNAL_ID_LENGTH), ...optionalSplitShape,
@@ -35,6 +37,10 @@ export const appActionInputSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("updateWeights"), ...workspaceShape,
     weights: z.array(z.object({ userId: userIdSchema, weight: weightSchema })).min(1).max(2) }),
   transactionMemoInputSchema,
+  createCategoryInputSchema,
+  updateCategoryInputSchema,
+  archiveCategoryInputSchema,
+  saveTransactionCategoryInputSchema,
   saveTransactionInputSchema,
   z.object({ action: z.literal("deleteTransaction"), ...workspaceShape, transactionId: z.string().uuid() }),
   z.object({ action: z.literal("deleteTransactions"), ...workspaceShape, transactionIds: transactionIdsSchema }),

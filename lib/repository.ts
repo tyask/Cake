@@ -2,6 +2,7 @@ import { db } from "./db";
 import { calculateSettlement } from "./settlement";
 import { defaultRuleRecord } from "./default-rule-record";
 import { transactionRecord } from "./transaction-record";
+import { categoryRecord } from "./category-record";
 import type {
   AppUser,
   BootstrapData,
@@ -89,6 +90,14 @@ async function readBootstrapRow(
     ), '[]'::jsonb) AS rules,
     COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
+        'id', c.id, 'parent_id', c.parent_id, 'name', c.name, 'color_hex', c.color_hex,
+        'sort_order', c.sort_order, 'archived_at', c.archived_at
+      ) ORDER BY c.sort_order, c.created_at, c.id)
+      FROM categories c
+      JOIN selected_workspace sw ON sw.id = c.workspace_id
+    ), '[]'::jsonb) AS categories,
+    COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
         'id', i.id, 'workspace_name', w.name, 'inviter_name', u.name,
         'expires_at', i.expires_at
       ) ORDER BY i.created_at DESC)
@@ -112,7 +121,8 @@ async function readBootstrapRow(
             'actor_user_id', t.actor_user_id, 'actor_name', u.name,
             'expense_class', t.expense_class, 'settled_at', t.settled_at,
             'external_id', t.external_id, 'source', t.source,
-            'split_weights', t.split_weights, 'memo', t.memo
+            'split_weights', t.split_weights, 'memo', t.memo,
+            'category_id', t.category_id, 'category_confirmed', t.category_confirmed
           ) ORDER BY t.occurred_at DESC, t.created_at DESC)
           FROM transactions t
           JOIN selected_workspace sw ON sw.id = t.workspace_id
@@ -177,7 +187,8 @@ function getWorkspaceData(
     role: text(row.role) as WorkspaceMember["role"],
   }));
   const rules: DefaultRule[] = (row.rules as Row[]).map(defaultRuleRecord);
-  if (scope === "metadata") return { workspace, members, rules };
+  const categories = (row.categories as Row[]).map(categoryRecord);
+  if (scope === "metadata") return { workspace, members, rules, categories };
 
   const transactions: TransactionRecord[] = (row.transactions as Row[]).map(row => transactionRecord(row));
   const settlementHistory: SettlementHistory[] = (row.settlement_history as Row[]).map((row) => ({
@@ -193,6 +204,7 @@ function getWorkspaceData(
     members,
     transactions,
     rules,
+    categories,
     settlement: workspace.type === "SHARED" ? calculateSettlement(members, transactions) : null,
     settlementHistory,
   };

@@ -6,12 +6,18 @@ import { transactionsService } from "./app-services/transactions";
 import { rulesService } from "./app-services/rules";
 import { importsService } from "./app-services/imports";
 import { settlementService } from "./app-services/settlement";
+import { categoriesService } from "./app-services/categories";
 
 export function createAppService(store: AppStore) {
   return {
     bootstrap: store.bootstrap,
     async execute(user: AppUser, input: AppActionInput) {
       switch (input.action) {
+        case "createCategory":
+        case "updateCategory":
+        case "archiveCategory":
+        case "saveTransactionCategory":
+          return categoriesService(store, user, input);
         case "updateProfile":
         case "createWorkspace":
         case "updateWorkspace":

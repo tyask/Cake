@@ -119,6 +119,11 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
         } else if (payload.action === "saveTransactionMemo" && result.transactionId && typeof result.memo === "string" && originWorkspaceId) {
           updateData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, { transactionId: result.transactionId, memo: result.memo }) : current);
           if (shouldNotify()) setNotice(success);
+        } else if (payload.action === "saveTransactionCategory" && result.transactionId && originWorkspaceId) {
+          updateData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, {
+            transactionId: result.transactionId, categoryId: result.categoryId, categoryConfirmed: result.categoryConfirmed,
+          }) : current);
+          if (shouldNotify()) setNotice(success);
         } else {
           const applied = await refresh(workspaceId ?? result.workspaceId ?? originWorkspaceId, generation);
           if (applied && shouldNotify()) {

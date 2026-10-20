@@ -12,7 +12,7 @@ const matchesTransactionFilters = (item: TransactionRecord, filters: Transaction
 const base: TransactionRecord = {
   id: "one", occurredAt: "2026-10-06T23:15:00.125Z", merchant: "スーパー", method: "現金",
   type: "PAYMENT", amountYen: 1001, actorUserId: "a", actorName: "A", expenseClass: "SHARED",
-  splitWeights: { a: 6, b: 4 }, settledAt: null, externalId: "filter-test", source: "MANUAL", memo: "",
+  splitWeights: { a: 6, b: 4 }, settledAt: null, externalId: "filter-test", source: "MANUAL", categoryId: null, categoryConfirmed: false, memo: "",
 };
 
 test("同じ列はOR、複数列はANDで照合し、空の選択は0件になる", () => {

@@ -288,7 +288,7 @@
                 <div class="dfd-arrow"><b>→</b><small>SQL command</small></div>
                 <div class="dfd-node store"><strong>Neon Transaction</strong><small>INSERT / UPDATE / DELETE<br />制約・一意性検証</small></div>
                 <div class="dfd-arrow"><b>→</b><small>{ ok, ...確定値 }<br />or { error }</small></div>
-                <div class="dfd-node process"><strong>run / refresh</strong><small>明細・メモは確定値を反映<br />他の更新はscope別GET</small></div>
+                <div class="dfd-node process"><strong>run / refresh</strong><small>明細・メモ・カテゴリは確定値を反映<br />他の更新はscope別GET</small></div>
                 <div class="dfd-arrow"><b>→</b><small>new data</small></div>
                 <div class="dfd-node output"><strong>Dashboard State</strong><small>useDashboardControllerで確定値または取得結果を反映<br />notice表示</small></div>
               </div>
@@ -457,6 +457,9 @@
               <tr><td><code>acceptInvite</code></td><td>token 64文字、Hash一致・PENDING・期限内・本人メール一致・2人未満。</td><td>MEMBER追加とACCEPTEDをTransaction実行。<code>{ ok, workspaceId }</code>。</td></tr>
               <tr><td><code>updateWeights</code></td><td>共有workspace・所属、現在の全参加者1〜2件、ID重複なし。整数0〜2147483647、合計は正。</td><td>workspaceとmemberのデフォルトweight更新。保存済み明細の割合は変えない。<code>{ ok }</code>。</td></tr>
               <tr><td><code>saveTransaction</code></td><td>workspace/任意transaction UUID、ISO日時、merchant 1〜240、method 1〜120、1〜2147483647の整数円、type、参加者actor、任意class/split。新規だけ任意memo。</td><td>新規はMANUALとmanual_UUID。既存は未清算行だけ更新し、既存割合の省略時は可能な限り保持。所属者別割合を検証。<code>{ ok, transaction }</code>は確定DB行のDTO。</td></tr>
+              <tr><td><code>createCategory</code> / <code>updateCategory</code></td><td>workspaceId、parentId（追加）/categoryId（編集）、trim後1〜40文字のname、6桁colorHex。共有schemaで検証。</td><td>workspaceロック後に最新所属と親・対象の使用可否を確認。同親の使用中同名を拒否。<code>{ ok, category }</code>。</td></tr>
+              <tr><td><code>archiveCategory</code></td><td>workspaceId、categoryId。</td><td>子孫を集合単位で使用停止。明細参照は維持。<code>{ ok, archivedCategoryIds }</code>。</td></tr>
+              <tr><td><code>saveTransactionCategory</code></td><td>workspaceId、transactionId、nullable categoryId。</td><td>清算済みもカテゴリと確認状態・監査列だけ更新。<code>{ ok, transactionId, categoryId, categoryConfirmed }</code>。</td></tr>
               <tr><td><code>saveTransactionMemo</code></td><td>strict入力: action、workspace UUID、transaction UUID、memo最大2000文字。</td><td>清算済みも更新可能。メモ・監査項目だけ更新。<code>{ ok, transactionId, memo }</code>。既存saveTransactionへmemoを含めると拒否。</td></tr>
               <tr><td><code>deleteTransaction</code></td><td>workspace/transaction UUID・所属。</td><td>未清算の対象行だけ削除。0件なら業務例外。<code>{ ok }</code>。</td></tr>
               <tr><td><code>deleteTransactions</code> / <code>applyTransactionRules</code></td><td>所属、transaction UUID配列1〜5000件、大小文字を正規化した重複なし。</td><td>DB関数で全選択の存在・未清算を検証し、全件削除/現在ルール適用。<code>{ ok, deleted }</code> / <code>{ ok, applied, appliedTransactions }</code>。</td></tr>
@@ -545,7 +548,7 @@
               </div>
               <div class="flow-branches" role="group" aria-label="GET応答の不一致、full、metadataの反映分岐">
                 <div class="dfd-node source"><strong>不一致 → 反映せず終了</strong><p>古いworkspace、保存開始前のGET、後続GETより遅れた応答をdataへ適用しない。</p><small>タブ世代はこの関数の比較項目に含めない。タブ切替で新しいGET要求IDが発行され、以前のGETを抑止する。同じタブの再選択は取得しない。</small></div>
-                <div class="dfd-node output"><strong>一致＋full → dataを置換</strong><p>利用者・workspace一覧・招待・選択先情報・参加者・ルール・明細・清算結果・履歴を受け取る。</p><small>workspace切替・手動更新はfull。home / transactions / settlementへのタブ切替もfull。</small></div>
+                <div class="dfd-node output"><strong>一致＋full → dataを置換</strong><p>利用者・workspace一覧・招待・選択先情報・参加者・ルール・カテゴリ・明細・清算結果・履歴を受け取る。</p><small>workspace切替・手動更新はfull。home / transactions / settlementへのタブ切替もfull。</small></div>
                 <div class="dfd-node output"><strong>一致＋metadata → 併合</strong><p>利用者・workspace一覧・招待・選択先情報・参加者・ルールを更新。同じworkspaceなら既存の明細・清算結果・履歴を保持する。</p><small>import / settingsで使用。選択先が別ならそのIDのfullを追加取得、選択先なしならselectedをnullにする。</small></div>
               </div>
               <div class="dfd-boundary"><b>失敗・初期表示:</b> GET失敗は例外となり、既存dataを置き換えず呼出元で通知等を処理する。初回の<code>GET /</code>はサーバーが直接getBootstrapを呼ぶ経路で、このブラウザGETを経由しない。所属workspaceが0件の場合の初期workspace作成はサーバー側の処理であり、GETだけを理由にDB無変更とは扱わない。</div>
@@ -637,7 +640,7 @@
           <ol>
             <li><code>postAction()</code>がJSONを<code>POST /api/app</code>し、非2xxのerrorを例外化する。</li>
             <li><code>run()</code>が要求開始時のworkspace・世代を保持し、現在のworkspace向けの成功応答だけを反映する。通知はタブ世代も一致し、手動更新中でない場合だけ表示する。</li>
-            <li><code>saveTransaction</code>はサーバーの確定TransactionRecordを一覧へ置換/追加し、日時で並び替え、清算を再計算。<code>saveTransactionMemo</code>は返されたメモだけを反映。どちらも直後の全件GETを省く。</li>
+            <li><code>saveTransaction</code>はサーバーの確定TransactionRecordを一覧へ追加し、既存行では専用保存で確定したメモ・カテゴリ・確認状態を保持して通常項目を反映する。日時で並び替え、清算を再計算する。<code>saveTransactionMemo</code>と<code>saveTransactionCategory</code>はそれぞれ確定した項目だけ反映し、直後の全件GETを省く。</li>
             <li>その他の更新とタブ切替は<code>refresh()</code>で再取得。import/settingsはmetadata、home/transactions/settlementはfull。workspace切替は常にfull。</li>
             <li>metadataは同一workspaceの取得済み明細・清算・履歴を保持して併合する。選択workspaceが変化した場合はfullを取得し直す。</li>
           </ol>
@@ -645,7 +648,7 @@
           <ul>
             <li>ホーム・取引明細・清算に「↻ 更新」を表示する。ホームは指標上部、取引明細は見出し右側の追加ボタン左、清算は見出し右側。白背景・薄いベージュ枠・茶色文字、高さ44px、角丸10〜12pxとし、スマートフォンでは見出し・説明の下に文字付きの操作行を右寄せする。</li>
             <li>現在のworkspaceを<code>full</code>で再取得する。画面遷移やコンポーネントの再マウントを行わず、フィルタとスクロール位置を保持する。</li>
-            <li>取引明細は全行の未保存入力とメモを保存し、保存キューの完了を待ってからGETする。入力検証・保存に失敗した場合はGETせず、下書きと再試行を保持する。</li>
+            <li>取引明細は全行の未保存入力・メモ・カテゴリを保存し、保存キューの完了を待ってからGETする。入力検証・保存に失敗した場合はGETせず、下書きと再試行を保持する。</li>
             <li>保存待ちから取得終了まで回転アイコンと「更新中…」を表示し、二重実行と競合する操作を抑制する。<code>notice</code>で成功・エラーを通知する。</li>
             <li>開始時のworkspace・世代とタブ世代を保持し、現在の表示と一致する場合だけ応答と通知を適用する。途中でタブやworkspaceが変わった場合、元のタブへ戻っても古い処理の完了で現在の画面を置換しない。</li>
           </ul>
@@ -653,7 +656,7 @@
             <thead><tr><th>タブ</th><th>参照・操作</th></tr></thead>
             <tbody>
               <tr><td>ホーム</td><td>今月の支払い、未清算共通費、次の送金、最近6件、保留招待数、登録/取込/清算への導線。lib/home-summary.tsで日本時間の年・月が一致する明細を抽出する。</td></tr>
-              <tr><td>取引明細</td><td>全明細の列フィルタ、未清算行のインライン保存、清算済みもメモ保存、選択削除/ルール適用。</td></tr>
+              <tr><td>取引明細</td><td>全明細の列フィルタ、未清算行のインライン保存、清算済みもメモ・カテゴリ保存、選択削除/ルール適用。</td></tr>
               <tr><td>CSV取込</td><td>ファイルまたは貼り付け本文を、metadataのルール・参加者で共通解析し、外部IDだけを専用APIで照合。選択行の費用区分を一括変更し、行ごとの割合を編集してbulkImport。</td></tr>
               <tr><td>清算</td><td>保存割合による清算内訳、対象明細、最新20件の履歴、清算完了。</td></tr>
               <tr><td>設定</td><td>本人表示名、workspace名・デフォルト割合・招待・削除、共有ルール、定期支払い、管理者だけの利用者登録/停止。</td></tr>
@@ -705,7 +708,7 @@
             <li>取引の担当者を変更すると個人費の割合は新担当者1・ほか0に追従。共通費の保存済み割合は保持する。費用区分を新たに共通費へ変更すると現在のデフォルト割合を使う。</li>
             <li>割合は%と円入力を切替可能。円表示は最大剰余法で配分し同率時は参加者順、合計を整数円に一致させる。円入力は分担金額を重みとして保存する。</li>
             <li><code>SplitEditor</code>の単位プルダウンは共通部品で常に「%」「円」「1:1」の3択を表示し、呼出元ごとの表示可否フラグは持たない。明細追加・一覧・CSV取込・定期支払いの追加/編集で同じ選択肢を使う。二人参加中で編集可能な共通費に限り、選択すると二人の重みを1ずつに設定し、%表示の50%ずつへ戻す。新規明細では手動調整としてルールの自動適用を止め、一覧では変更した割合を即時保存キューへ送る。奇数円でも保存割合は1:1を保持する。個人費・清算済み・参加者一人では利用不可とし、CSV取込では対象行のプレビューだけを変更し、取込実行時にsplitWeightsとして送信する。未選択の登録可能行も編集でき、選択状態・他行・workspaceのデフォルト割合を変更しない。エラー行・重複行・保存中はfieldsetを無効化する。定期支払いではフォームのconfigと手動調整状態を更新し、追加/変更の保存時に専用APIへ送る。onChangeがない参照用と参加者一人では1:1のoptionを無効にする。workspaceのデフォルト割合入力は単位プルダウンを持たない。API・DBの変更は不要。</li>
-            <li>メモは空文字で削除可能、改行/空白を保持し最大2000文字。blurまたはCtrl/⌘+Enterで専用保存。清算済み行はメモだけ編集できる。</li>
+            <li>メモは空文字で削除可能、改行/空白を保持し最大2000文字。blurまたはCtrl/⌘+Enterで専用保存。清算済み行はメモとカテゴリを専用保存で編集できる。</li>
             <li>列を絞り込んでも未清算行の選択を保持する。編集・保存・エラー中の行は条件外になっても表示を維持。一括操作の前に未保存の変更を保存し、確定した取引先と担当者へルールを適用する。</li>
             <li>一括削除/ルール適用は選択全件の存在と未清算をDBで確認し、対象の一部だけを変更しない。ルール未一致は個人費へ戻る。適用済み明細の確定値を応答し、編集Stateにも反映する。</li>
           </ul>
@@ -734,6 +737,30 @@
             <li>新規入力の<code>inputDate()</code>/<code>jstInputToIso()</code>はJSTのdatetime-localとUTC ISOを変換。</li>
             <li>一覧の<code>transactionDateInput()</code>/<wbr><code>transactionDateToIso()</code>は秒・ミリ秒を維持し、存在しない日付/時刻を拒否。Repositoryのfull取得は従来互換の秒精度を保ち、SQL内の順序判定には元の日時精度を使用する。</li>
           </ul>
+        </section>
+
+        <section id="categories">
+          <h2>集計用カテゴリ</h2>
+          <p><code>CategorySettings</code>が名前と色のdraft、折りたたみ、使用停止表示を所有し、保存済みカテゴリはDashboardのdataに一元化する。名前・色は共通schema、基本色と濃淡は<code>categories.ts</code>の9系統×5色を使う。カテゴリはnullable parentIdによる隣接リストで、パスは取得後に組み立てる。表示一覧と明細の選択肢はカテゴリ更新時に一度準備し、無制限の階層は反復処理で辿る。親の変更はAPIで受け付けず、DBでも所属と親を固定する。</p>
+          <div class="data-flow">
+            <div class="dfd-track" role="img" aria-label="カテゴリ設定の編集はローカルプレビューのみ。保存時にapp APIからカテゴリSQL関数へ進み、metadata再取得後にツリーを反映する">
+              <div class="dfd-node source"><strong>名前・色を編集</strong><small>draftと背景プレビューのみ更新</small></div>
+              <div class="dfd-arrow"><b>→</b><small>保存 / 使用停止</small></div>
+              <div class="dfd-node store"><strong>POST /api/app</strong><small>categoriesService → mutateCategory<br />workspaceロック・最新所属・全対象検証</small></div>
+              <div class="dfd-arrow"><b>→</b><small>metadata GET</small></div>
+              <div class="dfd-node output"><strong>カテゴリ一覧を反映</strong><small>使用停止済みと祖先も取得<br />失敗時は入力・エラーを保持</small></div>
+            </div>
+            <div class="dfd-track" role="img" aria-label="明細のカテゴリ選択は既存保存キューからカテゴリ専用APIへ送り、確定したカテゴリと確認状態だけを画面に反映する">
+              <div class="dfd-node source"><strong>明細でカテゴリを選択</strong><small>未分類または任意階層のID</small></div>
+              <div class="dfd-arrow"><b>→</b><small>共通の保存キュー</small></div>
+              <div class="dfd-node store"><strong>saveTransactionCategory</strong><small>清算済みも許可<br />金額・割合・メモを保持</small></div>
+              <div class="dfd-arrow"><b>→</b><small>部分反映</small></div>
+              <div class="dfd-node output"><strong>選択と背景を更新</strong><small>失敗時はdraftと再試行を保持<br />更新・一括操作の前にfreeze / flush</small></div>
+            </div>
+          </div>
+          <p>カテゴリ選択の保存中は選択欄を無効化する。通常項目と同じ保存キューを使い、確定応答はカテゴリIDと確認状態だけを反映する。通常保存の古い全体応答で最新カテゴリやメモを上書きしない。workspace切替後の遅延応答は既存の要求世代で破棄する。</p>
+          <p>新規手動明細は<code>saveTransaction</code>にcategoryIdを指定できる。既存明細の同actionではcategoryIdを拒否し、専用保存を使用する。カテゴリを選んだ手動操作はサーバーでcategoryConfirmed=true、解除はfalseとする。CSV・定期生成は未分類で登録し、一覧から手動設定できる。取引先の正規化・CSV補完・グラフは提供しない。</p>
+          <p>カテゴリ操作はworkspace行→membership行の順でロックし、追加先、対象カテゴリ、対象明細の所属と使用可否を同じTransactionで確認する。使用停止はrecursive CTEで子孫を列挙して一括更新する。明細カテゴリ割当は複合外部キーとtriggerで同workspaceの使用中カテゴリを検証する。カテゴリなしの既存INSERTでは追加照合を行わない。過去の使用停止参照は通常項目の編集・清算・表示で保持する。</p>
         </section>
 
         <section id="domain">
@@ -785,7 +812,7 @@ amountYen         = abs(payer.balance)</div>
           <h3>清算完了と同時操作</h3>
           <div class="state-flow"><span>清算専用取得・再計算</span><i>→</i><span>対象値をID順に固定</span><i>→</i><span>ロック・Snapshot照合</span><i>→</i><span>履歴・関連INSERT</span><i>→</i><span>settled_at更新</span></div>
           <p><code>cake_assert_settlement_snapshot()</code>をTransaction先頭で実行し、workspace行の更新ロックを取得して所属を再確認する。現在の未清算SHARED全明細のID・actor・type・amount・class・splitWeightsが期待値と完全一致しなければ全体を失敗させる。計算に関係しないメモ・日時・取引先・方法は照合Snapshotの対象外。</p>
-          <p>計算Snapshot・対象明細Snapshot、対象関連、settled_atを同じNeon Transactionで保存する。アプリが生成する更新SQLはSnapshot照合・履歴INSERT・関連の集合INSERT・対象の集合UPDATEの4本で、明細件数に比例して増やさない。関連INSERTはJSON配列を行集合へ展開し、UPDATEはworkspace・未清算・対象ID集合で制限する。対象明細の追加・削除・計算値変更・先行清算があれば再確認を促す。<code>settlement_transactions.transaction_id</code>のUNIQUE制約でも二重清算を防ぐ。清算済みの計算値は通常更新/削除不可だが、メモは専用APIで変更できる。</p>
+          <p>計算Snapshot・対象明細Snapshot、対象関連、settled_atを同じNeon Transactionで保存する。アプリが生成する更新SQLはSnapshot照合・履歴INSERT・関連の集合INSERT・対象の集合UPDATEの4本で、明細件数に比例して増やさない。関連INSERTはJSON配列を行集合へ展開し、UPDATEはworkspace・未清算・対象ID集合で制限する。対象明細の追加・削除・計算値変更・先行清算があれば再確認を促す。<code>settlement_transactions.transaction_id</code>のUNIQUE制約でも二重清算を防ぐ。清算済みの計算値は通常更新/削除不可だが、メモとカテゴリは専用APIで変更できる。</p>
         </section>
 
         <section id="repository">
@@ -794,7 +821,7 @@ amountYen         = abs(payer.balance)</div>
           <ol>
             <li>ユーザー登録/プロフィール書込みは行わず、認証境界で確認済みのAppUserを受け取る。</li>
             <li><code>my_workspaces</code> CTEで本人所属だけを抽出し、全参加者数を集計。<code>selected_workspace</code> CTEは指定IDに一致する所属を優先し、更新日時DESC・作成日時DESC・ID ASCで一件を選択する。</li>
-            <li>同じSQL内で一覧、選択先のmembers/rules、本人メール宛のPENDING・期限内招待をJSON集約する。fullの場合だけtransactionsとsettlementHistoryの集約を含める。</li>
+            <li>同じSQL内で一覧、選択先のmembers/rules/categories、本人メール宛のPENDING・期限内招待をJSON集約する。fullの場合だけtransactionsとsettlementHistoryの集約を含める。</li>
             <li>所属0件なら一つのCTEで「個人の家計」とOWNER membershipを作成し、集約SQLを一回再実行する。</li>
             <li>集約JSONをDTO化し、fullの共有workspaceだけ清算を計算する。</li>
           </ol>
@@ -805,7 +832,8 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>members</td><td>app_usersをJOIN、joined_at ASC、user_id ASC。</td><td>full / metadata</td></tr>
               <tr><td>rules</td><td>sort_order ASC、created_at ASC、id ASC。無効ルールも返す。</td><td>full / metadata</td></tr>
               <tr><td>pendingInvitations</td><td>本人メール宛、PENDING、expires_at &gt; now()、created_at DESC。</td><td>full / metadata</td></tr>
-              <tr><td>transactions</td><td>全明細、actor userをJOIN、occurred_at DESC、created_at DESC。memoと保存割合を含む。</td><td>fullのみ</td></tr>
+              <tr><td>categories</td><td>選択workspaceの全カテゴリ。使用停止済みと祖先も含め、全パス・色を解決する。</td><td>full / metadata</td></tr>
+              <tr><td>transactions</td><td>全明細、actor userをJOIN、occurred_at DESC、created_at DESC。memo、カテゴリID・確認状態と保存割合を含む。</td><td>fullのみ</td></tr>
               <tr><td>settlementHistory</td><td>payer/payeeをLEFT JOIN、completed_at DESC、最新20件。</td><td>fullのみ</td></tr>
             </tbody>
           </table></div>
@@ -836,7 +864,8 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>workspace_members</code></td><td>(workspace_id, user_id)</td><td>role OWNER/MEMBER、weight &gt;= 0、joined_at。PERSONAL最大1人・SHARED最大2人。</td><td>workspace/user削除時CASCADE。</td></tr>
               <tr><td><code>invitations</code></td><td>uuid id</td><td>token_hash UNIQUE、(workspace,email) UNIQUE、status Enum、期限・inviter。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>import_batches</code></td><td>uuid id</td><td>file_name、total/imported/skipped_rows、imported_by、created_at。</td><td>workspace削除時CASCADE。</td></tr>
-              <tr><td><code>transactions</code></td><td>uuid id</td><td>(workspace_id,external_id) UNIQUE、正のinteger amount、type/class/source Enum、actor・created/updated_by、split_weights NOT NULL/object、memo NOT NULL DEFAULT 空文字・最大2000文字。workspace/date、workspace/class/settled_at Index。</td><td>workspace削除時CASCADE、batch削除時SET NULL。清算関連からtransactionを参照。</td></tr>
+              <tr><td><code>categories</code></td><td>uuid id</td><td>workspace/id UNIQUE、同親の使用中同名を部分UNIQUEで禁止。parentは同workspaceの複合FK、名前1〜40文字、色6桁HEX、sort_order非負。所属・親は変更不可。</td><td>workspace削除時CASCADE。使用停止時は明細参照を保持。</td></tr>
+              <tr><td><code>transactions</code></td><td>uuid id</td><td>(workspace_id,external_id) UNIQUE、正のinteger amount、type/class/source Enum、actor・created/updated_by、split_weights NOT NULL/object、memo NOT NULL DEFAULT 空文字・最大2000文字。nullable category_idは同workspaceの複合FK。category_confirmedはNOT NULL、未分類はfalse。workspace/category部分Index。workspace/date、workspace/class/settled_at Index。</td><td>workspace削除時CASCADE、batch削除時SET NULL。清算関連からtransactionを参照。</td></tr>
               <tr><td><code>recurring_payments</code></td><td>uuid id</td><td>workspace/state Index、毎月の日1〜31、現在の支払い設定8項目、NOT NULLの処理予定日next_scheduled_on、実行承認者、正のrevision、固定blocked_reason、作成/更新の監査列。開始日カラムstart_onは削除済み。旧last_generated_month/active_from_month/pending_config/pending_effective_monthは現行DTO・予定判定・生成では使わない。</td><td>workspace削除時CASCADE。支払者・承認者・作成/更新者はapp_usersを参照。設定削除はARCHIVED。workspace_idの変更をTriggerで禁止する。</td></tr>
               <tr><td><code>default_rules</code></td><td>uuid id</td><td>merchant 1〜120、class Enum、sort_order &gt;= 0、nullable/object split_weights、enabled。sort_order/created_at Index。旧priority列とIndexは互換用に保持。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>settlements</code></td><td>uuid id</td><td>amount &gt;= 0、weight_snapshot/calculation_snapshot JSONB、payer/payee nullable、completed_by/completed_at。</td><td>workspace削除時CASCADE。</td></tr>
@@ -878,6 +907,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>011_recurring_payment_next_scheduled_on.sql</td><td>既存DBへ処理予定日next_scheduled_onと計算関数を追加する。未設定の予定日は設定日と適用時刻の日本時間09:00境界から初期化し、NOT NULLにする。追加・編集・再開・生成関数を現行仕様へ揃える。成功月は予定判定・生成に使わず、追加済み明細と旧列の値は保持する。</td></tr>
               <tr><td>012_delete_default_rules.sql</td><td>単件・複数の共通削除関数を追加。既存表・既存DB関数の引数・旧アプリの呼出しは変更せず、全対象確認をworkspaceロック後へ移す。</td></tr>
               <tr><td>013_bulk_rule_application.sql</td><td>既存cake_bulk_transactionsの署名・DELETE・ロック/全件検証・確定DTOを維持し、APPLY_RULESを一回の参加者集約・使用ルールごとの割合投影・集合UPDATEへ置き換える。004は変更しない。</td></tr>
+              <tr><td>014_categories.sql</td><td>カテゴリ表・親子/明細の同workspace制約・同親同名制約・階層固定trigger・カテゴリ割当trigger・更新関数。既存明細は未分類・未確認で初期化する。</td></tr>
             </tbody>
           </table></div>
           <p><code>scripts/setup-db.mjs</code>は環境に応じたDB接続（PreviewはCAKE_TEST_DATABASE_URL、それ以外はDATABASE_URL）を確認する。台帳初期化を1回実行し、<code>schema_migrations</code>の履歴を一度読みSetで照合して、未適用SQLの本文だけをファイル名順に読み込む。全適用済みの通常再実行は本文0読込・2往復、未適用がN件なら本文N読込・N+2往復となる。各SQLは共通advisory lock取得後に台帳を再確認し、SQLと履歴INSERTを同じDO文/Transactionで確定する。同時実行や失敗時にも二重適用・台帳だけの記録を防ぎ、既存データや適用日時を保持する。</p>
@@ -898,9 +928,10 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>SplitWeights</code></td><td><code>Record&lt;string, number&gt;</code>。保存済み参加者別整数割合。</td></tr>
               <tr><td><code>AppUser</code> / <code>RegisteredUser</code></td><td>id/email/name/imageUrl、AppUserは任意isAdmin。RegisteredUserは必須isAdmin/isEnabled。</td></tr>
               <tr><td><code>WorkspaceSummary</code> / <code>WorkspaceMember</code></td><td>workspaceのid/name/type/ownerUserId/memberCount。memberはAppUserにweightとOWNER/MEMBER role。</td></tr>
-              <tr><td><code>TransactionRecord</code></td><td>id、ISO occurredAt、merchant/method/memo、type、整数amountYen、actorUserId/actorName、expenseClass、splitWeights、nullable settledAt、externalId、MANUAL/PAYPAY/RECURRING source。</td></tr>
+              <tr><td><code>TransactionRecord</code></td><td>id、ISO occurredAt、merchant/method/memo、type、整数amountYen、actorUserId/actorName、expenseClass、splitWeights、nullable settledAt、externalId、MANUAL/PAYPAY/RECURRING source、nullable categoryId、categoryConfirmed。</td></tr>
               <tr><td><code>RecurringPayment</code></td><td>id、workspaceId、state、revision、authorizedById、currentConfig、nullable nextScheduledOn/blockedReason。configはdayOfMonth、merchant、method、amountYen、actorUserId、expenseClass、splitWeights、memo。nextScheduledOnは設定日とサーバー時刻から計算した画面の次回予定。</td></tr>
               <tr><td><code>RecurringPaymentsResponse</code></td><td>payments、eligibleActorUserIds、today（日本時間の日付）、now（サーバー時刻のISO文字列）。一覧とフォームで同じ09:00境界を基準に次回予定を計算する。</td></tr>
+              <tr><td><code>Category</code></td><td>id、nullable parentId、name、colorHex、sortOrder、nullable archivedAt。</td></tr>
               <tr><td><code>DefaultRule</code></td><td>id、merchantContains、expenseClass、sortOrder、nullable splitWeights、enabled。priorityはDTOに公開しない。</td></tr>
               <tr><td><code>SettlementPerson</code> / <code>SettlementResult</code></td><td>一人分のuserId/name/weight/payments/receipts/actual/target/balance。結果はtransactionIds、paymentTotal/receiptTotal/netTotal、people、nullable payerUserId/payerName/payeeUserId/payeeName、amountYen。</td></tr>
               <tr><td><code>SettlementHistory</code> / <code>PendingInvitation</code></td><td>履歴はid/nullable payerName・payeeName/amountYen/completedAt。招待はid/workspaceName/inviterName/expiresAt。</td></tr>
@@ -915,7 +946,8 @@ amountYen         = abs(payer.balance)</div>
 ├─ selected: WorkspaceMetadata | null
 │  ├─ workspace: WorkspaceSummary
 │  ├─ members: WorkspaceMember[]
-│  └─ rules: DefaultRule[]
+│  ├─ rules: DefaultRule[]
+│  └─ categories: Category[]
 └─ pendingInvitations: PendingInvitation[]
 
 BootstrapData extends BootstrapMetadata
@@ -935,7 +967,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>未認証・利用不可</td><td>現在のDB登録・有効状態・モードを照合。一般/app GETは401、POSTは基本400、重複APIと管理APIの未認証は401。画面はログイン導線。</td></tr>
               <tr><td>入力不正</td><td>Zod、CSV、純粋検証関数と入力欄で確認。API error/行エラーを表示し、通常フォームは未保存下書きを保持する。CSV解析・照合失敗は再コピー・ファイル再選択で再試行し、登録失敗は確認表を保持する。管理APIは入力の詳細を固定メッセージへ変換。</td></tr>
               <tr><td>非所属・管理者以外</td><td>workspace所属を確認。利用者管理は現在のDB管理者権限で確認し403。通常workspace操作のOWNER専用制約は持たない。</td></tr>
-              <tr><td>清算済み計算値の変更</td><td>通常UPDATE/DELETEはsettled_at IS NULL条件。0件は業務エラー。bulkは全対象の未清算を確認。メモは専用保存で変更可能。</td></tr>
+              <tr><td>清算済み計算値の変更</td><td>通常UPDATE/DELETEはsettled_at IS NULL条件。0件は業務エラー。bulkは全対象の未清算を確認。メモとカテゴリは専用保存で変更可能。</td></tr>
               <tr><td>古い/欠けた一括選択</td><td>DB関数で全IDの存在・未清算・参加者・現在ルールをロック下で確認。一件でも不正なら全体を変更しない。</td></tr>
               <tr><td>CSV重複・衝突</td><td>専用API・CSV内検証・DB UNIQUE・競合行のsource/金額/取引先検証。一致は省略、内容差は取込全体を中止。</td></tr>
               <tr><td>清算対象の並行変更</td><td>workspaceロック下でSnapshot一致検証。対象追加/削除/計算値変更/先行清算を検出したら全体を失敗させ、更新後の再確認を促す。関連UNIQUEでも二重清算を拒否。</td></tr>

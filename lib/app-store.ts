@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { createSettlementStore } from "./settlement-store";
+import { createCategoryStore } from "./category-store";
 import { getBootstrap, requireWorkspaceMember } from "./repository";
 import { updateDisplayName } from "./user-access";
 import { persistPayPayImport } from "./paypay-import";
@@ -13,6 +14,7 @@ type Row = Record<string, unknown>;
 export function createAppStore() {
   return {
     ...createSettlementStore(),
+    ...createCategoryStore(),
     bootstrap: getBootstrap,
     requireWorkspaceMember,
     updateDisplayName,
@@ -136,10 +138,10 @@ export function createAppStore() {
         sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
         sql`
           INSERT INTO transactions (id, workspace_id, occurred_at, merchant, method, type, amount_yen,
-            actor_user_id, expense_class, split_weights, external_id, source, created_by, updated_by, memo)
+            actor_user_id, expense_class, split_weights, external_id, source, created_by, updated_by, memo, category_id, category_confirmed)
           VALUES (${id}::uuid, ${input.workspaceId}::uuid, ${input.occurredAt}::timestamptz, ${input.merchant},
             ${input.method}, ${input.type}, ${input.amountYen}, ${input.actorUserId}, ${split.expenseClass}, ${JSON.stringify(split.splitWeights)}::jsonb,
-            ${`manual_${id}`}, 'MANUAL', ${user.id}, ${user.id}, ${input.memo ?? ""})
+            ${`manual_${id}`}, 'MANUAL', ${user.id}, ${user.id}, ${input.memo ?? ""}, ${input.categoryId ?? null}::uuid, ${input.categoryId != null})
           RETURNING *
           `,
       ]);

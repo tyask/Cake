@@ -14,5 +14,7 @@ export function transactionRecord(row: Record<string, unknown>, actorName = Stri
     splitWeights: row.split_weights as SplitWeights,
     settledAt: row.settled_at ? isoTimestamp(row.settled_at) : null,
     externalId: String(row.external_id), source: row.source as TransactionRecord["source"],
+    categoryId: row.category_id == null ? null : String(row.category_id),
+    categoryConfirmed: row.category_confirmed === true,
   };
 }
