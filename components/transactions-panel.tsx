@@ -134,8 +134,8 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
     return transactionMemoSchema.parse(result.memo);
   });
   const saveCategory: SaveTransactionCategory = (transactionId, categoryId) => enqueue(async () => {
-    const result = await run({ action: "saveTransactionCategory", workspaceId: selected.workspace.id, transactionId, categoryId }, "") as { categoryId: string | null };
-    return result.categoryId;
+    const result = await run({ action: "saveTransactionCategory", workspaceId: selected.workspace.id, transactionId, categoryId }, "") as { categoryId: string | null; categoryRevision: number };
+    return result;
   });
 
   function toggle(id: string) {
@@ -426,7 +426,7 @@ function EditableTransaction({ item, members, categoryChoices, categoryDisplay, 
   const tint = category ? categoryBackground(category.colorHex) : undefined;
   const rowStyle: CSSProperties | undefined = tint ? { backgroundColor: tint, "--swipe-surface": tint } as CSSProperties : undefined;
   const categoryLabel = category ? (categoryDisplay === "root" ? category.rootLabel : category.label) + (category.archived ? "（使用停止）" : "") : "未分類";
-  const categoryEditor = <TransactionCategoryEditor id={item.id} merchant={draft.merchant} categoryId={item.categoryId} choices={categoryChoices} display={categoryDisplay} disabled={busy} onSave={onSaveCategory} onPin={onCategoryPin} onError={() => setMobileExpanded(true)} onSavingChange={setCategorySaving} register={registerCategory} />;
+  const categoryEditor = <TransactionCategoryEditor id={item.id} merchant={draft.merchant} categoryId={item.categoryId} categoryRevision={item.categoryRevision} choices={categoryChoices} display={categoryDisplay} disabled={busy} onSave={onSaveCategory} onPin={onCategoryPin} onError={() => setMobileExpanded(true)} onSavingChange={setCategorySaving} register={registerCategory} />;
   if (item.settledAt) return <SettledTransaction item={item} members={members} busy={busy} pinnedOutsideFilter={pinnedOutsideFilter} onSaveMemo={onSaveMemo} onMemoPin={onMemoPin} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} onMemoError={() => setMobileExpanded(true)} updating={pending > 0 || memoSaving || categorySaving} onMemoSavingChange={setMemoSaving} registerMemo={registerMemo} categoryEditor={categoryEditor} categoryLabel={categoryLabel} rowStyle={rowStyle} />;
 
   const currentValues = () => ({ ...baseRef.current, ...changesRef.current });

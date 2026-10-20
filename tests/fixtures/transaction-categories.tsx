@@ -31,7 +31,11 @@ function Harness() {
   const [modal, setModal] = useState(false);
   const run: RunAppAction = async payload => {
     const result = await postAction(payload);
-    if (payload.action === "saveTransactionCategory") setSelected(current => ({ ...current, transactions: current.transactions.map(row => row.id === payload.transactionId ? { ...row, categoryId: result.categoryId, categoryConfirmed: result.categoryConfirmed, categoryRevision: result.categoryRevision ?? row.categoryRevision + 1 } : row) }));
+    if (payload.action === "saveTransactionCategory") setSelected(current => ({ ...current, transactions: current.transactions.map(row => {
+      const revision = result.categoryRevision ?? row.categoryRevision + 1;
+      return row.id === payload.transactionId && revision > row.categoryRevision
+        ? { ...row, categoryId: result.categoryId, categoryConfirmed: result.categoryConfirmed, categoryRevision: revision } : row;
+    }) }));
     if (payload.action === "saveTransaction" && payload.transactionId) setSelected(current => ({ ...current, transactions: current.transactions.map(row => row.id === payload.transactionId ? { ...row, ...result.transaction, categoryId: row.categoryId, categoryConfirmed: row.categoryConfirmed, categoryRevision: row.categoryRevision } : row) }));
     return result;
   };
@@ -40,6 +44,8 @@ function Harness() {
       try { await prepare(); await fetch("/api/test-refresh"); } catch { /* The real controller also keeps the editor on prepare failure. */ }
     }} refreshing={false} />
     {modal && <NewTransactionModal selected={selected} currentUserId="a" close={() => setModal(false)} run={run} />}
+    <button onClick={() => setSelected(current => ({ ...current, transactions: current.transactions.map(row => row.id === "first"
+      ? { ...row, categoryId: "fresh", categoryConfirmed: true, categoryRevision: 10 } : row) }))}>外部のカテゴリ更新を受信</button>
     <output id="saved-transactions" hidden>{JSON.stringify(selected.transactions)}</output>
   </main>;
 }

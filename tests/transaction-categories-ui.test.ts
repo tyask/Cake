@@ -103,5 +103,26 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         assert.deepEqual(errors, []);
       } finally { release?.(); await context.close(); }
     });
+    await t.test("保存中に新しいカテゴリを取得した場合、旧応答を入力欄でも承認しない", async () => {
+      const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      const page = await context.newPage();
+      let release: (() => void) | undefined;
+      await page.route("**/api/app", async route => {
+        const payload = route.request().postDataJSON();
+        await new Promise<void>(resolve => { release = resolve; });
+        await route.fulfill({ json: { transactionId: "first", categoryId: payload.categoryId, categoryConfirmed: true, categoryRevision: 1 } });
+      });
+      try {
+        await page.goto(origin);
+        const select = page.getByLabel("firstのカテゴリ", { exact: true });
+        await select.selectOption("leaf");
+        await page.waitForFunction(() => (document.querySelector('select[aria-label="firstのカテゴリ"]') as HTMLSelectElement).disabled);
+        await page.getByRole("button", { name: "外部のカテゴリ更新を受信", exact: true }).click();
+        assert.ok(release); release();
+        await page.waitForFunction(() => !(document.querySelector('select[aria-label="firstのカテゴリ"]') as HTMLSelectElement).disabled);
+        assert.equal(await select.inputValue(), "fresh");
+        assert.equal(JSON.parse((await page.locator("#saved-transactions").textContent())!)[0].categoryRevision, 10);
+      } finally { release?.(); await context.close(); }
+    });
   } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });

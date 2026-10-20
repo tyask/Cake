@@ -4,13 +4,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CategorySelect, type CategoryChoices } from "./category-select";
 import styles from "./transactions-panel.module.css";
 
-export type SaveTransactionCategory = (id: string, categoryId: string | null) => Promise<string | null>;
+export type SaveTransactionCategory = (id: string, categoryId: string | null) => Promise<{ categoryId: string | null; categoryRevision: number }>;
 export type TransactionCategoryHandle = { freeze: (value: boolean) => void; flush: () => Promise<void> };
 
-export function TransactionCategoryEditor({ id, merchant, categoryId, choices, display, disabled, onSave, onPin, onError, onSavingChange, register }: {
+export function TransactionCategoryEditor({ id, merchant, categoryId, categoryRevision, choices, display, disabled, onSave, onPin, onError, onSavingChange, register }: {
   id: string;
   merchant: string;
   categoryId: string | null;
+  categoryRevision: number;
   choices: CategoryChoices;
   display: "root" | "full";
   disabled: boolean;
@@ -22,11 +23,12 @@ export function TransactionCategoryEditor({ id, merchant, categoryId, choices, d
 }) {
   const [draft, setDraft] = useState<string | null | undefined>(undefined);
   const draftRef = useRef<string | null | undefined>(undefined);
-  const [acknowledged, setAcknowledged] = useState<{ sources: (string | null)[]; value: string | null } | null>(null);
-  if (acknowledged && categoryId === acknowledged.value) setAcknowledged(null);
-  const base = acknowledged?.sources.includes(categoryId) ? acknowledged.value : categoryId;
+  const [acknowledged, setAcknowledged] = useState<{ categoryId: string | null; categoryRevision: number } | null>(null);
+  if (acknowledged && categoryRevision >= acknowledged.categoryRevision) setAcknowledged(null);
+  const base = acknowledged && acknowledged.categoryRevision > categoryRevision ? acknowledged.categoryId : categoryId;
   const baseRef = useRef(base);
   const incomingRef = useRef(categoryId);
+  const incomingRevision = useRef(categoryRevision);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const saveAgain = useRef(false);
@@ -37,7 +39,7 @@ export function TransactionCategoryEditor({ id, merchant, categoryId, choices, d
   const mounted = useRef(true);
   const pinned = useRef(false);
 
-  useLayoutEffect(() => { baseRef.current = base; incomingRef.current = categoryId; }, [base, categoryId]);
+  useLayoutEffect(() => { baseRef.current = base; incomingRef.current = categoryId; incomingRevision.current = categoryRevision; }, [base, categoryId, categoryRevision]);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; onPin(id, false); onSavingChange(false); };
@@ -55,16 +57,15 @@ export function TransactionCategoryEditor({ id, merchant, categoryId, choices, d
       draftRef.current = undefined; setDraft(undefined); syncPin(); return Promise.resolve();
     }
     const captured = draftRef.current;
-    const source = baseRef.current;
     saveAgain.current = false;
     savingRef.current = true;
     setSaving(true);
     onSavingChange(true);
     errorRef.current = false; setError(null); syncPin();
     const operation = Promise.resolve().then(() => onSave(id, captured)).then(saved => {
-      baseRef.current = saved;
+      baseRef.current = saved.categoryRevision > incomingRevision.current ? saved.categoryId : incomingRef.current;
       if (!mounted.current) return;
-      setAcknowledged(current => ({ sources: [...new Set([source, incomingRef.current, ...(current?.sources ?? [])])], value: saved }));
+      setAcknowledged(saved.categoryRevision > incomingRevision.current ? saved : null);
       if (draftRef.current === captured) { draftRef.current = undefined; setDraft(undefined); }
     }).catch(failure => {
       errorRef.current = true;
