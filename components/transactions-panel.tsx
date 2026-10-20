@@ -24,7 +24,6 @@ import { createTransactionFilterMatcher, transactionColumns, transactionFilterOp
 import { transactionListView } from "@/lib/transaction-list";
 import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } from "./transaction-table";
 import { useTransactionFilters } from "./use-transaction-filters";
-import { categoryBackground } from "@/lib/categories";
 import { prepareCategoryChoices, type CategoryChoices } from "./category-select";
 import { TransactionCategoryEditor, type SaveTransactionCategory, type TransactionCategoryHandle } from "./transaction-category-editor";
 
@@ -42,7 +41,8 @@ type TransactionListProps = {
   refreshing: boolean;
 };
 
-const tableColumns = [{ id: "selection", label: "選択" }, ...transactionColumns.slice(0, 2), { id: "category", label: "カテゴリ" }, ...transactionColumns.slice(2), { id: "updateStatus", label: "更新状態" }] as const;
+const memoColumnIndex = transactionColumns.findIndex(column => column.id === "memo");
+const tableColumns = [{ id: "selection", label: "選択" }, ...transactionColumns.slice(0, memoColumnIndex), { id: "category", label: "カテゴリ" }, ...transactionColumns.slice(memoColumnIndex), { id: "updateStatus", label: "更新状態" }] as const;
 
 function signature(values: TransactionValues): string {
   return JSON.stringify([values.occurredAt, values.merchant, values.method, values.type, values.amountYen, values.actorUserId, values.expenseClass, Object.entries(values.splitWeights).sort(([a], [b]) => a.localeCompare(b))]);
@@ -223,7 +223,7 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
       {bulkError && <p role="alert" className={styles.bulkError}>{bulkError}</p>}
       {bulkNotice && <p role="status" className={styles.bulkNotice}>{bulkNotice}</p>}
       <p className={styles.note}>清算済みの明細もカテゴリとメモを編集できます。カテゴリは選択時、メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。全選択チェックを外すと非表示の選択も解除します。編集中の明細は編集を終えるまで表示します。</p>
-      <TransactionTable columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => <Fragment key={column.id}><th><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th>{column.id === "merchant" && <th>カテゴリ</th>}</Fragment>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
+      <TransactionTable columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => <Fragment key={column.id}>{column.id === "memo" && <th>カテゴリ</th>}<th><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th></Fragment>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
         {visible.map((item) => <EditableTransaction key={item.id} item={item} members={selected.members} categoryChoices={categoryChoices} categoryDisplay={categoryDisplay} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} onDelete={() => { void performBulk("deleteTransactions", [item.id]); }} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} onSaveCategory={saveCategory} onCategoryPin={onCategoryPin} />)}
       </TransactionTable>
       {visible.length === 0 && <p className={styles.empty}>条件に一致する明細がありません。</p>}
@@ -423,8 +423,7 @@ function EditableTransaction({ item, members, categoryChoices, categoryDisplay, 
   }
 
   const category = categoryChoices.byId.get(item.categoryId ?? "");
-  const tint = category ? categoryBackground(category.colorHex) : undefined;
-  const rowStyle: CSSProperties | undefined = tint ? { backgroundColor: tint, "--swipe-surface": tint } as CSSProperties : undefined;
+  const rowStyle: CSSProperties | undefined = category ? { "--transaction-category-color": category.colorHex } as CSSProperties : undefined;
   const categoryLabel = category ? (categoryDisplay === "root" ? category.rootLabel : category.label) + (category.archived ? "（使用停止）" : "") : "未分類";
   const categoryEditor = <TransactionCategoryEditor id={item.id} merchant={draft.merchant} categoryId={item.categoryId} categoryRevision={item.categoryRevision} choices={categoryChoices} display={categoryDisplay} disabled={busy} onSave={onSaveCategory} onPin={onCategoryPin} onError={() => setMobileExpanded(true)} onSavingChange={setCategorySaving} register={registerCategory} />;
   if (item.settledAt) return <SettledTransaction item={item} members={members} busy={busy} pinnedOutsideFilter={pinnedOutsideFilter} onSaveMemo={onSaveMemo} onMemoPin={onMemoPin} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} onMemoError={() => setMobileExpanded(true)} updating={pending > 0 || memoSaving || categorySaving} onMemoSavingChange={setMemoSaving} registerMemo={registerMemo} categoryEditor={categoryEditor} categoryLabel={categoryLabel} rowStyle={rowStyle} />;
@@ -438,7 +437,6 @@ function EditableTransaction({ item, members, categoryChoices, categoryDisplay, 
     <td data-label="選択" className={styles.selectionCell} data-selection><input className={styles.checkbox} type="checkbox" aria-label={item.merchant + "の明細を選択"} checked={checked} disabled={busy} onChange={() => onSelect(item.id)} /></td>
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell}><input aria-label="取引日時" type="datetime-local" step="0.001" required value={dateDraft ?? transactionDateInput(draft.occurredAt)} title={dateDraft ?? transactionDateInput(draft.occurredAt)} disabled={busy} onChange={(event) => changeDate(event.target.value)} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
     <td data-label="取引先"><input aria-label="取引先" required maxLength={MAX_MERCHANT_LENGTH} value={draft.merchant} disabled={busy} onChange={(event) => change({ merchant: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} />{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</td>
-    <td data-label="カテゴリ" className={styles.categoryCell + " " + styles.fullCell}>{categoryEditor}</td>
     <td data-label="方法"><input aria-label="取引方法" required maxLength={MAX_METHOD_LENGTH} value={draft.method} disabled={busy} onChange={(event) => change({ method: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
     <td data-label="金額（円）"><input aria-label="金額（円）" type="number" required min="1" max={MAX_AMOUNT_YEN} step="1" value={draft.amountYen} disabled={busy} onChange={(event) => change({ amountYen: Number(event.target.value) })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
     <td data-label={transactionActorLabels[draft.type]}><select aria-label={transactionActorLabels[draft.type]} value={draft.actorUserId} disabled={busy} onChange={(event) => change(transactionActorPatch(currentValues(), event.target.value, members), true)}>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></td>
@@ -447,6 +445,7 @@ function EditableTransaction({ item, members, categoryChoices, categoryDisplay, 
       <SplitEditor compact inline label="支払い割合" members={members} value={draft.splitWeights} amountYen={draft.amountYen}
         disabled={busy || draft.expenseClass === "PERSONAL"} onChange={(splitWeights) => change({ splitWeights })} onCommit={requestCommit} />
     </td>
+    <td data-label="カテゴリ" className={styles.categoryCell + " " + styles.fullCell}>{categoryEditor}</td>
     <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={draft.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} onError={() => setMobileExpanded(true)} onSavingChange={setMemoSaving} register={registerMemo} /></td>
     <td data-label="清算" className={styles.settlementCell}><span className={draft.expenseClass === "SHARED" ? styles.unsettled : styles.muted}>{draft.expenseClass === "PERSONAL" ? "対象外" : "未清算"}</span>
     </td>
@@ -476,12 +475,12 @@ function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMe
     <td data-label="選択" className={styles.selectionCell} data-selection><input className={styles.checkbox} type="checkbox" aria-label={item.merchant + "の明細を選択"} checked={false} disabled /></td>
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell} title={formatJstDateTime(item.occurredAt)}>{formatJstDateTime(item.occurredAt)}</td>
     <td data-label="取引先"><b>{item.merchant}</b>{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</td>
-    <td data-label="カテゴリ" className={styles.categoryCell + " " + styles.fullCell}>{categoryEditor}</td>
     <td data-label="方法">{item.method}</td>
     <td data-label="金額（円）">{formatYen(item.amountYen)}</td>
     <td data-label={transactionActorLabels[item.type]}>{item.actorName}</td>
     <td data-label="費用区分">{expenseClassLabels[item.expenseClass]}</td>
     <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}><span className={styles.settledSplit}>{members.map(member => <span key={member.id}><span>{formatYen(amounts[member.id])}</span><small>{percentages[member.id] / 10}%</small></span>)}</span></td>
+    <td data-label="カテゴリ" className={styles.categoryCell + " " + styles.fullCell}>{categoryEditor}</td>
     <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={item.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} onError={onMemoError} onSavingChange={onMemoSavingChange} register={registerMemo} />
       {pinnedOutsideFilter && <small className={styles.filterHint}>編集中のため表示</small>}
     </td>

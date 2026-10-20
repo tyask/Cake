@@ -13,5 +13,7 @@ const fields = { name: categoryNameSchema, colorHex: categoryColorSchema };
 export const createCategoryInputSchema = z.object({ action: z.literal("createCategory"), ...workspace, parentId: categoryIdSchema, ...fields });
 export const updateCategoryInputSchema = z.object({ action: z.literal("updateCategory"), ...workspace, ...category, ...fields });
 export const archiveCategoryInputSchema = z.object({ action: z.literal("archiveCategory"), ...workspace, ...category });
+export const moveCategoryInputSchema = z.object({ action: z.literal("moveCategory"), ...workspace, ...category,
+  parentId: categoryIdSchema, beforeCategoryId: categoryIdSchema });
 export const saveTransactionCategoryInputSchema = z.object({ action: z.literal("saveTransactionCategory"), ...workspace,
   transactionId: z.string().uuid(), categoryId: categoryIdSchema });

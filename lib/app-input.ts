@@ -6,7 +6,7 @@ import {
 import { MAX_PAYPAY_EXTERNAL_ID_LENGTH } from "./paypay-id";
 import { transactionMemoInputSchema, transactionMemoSchema } from "./transaction-memo";
 import { updateProfileInputSchema } from "./user-profile";
-import { archiveCategoryInputSchema, categoryIdSchema, createCategoryInputSchema, saveTransactionCategoryInputSchema, updateCategoryInputSchema } from "./category-input";
+import { archiveCategoryInputSchema, categoryIdSchema, createCategoryInputSchema, moveCategoryInputSchema, saveTransactionCategoryInputSchema, updateCategoryInputSchema } from "./category-input";
 
 const workspaceShape = { workspaceId: workspaceIdSchema };
 const transactionIdsSchema = z.array(z.string().uuid()).min(1).max(5000)
@@ -40,6 +40,7 @@ export const appActionInputSchema = z.discriminatedUnion("action", [
   createCategoryInputSchema,
   updateCategoryInputSchema,
   archiveCategoryInputSchema,
+  moveCategoryInputSchema,
   saveTransactionCategoryInputSchema,
   saveTransactionInputSchema,
   z.object({ action: z.literal("deleteTransaction"), ...workspaceShape, transactionId: z.string().uuid() }),

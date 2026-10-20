@@ -34,8 +34,8 @@
 .note { margin: .75rem 1rem; color: var(--muted); font-size: .7rem; line-height: 1.6; }
 .tableWrap { width: 100%; overflow-x: auto; }
 .table { width: 100%; min-width: 72rem; border-collapse: collapse; table-layout: fixed; font-size: .72rem; }
-.categoryTable { min-width: 85rem; }
-.categoryColumn { width: 13rem; }
+.categoryTable { min-width: 82rem; }
+.categoryColumn { width: 10rem; }
 .categoryCell { color: var(--ink); }
 .memoColumn { width: 12rem; }
 .memoEditor textarea { display: block; width: 100%; min-width: 0; min-height: 3rem; padding: .4rem; border: 1px solid var(--line-strong); border-radius: .45rem; color: var(--ink); background: var(--paper); font: inherit; font-size: .72rem; resize: vertical; }
@@ -65,6 +65,7 @@
 .table input[type="datetime-local"]::-webkit-calendar-picker-indicator { width: .85rem; margin: 0; }
 .table input:disabled, .table select:disabled { color: var(--disabled-ink); background: var(--surface-disabled); }
 .table .selectionCell { text-align: center; }
+.table .transactionRow > .selectionCell { box-shadow: inset 4px 0 var(--transaction-category-color, transparent); }
 .selectAllLabel { display: inline-flex; align-items: center; cursor: pointer; }
 .selectAllLabel > span { display: none; }
 .selectAllLabel[data-disabled="true"] { cursor: not-allowed; }
@@ -101,6 +102,7 @@
   .table tbody { display: block; width: 100%; }
   .table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .7rem; width: 100%; margin-bottom: .55rem; padding: .8rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--paper); }
   .table .transactionRow { position: relative; isolation: isolate; overflow: hidden; }
+  .table .transactionRow::before { position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--transaction-category-color, transparent); pointer-events: none; z-index: 3; content: ""; }
   .table .transactionRow > td:not(.mobileSummary) { transition: transform .18s ease; }
   .table .transactionRow:has([data-swipe-open="true"]) > td:not(.mobileSummary) { transform: translateX(-5rem); }
   .table td { display: block; min-width: 0; padding: 0; border: 0; }

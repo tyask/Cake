@@ -122,6 +122,11 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
             archivedCategories: result.archivedCategories,
           }) : current);
           if (shouldNotify()) setNotice(success);
+        } else if (payload.action === "moveCategory" && result.movedCategories && originWorkspaceId) {
+          updateData(current => isCurrentView() ? applyCategoryUpdate(current, originWorkspaceId, {
+            movedCategories: result.movedCategories,
+          }) : current);
+          if (shouldNotify()) setNotice(success);
         } else if (payload.action === "saveTransaction" && result.transaction && originWorkspaceId) {
           updateData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, { transaction: result.transaction }) : current);
           if (shouldNotify()) setNotice(success);

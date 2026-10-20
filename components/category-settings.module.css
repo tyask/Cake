@@ -9,7 +9,7 @@
 .treeToolbar .archiveToggle input { flex: 0 0 1rem; width: 1rem; height: 1rem; margin: 0; padding: 0; }
 .treeScroll { max-height: 36rem; overflow: auto; }
 .tree { margin: 0; padding: .5rem; list-style: none; }
-.treeRow { display: grid; grid-template-columns: 1.6rem minmax(5rem, 1fr) 2rem; align-items: center; min-height: 2.8rem; padding-inline-start: calc(var(--category-depth) * .9rem); border-radius: .5rem; }
+.treeRow { position: relative; display: grid; grid-template-columns: 1.6rem minmax(5rem, 1fr) 2rem 2rem; align-items: center; min-height: 2.8rem; padding-inline-start: calc(var(--category-depth) * .9rem); border-radius: .5rem; }
 .treeRow:hover { background: var(--surface-muted); }
 .selected, .selected:hover { background: var(--accent-soft); }
 .collapse, .addChild { display: grid; width: 1.75rem; min-height: 2rem; place-items: center; padding: 0; border: 0; border-radius: .4rem; color: var(--accent); background: transparent; cursor: pointer; }
@@ -21,6 +21,34 @@
 .categoryButton small { flex: 0 0 auto; color: var(--muted); font-size: .58rem; }
 .colorDot { flex: 0 0 .65rem; width: .65rem; height: .65rem; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .12); }
 .archived { opacity: .65; }
+.dragHandle { display: grid; width: 1.9rem; min-height: 2.2rem; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: .4rem; color: var(--muted); background: var(--paper); cursor: grab; font-size: 1.1rem; touch-action: none; }
+.dragHandle:active { cursor: grabbing; }
+.dragHandle:disabled { cursor: default; opacity: .4; }
+.dragging { opacity: .4; }
+.dragOverlay { max-width: 18rem; padding: .65rem 1rem; border: 1px solid var(--accent); border-radius: .5rem; background: var(--paper); box-shadow: var(--shadow); font-size: .8rem; font-weight: 700; overflow-wrap: anywhere; }
+.dropTarget { position: absolute; inset-inline: 0; z-index: 2; pointer-events: none; }
+.before { top: 0; height: 25%; }
+.inside { top: 25%; height: 50%; }
+.after { bottom: 0; height: 25%; }
+.dropOver { border: 2px solid var(--accent); border-radius: .3rem; background: var(--accent-soft); }
+.dropInvalid { border: 2px solid var(--red); border-radius: .3rem; }
+.dropTarget > span { position: absolute; inset-inline-start: .2rem; top: 50%; max-width: calc(100% - .4rem); transform: translateY(-50%); padding: .15rem .3rem; color: var(--accent); background: var(--paper); border-radius: .2rem; font-size: .62rem; line-height: 1.4; overflow-wrap: anywhere; }
+.dropInvalid > span { color: var(--red); }
+.rootDrop { display: grid; min-height: 2.5rem; place-items: center; margin: 0 .5rem .5rem; padding: .4rem; border: 1px dashed var(--line-strong); border-radius: .4rem; color: var(--muted); font-size: .65rem; text-align: center; }
+.rootDrop.dropOver { border-color: var(--accent); }
+.rootDrop.dropInvalid { border-color: var(--red); }
+.dragStatus, .moveNotice { margin: .4rem .85rem .7rem; color: var(--muted); font-size: .65rem; line-height: 1.6; overflow-wrap: anywhere; }
+.movePanel { padding: .85rem; border-bottom: 1px solid var(--line); background: var(--paper); }
+.moveHeading { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .6rem; font-size: .7rem; overflow-wrap: anywhere; }
+.movePanel select { width: 100%; min-width: 0; font-size: .75rem; }
+.movePanel > button { min-height: 2.2rem; font-size: .7rem; }
+.movePositions { display: flex; flex-wrap: wrap; gap: .6rem; margin: .6rem 0 0; padding: 0; border: 0; }
+.movePositions legend { margin-bottom: .4rem; color: var(--muted); font-size: .65rem; }
+.movePositions label { display: flex; align-items: center; gap: .2rem; font-size: .65rem; }
+.movePositions input { width: .9rem; height: .9rem; margin: 0; }
+.moveNotice { margin-inline: 0; }
+.error { margin: 0 1.3rem 1rem; }
+.error > button { margin-inline-start: .5rem; }
 .editorPanel { padding: 1rem; background: #fff; }
 .editorHeading { display: flex; justify-content: space-between; align-items: center; gap: .8rem; }
 .editorHeading h3 { margin: 0; font-size: .88rem; }
@@ -44,7 +72,7 @@
 .customColor input:not([type="color"]) { height: 2.65rem; font-variant-numeric: tabular-nums; }
 .customNote, .note, .notice { margin: .8rem 0 0; color: var(--muted); font-size: .65rem; line-height: 1.7; }
 .notice { margin-bottom: 1rem; padding: .6rem .7rem; border-radius: .5rem; background: var(--surface-muted); }
-.preview { margin-top: 1rem; padding: .8rem; border: 1px solid var(--line); border-inline-start: 4px solid; border-radius: .6rem; }
+.preview { margin-top: 1rem; padding: .8rem; border: 1px solid var(--line); border-inline-start: 4px solid; border-radius: .6rem; background: var(--paper); }
 .preview > span { display: block; color: var(--muted); font-size: .6rem; }
 .preview b { display: block; margin: .4rem 0 .55rem; font-size: .77rem; overflow-wrap: anywhere; }
 .preview small { display: flex; justify-content: space-between; gap: .6rem; font-size: .7rem; }

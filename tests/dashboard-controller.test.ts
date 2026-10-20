@@ -149,6 +149,35 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.reply(older, { ok: true, transactionId: "transaction-a", categoryId: "c1", categoryConfirmed: true, categoryRevision: 1 });
       await expectState(f.page, { "selected.transactions.0.categoryId": "c2", "selected.transactions.0.categoryRevision": 2, loading: false });
     });
+    await scenario("移動応答の順序が逆転しても親と全兄弟順を保持し、保存開始前のGETで戻さない", async f => {
+      const food = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+      const daily = { ...food, id: "daily", name: "日用品", sortOrder: 1 };
+      const child = { ...food, id: "child", parentId: "food", name: "食品" };
+      const initial = data(); initial.selected!.categories = [food, daily, child];
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+      await f.reply(await f.take(), initial);
+      await expectState(f.page, { "selected.categories.2.parentId": "food" });
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); }); const staleGet = await f.take();
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "moveCategory", workspaceId: "a", categoryId: "child", parentId: null, beforeCategoryId: "food" }, ""); });
+      const older = await f.take("POST");
+      assert.deepEqual(older.request().postDataJSON(), { action: "moveCategory", workspaceId: "a", categoryId: "child", parentId: null, beforeCategoryId: "food" });
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "moveCategory", workspaceId: "a", categoryId: "child", parentId: "daily", beforeCategoryId: null }, ""); });
+      await f.reply(await f.take("POST"), { ok: true, movedCategories: [food, daily, { ...child, parentId: "daily", revision: 3 }].map(category => ({ ...category, revision: 3 })) });
+      await f.reply(older, { ok: true, movedCategories: [{ ...food, sortOrder: 1, revision: 2 }, { ...daily, sortOrder: 2, revision: 2 }, { ...child, parentId: null, revision: 2 }] });
+      await f.reply(staleGet, initial);
+      await expectState(f.page, { "selected.categories.0.sortOrder": 0, "selected.categories.1.sortOrder": 1,
+        "selected.categories.2.parentId": "daily", "selected.categories.2.revision": 3, loading: false });
+      assert.equal(f.requests.length, 0, "移動確定後の追加GETは不要");
+    });
+    await scenario("workspace切替後のカテゴリ移動応答を破棄し、現在の家計へ兄弟を混ぜない", async f => {
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "moveCategory", workspaceId: "a", categoryId: "food", parentId: null, beforeCategoryId: null }, "古い移動通知"); });
+      const post = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
+      await f.reply(await f.take(), data("b"));
+      await f.reply(post, { ok: true, movedCategories: [{ id: "food", revision: 2, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 1, archivedAt: null }] });
+      await expectState(f.page, { "selected.workspace.id": "b", "selected.categories": [], notice: null, loading: false });
+      assert.equal(f.requests.length, 0);
+    });
     await scenario("保存開始前のGETは保存確定後の明細を上書きしない", async f => {
       await f.page.evaluate(() => window.controller.openTab("transactions")); const older = await f.take();
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransaction", workspaceId: "a", occurredAt: "2026-10-18T00:00:42.123Z", merchant: "saved", method: "現金", type: "PAYMENT", amountYen: 200, actorUserId: "user" }, "saved"); });

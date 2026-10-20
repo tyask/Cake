@@ -109,6 +109,7 @@ test("全actionの入力を判別し、各actionに必要なpayloadがなけれ�
     createCategory: { action: "createCategory", workspaceId, parentId: null, name: "食費", colorHex: "#f97316" },
     updateCategory: { action: "updateCategory", workspaceId, categoryId: transactionId, name: "食品", colorHex: "#f97316" },
     archiveCategory: { action: "archiveCategory", workspaceId, categoryId: transactionId },
+    moveCategory: { action: "moveCategory", workspaceId, categoryId: transactionId, parentId: null, beforeCategoryId: null },
     saveTransactionCategory: { action: "saveTransactionCategory", workspaceId, transactionId, categoryId: null },
     saveTransaction: { ...save, action: "saveTransaction" },
     deleteTransaction: { action: "deleteTransaction", workspaceId, transactionId },

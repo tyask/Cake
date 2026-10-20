@@ -62,10 +62,3 @@ export function suggestCategoryColor(categories: readonly Category[], parentId: 
   const usage = CATEGORY_PALETTE.map(palette => roots.filter(category => (palette.shades as readonly string[]).includes(category.colorHex.toLowerCase())).length);
   return CATEGORY_PALETTE[usage.indexOf(Math.min(...usage))].shades[2];
 }
-
-/** Fixed 10% tint: category tone and readable transaction background are independent. */
-export function categoryBackground(hex: string): string {
-  if (!/^#[0-9a-f]{6}$/i.test(hex)) return "transparent";
-  const channels = [1, 3, 5].map(start => Math.round(255 * 0.9 + parseInt(hex.slice(start, start + 2), 16) * 0.1));
-  return `rgb(${channels.join(", ")})`;
-}

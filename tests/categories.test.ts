@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CATEGORY_PALETTE, categoryBackground, categoryPath, flattenCategories, suggestCategoryColor } from "../lib/categories";
+import { CATEGORY_PALETTE, categoryPath, flattenCategories, suggestCategoryColor } from "../lib/categories";
 import { appActionInputSchema } from "../lib/app-input";
 import { applyCategoryUpdate } from "../lib/category-updates";
 import type { BootstrapData, Category } from "../lib/types";
@@ -33,6 +33,21 @@ test("親にも末端にも分類でき、使用停止済みを含む任意階�
   assert.deepEqual(categoryPath(categories, null), []);
 });
 
+test("移動応答の全兄弟をrevisionで併合し、遅い移動・編集・使用停止応答で新しい階層や順序を戻さない", () => {
+  const sibling = { ...root, id: "sibling", name: "日用品", sortOrder: 1 };
+  const data = { selected: { workspace: { id: "workspace" }, categories: [root, child, sibling], transactions: [] } } as unknown as BootstrapData;
+  const moved = { ...child, parentId: sibling.id, sortOrder: 1, revision: 3 };
+  const reordered = { ...root, sortOrder: 1, revision: 2 };
+  const unseen = { ...root, id: "unseen", sortOrder: 0, revision: 2 };
+  let next = applyCategoryUpdate(data, "workspace", { movedCategories: [moved, reordered, unseen] });
+  next = applyCategoryUpdate(next, "workspace", { movedCategories: [{ ...child, revision: 2 }, root] });
+  next = applyCategoryUpdate(next, "workspace", { category: { ...child, revision: 3, name: "同じ版の旧値" } });
+  next = applyCategoryUpdate(next, "workspace", { archivedCategories: [{ ...child, revision: 2, archivedAt: "2026-10-20T00:00:00Z" }] });
+  assert.deepEqual(next.selected!.categories, [reordered, moved, sibling, unseen]);
+  assert.deepEqual(data.selected!.categories, [root, child, sibling]);
+  assert.strictEqual(applyCategoryUpdate(next, "other", { movedCategories: [child] }), next);
+});
+
 test("新規カテゴリは色の重複を抑え、子では親の系統、自由色では親の色を初期候補にする", () => {
   const nextRoot = suggestCategoryColor([root], null);
   assert.notEqual(nextRoot, root.colorHex);
@@ -41,7 +56,6 @@ test("新規カテゴリは色の重複を抑え、子では親の系統、自�
   assert.notEqual(nextChild, child.colorHex);
   assert.equal(suggestCategoryColor([{ ...root, colorHex: "#123456" }], root.id), "#123456");
   assert.equal(root.colorHex, "#f97316");
-  assert.match(categoryBackground("#000000"), /^rgb\(23[0-9], 23[0-9], 23[0-9]\)$/);
 });
 
 test("カテゴリ入力を共通schemaで検証し、名前を整形し、専用操作以外で既存カテゴリを更新しない", () => {
@@ -55,4 +69,9 @@ test("カテゴリ入力を共通schemaで検証し、名前を整形し、専�
     method: "現金", type: "PAYMENT", amountYen: 100, actorUserId: "a", categoryId: null };
   assert.equal(appActionInputSchema.safeParse(save).success, true);
   assert.equal(appActionInputSchema.safeParse({ ...save, transactionId: workspaceId }).success, false);
+  const move = { action: "moveCategory", workspaceId, categoryId: workspaceId, parentId: null, beforeCategoryId: null };
+  assert.deepEqual(appActionInputSchema.parse(move), move);
+  for (const change of [{ parentId: "invalid" }, { beforeCategoryId: "invalid" }, { categoryId: null }, { beforeCategoryId: undefined }, { parentId: undefined }]) {
+    assert.equal(appActionInputSchema.safeParse({ ...move, ...change }).success, false);
+  }
 });

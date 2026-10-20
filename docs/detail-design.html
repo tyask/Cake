@@ -458,6 +458,7 @@
               <tr><td><code>updateWeights</code></td><td>共有workspace・所属、現在の全参加者1〜2件、ID重複なし。整数0〜2147483647、合計は正。</td><td>workspaceとmemberのデフォルトweight更新。保存済み明細の割合は変えない。<code>{ ok }</code>。</td></tr>
               <tr><td><code>saveTransaction</code></td><td>workspace/任意transaction UUID、ISO日時、merchant 1〜240、method 1〜120、1〜2147483647の整数円、type、参加者actor、任意class/split。新規だけ任意memo。</td><td>新規はMANUALとmanual_UUID。既存は未清算行だけ更新し、既存割合の省略時は可能な限り保持。所属者別割合を検証。<code>{ ok, transaction }</code>は確定DB行のDTO。</td></tr>
               <tr><td><code>createCategory</code> / <code>updateCategory</code></td><td>workspaceId、parentId（追加）/categoryId（編集）、trim後1〜40文字のname、6桁colorHex。共有schemaで検証。</td><td>workspaceロック後に最新所属と親・対象の使用可否を確認。同親の使用中同名を拒否。<code>{ ok, category }</code>。</td></tr>
+              <tr><td><code>moveCategory</code></td><td>workspaceId、categoryId、nullable parentId、nullable beforeCategoryId。nullのparentIdは最上位、nullのbeforeCategoryIdは兄弟末尾。</td><td>最新所属・対象・移動先・挿入位置・循環・同名を検証し、元と先の兄弟順を同じTransactionで確定。<code>{ ok, movedCategories }</code>は両側の兄弟と移動対象の完全なCategory一覧。</td></tr>
               <tr><td><code>archiveCategory</code></td><td>workspaceId、categoryId。</td><td>子孫を集合単位で使用停止。明細参照は維持。<code>{ ok, archivedCategoryIds, archivedCategories }</code>。</td></tr>
               <tr><td><code>saveTransactionCategory</code></td><td>workspaceId、transactionId、nullable categoryId。</td><td>清算済みもカテゴリと確認状態・監査列だけ更新。<code>{ ok, transactionId, categoryId, categoryConfirmed, categoryRevision }</code>。</td></tr>
               <tr><td><code>saveTransactionMemo</code></td><td>strict入力: action、workspace UUID、transaction UUID、memo最大2000文字。</td><td>清算済みも更新可能。メモ・監査項目だけ更新。<code>{ ok, transactionId, memo }</code>。既存saveTransactionへmemoを含めると拒否。</td></tr>
@@ -741,10 +742,10 @@
 
         <section id="categories">
           <h2>集計用カテゴリ</h2>
-          <p><code>CategorySettings</code>が名前と色のdraft、折りたたみ、使用停止表示を所有し、保存済みカテゴリはDashboardのdataに一元化する。追加・編集・使用停止は確定応答をカテゴリ一覧へ直接反映し、別の明細保存が再取得のrevisionを進めても確定カテゴリを失わない。初回・タブ切替・手動更新の取得では使用停止済みと祖先も含める。カテゴリはDBのrevisionを初期値1で保持し、編集・使用停止ごとに加算する。DTOでもrevisionを保持し、局所反映では対象ごとに現在より新しいrevisionだけを採用する。同revisionは既存値を保持する。遅い旧編集応答で名前・色・使用停止を戻さない。使用停止応答は既に停止済みの行も含む枝全体の完全なCategoryを返し、未取得の子も追加できるようにする。変更されたIDの集合はarchivedCategoryIdsで返す。名前・色は共通schema、基本色と濃淡は<code>categories.ts</code>の9系統×5色を使う。カテゴリはnullable parentIdによる隣接リストで、パスは取得後に組み立てる。表示一覧と明細の選択肢はカテゴリ更新時に一度準備し、無制限の階層は反復処理で辿る。親の変更はAPIで受け付けず、DBでも所属と親を固定する。</p>
+          <p><code>CategorySettings</code>が名前と色のdraft、折りたたみ、使用停止表示を所有し、保存済みカテゴリはDashboardのdataに一元化する。追加・編集・移動・使用停止は確定応答をカテゴリ一覧へ直接反映し、別の明細保存が再取得のrevisionを進めても確定カテゴリを失わない。初回・タブ切替・手動更新の取得では使用停止済みと祖先も含める。カテゴリはDBのrevisionを初期値1で保持し、編集・移動で値が変わった行・使用停止ごとに加算する。DTOでもrevisionを保持し、局所反映では対象ごとに現在より新しいrevisionだけを採用する。同revisionは既存値を保持する。遅い旧編集応答で名前・色・使用停止を戻さない。使用停止応答は既に停止済みの行も含む枝全体の完全なCategoryを返し、未取得の子も追加できるようにする。変更されたIDの集合はarchivedCategoryIdsで返す。名前・色は共通schema、基本色と濃淡は<code>categories.ts</code>の9系統×5色を使う。カテゴリはnullable parentIdによる隣接リストで、パスは取得後に組み立てる。表示一覧と明細の選択肢はカテゴリ更新時に一度準備し、無制限の階層は反復処理で辿る。所属workspaceはDBでも固定し、親と兄弟順は移動専用APIで変更する。</p>
           <div class="data-flow">
             <div class="dfd-track" role="img" aria-label="カテゴリ設定の編集はローカルプレビューのみ。保存時にapp APIからカテゴリSQL関数へ進み、確定応答でカテゴリ一覧だけを反映する">
-              <div class="dfd-node source"><strong>名前・色を編集</strong><small>draftと背景プレビューのみ更新</small></div>
+              <div class="dfd-node source"><strong>名前・色を編集</strong><small>draftと左端の色のプレビューのみ更新</small></div>
               <div class="dfd-arrow"><b>→</b><small>保存 / 使用停止</small></div>
               <div class="dfd-node store"><strong>POST /api/app</strong><small>categoriesService → mutateCategory<br />workspaceロック・最新所属・全対象検証</small></div>
               <div class="dfd-arrow"><b>→</b><small>確定応答の局所反映</small></div>
@@ -755,11 +756,23 @@
               <div class="dfd-arrow"><b>→</b><small>共通の保存キュー</small></div>
               <div class="dfd-node store"><strong>saveTransactionCategory</strong><small>清算済みも許可<br />金額・割合・メモを保持</small></div>
               <div class="dfd-arrow"><b>→</b><small>部分反映</small></div>
-              <div class="dfd-node output"><strong>選択と背景を更新</strong><small>失敗時はdraftと再試行を保持<br />更新・一括操作の前にfreeze / flush</small></div>
+              <div class="dfd-node output"><strong>選択と左端の色を更新</strong><small>失敗時はdraftと再試行を保持<br />更新・一括操作の前にfreeze / flush</small></div>
+            </div>
+          </div>
+          <p>カテゴリ列はメモの直前、PCの幅は10remとする。保存済みカテゴリの色を行のCSS変数へ渡し、背景色は変更しない。PCは選択セルの左端、スマートフォンは展開・スワイプ中もカード左端全体に4pxの線を表示する。未分類では色の線を表示せず、清算済み行の通常の背景も保持する。選択欄の色の点と全経路の補足表示を併用する。</p>
+          <p>カテゴリの移動中の対象・候補は設定画面が所有する。ハンドルのドラッグでは行の前・子・後の挿入位置と最上位の末尾を示す。ハンドルから移動先の選択欄を開く操作も用意し、キーボードで移動先・位置を選択できる。対象・候補の使用可否、子孫と同名重複は画面でも確認し、確定時に<code>moveCategory</code>を送る。移動中は他の保存と同じpending guardで二重操作を防ぐ。未保存の名前・色は保持し、保存済み順序は応答まで変更しない。失敗時は元の順序と入力を保持してエラーを表示する。</p>
+          <div class="data-flow">
+            <div class="dfd-track" role="img" aria-label="ドラッグまたは移動先選択の確定後、移動APIが最新の親子と兄弟を検証し、確定したカテゴリを版番号で画面へ反映する">
+              <div class="dfd-node source"><strong>移動先・挿入位置を確定</strong><small>categoryId / parentId / beforeCategoryId<br />未保存の名前・色は保持</small></div>
+              <div class="dfd-arrow"><b>→</b><small>POST /api/app</small></div>
+              <div class="dfd-node store"><strong>moveCategory</strong><small>workspace・最新所属・対象をロック確認<br />循環・重複・挿入位置を検証し一括更新</small></div>
+              <div class="dfd-arrow"><b>→</b><small>movedCategories</small></div>
+              <div class="dfd-node output"><strong>確定した親・兄弟順を反映</strong><small>行ごとのrevisionで旧応答を除外<br />明細のカテゴリID・色は維持</small></div>
             </div>
           </div>
           <p>明細にもcategory_revisionを保存し、割当・解除ごとにDBで加算する。新規カテゴリ付き明細は1、既存/未分類新規は0を初期値とする。DTOと専用保存応答にcategoryRevisionを保持し、古い/同じ版の割当応答は反映しない。タブを往復して保存キューが再生成されても旧カテゴリへ戻らない。編集欄の一時的な保存承認にもcategoryRevisionを使い、保存中に取得した新しいpropを旧応答で隠さない。カテゴリ選択の保存中は選択欄を無効化する。通常項目と同じ保存キューを使い、確定応答はカテゴリIDと確認状態だけを反映する。通常保存の古い全体応答で最新カテゴリやメモを上書きしない。workspace切替後の遅延応答は既存の要求世代で破棄する。</p>
           <p>新規手動明細は<code>saveTransaction</code>にcategoryIdを指定できる。既存明細の同actionではcategoryIdを拒否し、専用保存を使用する。カテゴリを選んだ手動操作はサーバーでcategoryConfirmed=true、解除はfalseとする。CSV・定期生成は未分類で登録し、一覧から手動設定できる。取引先の正規化・CSV補完・グラフは提供しない。</p>
+          <p><code>moveCategory</code>はnullable parentIdとbeforeCategoryIdで移動先と挿入位置を受け取る。parentId=nullは最上位、beforeCategoryId=nullは兄弟末尾。workspaceロック後の最新の所属、移動対象・親・挿入先兄弟の同workspaceと使用可否、自身・子孫への移動と同親同名を検証する。元と先の兄弟をsortOrder・id順に準備し、対象を除いた移動先の指定位置へ挿入する。親と両側の兄弟順の更新は同じTransactionで確定し、値が変わった行だけrevisionを加算する。応答は使用停止済みを含む元と先の兄弟の完全なCategoryをmovedCategoriesに返し、変更行だけの応答による取りこぼしを防ぐ。移動対象のID・色と子孫のID・親参照、明細の割当は変更しない。追加migrationで旧APIの署名とカテゴリ追加・編集・停止・割当を維持する。</p>
           <p>カテゴリ操作はworkspace行→membership行の順でロックし、追加先、対象カテゴリ、対象明細の所属と使用可否を同じTransactionで確認する。使用停止はrecursive CTEで子孫のID集合を一度列挙し、使用中の行を一括更新してから枝全体の確定DTOを返す。既に停止済みの行のrevisionは加算しない。明細カテゴリ割当は複合外部キーとtriggerで同workspaceの使用中カテゴリを検証する。カテゴリなしの既存INSERTでは追加照合を行わない。過去の使用停止参照は通常項目の編集・清算・表示で保持する。</p>
         </section>
 
@@ -864,7 +877,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>workspace_members</code></td><td>(workspace_id, user_id)</td><td>role OWNER/MEMBER、weight &gt;= 0、joined_at。PERSONAL最大1人・SHARED最大2人。</td><td>workspace/user削除時CASCADE。</td></tr>
               <tr><td><code>invitations</code></td><td>uuid id</td><td>token_hash UNIQUE、(workspace,email) UNIQUE、status Enum、期限・inviter。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>import_batches</code></td><td>uuid id</td><td>file_name、total/imported/skipped_rows、imported_by、created_at。</td><td>workspace削除時CASCADE。</td></tr>
-              <tr><td><code>categories</code></td><td>uuid id</td><td>workspace/id UNIQUE、同親の使用中同名を部分UNIQUEで禁止。parentは同workspaceの複合FK、名前1〜40文字、色6桁HEX、sort_order非負、正のrevision。所属・親は変更不可。</td><td>workspace削除時CASCADE。使用停止時は明細参照を保持。</td></tr>
+              <tr><td><code>categories</code></td><td>uuid id</td><td>workspace/id UNIQUE、同親の使用中同名を部分UNIQUEで禁止。parentは同workspaceの複合FK、名前1〜40文字、色6桁HEX、sort_order非負、正のrevision。所属は変更不可。親変更時は使用可否と循環をtriggerでも検証する。</td><td>workspace削除時CASCADE。使用停止時は明細参照を保持。</td></tr>
               <tr><td><code>transactions</code></td><td>uuid id</td><td>(workspace_id,external_id) UNIQUE、正のinteger amount、type/class/source Enum、actor・created/updated_by、split_weights NOT NULL/object、memo NOT NULL DEFAULT 空文字・最大2000文字。nullable category_idは同workspaceの複合FK。category_confirmedはNOT NULL、未分類はfalse。非負category_revisionは専用保存で加算。workspace/category部分Index。workspace/date、workspace/class/settled_at Index。</td><td>workspace削除時CASCADE、batch削除時SET NULL。清算関連からtransactionを参照。</td></tr>
               <tr><td><code>recurring_payments</code></td><td>uuid id</td><td>workspace/state Index、毎月の日1〜31、現在の支払い設定8項目、NOT NULLの処理予定日next_scheduled_on、実行承認者、正のrevision、固定blocked_reason、作成/更新の監査列。開始日カラムstart_onは削除済み。旧last_generated_month/active_from_month/pending_config/pending_effective_monthは現行DTO・予定判定・生成では使わない。</td><td>workspace削除時CASCADE。支払者・承認者・作成/更新者はapp_usersを参照。設定削除はARCHIVED。workspace_idの変更をTriggerで禁止する。</td></tr>
               <tr><td><code>default_rules</code></td><td>uuid id</td><td>merchant 1〜120、class Enum、sort_order &gt;= 0、nullable/object split_weights、enabled。sort_order/created_at Index。旧priority列とIndexは互換用に保持。</td><td>workspace削除時CASCADE。</td></tr>
@@ -908,6 +921,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>012_delete_default_rules.sql</td><td>単件・複数の共通削除関数を追加。既存表・既存DB関数の引数・旧アプリの呼出しは変更せず、全対象確認をworkspaceロック後へ移す。</td></tr>
               <tr><td>013_bulk_rule_application.sql</td><td>既存cake_bulk_transactionsの署名・DELETE・ロック/全件検証・確定DTOを維持し、APPLY_RULESを一回の参加者集約・使用ルールごとの割合投影・集合UPDATEへ置き換える。004は変更しない。</td></tr>
               <tr><td>014_categories.sql</td><td>カテゴリ表・親子/明細の同workspace制約・同親同名制約・階層固定trigger・カテゴリ割当trigger・更新関数。既存明細は未分類・未確認で初期化する。</td></tr>
+              <tr><td>015_category_moves.sql</td><td>階層固定triggerを所属固定・循環検証へ置き換え、移動専用関数で親と兄弟順を原子的に更新する。014と既存APIの署名は変更せず、カテゴリID・色・明細割当を保持する。</td></tr>
             </tbody>
           </table></div>
           <p><code>scripts/setup-db.mjs</code>は環境に応じたDB接続（PreviewはCAKE_TEST_DATABASE_URL、それ以外はDATABASE_URL）を確認する。台帳初期化を1回実行し、<code>schema_migrations</code>の履歴を一度読みSetで照合して、未適用SQLの本文だけをファイル名順に読み込む。全適用済みの通常再実行は本文0読込・2往復、未適用がN件なら本文N読込・N+2往復となる。各SQLは共通advisory lock取得後に台帳を再確認し、SQLと履歴INSERTを同じDO文/Transactionで確定する。同時実行や失敗時にも二重適用・台帳だけの記録を防ぎ、既存データや適用日時を保持する。</p>

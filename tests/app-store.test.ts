@@ -51,6 +51,7 @@ function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean;
     if (/SELECT expense_class/.test(query)) return [transaction];
     if (/cake_bulk_transactions/.test(query)) return [{ result: { affected: 1, transactions: [{ id: transactionId, occurredAt: "2026-10-10T00:00:00+00:00" }] } }];
     if (/cake_delete_default_rules/.test(query)) return [{ deleted: 1 }];
+    if (/cake_move_category/.test(query)) return [{ result: { movedCategories: [] } }];
     if (/RETURNING imported_rows, skipped_rows/.test(query)) return [{ imported_rows: 1, skipped_rows: 0 }];
     if (/RETURNING id, memo/.test(query)) return [{ id: transactionId, memo: "メモ" }];
     if (/RETURNING \*/.test(query)) return [options.transaction ?? transaction];
@@ -85,6 +86,7 @@ const cases: { input: Row; counts: number[]; transactions?: number[]; result?: R
   { input: { ...save, transactionId }, counts: [1, 1, 1, 2], transactions: [3] },
   { input: { ...save, transactionId, splitWeights: { a: 1, b: 0 } }, counts: [1, 1, 1, 2], transactions: [3] },
   { input: { action: "saveTransactionMemo", workspaceId, transactionId, memo: "メモ" }, counts: [1, 2], transactions: [1], result: { ok: true, transactionId, memo: "メモ" } },
+  { input: { action: "moveCategory", workspaceId, categoryId: transactionId, parentId: null, beforeCategoryId: ruleId }, counts: [1], result: { ok: true, movedCategories: [] } },
   { input: { action: "deleteTransaction", workspaceId, transactionId }, counts: [1, 2], transactions: [1] },
   { input: { action: "deleteTransactions", workspaceId, transactionIds: [transactionId] }, counts: [1, 1], result: { ok: true, deleted: 1 } },
   { input: { action: "applyTransactionRules", workspaceId, transactionIds: [transactionId] }, counts: [1, 1], result: { ok: true, applied: 1, appliedTransactions: [{ id: transactionId, occurredAt: "2026-10-10T00:00:00.000Z" }] } },
@@ -131,6 +133,10 @@ for (const [index, scenario] of cases.entries()) {
     }
     if (scenario.input.action === "updateProfile") {
       assert.match(f.trips[0].queries[0].query, /WHERE id = \$\d+ AND email = \$\d+ AND is_enabled = true/);
+    }
+    if (scenario.input.action === "moveCategory") {
+      assert.match(f.trips[0].queries[0].query, /cake_move_category/);
+      assert.deepEqual(f.trips[0].queries[0].params, [workspaceId, user.id, transactionId, null, ruleId]);
     }
   });
 }
