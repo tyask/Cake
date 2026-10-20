@@ -35,7 +35,7 @@ test("清算後にメモが変わっても取引値と清算計算は変わら�
   const item: TransactionRecord = {
     id: input.transactionId, occurredAt: "2026-10-06T00:00:00Z", merchant: "スーパー", method: "現金",
     type: "PAYMENT", amountYen: 1001, actorUserId: "a", actorName: "A", expenseClass: "SHARED",
-    splitWeights: { a: 1, b: 1 }, settledAt: "2026-10-07T00:00:00Z", externalId: "memo-test", source: "MANUAL", categoryId: null, categoryConfirmed: false, memo: "",
+    splitWeights: { a: 1, b: 1 }, settledAt: "2026-10-07T00:00:00Z", externalId: "memo-test", source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0, memo: "",
   };
   const edited = { ...item, memo: input.memo };
   assert.deepEqual(transactionValues(edited), transactionValues(item));

@@ -150,7 +150,7 @@ test("既定の読込は1回のSQL通信で明細・メモ・担当者名と清�
   assert.deepEqual(data.selected.transactions, [{
     id: "transaction", occurredAt: "2026-10-08T00:00:00.000Z", merchant: "スーパー", method: "現金",
     type: "PAYMENT", amountYen: 1000, actorUserId: user.id, actorName: "A", expenseClass: "SHARED",
-    settledAt: null, externalId: "manual-1", source: "MANUAL", categoryId: null, categoryConfirmed: false,
+    settledAt: null, externalId: "manual-1", source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0,
     splitWeights: { "member-a": 1, "member-b": 1 }, memo: "レシートあり",
   }]);
   assert.equal(data.selected.settlement?.amountYen, 500);

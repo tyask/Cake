@@ -21,7 +21,7 @@ const workspace: WorkspaceData = {
   ],
   rules: [],
   transactions: ["first", "settled"].map(id => ({
-    id, merchant: id, amountYen: 100, occurredAt: "2026-10-20T03:00:00.000Z", method: "現金", memo: "", type: "PAYMENT", actorUserId: "a", actorName: "A", expenseClass: "SHARED", splitWeights: { a: 1, b: 1 }, settledAt: id === "settled" ? "2026-10-20T04:00:00Z" : null, externalId: id, source: "MANUAL", categoryId: id === "settled" ? "old" : null, categoryConfirmed: id === "settled",
+    id, merchant: id, amountYen: 100, occurredAt: "2026-10-20T03:00:00.000Z", method: "現金", memo: "", type: "PAYMENT", actorUserId: "a", actorName: "A", expenseClass: "SHARED", splitWeights: { a: 1, b: 1 }, settledAt: id === "settled" ? "2026-10-20T04:00:00Z" : null, externalId: id, source: "MANUAL", categoryId: id === "settled" ? "old" : null, categoryConfirmed: id === "settled", categoryRevision: id === "settled" ? 1 : 0,
   })),
   settlement: null, settlementHistory: [],
 };
@@ -31,8 +31,8 @@ function Harness() {
   const [modal, setModal] = useState(false);
   const run: RunAppAction = async payload => {
     const result = await postAction(payload);
-    if (payload.action === "saveTransactionCategory") setSelected(current => ({ ...current, transactions: current.transactions.map(row => row.id === payload.transactionId ? { ...row, categoryId: result.categoryId, categoryConfirmed: result.categoryConfirmed } : row) }));
-    if (payload.action === "saveTransaction" && payload.transactionId) setSelected(current => ({ ...current, transactions: current.transactions.map(row => row.id === payload.transactionId ? { ...row, ...result.transaction, categoryId: row.categoryId, categoryConfirmed: row.categoryConfirmed } : row) }));
+    if (payload.action === "saveTransactionCategory") setSelected(current => ({ ...current, transactions: current.transactions.map(row => row.id === payload.transactionId ? { ...row, categoryId: result.categoryId, categoryConfirmed: result.categoryConfirmed, categoryRevision: result.categoryRevision ?? row.categoryRevision + 1 } : row) }));
+    if (payload.action === "saveTransaction" && payload.transactionId) setSelected(current => ({ ...current, transactions: current.transactions.map(row => row.id === payload.transactionId ? { ...row, ...result.transaction, categoryId: row.categoryId, categoryConfirmed: row.categoryConfirmed, categoryRevision: row.categoryRevision } : row) }));
     return result;
   };
   return <main style={{ padding: 12, maxWidth: 1600 }}>

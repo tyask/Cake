@@ -459,7 +459,7 @@
               <tr><td><code>saveTransaction</code></td><td>workspace/任意transaction UUID、ISO日時、merchant 1〜240、method 1〜120、1〜2147483647の整数円、type、参加者actor、任意class/split。新規だけ任意memo。</td><td>新規はMANUALとmanual_UUID。既存は未清算行だけ更新し、既存割合の省略時は可能な限り保持。所属者別割合を検証。<code>{ ok, transaction }</code>は確定DB行のDTO。</td></tr>
               <tr><td><code>createCategory</code> / <code>updateCategory</code></td><td>workspaceId、parentId（追加）/categoryId（編集）、trim後1〜40文字のname、6桁colorHex。共有schemaで検証。</td><td>workspaceロック後に最新所属と親・対象の使用可否を確認。同親の使用中同名を拒否。<code>{ ok, category }</code>。</td></tr>
               <tr><td><code>archiveCategory</code></td><td>workspaceId、categoryId。</td><td>子孫を集合単位で使用停止。明細参照は維持。<code>{ ok, archivedCategoryIds, archivedCategories }</code>。</td></tr>
-              <tr><td><code>saveTransactionCategory</code></td><td>workspaceId、transactionId、nullable categoryId。</td><td>清算済みもカテゴリと確認状態・監査列だけ更新。<code>{ ok, transactionId, categoryId, categoryConfirmed }</code>。</td></tr>
+              <tr><td><code>saveTransactionCategory</code></td><td>workspaceId、transactionId、nullable categoryId。</td><td>清算済みもカテゴリと確認状態・監査列だけ更新。<code>{ ok, transactionId, categoryId, categoryConfirmed, categoryRevision }</code>。</td></tr>
               <tr><td><code>saveTransactionMemo</code></td><td>strict入力: action、workspace UUID、transaction UUID、memo最大2000文字。</td><td>清算済みも更新可能。メモ・監査項目だけ更新。<code>{ ok, transactionId, memo }</code>。既存saveTransactionへmemoを含めると拒否。</td></tr>
               <tr><td><code>deleteTransaction</code></td><td>workspace/transaction UUID・所属。</td><td>未清算の対象行だけ削除。0件なら業務例外。<code>{ ok }</code>。</td></tr>
               <tr><td><code>deleteTransactions</code> / <code>applyTransactionRules</code></td><td>所属、transaction UUID配列1〜5000件、大小文字を正規化した重複なし。</td><td>DB関数で全選択の存在・未清算を検証し、全件削除/現在ルール適用。<code>{ ok, deleted }</code> / <code>{ ok, applied, appliedTransactions }</code>。</td></tr>
@@ -640,7 +640,7 @@
           <ol>
             <li><code>postAction()</code>がJSONを<code>POST /api/app</code>し、非2xxのerrorを例外化する。</li>
             <li><code>run()</code>が要求開始時のworkspace・世代を保持し、現在のworkspace向けの成功応答だけを反映する。通知はタブ世代も一致し、手動更新中でない場合だけ表示する。</li>
-            <li><code>saveTransaction</code>はサーバーの確定TransactionRecordを一覧へ追加し、既存行では専用保存で確定したメモ・カテゴリ・確認状態を保持して通常項目を反映する。日時で並び替え、清算を再計算する。<code>saveTransactionMemo</code>と<code>saveTransactionCategory</code>はそれぞれ確定した項目だけ反映し、直後の全件GETを省く。</li>
+            <li><code>saveTransaction</code>はサーバーの確定TransactionRecordを一覧へ追加し、既存行では専用保存で確定したメモを保持し、カテゴリはcategoryRevisionが新しい方を採用して通常項目を反映する。日時で並び替え、清算を再計算する。<code>saveTransactionMemo</code>と<code>saveTransactionCategory</code>はそれぞれ確定した項目だけ反映し、直後の全件GETを省く。</li>
             <li>その他の更新とタブ切替は<code>refresh()</code>で再取得。import/settingsはmetadata、home/transactions/settlementはfull。workspace切替は常にfull。</li>
             <li>metadataは同一workspaceの取得済み明細・清算・履歴を保持して併合する。選択workspaceが変化した場合はfullを取得し直す。</li>
           </ol>
@@ -758,7 +758,7 @@
               <div class="dfd-node output"><strong>選択と背景を更新</strong><small>失敗時はdraftと再試行を保持<br />更新・一括操作の前にfreeze / flush</small></div>
             </div>
           </div>
-          <p>カテゴリ選択の保存中は選択欄を無効化する。通常項目と同じ保存キューを使い、確定応答はカテゴリIDと確認状態だけを反映する。通常保存の古い全体応答で最新カテゴリやメモを上書きしない。workspace切替後の遅延応答は既存の要求世代で破棄する。</p>
+          <p>明細にもcategory_revisionを保存し、割当・解除ごとにDBで加算する。新規カテゴリ付き明細は1、既存/未分類新規は0を初期値とする。DTOと専用保存応答にcategoryRevisionを保持し、古い/同じ版の割当応答は反映しない。タブを往復して保存キューが再生成されても旧カテゴリへ戻らない。カテゴリ選択の保存中は選択欄を無効化する。通常項目と同じ保存キューを使い、確定応答はカテゴリIDと確認状態だけを反映する。通常保存の古い全体応答で最新カテゴリやメモを上書きしない。workspace切替後の遅延応答は既存の要求世代で破棄する。</p>
           <p>新規手動明細は<code>saveTransaction</code>にcategoryIdを指定できる。既存明細の同actionではcategoryIdを拒否し、専用保存を使用する。カテゴリを選んだ手動操作はサーバーでcategoryConfirmed=true、解除はfalseとする。CSV・定期生成は未分類で登録し、一覧から手動設定できる。取引先の正規化・CSV補完・グラフは提供しない。</p>
           <p>カテゴリ操作はworkspace行→membership行の順でロックし、追加先、対象カテゴリ、対象明細の所属と使用可否を同じTransactionで確認する。使用停止はrecursive CTEで子孫のID集合を一度列挙し、使用中の行を一括更新してから枝全体の確定DTOを返す。既に停止済みの行のrevisionは加算しない。明細カテゴリ割当は複合外部キーとtriggerで同workspaceの使用中カテゴリを検証する。カテゴリなしの既存INSERTでは追加照合を行わない。過去の使用停止参照は通常項目の編集・清算・表示で保持する。</p>
         </section>
@@ -865,7 +865,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>invitations</code></td><td>uuid id</td><td>token_hash UNIQUE、(workspace,email) UNIQUE、status Enum、期限・inviter。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>import_batches</code></td><td>uuid id</td><td>file_name、total/imported/skipped_rows、imported_by、created_at。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>categories</code></td><td>uuid id</td><td>workspace/id UNIQUE、同親の使用中同名を部分UNIQUEで禁止。parentは同workspaceの複合FK、名前1〜40文字、色6桁HEX、sort_order非負、正のrevision。所属・親は変更不可。</td><td>workspace削除時CASCADE。使用停止時は明細参照を保持。</td></tr>
-              <tr><td><code>transactions</code></td><td>uuid id</td><td>(workspace_id,external_id) UNIQUE、正のinteger amount、type/class/source Enum、actor・created/updated_by、split_weights NOT NULL/object、memo NOT NULL DEFAULT 空文字・最大2000文字。nullable category_idは同workspaceの複合FK。category_confirmedはNOT NULL、未分類はfalse。workspace/category部分Index。workspace/date、workspace/class/settled_at Index。</td><td>workspace削除時CASCADE、batch削除時SET NULL。清算関連からtransactionを参照。</td></tr>
+              <tr><td><code>transactions</code></td><td>uuid id</td><td>(workspace_id,external_id) UNIQUE、正のinteger amount、type/class/source Enum、actor・created/updated_by、split_weights NOT NULL/object、memo NOT NULL DEFAULT 空文字・最大2000文字。nullable category_idは同workspaceの複合FK。category_confirmedはNOT NULL、未分類はfalse。非負category_revisionは専用保存で加算。workspace/category部分Index。workspace/date、workspace/class/settled_at Index。</td><td>workspace削除時CASCADE、batch削除時SET NULL。清算関連からtransactionを参照。</td></tr>
               <tr><td><code>recurring_payments</code></td><td>uuid id</td><td>workspace/state Index、毎月の日1〜31、現在の支払い設定8項目、NOT NULLの処理予定日next_scheduled_on、実行承認者、正のrevision、固定blocked_reason、作成/更新の監査列。開始日カラムstart_onは削除済み。旧last_generated_month/active_from_month/pending_config/pending_effective_monthは現行DTO・予定判定・生成では使わない。</td><td>workspace削除時CASCADE。支払者・承認者・作成/更新者はapp_usersを参照。設定削除はARCHIVED。workspace_idの変更をTriggerで禁止する。</td></tr>
               <tr><td><code>default_rules</code></td><td>uuid id</td><td>merchant 1〜120、class Enum、sort_order &gt;= 0、nullable/object split_weights、enabled。sort_order/created_at Index。旧priority列とIndexは互換用に保持。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>settlements</code></td><td>uuid id</td><td>amount &gt;= 0、weight_snapshot/calculation_snapshot JSONB、payer/payee nullable、completed_by/completed_at。</td><td>workspace削除時CASCADE。</td></tr>
@@ -928,7 +928,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>SplitWeights</code></td><td><code>Record&lt;string, number&gt;</code>。保存済み参加者別整数割合。</td></tr>
               <tr><td><code>AppUser</code> / <code>RegisteredUser</code></td><td>id/email/name/imageUrl、AppUserは任意isAdmin。RegisteredUserは必須isAdmin/isEnabled。</td></tr>
               <tr><td><code>WorkspaceSummary</code> / <code>WorkspaceMember</code></td><td>workspaceのid/name/type/ownerUserId/memberCount。memberはAppUserにweightとOWNER/MEMBER role。</td></tr>
-              <tr><td><code>TransactionRecord</code></td><td>id、ISO occurredAt、merchant/method/memo、type、整数amountYen、actorUserId/actorName、expenseClass、splitWeights、nullable settledAt、externalId、MANUAL/PAYPAY/RECURRING source、nullable categoryId、categoryConfirmed。</td></tr>
+              <tr><td><code>TransactionRecord</code></td><td>id、ISO occurredAt、merchant/method/memo、type、整数amountYen、actorUserId/actorName、expenseClass、splitWeights、nullable settledAt、externalId、MANUAL/PAYPAY/RECURRING source、nullable categoryId、categoryConfirmed、categoryRevision。</td></tr>
               <tr><td><code>RecurringPayment</code></td><td>id、workspaceId、state、revision、authorizedById、currentConfig、nullable nextScheduledOn/blockedReason。configはdayOfMonth、merchant、method、amountYen、actorUserId、expenseClass、splitWeights、memo。nextScheduledOnは設定日とサーバー時刻から計算した画面の次回予定。</td></tr>
               <tr><td><code>RecurringPaymentsResponse</code></td><td>payments、eligibleActorUserIds、today（日本時間の日付）、now（サーバー時刻のISO文字列）。一覧とフォームで同じ09:00境界を基準に次回予定を計算する。</td></tr>
               <tr><td><code>Category</code></td><td>id、nullable parentId、name、colorHex、sortOrder、nullable archivedAt、revision。</td></tr>

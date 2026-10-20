@@ -45,6 +45,7 @@ export interface TransactionRecord {
   source: TransactionSource;
   categoryId: string | null;
   categoryConfirmed: boolean;
+  categoryRevision: number;
 }
 
 export interface Category {

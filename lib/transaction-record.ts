@@ -16,5 +16,6 @@ export function transactionRecord(row: Record<string, unknown>, actorName = Stri
     externalId: String(row.external_id), source: row.source as TransactionRecord["source"],
     categoryId: row.category_id == null ? null : String(row.category_id),
     categoryConfirmed: row.category_confirmed === true,
+    categoryRevision: Number(row.category_revision ?? 0),
   };
 }

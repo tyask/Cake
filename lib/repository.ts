@@ -122,7 +122,7 @@ async function readBootstrapRow(
             'expense_class', t.expense_class, 'settled_at', t.settled_at,
             'external_id', t.external_id, 'source', t.source,
             'split_weights', t.split_weights, 'memo', t.memo,
-            'category_id', t.category_id, 'category_confirmed', t.category_confirmed
+            'category_id', t.category_id, 'category_confirmed', t.category_confirmed, 'category_revision', t.category_revision
           ) ORDER BY t.occurred_at DESC, t.created_at DESC)
           FROM transactions t
           JOIN selected_workspace sw ON sw.id = t.workspace_id

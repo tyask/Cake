@@ -6,7 +6,7 @@ import type { TransactionRecord } from "../lib/types";
 const item = (id: string, settledAt: string | null = null): TransactionRecord => ({
   id, occurredAt: "2026-10-06T00:00:00Z", merchant: id, method: "現金", type: "PAYMENT",
   amountYen: 100, actorUserId: "a", actorName: "A", expenseClass: "SHARED", splitWeights: { a: 1 },
-  settledAt, externalId: id, source: "MANUAL", categoryId: null, categoryConfirmed: false, memo: "",
+  settledAt, externalId: id, source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0, memo: "",
 });
 const empty = new Set<string>();
 

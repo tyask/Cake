@@ -14,7 +14,7 @@ function data(id = "a", merchant = "initial"): BootstrapData {
     workspace: workspaces.find(w => w.id === id)!, members: [{ ...user, weight: 1, role: "OWNER" }], categories: [], rules: [],
     transactions: [{ id: "transaction-" + id, occurredAt: "2026-10-18T00:00:42.123Z", merchant, method: "現金", type: "PAYMENT",
       amountYen: 100, actorUserId: user.id, actorName: user.name, expenseClass: "PERSONAL", splitWeights: { user: 1 }, settledAt: null,
-      memo: "original", externalId: "manual-" + id, source: "MANUAL", categoryId: null, categoryConfirmed: false }], settlement: null, settlementHistory: [],
+      memo: "original", externalId: "manual-" + id, source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0 }], settlement: null, settlementHistory: [],
   } };
 }
 function metadata(id = "a"): BootstrapMetadata {
@@ -110,7 +110,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: null }, ""); });
       const transactionPost = await f.take("POST");
       await f.reply(categoryPost, { ok: true, category });
-      await f.reply(transactionPost, { ok: true, transactionId: "transaction-a", categoryId: null, categoryConfirmed: false });
+      await f.reply(transactionPost, { ok: true, transactionId: "transaction-a", categoryId: null, categoryConfirmed: false, categoryRevision: 1 });
       await expectState(f.page, { "selected.categories.0.id": "food", "selected.transactions.0.categoryId": null, loading: false });
       assert.equal(f.requests.length, 0);
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "archiveCategory", workspaceId: "a", categoryId: "food" }, "archive"); });
@@ -135,6 +135,19 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await expectState(f.page, { "selected.categories.0.archivedAt": "2026-10-20T00:00:00Z", "selected.categories.0.revision": 5,
         "selected.categories.0.name": "確定した名前", "selected.categories.0.colorHex": "#2563eb", loading: false });
       assert.equal(f.requests.length, 0);
+    });
+    await scenario("明細画面を開き直した後のカテゴリ保存は遅い旧応答で戻らない", async f => {
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: "c1" }, ""); });
+      const older = await f.take("POST");
+      await f.page.evaluate(() => window.controller.openTab("settings")); await f.reply(await f.take(), metadata());
+      await f.page.evaluate(() => window.controller.openTab("transactions"));
+      const committed = data();
+      committed.selected!.transactions[0] = { ...committed.selected!.transactions[0], categoryId: "c1", categoryConfirmed: true, categoryRevision: 1 };
+      await f.reply(await f.take(), committed);
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: "c2" }, ""); });
+      await f.reply(await f.take("POST"), { ok: true, transactionId: "transaction-a", categoryId: "c2", categoryConfirmed: true, categoryRevision: 2 });
+      await f.reply(older, { ok: true, transactionId: "transaction-a", categoryId: "c1", categoryConfirmed: true, categoryRevision: 1 });
+      await expectState(f.page, { "selected.transactions.0.categoryId": "c2", "selected.transactions.0.categoryRevision": 2, loading: false });
     });
     await scenario("保存開始前のGETは保存確定後の明細を上書きしない", async f => {
       await f.page.evaluate(() => window.controller.openTab("transactions")); const older = await f.take();

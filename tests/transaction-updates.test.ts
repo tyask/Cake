@@ -8,7 +8,7 @@ import type { BootstrapData, TransactionRecord } from "../lib/types";
 const item: TransactionRecord = {
   id: "one", occurredAt: "2026-10-06T00:00:00Z", merchant: "スーパー", method: "現金", memo: "レシートあり",
   type: "PAYMENT", amountYen: 1000, actorUserId: "a", actorName: "A", expenseClass: "SHARED",
-  splitWeights: { a: 1, b: 1 }, settledAt: null, externalId: "test", source: "MANUAL", categoryId: null, categoryConfirmed: false,
+  splitWeights: { a: 1, b: 1 }, settledAt: null, externalId: "test", source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0,
 };
 function bootstrap(): BootstrapData {
   const members = [
@@ -61,16 +61,21 @@ test("以前のワークスペースの保存結果は現在の画面に反映�
 
 test("カテゴリ保存後の古い通常保存応答は分類とメモを戻さず、精算額も変更しない", () => {
   const data = bootstrap();
-  const categorized = applyTransactionUpdate(data, "workspace", { transactionId: item.id, categoryId: "food", categoryConfirmed: true });
+  const categorized = applyTransactionUpdate(data, "workspace", { transactionId: item.id, categoryId: "food", categoryConfirmed: true, categoryRevision: 1 });
   assert.strictEqual(categorized.selected!.settlement, data.selected!.settlement);
   const withMemo = applyTransactionUpdate(categorized, "workspace", { transactionId: item.id, memo: "確認" });
   const updated = applyTransactionUpdate(withMemo, "workspace", { transaction: { ...item, amountYen: 1200 } });
   assert.equal(updated.selected!.transactions[0].categoryId, "food");
   assert.equal(updated.selected!.transactions[0].categoryConfirmed, true);
+  assert.equal(updated.selected!.transactions[0].categoryRevision, 1);
   assert.equal(updated.selected!.transactions[0].memo, "確認");
   assert.equal(updated.selected!.transactions[0].amountYen, 1200);
-  assert.equal(applyTransactionUpdate(updated, "workspace", { transactionId: item.id, categoryId: null, categoryConfirmed: false })
+  assert.equal(applyTransactionUpdate(updated, "workspace", { transactionId: item.id, categoryId: null, categoryConfirmed: false, categoryRevision: 2 })
     .selected!.transactions[0].categoryId, null);
+  assert.equal(applyTransactionUpdate(updated, "workspace", { transactionId: item.id, categoryId: "old", categoryConfirmed: true, categoryRevision: 0 })
+    .selected!.transactions[0].categoryId, "food");
+  const latest = applyTransactionUpdate(updated, "workspace", { transaction: { ...item, categoryId: "new", categoryConfirmed: true, categoryRevision: 2 } });
+  assert.equal(latest.selected!.transactions[0].categoryId, "new");
 });
 
 test("DBの確定値から応答を作り、メモ・日時精度を保持して監査用データは含めない", () => {

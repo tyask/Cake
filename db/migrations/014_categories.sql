@@ -28,6 +28,7 @@ CREATE INDEX categories_workspace_parent_order_idx ON categories(workspace_id, p
 ALTER TABLE transactions
   ADD COLUMN category_id uuid,
   ADD COLUMN category_confirmed boolean NOT NULL DEFAULT false,
+  ADD COLUMN category_revision integer NOT NULL DEFAULT 0 CHECK (category_revision >= 0),
   ADD CONSTRAINT transactions_category_workspace_fk
     FOREIGN KEY (workspace_id, category_id) REFERENCES categories(workspace_id, id),
   ADD CONSTRAINT transactions_category_confirmation_check
@@ -59,6 +60,11 @@ CREATE TRIGGER categories_structure_guard
 CREATE FUNCTION cake_transaction_category_guard()
 RETURNS trigger AS $cake_transaction_category_guard$
 BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    NEW.category_revision := OLD.category_revision + 1;
+  ELSE
+    NEW.category_revision := CASE WHEN NEW.category_id IS NULL THEN 0 ELSE 1 END;
+  END IF;
   -- Uncategorized legacy CSV/recurring inserts need no extra context queries.
   -- Dedicated clear operations already lock/check membership in the function.
   IF NEW.category_id IS NULL THEN
@@ -101,6 +107,7 @@ DECLARE
   archived_ids jsonb;
   branch_ids uuid[];
   saved_transaction uuid;
+  saved_category_revision integer;
 BEGIN
   IF operation IS NULL OR operation NOT IN ('CREATE', 'UPDATE', 'ARCHIVE', 'ASSIGN') THEN
     RAISE EXCEPTION '未対応のカテゴリ操作です。';
@@ -124,10 +131,10 @@ BEGIN
     UPDATE transactions SET category_id = target_category, category_confirmed = target_category IS NOT NULL,
       updated_by = actor_id, updated_at = now()
       WHERE workspace_id = target_workspace AND id = target_transaction
-      RETURNING id INTO saved_transaction;
+      RETURNING id, category_revision INTO saved_transaction, saved_category_revision;
     IF NOT FOUND THEN RAISE EXCEPTION '明細が存在しません。'; END IF;
     RETURN jsonb_build_object('transactionId', saved_transaction, 'categoryId', target_category,
-      'categoryConfirmed', target_category IS NOT NULL);
+      'categoryConfirmed', target_category IS NOT NULL, 'categoryRevision', saved_category_revision);
   END IF;
 
   IF operation IN ('CREATE', 'UPDATE') AND (

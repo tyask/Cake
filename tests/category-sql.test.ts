@@ -30,7 +30,7 @@ test("カテゴリの実SQLは階層・所属・履歴を保持し、失敗し�
   type Category = { id: string; revision: number; parentId: string | null; name: string; colorHex: string; sortOrder: number; archivedAt: string | null };
   async function mutate(operation: string, options: { workspace?: string; actor?: string; categoryId?: string | null;
     parentId?: string | null; name?: string; color?: string; transactionId?: string } = {}) {
-    return (await sql.query<{ result: { category: Category; archivedCategoryIds: string[]; archivedCategories: Category[]; categoryId: string | null; categoryConfirmed: boolean } }>(
+    return (await sql.query<{ result: { category: Category; archivedCategoryIds: string[]; archivedCategories: Category[]; categoryId: string | null; categoryConfirmed: boolean; categoryRevision: number } }>(
       "SELECT cake_mutate_category($1::uuid,$2,$3,$4::uuid,$5::uuid,$6,$7,$8::uuid) AS result",
       [options.workspace ?? workspace, options.actor ?? "a", operation, options.categoryId ?? null,
         options.parentId ?? null, options.name ?? null, options.color ?? "#f59e0b", options.transactionId ?? null],
@@ -86,14 +86,16 @@ test("カテゴリの実SQLは階層・所属・履歴を保持し、失敗し�
     await sql.query("UPDATE transactions SET settled_at='2026-10-02T00:00:00Z' WHERE id=$1", [historical]);
     const fields = "occurred_at,merchant,method,type,amount_yen,actor_user_id,expense_class,split_weights,memo,settled_at,external_id,source,created_by,created_at";
     const previous = (await sql.query(`SELECT ${fields} FROM transactions WHERE id=$1`, [historical])).rows[0];
+    const previousRevision = (await sql.query<{ category_revision: number }>("SELECT category_revision FROM transactions WHERE id=$1", [historical])).rows[0].category_revision;
     const assigned = await mutate("ASSIGN", { categoryId: vegetable.id, transactionId: historical });
     assert.equal(assigned.categoryId, vegetable.id); assert.equal(assigned.categoryConfirmed, true);
+    assert.equal(assigned.categoryRevision, previousRevision + 1);
     assert.deepEqual((await sql.query(`SELECT ${fields} FROM transactions WHERE id=$1`, [historical])).rows[0], previous);
     assert.deepEqual((await sql.query("SELECT category_id,category_confirmed FROM transactions WHERE id=$1", [historical])).rows[0],
       { category_id: vegetable.id, category_confirmed: true });
     const manual = await insert(vegetable.id, false);
     assert.equal((await sql.query<{ category_confirmed: boolean }>("SELECT category_confirmed FROM transactions WHERE id=$1", [manual])).rows[0].category_confirmed, true);
-    await mutate("ASSIGN", { transactionId: historical });
+    assert.equal((await mutate("ASSIGN", { transactionId: historical })).categoryRevision, previousRevision + 2);
     assert.deepEqual((await sql.query("SELECT category_id,category_confirmed FROM transactions WHERE id=$1", [historical])).rows[0],
       { category_id: null, category_confirmed: false });
     const before = await snapshot();

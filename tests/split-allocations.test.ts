@@ -16,7 +16,7 @@ test("1:1は奇数円の表示端数を保存割合にせず、複数明細も�
   const transactions: TransactionRecord[] = ["first", "second"].map((id) => ({
     id, occurredAt: "2026-10-11T00:00:00Z", merchant: "スーパー", method: "現金", type: "PAYMENT",
     amountYen: 101, actorUserId: "a", actorName: "A", expenseClass: "SHARED", splitWeights: weights,
-    settledAt: null, externalId: id, source: "MANUAL", categoryId: null, categoryConfirmed: false, memo: "",
+    settledAt: null, externalId: id, source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0, memo: "",
   }));
   const result = calculateSettlement(members, transactions)!;
   assert.deepEqual(result.people.map((person) => person.target), [101, 101]);
@@ -62,7 +62,7 @@ test("円で指定した支払い分が既存の清算計算にも正確に反�
   const transaction: TransactionRecord = {
     id: "amount-split", occurredAt: "2026-10-06T00:00:00Z", merchant: "スーパー", method: "現金", type: "PAYMENT", amountYen: 1001,
     actorUserId: "a", actorName: "A", expenseClass: "SHARED", splitWeights: changeSplitAmount(1001, 700, "a", { a: 1, b: 1 }, members),
-    settledAt: null, externalId: "amount-split-test", source: "MANUAL", categoryId: null, categoryConfirmed: false, memo: "",
+    settledAt: null, externalId: "amount-split-test", source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0, memo: "",
   };
   const result = calculateSettlement(members, [transaction])!;
   assert.deepEqual(result.people.map((person) => person.target), [700, 301]);

@@ -16,7 +16,7 @@ export const swipeWorkspace: WorkspaceData = {
     { id: "b", name: "B", email: "b@example.test", imageUrl: null, weight: 4, role: "MEMBER" },
   ],
   categories: [], rules: ["rule1", "rule2"].map((id, sortOrder) => ({ id, merchantContains: id, expenseClass: "SHARED", sortOrder, splitWeights: null, enabled: true })),
-  transactions: ["first", "second", "settled"].map(id => ({ id, merchant: id, amountYen: 100, occurredAt: "2026-10-18T03:00:00.000Z", method: "現金", memo: "", type: "PAYMENT", actorUserId: "a", actorName: "A", expenseClass: "SHARED", splitWeights: { a: 6, b: 4 }, settledAt: id === "settled" ? "2026-10-18T03:00:00.000Z" : null, externalId: id, source: "MANUAL", categoryId: null, categoryConfirmed: false })),
+  transactions: ["first", "second", "settled"].map(id => ({ id, merchant: id, amountYen: 100, occurredAt: "2026-10-18T03:00:00.000Z", method: "現金", memo: "", type: "PAYMENT", actorUserId: "a", actorName: "A", expenseClass: "SHARED", splitWeights: { a: 6, b: 4 }, settledAt: id === "settled" ? "2026-10-18T03:00:00.000Z" : null, externalId: id, source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0 })),
   settlement: null, settlementHistory: [],
 };
 

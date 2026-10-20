@@ -130,7 +130,7 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
           if (shouldNotify()) setNotice(success);
         } else if (payload.action === "saveTransactionCategory" && result.transactionId && originWorkspaceId) {
           updateData(current => isCurrentView() ? applyTransactionUpdate(current, originWorkspaceId, {
-            transactionId: result.transactionId, categoryId: result.categoryId, categoryConfirmed: result.categoryConfirmed,
+            transactionId: result.transactionId, categoryId: result.categoryId, categoryConfirmed: result.categoryConfirmed, categoryRevision: result.categoryRevision,
           }) : current);
           if (shouldNotify()) setNotice(success);
         } else {

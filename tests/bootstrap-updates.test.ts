@@ -14,7 +14,7 @@ function fixture(): { current: BootstrapData; metadata: BootstrapMetadata } {
   const transactions: TransactionRecord[] = [{
     id: "transaction", occurredAt: "2026-10-08T00:00:00.000Z", merchant: "スーパー", method: "現金",
     memo: "保存済み", type: "PAYMENT", amountYen: 1000, actorUserId: user.id, actorName: "A",
-    expenseClass: "SHARED", splitWeights: { a: 1, b: 1 }, settledAt: null, externalId: "manual", source: "MANUAL", categoryId: null, categoryConfirmed: false,
+    expenseClass: "SHARED", splitWeights: { a: 1, b: 1 }, settledAt: null, externalId: "manual", source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0,
   }];
   const current: BootstrapData = {
     user, workspaces: [workspace], pendingInvitations: [],

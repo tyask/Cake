@@ -4,7 +4,7 @@ import type { Action } from "./app-services/types";
 
 type CategoryAction = Action<"createCategory" | "updateCategory" | "archiveCategory" | "saveTransactionCategory">;
 type CategoryMutationResult = { category: Category } | { archivedCategoryIds: string[]; archivedCategories: Category[] }
-  | { transactionId: string; categoryId: string | null; categoryConfirmed: boolean };
+  | { transactionId: string; categoryId: string | null; categoryConfirmed: boolean; categoryRevision: number };
 
 export function createCategoryStore() {
   return {
