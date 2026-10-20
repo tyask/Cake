@@ -97,7 +97,9 @@ CREATE FUNCTION cake_mutate_category(
 RETURNS jsonb AS $cake_mutate_category$
 DECLARE
   saved categories;
-  archived_revisions jsonb;
+  archived_categories jsonb;
+  archived_ids jsonb;
+  branch_ids uuid[];
   saved_transaction uuid;
 BEGIN
   IF operation IS NULL OR operation NOT IN ('CREATE', 'UPDATE', 'ARCHIVE', 'ASSIGN') THEN
@@ -160,13 +162,20 @@ BEGIN
       SELECT id FROM categories WHERE workspace_id = target_workspace AND id = target_category
       UNION
       SELECT c.id FROM categories c JOIN branch b ON c.parent_id = b.id WHERE c.workspace_id = target_workspace
-    ), archived AS (
+    ) SELECT array_agg(id) INTO branch_ids FROM branch;
+    WITH archived AS (
       UPDATE categories SET archived_at = now(), revision = revision + 1, updated_by = actor_id, updated_at = now()
-        WHERE workspace_id = target_workspace AND id IN (SELECT id FROM branch) AND archived_at IS NULL
-        RETURNING id, revision
-    ) SELECT COALESCE(jsonb_agg(jsonb_build_object('id', id, 'revision', revision) ORDER BY id), '[]'::jsonb) INTO archived_revisions FROM archived;
-    RETURN jsonb_build_object('archivedCategoryIds', (SELECT COALESCE(jsonb_agg(value->'id'), '[]'::jsonb) FROM jsonb_array_elements(archived_revisions)),
-      'archivedCategoryRevisions', archived_revisions, 'archivedAt', now());
+        WHERE workspace_id = target_workspace AND id = ANY(branch_ids) AND archived_at IS NULL
+        RETURNING id
+    ) SELECT COALESCE(jsonb_agg(id ORDER BY id), '[]'::jsonb) INTO archived_ids FROM archived;
+    -- Acknowledge the entire branch, including already archived rows and children
+    -- whose CREATE response has not reached this browser yet.
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', id, 'parentId', parent_id, 'name', name, 'colorHex', color_hex,
+      'sortOrder', sort_order, 'archivedAt', archived_at, 'revision', revision
+    ) ORDER BY id) INTO archived_categories
+      FROM categories WHERE workspace_id = target_workspace AND id = ANY(branch_ids);
+    RETURN jsonb_build_object('archivedCategoryIds', archived_ids, 'archivedCategories', archived_categories);
   END IF;
   RETURN jsonb_build_object('category', jsonb_build_object(
     'id', saved.id, 'parentId', saved.parent_id, 'name', saved.name, 'colorHex', saved.color_hex,

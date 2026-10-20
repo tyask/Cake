@@ -30,7 +30,7 @@ test("カテゴリの実SQLは階層・所属・履歴を保持し、失敗し�
   type Category = { id: string; revision: number; parentId: string | null; name: string; colorHex: string; sortOrder: number; archivedAt: string | null };
   async function mutate(operation: string, options: { workspace?: string; actor?: string; categoryId?: string | null;
     parentId?: string | null; name?: string; color?: string; transactionId?: string } = {}) {
-    return (await sql.query<{ result: { category: Category; archivedCategoryIds: string[]; archivedCategoryRevisions: { id: string; revision: number }[]; categoryId: string | null; categoryConfirmed: boolean } }>(
+    return (await sql.query<{ result: { category: Category; archivedCategoryIds: string[]; archivedCategories: Category[]; categoryId: string | null; categoryConfirmed: boolean } }>(
       "SELECT cake_mutate_category($1::uuid,$2,$3,$4::uuid,$5::uuid,$6,$7,$8::uuid) AS result",
       [options.workspace ?? workspace, options.actor ?? "a", operation, options.categoryId ?? null,
         options.parentId ?? null, options.name ?? null, options.color ?? "#f59e0b", options.transactionId ?? null],
@@ -113,7 +113,7 @@ test("カテゴリの実SQLは階層・所属・履歴を保持し、失敗し�
   await t.test("子孫を一括停止しても過去の参照を維持し、新しい割当・子追加だけ拒否する", async () => {
     const archived = await mutate("ARCHIVE", { categoryId: food.id });
     assert.ok([food, grocery, fresh, vegetable].every(category => archived.archivedCategoryIds.includes(category.id)));
-    const revisions = new Map(archived.archivedCategoryRevisions.map(category => [category.id, category.revision]));
+    const revisions = new Map(archived.archivedCategories.map(category => [category.id, category.revision]));
     assert.equal(revisions.get(food.id), 3);
     assert.equal(revisions.get(vegetable.id), 2);
     assert.equal((await sql.query<{ archived_at: string | null }>("SELECT archived_at FROM categories WHERE id=$1", [daily.id])).rows[0].archived_at, null);
@@ -123,7 +123,9 @@ test("カテゴリの実SQLは階層・所属・履歴を保持し、失敗し�
     await assert.rejects(insert(vegetable.id), /使用停止/);
     await assert.rejects(create("追加不可", food.id), /使用停止/);
     await assert.rejects(mutate("UPDATE", { categoryId: vegetable.id, name: "変更不可" }), /使用停止/);
-    assert.deepEqual((await mutate("ARCHIVE", { categoryId: food.id })).archivedCategoryIds, []);
+    const repeated = await mutate("ARCHIVE", { categoryId: food.id });
+    assert.deepEqual(repeated.archivedCategoryIds, []);
+    assert.deepEqual(repeated.archivedCategories, archived.archivedCategories, "既に停止済みでも枝全体の確定状態を返す");
     assert.equal((await create("飲食費")).name, "飲食費");
     await mutate("ASSIGN", { transactionId: historical });
     assert.equal((await sql.query<{ category_id: string | null }>("SELECT category_id FROM transactions WHERE id=$1", [historical])).rows[0].category_id, null);

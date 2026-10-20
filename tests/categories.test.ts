@@ -2,10 +2,23 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CATEGORY_PALETTE, categoryBackground, categoryPath, flattenCategories, suggestCategoryColor } from "../lib/categories";
 import { appActionInputSchema } from "../lib/app-input";
-import type { Category } from "../lib/types";
+import { applyCategoryUpdate } from "../lib/category-updates";
+import type { BootstrapData, Category } from "../lib/types";
 
 const root: Category = { id: "root", revision: 1, name: "食費", parentId: null, colorHex: "#f97316", sortOrder: 0, archivedAt: null };
 const child: Category = { ...root, id: "child", name: "食品", parentId: root.id };
+
+test("使用停止の全DTOは未取得の子も保持し、遅い作成・編集応答で名前・色・停止状態を戻さない", () => {
+  const data = { selected: { workspace: { id: "workspace" }, categories: [root], transactions: [] } } as unknown as BootstrapData;
+  const archived = { ...root, revision: 3, name: "確定名", colorHex: "#2563eb", archivedAt: "2026-10-20T00:00:00.123Z" };
+  const archivedChild = { ...child, revision: 2, archivedAt: archived.archivedAt };
+  let next = applyCategoryUpdate(data, "workspace", { archivedCategories: [archived, archivedChild] });
+  next = applyCategoryUpdate(next, "workspace", { category: child });
+  next = applyCategoryUpdate(next, "workspace", { category: { ...root, revision: 2, name: "遅い応答" } });
+  assert.deepEqual(next.selected!.categories, [archived, archivedChild]);
+  assert.deepEqual(data.selected!.categories, [root]);
+  assert.strictEqual(applyCategoryUpdate(next, "other", { category: root }), next);
+});
 
 test("親にも末端にも分類でき、使用停止済みを含む任意階層のパスと兄弟順を表示する", () => {
   const categories = [root, child];

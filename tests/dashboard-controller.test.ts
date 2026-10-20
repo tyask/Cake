@@ -114,7 +114,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await expectState(f.page, { "selected.categories.0.id": "food", "selected.transactions.0.categoryId": null, loading: false });
       assert.equal(f.requests.length, 0);
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "archiveCategory", workspaceId: "a", categoryId: "food" }, "archive"); });
-      await f.reply(await f.take("POST"), { ok: true, archivedCategoryIds: ["food"], archivedCategoryRevisions: [{ id: "food", revision: 2 }], archivedAt: "2026-10-20T00:00:00.123Z" });
+      await f.reply(await f.take("POST"), { ok: true, archivedCategoryIds: ["food"], archivedCategories: [{ ...category, revision: 2, archivedAt: "2026-10-20T00:00:00.123Z" }] });
       await expectState(f.page, { "selected.categories.0.archivedAt": "2026-10-20T00:00:00.123Z", loading: false });
       assert.equal(f.requests.length, 0);
     });
@@ -130,9 +130,10 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await expectState(f.page, { "selected.categories.0.name": "新しい名前", "selected.categories.0.revision": 3, loading: false });
       await update(); const beforeArchive = await f.take("POST");
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "archiveCategory", workspaceId: "a", categoryId: "food" }, ""); });
-      await f.reply(await f.take("POST"), { ok: true, archivedCategoryIds: ["food"], archivedCategoryRevisions: [{ id: "food", revision: 5 }], archivedAt: "2026-10-20T00:00:00Z" });
+      await f.reply(await f.take("POST"), { ok: true, archivedCategoryIds: ["food"], archivedCategories: [{ ...category, name: "確定した名前", colorHex: "#2563eb", revision: 5, archivedAt: "2026-10-20T00:00:00Z" }] });
       await f.reply(beforeArchive, { ok: true, category: { ...category, revision: 4 } });
-      await expectState(f.page, { "selected.categories.0.archivedAt": "2026-10-20T00:00:00Z", "selected.categories.0.revision": 5, loading: false });
+      await expectState(f.page, { "selected.categories.0.archivedAt": "2026-10-20T00:00:00Z", "selected.categories.0.revision": 5,
+        "selected.categories.0.name": "確定した名前", "selected.categories.0.colorHex": "#2563eb", loading: false });
       assert.equal(f.requests.length, 0);
     });
     await scenario("保存開始前のGETは保存確定後の明細を上書きしない", async f => {
