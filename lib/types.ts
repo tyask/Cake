@@ -49,6 +49,7 @@ export interface TransactionRecord {
 
 export interface Category {
   id: string;
+  revision: number;
   parentId: string | null;
   name: string;
   colorHex: string;

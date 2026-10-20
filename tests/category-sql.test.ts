@@ -27,10 +27,10 @@ test("カテゴリの実SQLは階層・所属・履歴を保持し、失敗し�
   // This historical row predates the new columns, just like production data.
   const historical = await insert();
   await sql.exec(await readFile(new URL("014_categories.sql", directory), "utf8"));
-  type Category = { id: string; parentId: string | null; name: string; colorHex: string; sortOrder: number; archivedAt: string | null };
+  type Category = { id: string; revision: number; parentId: string | null; name: string; colorHex: string; sortOrder: number; archivedAt: string | null };
   async function mutate(operation: string, options: { workspace?: string; actor?: string; categoryId?: string | null;
     parentId?: string | null; name?: string; color?: string; transactionId?: string } = {}) {
-    return (await sql.query<{ result: { category: Category; archivedCategoryIds: string[]; categoryId: string | null; categoryConfirmed: boolean } }>(
+    return (await sql.query<{ result: { category: Category; archivedCategoryIds: string[]; archivedCategoryRevisions: { id: string; revision: number }[]; categoryId: string | null; categoryConfirmed: boolean } }>(
       "SELECT cake_mutate_category($1::uuid,$2,$3,$4::uuid,$5::uuid,$6,$7,$8::uuid) AS result",
       [options.workspace ?? workspace, options.actor ?? "a", operation, options.categoryId ?? null,
         options.parentId ?? null, options.name ?? null, options.color ?? "#f59e0b", options.transactionId ?? null],
@@ -58,6 +58,7 @@ test("カテゴリの実SQLは階層・所属・履歴を保持し、失敗し�
     assert.equal((await create("食品", daily.id)).name, "食品");
     const updated = (await mutate("UPDATE", { categoryId: food.id, name: "飲食費", color: "#ABCDEF" })).category;
     assert.equal(updated.colorHex, "#abcdef");
+    assert.equal(updated.revision, food.revision + 1);
     assert.equal((await sql.query<{ color_hex: string }>("SELECT color_hex FROM categories WHERE id=$1", [vegetable.id])).rows[0].color_hex, "#f59e0b");
     await assert.rejects(mutate("UPDATE", { categoryId: daily.id, name: "飲食費" }), /同じ階層に同じ名前/);
   });
@@ -112,6 +113,9 @@ test("カテゴリの実SQLは階層・所属・履歴を保持し、失敗し�
   await t.test("子孫を一括停止しても過去の参照を維持し、新しい割当・子追加だけ拒否する", async () => {
     const archived = await mutate("ARCHIVE", { categoryId: food.id });
     assert.ok([food, grocery, fresh, vegetable].every(category => archived.archivedCategoryIds.includes(category.id)));
+    const revisions = new Map(archived.archivedCategoryRevisions.map(category => [category.id, category.revision]));
+    assert.equal(revisions.get(food.id), 3);
+    assert.equal(revisions.get(vegetable.id), 2);
     assert.equal((await sql.query<{ archived_at: string | null }>("SELECT archived_at FROM categories WHERE id=$1", [daily.id])).rows[0].archived_at, null);
     assert.equal((await sql.query<{ category_id: string | null }>("SELECT category_id FROM transactions WHERE id=$1", [historical])).rows[0].category_id, vegetable.id);
     await sql.query("UPDATE transactions SET merchant='スーパー編集',memo='メモ編集' WHERE id=$1", [historical]);

@@ -4,7 +4,7 @@ import { CATEGORY_PALETTE, categoryBackground, categoryPath, flattenCategories, 
 import { appActionInputSchema } from "../lib/app-input";
 import type { Category } from "../lib/types";
 
-const root: Category = { id: "root", name: "食費", parentId: null, colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+const root: Category = { id: "root", revision: 1, name: "食費", parentId: null, colorHex: "#f97316", sortOrder: 0, archivedAt: null };
 const child: Category = { ...root, id: "child", name: "食品", parentId: root.id };
 
 test("親にも末端にも分類でき、使用停止済みを含む任意階層のパスと兄弟順を表示する", () => {

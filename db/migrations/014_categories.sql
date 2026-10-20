@@ -8,6 +8,7 @@ CREATE TABLE categories (
   color_hex text NOT NULL CHECK (color_hex ~ '^#[0-9a-fA-F]{6}$'),
   sort_order integer NOT NULL CHECK (sort_order >= 0),
   archived_at timestamptz,
+  revision integer NOT NULL DEFAULT 1 CHECK (revision > 0),
   created_by text NOT NULL REFERENCES app_users(id),
   updated_by text NOT NULL REFERENCES app_users(id),
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -96,7 +97,7 @@ CREATE FUNCTION cake_mutate_category(
 RETURNS jsonb AS $cake_mutate_category$
 DECLARE
   saved categories;
-  archived_ids jsonb;
+  archived_revisions jsonb;
   saved_transaction uuid;
 BEGIN
   IF operation IS NULL OR operation NOT IN ('CREATE', 'UPDATE', 'ARCHIVE', 'ASSIGN') THEN
@@ -147,7 +148,7 @@ BEGIN
       WHERE workspace_id = target_workspace AND parent_id IS NOT DISTINCT FROM parent_category
     RETURNING * INTO saved;
   ELSIF operation = 'UPDATE' THEN
-    UPDATE categories SET name = category_name, color_hex = lower(category_color), updated_by = actor_id, updated_at = now()
+    UPDATE categories SET name = category_name, color_hex = lower(category_color), revision = revision + 1, updated_by = actor_id, updated_at = now()
       WHERE workspace_id = target_workspace AND id = target_category AND archived_at IS NULL
       RETURNING * INTO saved;
     IF NOT FOUND THEN RAISE EXCEPTION 'カテゴリが存在しないか、使用停止されています。'; END IF;
@@ -160,15 +161,16 @@ BEGIN
       UNION
       SELECT c.id FROM categories c JOIN branch b ON c.parent_id = b.id WHERE c.workspace_id = target_workspace
     ), archived AS (
-      UPDATE categories SET archived_at = now(), updated_by = actor_id, updated_at = now()
+      UPDATE categories SET archived_at = now(), revision = revision + 1, updated_by = actor_id, updated_at = now()
         WHERE workspace_id = target_workspace AND id IN (SELECT id FROM branch) AND archived_at IS NULL
-        RETURNING id
-    ) SELECT COALESCE(jsonb_agg(id ORDER BY id), '[]'::jsonb) INTO archived_ids FROM archived;
-    RETURN jsonb_build_object('archivedCategoryIds', archived_ids, 'archivedAt', now());
+        RETURNING id, revision
+    ) SELECT COALESCE(jsonb_agg(jsonb_build_object('id', id, 'revision', revision) ORDER BY id), '[]'::jsonb) INTO archived_revisions FROM archived;
+    RETURN jsonb_build_object('archivedCategoryIds', (SELECT COALESCE(jsonb_agg(value->'id'), '[]'::jsonb) FROM jsonb_array_elements(archived_revisions)),
+      'archivedCategoryRevisions', archived_revisions, 'archivedAt', now());
   END IF;
   RETURN jsonb_build_object('category', jsonb_build_object(
     'id', saved.id, 'parentId', saved.parent_id, 'name', saved.name, 'colorHex', saved.color_hex,
-    'sortOrder', saved.sort_order, 'archivedAt', saved.archived_at
+    'sortOrder', saved.sort_order, 'archivedAt', saved.archived_at, 'revision', saved.revision
   ));
 EXCEPTION WHEN unique_violation THEN
   RAISE EXCEPTION '同じ階層に同じ名前のカテゴリがあります。';

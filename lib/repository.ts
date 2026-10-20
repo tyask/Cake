@@ -91,7 +91,7 @@ async function readBootstrapRow(
     COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
         'id', c.id, 'parent_id', c.parent_id, 'name', c.name, 'color_hex', c.color_hex,
-        'sort_order', c.sort_order, 'archived_at', c.archived_at
+        'sort_order', c.sort_order, 'archived_at', c.archived_at, 'revision', c.revision
       ) ORDER BY c.sort_order, c.created_at, c.id)
       FROM categories c
       JOIN selected_workspace sw ON sw.id = c.workspace_id

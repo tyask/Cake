@@ -14,10 +14,10 @@ const workspace: WorkspaceData = {
     { id: "b", name: "B", email: "b@example.test", imageUrl: null, weight: 1, role: "MEMBER" },
   ],
   categories: [
-    { id: "food", name: "食費", parentId: null, colorHex: "#f97316", sortOrder: 0, archivedAt: null },
-    { id: "fresh", name: "生鮮食品", parentId: "food", colorHex: "#fb923c", sortOrder: 0, archivedAt: null },
-    { id: "leaf", name: "野菜", parentId: "fresh", colorHex: "#fdba74", sortOrder: 0, archivedAt: null },
-    { id: "old", name: "以前のカテゴリ", parentId: null, colorHex: "#3b82f6", sortOrder: 1, archivedAt: "2026-10-20T00:00:00Z" },
+    { id: "food", name: "食費", parentId: null, revision: 1, colorHex: "#f97316", sortOrder: 0, archivedAt: null },
+    { id: "fresh", name: "生鮮食品", parentId: "food", revision: 1, colorHex: "#fb923c", sortOrder: 0, archivedAt: null },
+    { id: "leaf", name: "野菜", parentId: "fresh", revision: 1, colorHex: "#fdba74", sortOrder: 0, archivedAt: null },
+    { id: "old", name: "以前のカテゴリ", parentId: null, revision: 1, colorHex: "#3b82f6", sortOrder: 1, archivedAt: "2026-10-20T00:00:00Z" },
   ],
   rules: [],
   transactions: ["first", "settled"].map(id => ({

@@ -117,9 +117,9 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
         if ((payload.action === "createCategory" || payload.action === "updateCategory") && result.category && originWorkspaceId) {
           updateData(current => isCurrentView() ? applyCategoryUpdate(current, originWorkspaceId, { category: result.category }) : current);
           if (shouldNotify()) setNotice(success);
-        } else if (payload.action === "archiveCategory" && result.archivedCategoryIds && typeof result.archivedAt === "string" && originWorkspaceId) {
+        } else if (payload.action === "archiveCategory" && result.archivedCategoryRevisions && typeof result.archivedAt === "string" && originWorkspaceId) {
           updateData(current => isCurrentView() ? applyCategoryUpdate(current, originWorkspaceId, {
-            archivedCategoryIds: result.archivedCategoryIds, archivedAt: result.archivedAt,
+            archivedCategoryRevisions: result.archivedCategoryRevisions, archivedAt: result.archivedAt,
           }) : current);
           if (shouldNotify()) setNotice(success);
         } else if (payload.action === "saveTransaction" && result.transaction && originWorkspaceId) {

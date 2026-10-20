@@ -104,7 +104,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.reply(oldB, data("b", "stale")); await expectState(f.page, { "selected.workspace.id": "a", "selected.transactions.0.merchant": "returned", loading: false });
     });
     await scenario("カテゴリ追加は明細保存と重なっても確定値を直接反映し、追加GETに依存しない", async f => {
-      const category = { id: "food", parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+      const category = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "createCategory", workspaceId: "a", parentId: null, name: "食費", colorHex: "#f97316" }, "category"); });
       const categoryPost = await f.take("POST");
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: null }, ""); });
@@ -114,8 +114,25 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await expectState(f.page, { "selected.categories.0.id": "food", "selected.transactions.0.categoryId": null, loading: false });
       assert.equal(f.requests.length, 0);
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "archiveCategory", workspaceId: "a", categoryId: "food" }, "archive"); });
-      await f.reply(await f.take("POST"), { ok: true, archivedCategoryIds: ["food"], archivedAt: "2026-10-20T00:00:00.123Z" });
+      await f.reply(await f.take("POST"), { ok: true, archivedCategoryIds: ["food"], archivedCategoryRevisions: [{ id: "food", revision: 2 }], archivedAt: "2026-10-20T00:00:00.123Z" });
       await expectState(f.page, { "selected.categories.0.archivedAt": "2026-10-20T00:00:00.123Z", loading: false });
+      assert.equal(f.requests.length, 0);
+    });
+    await scenario("カテゴリ更新と使用停止の応答が逆順でもDBの新しいrevisionを保持する", async f => {
+      const category = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "createCategory", workspaceId: "a", parentId: null, name: "食費", colorHex: "#f97316" }, ""); });
+      await f.reply(await f.take("POST"), { ok: true, category });
+      const update = () => f.page.evaluate(() => { window.operation = window.controller.run({ action: "updateCategory", workspaceId: "a", categoryId: "food", name: "編集", colorHex: "#f97316" }, ""); });
+      await update(); const older = await f.take("POST");
+      await update(); const newer = await f.take("POST");
+      await f.reply(newer, { ok: true, category: { ...category, name: "新しい名前", revision: 3 } });
+      await f.reply(older, { ok: true, category: { ...category, name: "古い名前", revision: 2 } });
+      await expectState(f.page, { "selected.categories.0.name": "新しい名前", "selected.categories.0.revision": 3, loading: false });
+      await update(); const beforeArchive = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "archiveCategory", workspaceId: "a", categoryId: "food" }, ""); });
+      await f.reply(await f.take("POST"), { ok: true, archivedCategoryIds: ["food"], archivedCategoryRevisions: [{ id: "food", revision: 5 }], archivedAt: "2026-10-20T00:00:00Z" });
+      await f.reply(beforeArchive, { ok: true, category: { ...category, revision: 4 } });
+      await expectState(f.page, { "selected.categories.0.archivedAt": "2026-10-20T00:00:00Z", "selected.categories.0.revision": 5, loading: false });
       assert.equal(f.requests.length, 0);
     });
     await scenario("保存開始前のGETは保存確定後の明細を上書きしない", async f => {
