@@ -49,7 +49,7 @@ async function drag(page: Page, sourceId: string, targetId: string, position: st
   return preview;
 }
 
-test("カテゴリ設定のマウス・タッチ移動、入力保持、拒否・失敗・再試行・キーボードを検証する", async t => {
+test("カテゴリ設定の上下・マウス・タッチ・キーボード移動、入力保持、拒否・失敗・再試行・子孫削除を検証する", async t => {
   const bundle = await build({ entryPoints: ["tests/fixtures/category-settings.tsx"], bundle: true, write: false, outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
   const server = createServer((req, res) => {
     const asset = bundle.outputFiles.find(file => file.path.endsWith(req.url === "/bundle.css" ? "/bundle.css" : "/bundle.js"));
@@ -61,19 +61,35 @@ test("カテゴリ設定のマウス・タッチ移動、入力保持、拒否�
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(resolve => server.close(() => resolve())); throw error; });
   try {
-    for (const width of [1440, 390]) await t.test(`${width}px`, async () => {
+    for (const width of [1440, 390, 320]) await t.test(`${width}px`, async () => {
       const context = await browser.newContext({ viewport: { width, height: 1100 }, hasTouch: width < 768 });
       const page = await context.newPage();
-      const writes: Record<string, unknown>[] = [], errors: string[] = [];
+      const writes: Record<string, unknown>[] = [], errors: string[] = [], dialogs: string[] = [];
+      let acceptDialog = true;
       let saved: Category[] = [], fail = false, hold = false, release: (() => void) | undefined;
       page.setDefaultTimeout(6000);
       page.on("pageerror", error => errors.push(error.message));
+      page.on("dialog", dialog => { dialogs.push(dialog.message()); void (acceptDialog ? dialog.accept() : dialog.dismiss()); });
       try {
         await page.route("**/api/app", async route => {
           const payload = route.request().postDataJSON();
           writes.push(payload);
           if (hold) await new Promise<void>(resolve => { release = resolve; });
-          if (fail) { await route.fulfill({ status: 503, json: { error: "カテゴリ移動失敗" } }); return; }
+          if (fail) { await route.fulfill({ status: 503, json: { error: payload.action === "deleteCategory" ? "カテゴリ削除失敗" : "カテゴリ移動失敗" } }); return; }
+          if (payload.action === "deleteCategory") {
+            const deleted = new Set<string>([payload.categoryId]);
+            for (let changed = true; changed;) {
+              changed = false;
+              for (const category of saved) if (category.parentId && deleted.has(category.parentId) && !deleted.has(category.id)) { deleted.add(category.id); changed = true; }
+            }
+            saved = saved.filter(category => !deleted.has(category.id));
+            await route.fulfill({ json: { ok: true, deletedCategoryIds: [...deleted], detachedTransactions: [] } }); return;
+          }
+          if (payload.action === "createCategory") {
+            const category: Category = { id: "new-root", name: payload.name, colorHex: payload.colorHex, parentId: payload.parentId, sortOrder: 10, revision: 1, archivedAt: null };
+            saved.push(category);
+            await route.fulfill({ json: { ok: true, category } }); return;
+          }
           if (payload.action === "updateCategory") {
             const category = saved.find(category => category.id === payload.categoryId)!;
             Object.assign(category, { name: payload.name, colorHex: payload.colorHex, revision: category.revision + 1 });
@@ -83,12 +99,12 @@ test("カテゴリ設定のマウス・タッチ移動、入力保持、拒否�
           const before = saved.map(category => ({ ...category }));
           const source = saved.find(category => category.id === payload.categoryId)!;
           const oldParentId = source.parentId;
-          const siblings = saved.filter(category => category.parentId === payload.parentId && category.id !== source.id).sort((a, b) => a.sortOrder - b.sortOrder);
+          const siblings = saved.filter(category => !category.archivedAt && category.parentId === payload.parentId && category.id !== source.id).sort((a, b) => a.sortOrder - b.sortOrder);
           const at = payload.beforeCategoryId === null ? siblings.length : siblings.findIndex(category => category.id === payload.beforeCategoryId);
           assert.ok(at >= 0);
           siblings.splice(at, 0, source);
           source.parentId = payload.parentId;
-          const oldSiblings = saved.filter(category => category.parentId === oldParentId && category.id !== source.id).sort((a, b) => a.sortOrder - b.sortOrder);
+          const oldSiblings = saved.filter(category => !category.archivedAt && category.parentId === oldParentId && category.id !== source.id).sort((a, b) => a.sortOrder - b.sortOrder);
           oldSiblings.forEach((category, index) => { category.sortOrder = index; });
           siblings.forEach((category, index) => { category.sortOrder = index; });
           saved.forEach(category => { const previous = before.find(row => row.id === category.id)!; if (previous.parentId !== category.parentId || previous.sortOrder !== category.sortOrder) category.revision++; });
@@ -97,6 +113,39 @@ test("カテゴリ設定のマウス・タッチ移動、入力保持、拒否�
         await page.goto(origin);
         saved = JSON.parse((await page.locator("#saved-categories").textContent())!);
         const waitParent = async (id: string, parentId: string | null) => page.waitForFunction(({ id, parentId }) => JSON.parse(document.getElementById("saved-categories")!.textContent!).find((category: Category) => category.id === id).parentId === parentId, { id, parentId });
+        const waitOrder = async (id: string, sortOrder: number) => page.waitForFunction(({ id, sortOrder }) => JSON.parse(document.getElementById("saved-categories")!.textContent!).find((category: Category) => category.id === id).sortOrder === sortOrder, { id, sortOrder });
+        assert.equal(await page.locator('[data-category-drop-id="root"]').count(), 0);
+        assert.equal(await page.getByText(/最上位の末尾|使用停止/).count(), 0);
+        assert.equal(await page.getByRole("button", { name: "食費を上へ", exact: true }).isDisabled(), true);
+        assert.equal(await page.getByRole("button", { name: "娯楽を下へ", exact: true }).isDisabled(), true, "旧使用停止カテゴリは兄弟順に含めない");
+        assert.equal(await page.getByRole("button", { name: "食費 › 食料品 › 生鮮食品を上へ", exact: true }).isDisabled(), true);
+        assert.equal(await page.getByRole("button", { name: "食費 › 食料品 › お菓子を下へ", exact: true }).isDisabled(), true);
+        await page.getByRole("button", { name: "食費を下へ", exact: true }).click();
+        await waitOrder("food", 1);
+        assert.deepEqual(writes.at(-1), { action: "moveCategory", workspaceId: "workspace", categoryId: "food", parentId: null, beforeCategoryId: "fun" });
+        await page.getByRole("button", { name: "食費を上へ", exact: true }).click();
+        await waitOrder("food", 0);
+        assert.deepEqual(writes.at(-1), { action: "moveCategory", workspaceId: "workspace", categoryId: "food", parentId: null, beforeCategoryId: "daily" });
+        await page.getByRole("button", { name: "食費 › 食料品を選択", exact: true }).click();
+        await page.getByLabel("カテゴリ名", { exact: true }).fill("並べ替え中の名前");
+        const beforeStepDialogs = dialogs.length;
+        await page.getByRole("button", { name: "食費 › 保存前の名前を上へ", exact: true }).click();
+        await waitOrder("old-conflict", 0);
+        assert.deepEqual(writes.at(-1), { action: "moveCategory", workspaceId: "workspace", categoryId: "old-conflict", parentId: "food", beforeCategoryId: "grocery" });
+        assert.equal(await page.getByLabel("カテゴリ名", { exact: true }).inputValue(), "並べ替え中の名前");
+        assert.equal(dialogs.length, beforeStepDialogs, "並べ替えは編集中の入力を破棄しない");
+        fail = true;
+        await page.getByRole("button", { name: "食費 › 保存前の名前を下へ", exact: true }).click();
+        await page.getByRole("alert").filter({ hasText: "カテゴリ移動失敗" }).waitFor();
+        assert.equal(saved.find(category => category.id === "old-conflict")!.sortOrder, 0);
+        fail = false; hold = true;
+        await page.getByRole("button", { name: "移動を再試行", exact: true }).click();
+        await page.waitForFunction(() => document.querySelector('section[aria-busy="true"]'));
+        assert.equal(await page.getByRole("button", { name: "食費を下へ", exact: true }).isDisabled(), true);
+        assert.equal(await page.getByRole("button", { name: "削除する", exact: true }).isDisabled(), true);
+        assert.ok(release); hold = false; release();
+        await waitOrder("old-conflict", 1);
+        assert.equal(await page.getByLabel("カテゴリ名", { exact: true }).inputValue(), "並べ替え中の名前");
         if (width === 1440) {
           await page.getByRole("button", { name: "食費 › 食料品を選択", exact: true }).click();
           await page.getByLabel("カテゴリ名", { exact: true }).fill("保存前の名前");
@@ -111,8 +160,7 @@ test("カテゴリ設定のマウス・タッチ移動、入力保持、拒否�
           assert.match((await drag(page, "grocery", "leaf", "inside", false, true))!, /子孫/);
           await page.getByRole("alert").filter({ hasText: "子孫" }).waitFor();
           assert.match((await drag(page, "grocery", "daily", "inside", false, true))!, /同じ名前/);
-          await page.getByLabel("使用停止も表示").check();
-          assert.match((await drag(page, "grocery", "archived", "inside", false, true))!, /使用停止/);
+          assert.match((await drag(page, "grocery", "archived", "inside", false, true))!, /変更できない/);
           assert.equal(writes.length, beforeRejected, "無効な移動はAPIへ送らない");
 
           await drag(page, "grocery", "books", "inside");
@@ -126,7 +174,7 @@ test("カテゴリ設定のマウス・タッチ移動、入力保持、拒否�
           assert.equal(writes.at(-1)?.action, "updateCategory", "移動前の親でdraftの同名判定をしない");
 
           fail = true;
-          await drag(page, "leaf", "root", "inside");
+          await drag(page, "leaf", "daily", "before");
           await page.getByRole("alert").filter({ hasText: "カテゴリ移動失敗" }).waitFor();
           assert.equal(saved.find(row => row.id === "leaf")!.parentId, "fresh");
           assert.equal(await page.getByRole("heading", { name: "カテゴリと色を設定", exact: true }).isVisible(), true, "編集欄を閉じていても失敗が見える");
@@ -143,6 +191,8 @@ test("カテゴリ設定のマウス・タッチ移動、入力保持、拒否�
           const handle = page.locator('[data-category-move-handle="leaf"]');
           await handle.focus(); await handle.press("Enter");
           const moveForm = page.getByRole("form", { name: "カテゴリを移動", exact: true });
+          assert.equal(await moveForm.locator("option").filter({ hasText: "最上位の末尾" }).count(), 0);
+          assert.equal(await moveForm.getByRole("button", { name: "この位置へ移動", exact: true }).isDisabled(), true);
           await moveForm.getByLabel("移動先のカテゴリ", { exact: true }).selectOption("fresh");
           await moveForm.getByLabel("子カテゴリにする（末尾）", { exact: true }).check();
           await moveForm.getByRole("button", { name: "この位置へ移動", exact: true }).click();
@@ -184,8 +234,45 @@ test("カテゴリ設定のマウス・タッチ移動、入力保持、拒否�
           await moveForm.getByLabel("後に並べる", { exact: true }).check();
           await moveForm.getByRole("button", { name: "この位置へ移動", exact: true }).click();
           await page.waitForFunction(() => JSON.parse(document.getElementById("saved-categories")!.textContent!).find((category: Category) => category.id === "movie").sortOrder === 1);
-          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width);
         }
+        await page.locator('[data-category-id="fresh"]').getByRole("button", { name: /を選択$/ }).click();
+        await page.getByLabel("カテゴリ名", { exact: true }).fill("削除前の下書き");
+        acceptDialog = false;
+        const beforeCancel = writes.length;
+        await page.getByRole("button", { name: "削除する", exact: true }).click();
+        assert.equal(writes.length, beforeCancel);
+        assert.match(dialogs.at(-1)!, /生鮮食品.*子カテゴリ.*2件.*削除.*清算済み.*未分類.*未保存/);
+        assert.equal(await page.getByLabel("カテゴリ名", { exact: true }).inputValue(), "削除前の下書き");
+        acceptDialog = true; fail = true;
+        await page.getByRole("button", { name: "削除する", exact: true }).click();
+        await page.getByRole("alert").filter({ hasText: "カテゴリ削除失敗" }).waitFor();
+        assert.equal(await page.getByLabel("カテゴリ名", { exact: true }).inputValue(), "削除前の下書き");
+        assert.equal(saved.some(category => category.id === "fresh"), true);
+        fail = false; hold = true;
+        await page.getByRole("button", { name: "削除する", exact: true }).click();
+        await page.waitForFunction(() => document.querySelector('section[aria-busy="true"]'));
+        assert.equal(await page.getByRole("button", { name: "削除する", exact: true }).isDisabled(), true);
+        assert.equal(await page.getByRole("button", { name: "保存中…", exact: true }).isDisabled(), true);
+        assert.ok(release); hold = false; release();
+        await page.locator('[data-category-id="fresh"]').waitFor({ state: "hidden" });
+        assert.equal(await page.locator('[data-category-id="leaf"]').count(), 0);
+        assert.equal(saved.some(category => category.id === "grocery"), true);
+        assert.deepEqual(writes.at(-1), { action: "deleteCategory", workspaceId: "workspace", categoryId: "fresh" });
+        await page.getByRole("button", { name: "以前のカテゴリを選択", exact: true }).click();
+        await page.getByText("このカテゴリは変更できません。削除はできます。", { exact: true }).waitFor();
+        assert.equal(await page.getByLabel("カテゴリ名", { exact: true }).isDisabled(), true);
+        assert.equal(await page.getByRole("button", { name: "以前のカテゴリを上へ", exact: true }).isDisabled(), true);
+        assert.equal(await page.locator('[data-category-move-handle="archived"]').isDisabled(), true);
+        await page.getByRole("button", { name: "削除する", exact: true }).click();
+        await page.locator('[data-category-id="archived"]').waitFor({ state: "hidden" });
+        await page.getByRole("button", { name: "＋ 大分類を追加", exact: true }).click();
+        await page.getByLabel("カテゴリ名", { exact: true }).fill("新しい大分類");
+        await page.getByRole("button", { name: "カテゴリを追加", exact: true }).click();
+        await page.locator('[data-category-id="new-root"]').waitFor();
+        assert.equal(writes.at(-1)?.action, "createCategory");
+        assert.equal(writes.at(-1)?.parentId, null);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width);
+        assert.equal(await page.locator('[data-category-tree-scroll]').evaluate(element => element.scrollWidth <= element.clientWidth), true, "ツリーも横にあふれない");
         assert.deepEqual(errors, []);
       } finally { release?.(); await context.close(); }
     });

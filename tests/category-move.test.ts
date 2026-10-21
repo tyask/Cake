@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { prepareCategoryMove } from "../lib/category-move";
+import { prepareCategoryMove, prepareCategorySiblingMoves } from "../lib/category-move";
 import type { Category } from "../lib/types";
 
 const category = (id: string, parentId: string | null = null, sortOrder = 0, extra: Partial<Category> = {}): Category => ({
@@ -28,11 +28,11 @@ test("自分・子孫・停止済み・同階層同名を拒否し、深い階�
   assert.match(move.destination({ categoryId: "source", position: "before" }).error!, /自分自身/);
   assert.match(move.destination({ categoryId: "deep-2999", position: "inside" }).error!, /子孫/);
   assert.match(move.destination({ categoryId: "deep-2999", position: "after" }).error!, /子孫/);
-  assert.match(move.destination({ categoryId: "archived", position: "inside" }).error!, /使用停止/);
+  assert.match(move.destination({ categoryId: "archived", position: "inside" }).error!, /変更できない/);
   assert.match(move.destination({ categoryId: "missing", position: "inside" }).error!, /削除/);
   assert.match(move.destination({ categoryId: "other", position: "inside" }).error!, /同じ名前/);
   assert.equal(move.destination({ categoryId: "root", position: "after" }).error, null);
-  assert.match(prepareCategoryMove(rows, "archived").destination({ categoryId: null, position: "inside" }).error!, /使用停止/);
+  assert.match(prepareCategoryMove(rows, "archived").destination({ categoryId: null, position: "inside" }).error!, /変更できません/);
 });
 
 test("同じ親で隣接する移動は通信不要と判定し、移動元自身を基準にしない", () => {
@@ -44,4 +44,20 @@ test("同じ親で隣接する移動は通信不要と判定し、移動元自�
   assert.equal(move.destination({ categoryId: "c", position: "before" }).unchanged, true);
   assert.equal(move.destination({ categoryId: "c", position: "after" }).unchanged, false);
   assert.equal(prepareCategoryMove(rows, "c").destination({ categoryId: null, position: "inside" }).unchanged, true);
+});
+
+test("上下操作は同じ親の使用中カテゴリだけを1つずつ移動し、両端と単独のカテゴリは無効にする", () => {
+  const rows = [category("c", null, 3), category("a"), category("archived", null, 1, { archivedAt: "2026-10-20T00:00:00Z" }), category("b", null, 2), category("child", "a")];
+  const original = structuredClone(rows);
+  const siblings = prepareCategorySiblingMoves(rows);
+  assert.deepEqual(siblings.get("a"), { up: null, down: { categoryId: "b", position: "after" } });
+  assert.deepEqual(siblings.get("b"), { up: { categoryId: "a", position: "before" }, down: { categoryId: "c", position: "after" } });
+  assert.deepEqual(siblings.get("c"), { up: { categoryId: "b", position: "before" }, down: null });
+  assert.deepEqual(siblings.get("child"), { up: null, down: null });
+  assert.equal(siblings.has("archived"), false);
+  const down = prepareCategoryMove(rows, "a").destination(siblings.get("a")!.down!);
+  assert.deepEqual([down.parentId, down.beforeCategoryId, down.error, down.unchanged], [null, "c", null, false]);
+  const up = prepareCategoryMove(rows, "c").destination(siblings.get("c")!.up!);
+  assert.deepEqual([up.parentId, up.beforeCategoryId, up.error, up.unchanged], [null, "b", null, false]);
+  assert.deepEqual(rows, original);
 });

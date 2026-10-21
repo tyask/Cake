@@ -196,6 +196,198 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await expectState(f.page, { "selected.workspace.id": "b", "selected.categories": [], notice: null, loading: false });
       assert.equal(f.requests.length, 0);
     });
+    await scenario("カテゴリ削除は未取得の子と新規明細も記憶し、遅い追加・編集・移動・割当・GETで復活させない", async f => {
+      const food = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+      const child = { ...food, id: "child", parentId: "food", name: "子" };
+      const other = { ...food, id: "other", name: "保持するカテゴリ", sortOrder: 1 };
+      const initial = data(); initial.selected!.categories = [food, other];
+      initial.selected!.transactions[0] = { ...initial.selected!.transactions[0], categoryId: food.id, categoryConfirmed: true, categoryRevision: 1 };
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+      await f.reply(await f.take(), initial);
+      await expectState(f.page, { "selected.transactions.0.categoryId": "food" });
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "createCategory", workspaceId: "a", parentId: "food", name: "子", colorHex: "#f97316" }, ""); });
+      const create = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "updateCategory", workspaceId: "a", categoryId: "food", name: "改名", colorHex: "#f97316" }, ""); });
+      const update = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "moveCategory", workspaceId: "a", categoryId: "food", parentId: null, beforeCategoryId: null }, ""); });
+      const move = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransaction", workspaceId: "a", occurredAt: "2026-10-19T00:00:00Z", merchant: "新規", method: "現金", type: "PAYMENT", amountYen: 200, actorUserId: "user", categoryId: "food" }, ""); });
+      const insert = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: "food" }, ""); });
+      const assignment = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+      const get = await f.take();
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "deleteCategory", workspaceId: "a", categoryId: "food" }, "削除しました。"); });
+      const deletion = await f.take("POST");
+      assert.deepEqual(deletion.request().postDataJSON(), { action: "deleteCategory", workspaceId: "a", categoryId: "food" });
+      await f.reply(deletion, { ok: true, deletedCategoryIds: ["food", "child"], detachedTransactions: [
+        { transactionId: "transaction-a", categoryId: null, categoryConfirmed: false, categoryRevision: 3 },
+        { transactionId: "new-transaction", categoryId: null, categoryConfirmed: false, categoryRevision: 2 },
+      ] });
+      await expectState(f.page, { "selected.categories": [other], "selected.transactions.0.categoryId": null, "selected.transactions.0.categoryRevision": 3 });
+      await f.reply(create, { ok: true, category: child, ancestorCategories: [food] });
+      await f.reply(update, { ok: true, category: { ...food, revision: 2 }, ancestorCategories: [] });
+      await f.reply(move, { ok: true, movedCategories: [{ ...food, revision: 3 }, child, other] });
+      await f.reply(assignment, { ok: true, transactionId: "transaction-a", categoryId: "food", categoryConfirmed: true, categoryRevision: 2 });
+      const transaction = { ...initial.selected!.transactions[0], id: "new-transaction", occurredAt: "2026-10-19T00:00:00Z" };
+      await f.reply(insert, { ok: true, transaction });
+      await f.reply(get, initial);
+      await expectState(f.page, { "selected.categories": [other], "selected.transactions.0.id": "new-transaction", "selected.transactions.0.categoryId": null,
+        "selected.transactions.0.categoryRevision": 2, "selected.transactions.1.categoryId": null, "selected.transactions.1.categoryRevision": 3, loading: false });
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: "other" }, ""); });
+      await f.reply(await f.take("POST"), { ok: true, transactionId: "transaction-a", categoryId: "other", categoryConfirmed: true, categoryRevision: 4 });
+      await expectState(f.page, { "selected.transactions.1.categoryId": "other", "selected.transactions.1.categoryRevision": 4, loading: false });
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
+      await f.reply(await f.take(), data("b"));
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("a"); });
+      await f.reply(await f.take(), initial);
+      await expectState(f.page, { "selected.categories": [other], "selected.transactions.0.categoryId": null, "selected.transactions.0.categoryRevision": 3, loading: false });
+      assert.equal(f.requests.length, 0);
+    });
+    await scenario("別workspaceへ切り替えた後のカテゴリ削除応答は現在の家計を変えず、戻った後のGETにも削除を保持する", async f => {
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "deleteCategory", workspaceId: "a", categoryId: "food" }, "古い削除通知"); });
+      const deletion = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
+      await f.reply(await f.take(), data("b"));
+      await f.reply(deletion, { ok: true, deletedCategoryIds: ["food"], detachedTransactions: [
+        { transactionId: "transaction-a", categoryId: null, categoryConfirmed: false, categoryRevision: 2 },
+      ] });
+      await expectState(f.page, { "selected.workspace.id": "b", "selected.categories": [], "selected.transactions.0.categoryRevision": 0, notice: null, loading: false });
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("a"); });
+      const old = data(); old.selected!.categories = [{ id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null }];
+      old.selected!.transactions[0] = { ...old.selected!.transactions[0], categoryId: "food", categoryConfirmed: true, categoryRevision: 1 };
+      await f.reply(await f.take(), old);
+      await expectState(f.page, { "selected.workspace.id": "a", "selected.categories": [], "selected.transactions.0.categoryId": null, "selected.transactions.0.categoryRevision": 2, notice: null, loading: false });
+    });
+    await scenario("metadataで別ブラウザのカテゴリ削除を検知したらfullで実際の明細revisionを取得する", async f => {
+      const initial = data(); initial.selected!.categories = [{ id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null }];
+      initial.selected!.transactions[0] = { ...initial.selected!.transactions[0], categoryId: "food", categoryConfirmed: true, categoryRevision: 1 };
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+      await f.reply(await f.take(), initial);
+      await expectState(f.page, { "selected.transactions.0.categoryId": "food" });
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "updateCategory", workspaceId: "a", categoryId: "food", name: "遅い編集", colorHex: "#f97316" }, ""); });
+      const update = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: "food" }, ""); });
+      const assignment = await f.take("POST");
+      await f.page.evaluate(() => window.controller.openTab("settings"));
+      const metadataRequest = await f.take();
+      assert.equal(new URL(metadataRequest.request().url()).searchParams.get("scope"), "metadata");
+      await f.reply(metadataRequest, metadata());
+      const full = await f.take();
+      assert.equal(new URL(full.request().url()).searchParams.has("scope"), false);
+      const detached = data(); detached.selected!.transactions[0].categoryRevision = 3;
+      await f.reply(full, detached);
+      await expectState(f.page, { "selected.categories": [], "selected.transactions.0.categoryId": null, "selected.transactions.0.categoryRevision": 3 });
+      await f.reply(update, { ok: true, category: { ...initial.selected!.categories[0], name: "遅い編集", revision: 2 } });
+      await f.reply(assignment, { ok: true, transactionId: "transaction-a", categoryId: "food", categoryConfirmed: true, categoryRevision: 2 });
+      await expectState(f.page, { "selected.categories": [], "selected.transactions.0.categoryId": null, "selected.transactions.0.categoryRevision": 3, loading: false });
+      assert.equal(f.requests.length, 0);
+    });
+    await scenario("外部カテゴリ削除後のfull取得に失敗したら、部分metadataを採用せず元の一覧と明細を保持する", async f => {
+      const initial = data(); initial.selected!.categories = [{ id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null }];
+      initial.selected!.transactions[0] = { ...initial.selected!.transactions[0], categoryId: "food", categoryConfirmed: true, categoryRevision: 1 };
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+      await f.reply(await f.take(), initial);
+      await expectState(f.page, { "selected.transactions.0.categoryId": "food" });
+      await f.page.evaluate(() => window.controller.openTab("settings"));
+      await f.reply(await f.take(), metadata());
+      await f.reply(await f.take(), { error: "最新の明細を取得できませんでした。" }, 400);
+      await expectState(f.page, { "selected.categories": initial.selected!.categories, "selected.transactions.0.categoryId": "food",
+        "selected.transactions.0.categoryRevision": 1, notice: "最新の明細を取得できませんでした。", loading: false });
+      assert.equal(f.requests.length, 0);
+    });
+    await scenario("既知明細に参照がなくてもカテゴリ消失をfull照合し、未取得の子・孫と新規明細の旧応答を除外する", async f => {
+      const food = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+      const survivor = { ...food, id: "survivor", parentId: "food", name: "削除前に別階層へ移動した子" };
+      const initial = data(); initial.selected!.categories = [food, survivor];
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+      await f.reply(await f.take(), initial);
+      await expectState(f.page, { "selected.categories.0.id": "food" });
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "createCategory", workspaceId: "a", parentId: "food", name: "未取得の子", colorHex: "#f97316" }, ""); });
+      const create = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "moveCategory", workspaceId: "a", categoryId: "food", parentId: null, beforeCategoryId: null }, ""); });
+      const move = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransaction", workspaceId: "a", occurredAt: "2026-10-19T00:00:00Z", merchant: "新規", method: "現金", type: "PAYMENT", amountYen: 200, actorUserId: "user", categoryId: "food" }, ""); });
+      const insert = await f.take("POST");
+      await f.page.evaluate(() => window.controller.openTab("settings"));
+      const nextMetadata = metadata(); nextMetadata.selected!.categories = [{ ...survivor, parentId: null, revision: 2 }];
+      await f.reply(await f.take(), nextMetadata);
+      const full = await f.take();
+      assert.equal(new URL(full.request().url()).searchParams.has("scope"), false);
+      const detached = data(); detached.selected!.categories = nextMetadata.selected!.categories;
+      detached.selected!.transactions.unshift({ ...detached.selected!.transactions[0], id: "new-transaction", occurredAt: "2026-10-19T00:00:00Z", categoryRevision: 2 });
+      await f.reply(full, detached);
+      await expectState(f.page, { "selected.categories": detached.selected!.categories, "selected.transactions.0.id": "new-transaction" });
+      const child = { ...food, id: "unseen-child", parentId: "food", name: "未取得の子" };
+      const grandchild = { ...child, id: "unseen-grandchild", parentId: child.id };
+      // The root MOVE response arrives before CREATE reveals the deleted parent.
+      await f.reply(move, { ok: true, movedCategories: [{ ...child, parentId: null }, { ...grandchild, parentId: null }] });
+      const reconciliation = await f.take();
+      assert.equal(new URL(reconciliation.request().url()).searchParams.has("scope"), false);
+      await f.reply(reconciliation, detached);
+      await expectState(f.page, { "selected.categories": detached.selected!.categories });
+      await f.reply(create, { ok: true, category: grandchild, ancestorCategories: [survivor, child, food] });
+      await f.reply(insert, { ok: true, transaction: { ...detached.selected!.transactions[0], categoryId: "food", categoryConfirmed: true, categoryRevision: 1 } });
+      await expectState(f.page, { "selected.categories": detached.selected!.categories, "selected.transactions.0.categoryId": null, "selected.transactions.0.categoryRevision": 2, loading: false });
+      assert.equal(f.requests.length, 0);
+    });
+    await scenario("削除前に別階層へ移った未取得の子は、遅い作成応答を完全GETで照合して最新の親を保持する", async f => {
+      const food = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+      const child = { ...food, id: "child", parentId: "food", name: "生存する子" };
+      const initial = data(); initial.selected!.categories = [food];
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+      await f.reply(await f.take(), initial);
+      await expectState(f.page, { "selected.categories.0.id": "food" });
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "createCategory", workspaceId: "a", parentId: "food", name: "生存する子", colorHex: "#f97316" }, "追加しました。"); });
+      const create = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "deleteCategory", workspaceId: "a", categoryId: "food" }, ""); });
+      await f.reply(await f.take("POST"), { ok: true, deletedCategoryIds: ["food"], detachedTransactions: [] });
+      await expectState(f.page, { "selected.categories": [] });
+      await f.reply(create, { ok: true, category: child, ancestorCategories: [food] });
+      const latest = data(); latest.selected!.categories = [{ ...child, parentId: null, revision: 2 }];
+      await f.reply(await f.take(), latest);
+      await expectState(f.page, { "selected.categories": latest.selected!.categories, notice: "追加しました。", loading: false });
+      assert.equal(f.requests.length, 0);
+    });
+    await scenario("成功済みカテゴリ追加の照合GETが失敗しても再送を促さず、保存済みと未同期を通知する", async f => {
+      const food = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "deleteCategory", workspaceId: "a", categoryId: "food" }, ""); });
+      await f.reply(await f.take("POST"), { ok: true, deletedCategoryIds: ["food"], detachedTransactions: [] });
+      await expectState(f.page, { loading: false });
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+      await f.reply(await f.take(), data());
+      await f.page.evaluate(() => window.operation);
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "createCategory", workspaceId: "a", parentId: null, name: "新しいカテゴリ", colorHex: "#f97316" }, "追加しました。"); });
+      await f.reply(await f.take("POST"), { ok: true, category: { ...food, id: "new-category", name: "新しいカテゴリ" } });
+      await f.reply(await f.take(), { error: "取得失敗" }, 400);
+      await f.page.evaluate(() => window.operation);
+      await expectState(f.page, { "selected.categories": [], notice: "変更は保存されました。最新の状態を取得できないため、画面を更新してください。", loading: false });
+      assert.equal(f.requests.length, 0);
+    });
+    await scenario("カテゴリ照合GETが別保存で無効になったら旧カテゴリを採用せず、再取得を案内する", async f => {
+      const food = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "deleteCategory", workspaceId: "a", categoryId: "food" }, ""); });
+      await f.reply(await f.take("POST"), { ok: true, deletedCategoryIds: ["food"], detachedTransactions: [] });
+      await expectState(f.page, { loading: false });
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+      const snapshot = data(); snapshot.selected!.categories = [{ ...food, id: "another-category" }];
+      await f.reply(await f.take(), snapshot);
+      await f.page.evaluate(() => window.operation);
+      // A subsequent local deletion must retain the prior complete snapshot.
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "deleteCategory", workspaceId: "a", categoryId: "another-category" }, ""); });
+      await f.reply(await f.take("POST"), { ok: true, deletedCategoryIds: ["another-category"], detachedTransactions: [] });
+      await expectState(f.page, { "selected.categories": [], loading: false });
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "moveCategory", workspaceId: "a", categoryId: "other", parentId: null, beforeCategoryId: null }, "移動しました。"); });
+      await f.reply(await f.take("POST"), { ok: true, movedCategories: [{ ...food, id: "unknown-category" }] });
+      const reconciliation = await f.take();
+      await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionMemo", workspaceId: "a", transactionId: "transaction-a", memo: "確定メモ" }, ""); });
+      await f.reply(await f.take("POST"), { ok: true, transactionId: "transaction-a", memo: "確定メモ" });
+      const old = data(); old.selected!.categories = [{ ...food, id: "unknown-category" }];
+      await f.reply(reconciliation, old);
+      await expectState(f.page, { "selected.categories": [], "selected.transactions.0.memo": "確定メモ",
+        notice: "変更は保存されました。画面を更新して最新の状態を確認してください。", loading: false });
+      assert.equal(f.requests.length, 0);
+    });
     await scenario("保存開始前のGETは保存確定後の明細を上書きしない", async f => {
       await f.page.evaluate(() => window.controller.openTab("transactions")); const older = await f.take();
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransaction", workspaceId: "a", occurredAt: "2026-10-18T00:00:42.123Z", merchant: "saved", method: "現金", type: "PAYMENT", amountYen: 200, actorUserId: "user" }, "saved"); });

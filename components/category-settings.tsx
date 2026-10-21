@@ -5,7 +5,7 @@ import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, us
 import type { RunAppAction } from "@/lib/app-input";
 import { categoryColorSchema, categoryNameSchema } from "@/lib/category-input";
 import { CATEGORY_NAME_MAX_LENGTH, CATEGORY_PALETTE, categoryPath, flattenCategories, suggestCategoryColor } from "@/lib/categories";
-import { prepareCategoryMove, type CategoryMoveDestination, type CategoryMovePosition, type CategoryMoveTarget } from "@/lib/category-move";
+import { prepareCategoryMove, prepareCategorySiblingMoves, type CategoryMoveDestination, type CategoryMovePosition, type CategoryMoveTarget } from "@/lib/category-move";
 import type { Category } from "@/lib/types";
 import styles from "./category-settings.module.css";
 
@@ -37,7 +37,6 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
   const [busy, setBusy] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [failedMove, setFailedMove] = useState<Move | null>(null);
   const [moveId, setMoveId] = useState<string | null>(null);
@@ -57,19 +56,22 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
   const prepared = useMemo(() => {
     const flat = flattenCategories(categories);
     const byId = new Map(categories.map(category => [category.id, category]));
-    const parents = new Set(categories.filter(category => showArchived || !category.archivedAt).map(category => category.parentId));
+    const parents = new Set(categories.map(category => category.parentId));
+    const siblingMoves = prepareCategorySiblingMoves(categories);
+    return { flat, byId, parents, siblingMoves };
+  }, [categories]);
+  const visibleCategories = useMemo(() => {
     let hiddenDepth: number | null = null;
-    const visible: typeof flat = [];
-    for (const entry of flat) {
+    const visible: typeof prepared.flat = [];
+    for (const entry of prepared.flat) {
       const { category, depth } = entry;
       if (hiddenDepth !== null && depth > hiddenDepth) continue;
       hiddenDepth = null;
-      if (!showArchived && category.archivedAt) continue;
       if (collapsed.has(category.id)) hiddenDepth = depth;
       visible.push(entry);
     }
-    return { flat, visible, byId, parents };
-  }, [categories, collapsed, showArchived]);
+    return visible;
+  }, [prepared, collapsed]);
   const selected = editor?.categoryId ? prepared.byId.get(editor.categoryId) : undefined;
   // An existing draft follows its category's confirmed parent after a move.
   const editorParentId = editor?.categoryId ? selected?.parentId ?? null : editor?.parentId ?? null;
@@ -85,7 +87,7 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
   useEffect(() => { if (editorKey) nameInput.current?.focus(); }, [editorKey]);
   useEffect(() => { if (moveId) moveInput.current?.focus(); }, [moveId]);
   const moving = useMemo(() => prepareCategoryMove(categories, dragId ?? moveId), [categories, dragId, moveId]);
-  const moveDestination = moving.destination(moveTarget);
+  const moveDestination = moveTarget.categoryId ? moving.destination(moveTarget) : { ...moving.destination(moveTarget), error: "移動先のカテゴリを選択してください。" };
   const hoveredDestination = hoverTarget ? moving.destination(hoverTarget) : null;
 
   function beginMove(category: Category) {
@@ -98,9 +100,10 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
 
   async function moveCategory(move: Move) {
     if (pending.current) return;
-    const destination = prepareCategoryMove(categories, move.sourceId).destination(move.target);
     setError(null);
     setFailedMove(null);
+    if (!move.target.categoryId) { setError("移動先のカテゴリを選択してください。"); return; }
+    const destination = prepareCategoryMove(categories, move.sourceId).destination(move.target);
     if (destination.error) { setError(destination.error); return; }
     if (destination.unchanged) return;
     pending.current = true;
@@ -178,8 +181,8 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
     }
   }
 
-  async function archive() {
-    if (!selected || selected.archivedAt || pending.current) return;
+  async function deleteCategory() {
+    if (!selected || pending.current) return;
     const descendants = new Map<string | null, Category[]>();
     for (const category of categories) {
       const siblings = descendants.get(category.parentId) ?? [];
@@ -193,19 +196,20 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
       const category = stack.pop()!;
       if (visited.has(category.id)) continue;
       visited.add(category.id);
-      if (!category.archivedAt) count += 1;
+      count += 1;
       stack.push(...descendants.get(category.id) ?? []);
     }
-    if (!confirm(`「${selected.name}」${count > 1 ? `と子カテゴリを合わせた${count}件` : ""}を使用停止にしますか？過去の明細の分類は残ります。${dirty ? "未保存の変更は破棄されます。" : ""}`)) return;
+    if (!confirm(`「${selected.name}」${count > 1 ? `と子カテゴリを合わせた${count}件` : ""}を削除しますか？このカテゴリと子カテゴリを設定した明細は、清算済みも含めて未分類になります。${dirty ? "未保存の変更は破棄されます。" : ""}`)) return;
     pending.current = true;
     setBusy(true);
     setError(null);
     setFailedMove(null);
     try {
-      await run({ action: "archiveCategory", workspaceId, categoryId: selected.id }, "カテゴリを使用停止にしました。");
+      await run({ action: "deleteCategory", workspaceId, categoryId: selected.id }, "カテゴリを削除しました。");
       setEditor(null);
+      setMoveId(null);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "カテゴリを使用停止にできませんでした。");
+      setError(failure instanceof Error ? failure.message : "カテゴリを削除できませんでした。");
     } finally {
       pending.current = false;
       setBusy(false);
@@ -215,18 +219,17 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
   return <section className={`panel settings-section ${styles.section}`} aria-busy={busy}>
     <div className="panel-head"><div><span>CATEGORIES</span><h2>集計用カテゴリ</h2></div></div>
     <p className={styles.description}>明細に設定するカテゴリを管理します。「＋」で子カテゴリを追加できます。</p>
-    <p className={styles.description}>右端のハンドルをドラッグすると、前・子・後へ移動できます。ハンドルを押して移動先を選ぶ操作も使えます。入力中の名前と色は移動後も保持します。</p>
+    <p className={styles.description}>↑・↓で同じ階層の順番を1つずつ変えられます。右端のハンドルをドラッグすると、前・子・後へ移動できます。ハンドルを押して移動先を選ぶ操作も使えます。入力中の名前と色は移動後も保持します。</p>
     {error && <div className={`form-error ${styles.error}`} role="alert">{error}{failedMove && <button type="button" className="text-button" disabled={busy} onClick={() => { void moveCategory(failedMove); }}>移動を再試行</button>}</div>}
     <div className={styles.layout}>
       <div className={styles.treePanel}>
         <div className={styles.treeToolbar}>
           <button type="button" className="secondary" disabled={busy} onClick={() => beginCreate(null)}>＋ 大分類を追加</button>
-          <label className={styles.archiveToggle}><input type="checkbox" checked={showArchived} onChange={event => setShowArchived(event.target.checked)} />使用停止も表示</label>
         </div>
         {moveId && <form className={styles.movePanel} aria-label="カテゴリを移動" onSubmit={event => { event.preventDefault(); void moveCategory({ sourceId: moveId, target: moveTarget }); }}>
           <div className={styles.moveHeading}><b>「{prepared.byId.get(moveId)?.name ?? "カテゴリ"}」を移動</b><button type="button" className="text-button" disabled={busy} onClick={() => setMoveId(null)}>キャンセル</button></div>
           <div className={styles.field}><label htmlFor={`${formId}-move-target`}>移動先のカテゴリ</label><select id={`${formId}-move-target`} ref={moveInput} value={moveTarget.categoryId ?? ""} disabled={busy} onChange={event => setMoveTarget(current => ({ ...current, categoryId: event.target.value || null }))}>
-            <option value="">最上位の末尾</option>
+            <option value="">移動先を選択</option>
             {prepared.flat.filter(({ category }) => !category.archivedAt && !moving.descendants.has(category.id)).map(({ category, path }) => <option key={category.id} value={category.id}>{path}</option>)}
           </select></div>
           <fieldset className={styles.movePositions} disabled={busy || !moveTarget.categoryId}><legend>移動する位置</legend>{movePositions.map(position => <label key={position.value}><input type="radio" name={`${formId}-position`} value={position.value} checked={moveTarget.position === position.value} onChange={() => setMoveTarget(current => ({ ...current, position: position.value }))} />{position.label}</label>)}</fieldset>
@@ -258,23 +261,22 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
           }}>
           <div ref={treeScroll} data-category-tree-scroll className={styles.treeScroll}>
             <ul className={styles.tree} aria-label="カテゴリ一覧">
-              {prepared.visible.map(({ category, depth, path }) => <CategoryTreeRow key={category.id} category={category} depth={depth} path={path} selected={editor?.categoryId === category.id}
-                busy={busy} dragging={!!dragId} collapsed={collapsed.has(category.id)} hasChildren={prepared.parents.has(category.id)} destination={moving.destination}
+              {visibleCategories.map(({ category, depth, path }) => <CategoryTreeRow key={category.id} category={category} depth={depth} path={path} selected={editor?.categoryId === category.id}
+                busy={busy} dragging={!!dragId} collapsed={collapsed.has(category.id)} hasChildren={prepared.parents.has(category.id)} destination={moving.destination} siblingMoves={prepared.siblingMoves.get(category.id)}
                 onCollapse={() => setCollapsed(current => { const next = new Set(current); if (next.has(category.id)) next.delete(category.id); else next.add(category.id); return next; })}
-                onEdit={() => beginEdit(category)} onCreate={() => beginCreate(category.id)} onMove={() => beginMove(category)} />)}
+                onEdit={() => beginEdit(category)} onCreate={() => beginCreate(category.id)} onMove={() => beginMove(category)} onStep={target => { void moveCategory({ sourceId: category.id, target }); }} />)}
             </ul>
-            <CategoryDropTarget target={{ categoryId: null, position: "inside" }} destination={moving.destination({ categoryId: null, position: "inside" })} active={!!dragId && !busy} root />
           </div>
           <DragOverlay dropAnimation={null}>{dragId && <div className={styles.dragOverlay}>{prepared.byId.get(dragId)?.name}</div>}</DragOverlay>
         </DndContext>
         {dragId && <p className={styles.dragStatus} role="status">{hoveredDestination?.error ?? (hoveredDestination?.unchanged ? "現在と同じ位置です。" : hoveredDestination?.label) ?? "移動先の行の上側・中央・下側に重ねてください。"}</p>}
-        {prepared.visible.length === 0 && <p className={styles.empty}>カテゴリはまだありません。大分類を追加してください。</p>}
+        {visibleCategories.length === 0 && <p className={styles.empty}>カテゴリはまだありません。大分類を追加してください。</p>}
       </div>
       <div className={styles.editorPanel}>
         {editor ? <form onSubmit={event => { void save(event); }}>
           <div className={styles.editorHeading}><h3>{editor.categoryId ? "カテゴリを編集" : parentPath ? "子カテゴリを追加" : "大分類を追加"}</h3><button type="button" className="text-button" disabled={busy} onClick={() => changeEditor(null)}>閉じる</button></div>
           <p className={styles.path}>{parentPath || "最上位のカテゴリ"}</p>
-          {unavailable && <p className={styles.notice}>このカテゴリ、または親カテゴリは使用停止・削除されています。編集や追加はできません。</p>}
+          {unavailable && <p className={styles.notice}>{selected?.archivedAt ? "このカテゴリは変更できません。削除はできます。" : "このカテゴリ、または親カテゴリは削除されています。編集や追加はできません。"}</p>}
           <fieldset className={styles.fields} disabled={busy || unavailable}>
             <label className={styles.field} htmlFor={`${formId}-name`}>カテゴリ名<input ref={nameInput} id={`${formId}-name`} value={editor.name} maxLength={CATEGORY_NAME_MAX_LENGTH} onChange={event => setEditor(current => current ? { ...current, name: event.target.value } : current)} autoComplete="off" placeholder="例：食費" required /></label>
             <fieldset className={styles.colorGroup}><legend>基本色</legend><div className={styles.palette}>
@@ -295,30 +297,32 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
           </div>
           <p className={styles.note}>保存すると明細に反映されます。色を変えても子カテゴリの色は変わりません。</p>
           <div className={styles.actions}>
-            {selected && !selected.archivedAt && <button type="button" className={`danger-text ${styles.archiveButton}`} disabled={busy} onClick={() => { void archive(); }}>使用停止にする</button>}
+            {selected && <button type="button" className={`danger-text ${styles.deleteButton}`} disabled={busy} onClick={() => { void deleteCategory(); }}>削除する</button>}
             <button type="submit" className="primary" disabled={busy || unavailable || !editor.name.trim() || (!!editor.categoryId && !dirty)}>{busy ? "保存中…" : editor.categoryId ? "変更を保存" : "カテゴリを追加"}</button>
           </div>
         </form> : <div className={styles.placeholder}><span aria-hidden="true">◈</span><h3>カテゴリと色を設定</h3><p>一覧のカテゴリを選択するか、<br />「＋」から新しいカテゴリを追加してください。</p><div className={styles.example}><span style={{ backgroundColor: CATEGORY_PALETTE[0].shades[2] }} />食費<span className={styles.exampleArrow}>›</span>外食費</div></div>}
       </div>
     </div>
-    <p className={styles.footnote}>使用停止にしたカテゴリは新しく割り当てられません。過去の明細のカテゴリ名と色は残ります。</p>
   </section>;
 }
 
-function CategoryTreeRow({ category, depth, path, selected, busy, dragging, collapsed, hasChildren, destination, onCollapse, onEdit, onCreate, onMove }: {
+function CategoryTreeRow({ category, depth, path, selected, busy, dragging, collapsed, hasChildren, destination, siblingMoves, onCollapse, onEdit, onCreate, onMove, onStep }: {
   category: Category; depth: number; path: string; selected: boolean; busy: boolean; dragging: boolean;
   collapsed: boolean; hasChildren: boolean; destination: (target: CategoryMoveTarget) => CategoryMoveDestination;
+  siblingMoves: { up: CategoryMoveTarget | null; down: CategoryMoveTarget | null } | undefined;
   onCollapse: () => void; onEdit: () => void; onCreate: () => void; onMove: () => void;
+  onStep: (target: CategoryMoveTarget) => void;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({ id: category.id, disabled: busy || !!category.archivedAt });
   return <li ref={setNodeRef}>
-    <div data-category-id={category.id} data-category-dragging={isDragging || undefined} className={`${styles.treeRow} ${selected ? styles.selected : ""} ${category.archivedAt ? styles.archived : ""} ${isDragging ? styles.dragging : ""}`} style={{ "--category-depth": depth } as CSSProperties}>
+    <div data-category-id={category.id} data-category-dragging={isDragging || undefined} className={`${styles.treeRow} ${selected ? styles.selected : ""} ${isDragging ? styles.dragging : ""}`} style={{ "--category-depth": depth } as CSSProperties}>
       {hasChildren ? <button type="button" className={styles.collapse} aria-label={`${path}を${collapsed ? "展開" : "折りたたむ"}`} aria-expanded={!collapsed} onClick={onCollapse}>{collapsed ? "▸" : "▾"}</button> : <span />}
-      <button type="button" className={styles.categoryButton} disabled={busy || dragging} aria-label={`${path}を選択${category.archivedAt ? "（使用停止）" : ""}`} aria-pressed={selected} title={path} onClick={onEdit}>
+      <button type="button" className={styles.categoryButton} disabled={busy || dragging} aria-label={`${path}を選択`} aria-pressed={selected} title={path} onClick={onEdit}>
         <span className={styles.colorDot} style={{ backgroundColor: category.colorHex }} />
         <span className={styles.categoryName}>{category.name}</span>
-        {category.archivedAt && <small>使用停止</small>}
       </button>
+      <button type="button" className={`${styles.stepButton} ${styles.stepUp}`} aria-label={`${path}を上へ`} title="同じ階層で1つ上へ" disabled={busy || dragging || !siblingMoves?.up} onClick={() => { if (siblingMoves?.up) onStep(siblingMoves.up); }}>↑</button>
+      <button type="button" className={`${styles.stepButton} ${styles.stepDown}`} aria-label={`${path}を下へ`} title="同じ階層で1つ下へ" disabled={busy || dragging || !siblingMoves?.down} onClick={() => { if (siblingMoves?.down) onStep(siblingMoves.down); }}>↓</button>
       {!category.archivedAt ? <button type="button" className={styles.addChild} aria-label={`${path}に子カテゴリを追加`} disabled={busy || dragging} onClick={onCreate}>＋</button> : <span />}
       <button type="button" ref={setActivatorNodeRef} {...attributes} {...listeners} data-category-move-handle={category.id} className={styles.dragHandle} aria-label={`${path}を移動`} title="ドラッグで移動。押すと移動先を選べます" disabled={busy || !!category.archivedAt} onClick={onMove}>⠿</button>
       {movePositions.map(({ value }) => {
@@ -329,12 +333,12 @@ function CategoryTreeRow({ category, depth, path, selected, busy, dragging, coll
   </li>;
 }
 
-function CategoryDropTarget({ target, destination, active, root = false }: {
-  target: CategoryMoveTarget; destination: CategoryMoveDestination; active: boolean; root?: boolean;
+function CategoryDropTarget({ target, destination, active }: {
+  target: CategoryMoveTarget; destination: CategoryMoveDestination; active: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `category-drop:${target.categoryId ?? "root"}:${target.position}`, data: { target }, disabled: !active });
   return <div ref={setNodeRef} data-category-drop-id={target.categoryId ?? "root"} data-category-drop-position={target.position} data-category-drop-over={active && isOver ? destination.error ? "invalid" : "valid" : undefined} aria-hidden="true"
-    className={`${root ? styles.rootDrop : `${styles.dropTarget} ${styles[target.position]}`} ${active && isOver ? destination.error ? styles.dropInvalid : styles.dropOver : ""}`}>
-    {root ? <span>最上位の末尾へ移動</span> : active && isOver && <span>{destination.error ?? destination.label}</span>}
+    className={`${styles.dropTarget} ${styles[target.position]} ${active && isOver ? destination.error ? styles.dropInvalid : styles.dropOver : ""}`}>
+    {active && isOver && <span>{destination.error ?? destination.label}</span>}
   </div>;
 }

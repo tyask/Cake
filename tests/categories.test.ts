@@ -74,4 +74,9 @@ test("カテゴリ入力を共通schemaで検証し、名前を整形し、専�
   for (const change of [{ parentId: "invalid" }, { beforeCategoryId: "invalid" }, { categoryId: null }, { beforeCategoryId: undefined }, { parentId: undefined }]) {
     assert.equal(appActionInputSchema.safeParse({ ...move, ...change }).success, false);
   }
+  const deletion = { action: "deleteCategory", workspaceId, categoryId: workspaceId };
+  assert.deepEqual(appActionInputSchema.parse(deletion), deletion);
+  for (const change of [{ workspaceId: "invalid" }, { categoryId: null }, { categoryId: undefined }, { categoryId: "invalid" }]) {
+    assert.equal(appActionInputSchema.safeParse({ ...deletion, ...change }).success, false);
+  }
 });

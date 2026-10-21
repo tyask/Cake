@@ -16,6 +16,7 @@ export function createAppService(store: AppStore) {
         case "createCategory":
         case "updateCategory":
         case "archiveCategory":
+        case "deleteCategory":
         case "moveCategory":
         case "saveTransactionCategory":
           return categoriesService(store, user, input);

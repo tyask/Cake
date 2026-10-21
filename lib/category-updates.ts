@@ -1,12 +1,30 @@
 import type { BootstrapData, Category } from "./types";
 
-type CategoryUpdate = ({ category: Category } | { archivedCategories: Category[] } | { movedCategories: Category[] })
+export type CategoryDeletion = {
+  deletedCategoryIds: string[];
+  detachedTransactions: { transactionId: string; categoryId: null; categoryConfirmed: false; categoryRevision: number }[];
+};
+
+type CategoryUpdate = ({ category: Category } | { archivedCategories: Category[] } | { movedCategories: Category[] } | CategoryDeletion)
   & { ancestorCategories?: Category[] };
 
 /** Adopt acknowledged metadata without a GET that another save could invalidate. */
 export function applyCategoryUpdate(data: BootstrapData, workspaceId: string, update: CategoryUpdate): BootstrapData {
   const selected = data.selected;
   if (!selected || selected.workspace.id !== workspaceId) return data;
+  if ("deletedCategoryIds" in update) {
+    const deleted = new Set(update.deletedCategoryIds);
+    const detached = new Map(update.detachedTransactions.map(transaction => [transaction.transactionId, transaction]));
+    return { ...data, selected: { ...selected,
+      categories: selected.categories.filter(category => !deleted.has(category.id)),
+      transactions: selected.transactions.map(transaction => {
+        const acknowledged = detached.get(transaction.id);
+        return acknowledged && acknowledged.categoryRevision > transaction.categoryRevision
+          ? { ...transaction, categoryId: null, categoryConfirmed: false, categoryRevision: acknowledged.categoryRevision }
+          : transaction;
+      }),
+    } };
+  }
   const categories = new Map(selected.categories.map(category => [category.id, category]));
   const acknowledged = "category" in update ? [update.category]
     : "archivedCategories" in update ? update.archivedCategories : update.movedCategories;

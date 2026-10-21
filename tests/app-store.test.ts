@@ -54,6 +54,9 @@ function fixture(t: TestContext, options: { forbidden?: boolean; fail?: boolean;
     if (/cake_bulk_transactions/.test(query)) return [{ result: { affected: 1, transactions: [{ id: transactionId, occurredAt: "2026-10-10T00:00:00+00:00" }] } }];
     if (/cake_delete_default_rules/.test(query)) return [{ deleted: 1 }];
     if (/cake_move_category/.test(query)) return [{ result: { movedCategories: [] } }];
+    if (/cake_delete_category/.test(query)) return [{ result: { deletedCategoryIds: [ruleId], detachedTransactions: [
+      { transactionId, categoryId: null, categoryConfirmed: false, categoryRevision: 3 },
+    ] } }];
     if (/cake_mutate_category_with_ancestors/.test(query)) return [{ result: params[2] === "ARCHIVE"
       ? { archivedCategoryIds: [category.id], archivedCategories: [category], ancestorCategories: [ancestorCategory] }
       : { category, ancestorCategories: [ancestorCategory] } }];
@@ -95,6 +98,8 @@ const cases: { input: Row; counts: number[]; transactions?: number[]; result?: R
   { input: { action: "createCategory", workspaceId, parentId: transactionId, name: "食費", colorHex: "#f97316" }, counts: [1], result: { ok: true, category, ancestorCategories: [ancestorCategory] } },
   { input: { action: "updateCategory", workspaceId, categoryId: ruleId, name: "食費", colorHex: "#f97316" }, counts: [1], result: { ok: true, category, ancestorCategories: [ancestorCategory] } },
   { input: { action: "archiveCategory", workspaceId, categoryId: ruleId }, counts: [1], result: { ok: true, archivedCategoryIds: [category.id], archivedCategories: [category], ancestorCategories: [ancestorCategory] } },
+  { input: { action: "deleteCategory", workspaceId, categoryId: ruleId }, counts: [1], result: { ok: true,
+    deletedCategoryIds: [ruleId], detachedTransactions: [{ transactionId, categoryId: null, categoryConfirmed: false, categoryRevision: 3 }] } },
   { input: { action: "deleteTransaction", workspaceId, transactionId }, counts: [1, 2], transactions: [1] },
   { input: { action: "deleteTransactions", workspaceId, transactionIds: [transactionId] }, counts: [1, 1], result: { ok: true, deleted: 1 } },
   { input: { action: "applyTransactionRules", workspaceId, transactionIds: [transactionId] }, counts: [1, 1], result: { ok: true, applied: 1, appliedTransactions: [{ id: transactionId, occurredAt: "2026-10-10T00:00:00.000Z" }] } },
@@ -145,6 +150,10 @@ for (const [index, scenario] of cases.entries()) {
     if (scenario.input.action === "moveCategory") {
       assert.match(f.trips[0].queries[0].query, /cake_move_category/);
       assert.deepEqual(f.trips[0].queries[0].params, [workspaceId, user.id, transactionId, null, ruleId]);
+    }
+    if (scenario.input.action === "deleteCategory") {
+      assert.match(f.trips[0].queries[0].query, /cake_delete_category/);
+      assert.deepEqual(f.trips[0].queries[0].params, [workspaceId, user.id, ruleId]);
     }
     if (["createCategory", "updateCategory", "archiveCategory"].includes(String(scenario.input.action))) {
       assert.match(f.trips[0].queries[0].query, /cake_mutate_category_with_ancestors/);

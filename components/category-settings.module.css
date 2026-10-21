@@ -1,15 +1,13 @@
 .section { margin-top: 1rem; }
-.description, .footnote { margin: -.3rem 1.3rem 1rem; color: var(--muted); font-size: .72rem; line-height: 1.7; }
+.description { margin: -.3rem 1.3rem 1rem; color: var(--muted); font-size: .72rem; line-height: 1.7; }
 .layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 1.1rem; margin: 0 1.3rem; }
 .treePanel, .editorPanel { min-width: 0; border: 1px solid var(--line); border-radius: .8rem; }
 .treePanel { align-self: start; overflow: hidden; }
 .treeToolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .7rem; padding: .85rem; background: var(--surface-muted); border-bottom: 1px solid var(--line); }
 .treeToolbar > button { min-height: 2.5rem; padding: .5rem .7rem; font-size: .72rem; }
-.archiveToggle { display: flex; flex-shrink: 0; align-items: center; gap: .35rem; color: var(--muted); font-size: .66rem; white-space: nowrap; cursor: pointer; }
-.treeToolbar .archiveToggle input { flex: 0 0 1rem; width: 1rem; height: 1rem; margin: 0; padding: 0; }
 .treeScroll { max-height: 36rem; overflow: auto; }
 .tree { margin: 0; padding: .5rem; list-style: none; }
-.treeRow { position: relative; display: grid; grid-template-columns: 1.6rem minmax(5rem, 1fr) 2rem 2rem; align-items: center; min-height: 2.8rem; padding-inline-start: calc(var(--category-depth) * .9rem); border-radius: .5rem; }
+.treeRow { position: relative; display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) 1.8rem 1.8rem 2rem 2rem; align-items: center; min-height: 2.8rem; padding-inline-start: min(calc(var(--category-depth) * .9rem), 3.6rem); border-radius: .5rem; }
 .treeRow:hover { background: var(--surface-muted); }
 .selected, .selected:hover { background: var(--accent-soft); }
 .collapse, .addChild { display: grid; width: 1.75rem; min-height: 2rem; place-items: center; padding: 0; border: 0; border-radius: .4rem; color: var(--accent); background: transparent; cursor: pointer; }
@@ -18,9 +16,10 @@
 .addChild:hover, .collapse:hover { background: var(--paper); }
 .categoryButton { display: flex; min-width: 0; align-items: center; gap: .5rem; min-height: 2.5rem; padding: .35rem .2rem; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .categoryName { min-width: 0; overflow-wrap: anywhere; font-size: .76rem; font-weight: 700; }
-.categoryButton small { flex: 0 0 auto; color: var(--muted); font-size: .58rem; }
 .colorDot { flex: 0 0 .65rem; width: .65rem; height: .65rem; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .12); }
-.archived { opacity: .65; }
+.stepButton { display: grid; width: 1.65rem; min-height: 2.2rem; place-items: center; padding: 0; border: 0; border-radius: .4rem; color: var(--accent); background: transparent; cursor: pointer; font-size: .9rem; }
+.stepButton:hover { background: var(--paper); }
+.stepButton:disabled { color: var(--muted); cursor: default; opacity: .35; }
 .dragHandle { display: grid; width: 1.9rem; min-height: 2.2rem; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: .4rem; color: var(--muted); background: var(--paper); cursor: grab; font-size: 1.1rem; touch-action: none; }
 .dragHandle:active { cursor: grabbing; }
 .dragHandle:disabled { cursor: default; opacity: .4; }
@@ -34,9 +33,6 @@
 .dropInvalid { border: 2px solid var(--red); border-radius: .3rem; }
 .dropTarget > span { position: absolute; inset-inline-start: .2rem; top: 50%; max-width: calc(100% - .4rem); transform: translateY(-50%); padding: .15rem .3rem; color: var(--accent); background: var(--paper); border-radius: .2rem; font-size: .62rem; line-height: 1.4; overflow-wrap: anywhere; }
 .dropInvalid > span { color: var(--red); }
-.rootDrop { display: grid; min-height: 2.5rem; place-items: center; margin: 0 .5rem .5rem; padding: .4rem; border: 1px dashed var(--line-strong); border-radius: .4rem; color: var(--muted); font-size: .65rem; text-align: center; }
-.rootDrop.dropOver { border-color: var(--accent); }
-.rootDrop.dropInvalid { border-color: var(--red); }
 .dragStatus, .moveNotice { margin: .4rem .85rem .7rem; color: var(--muted); font-size: .65rem; line-height: 1.6; overflow-wrap: anywhere; }
 .movePanel { padding: .85rem; border-bottom: 1px solid var(--line); background: var(--paper); }
 .moveHeading { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .6rem; font-size: .7rem; overflow-wrap: anywhere; }
@@ -79,7 +75,7 @@
 .preview small > span { font-weight: 700; white-space: nowrap; }
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .8rem; margin-top: 1rem; }
 .actions > button { min-height: 2.6rem; font-size: .74rem; }
-.actions > .archiveButton { margin-right: auto; padding: .4rem 0; font-size: .68rem; }
+.actions > .deleteButton { margin-right: auto; padding: .4rem 0; font-size: .68rem; }
 .placeholder { display: flex; min-height: 18rem; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; text-align: center; }
 .placeholder > span { color: var(--accent); font-size: 1.8rem; }
 .placeholder h3 { margin: .7rem 0 .2rem; font-size: .85rem; }
@@ -88,19 +84,24 @@
 .example > span:first-child { width: .65rem; height: .65rem; border-radius: 50%; }
 .exampleArrow { color: var(--muted); }
 .empty { margin: 1rem; color: var(--muted); font-size: .7rem; line-height: 1.7; }
-.footnote { margin-top: 1rem; margin-bottom: 0; }
 @media (max-width: 1100px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
   .treeScroll { max-height: 22rem; }
 }
 @media (max-width: 600px) {
   .layout { margin: 0 .8rem; gap: .8rem; }
-  .description, .footnote { margin-inline: .9rem; }
+  .description { margin-inline: .9rem; }
   .editorPanel { padding: .85rem; }
   .palette { gap: .12rem; }
   .paletteButton { padding-inline: .1rem; }
   .paletteButton small { font-size: .58rem; }
   .field input { font-size: 16px; }
-  .categoryButton small { font-size: .55rem; }
-  .treeRow { padding-inline-start: calc(var(--category-depth) * .7rem); }
+  .treeRow { grid-template-columns: 1.3rem repeat(4, minmax(0, 1fr)); padding-inline-start: min(calc(var(--category-depth) * .7rem), 1.4rem); }
+  .categoryButton { grid-column: 2 / -1; }
+  .stepButton { grid-row: 2; }
+  .stepUp { grid-column: 2; }
+  .stepDown { grid-column: 3; }
+  .addChild { grid-row: 2; grid-column: 4; }
+  .dragHandle { grid-row: 2; grid-column: 5; }
+  .stepButton, .addChild, .dragHandle { width: 100%; min-height: 2.75rem; }
 }

@@ -10,6 +10,26 @@ export type CategoryMoveDestination = {
   unchanged: boolean;
 };
 
+/** One-step controls use active siblings, including siblings hidden by collapse. */
+export function prepareCategorySiblingMoves(categories: readonly Category[]) {
+  const children = new Map<string | null, Category[]>();
+  for (const category of categories) {
+    if (category.archivedAt) continue;
+    const siblings = children.get(category.parentId) ?? [];
+    siblings.push(category);
+    children.set(category.parentId, siblings);
+  }
+  const moves = new Map<string, { up: CategoryMoveTarget | null; down: CategoryMoveTarget | null }>();
+  for (const siblings of children.values()) {
+    siblings.sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id));
+    siblings.forEach((category, index) => moves.set(category.id, {
+      up: index ? { categoryId: siblings[index - 1].id, position: "before" } : null,
+      down: index + 1 < siblings.length ? { categoryId: siblings[index + 1].id, position: "after" } : null,
+    }));
+  }
+  return moves;
+}
+
 /** Prepare shared lookups once for all drop targets in the current tree. */
 export function prepareCategoryMove(categories: readonly Category[], sourceId: string | null) {
   const byId = new Map(categories.map(category => [category.id, category]));
@@ -48,10 +68,12 @@ export function prepareCategoryMove(categories: readonly Category[], sourceId: s
     if (relative && target.position === "after") beforeCategoryId = nextSibling.get(relative.id) ?? null;
     const label = relative ? `「${relative.name}」${target.position === "before" ? "の前" : target.position === "after" ? "の後" : "の子カテゴリ（末尾）"}へ移動` : "最上位の末尾へ移動";
     let error: string | null = null;
-    if (!source || source.archivedAt) error = "移動するカテゴリは使用停止・削除されています。";
-    else if (target.categoryId && (!relative || relative.archivedAt)) error = "使用停止・削除されたカテゴリには移動できません。";
+    if (!source) error = "移動するカテゴリは削除されています。";
+    else if (source.archivedAt) error = "移動するカテゴリは変更できません。";
+    else if (target.categoryId && !relative) error = "削除されたカテゴリには移動できません。";
+    else if (relative?.archivedAt) error = "変更できないカテゴリには移動できません。";
     else if (relative?.id === source.id || (parentId && descendants.has(parentId))) error = "自分自身や子孫のカテゴリには移動できません。";
-    else if (parentId && (!byId.has(parentId) || byId.get(parentId)?.archivedAt)) error = "移動先の親カテゴリは使用停止・削除されています。";
+    else if (parentId && (!byId.has(parentId) || byId.get(parentId)?.archivedAt)) error = "移動先の親カテゴリは変更できません。";
     else if (duplicateParents.has(parentId)) error = "移動先の階層に同じ名前のカテゴリがあります。";
     return { parentId, beforeCategoryId, label, error, unchanged: !error && source?.parentId === parentId && beforeCategoryId === oldNextId };
   }
