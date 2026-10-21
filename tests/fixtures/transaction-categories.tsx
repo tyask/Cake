@@ -7,11 +7,13 @@ import type { RunAppAction } from "../../lib/app-input";
 import type { WorkspaceData } from "../../lib/types";
 import "../../app/globals.css";
 
+const longMemberName = new URLSearchParams(location.search).has("longNames") ? "W".repeat(120) : null;
+
 const workspace: WorkspaceData = {
   workspace: { id: "workspace", name: "家計", type: "SHARED", ownerUserId: "a", memberCount: 2 },
   members: [
-    { id: "a", name: "A", email: "a@example.test", imageUrl: null, weight: 1, role: "OWNER" },
-    { id: "b", name: "B", email: "b@example.test", imageUrl: null, weight: 1, role: "MEMBER" },
+    { id: "a", name: longMemberName ?? "A", email: "a@example.test", imageUrl: null, weight: 1, role: "OWNER" },
+    { id: "b", name: longMemberName ?? "B", email: "b@example.test", imageUrl: null, weight: 1, role: "MEMBER" },
   ],
   categories: [
     { id: "food", name: "食費", parentId: null, revision: 1, colorHex: "#f97316", sortOrder: 0, archivedAt: null },

@@ -1046,7 +1046,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>app-handlers.test.ts / app-services.test.ts / app-store.test.ts</td><td>HTTP応答・入力・未認証・所属拒否・DB失敗、割合継承・招待・清算Snapshot、全19操作のSQL往復とTransaction境界、通常bootstrapの2 SQL。</td></tr>
               <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・ミリ秒保持、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
               <tr><td>db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
-              <tr><td>transaction-layout.test.ts</td><td>PCの表示領域7パターン（84rem境界前後を含む）で横溢れ・項目の折り返し・カテゴリ色線・全選択・フィルタを確認。幅変更による入力とフォーカスの保持・追加送信なし・メモ保存失敗時の入力保持と、スマートフォンの要約/展開をローカルChromiumで検証する。</td></tr>
+              <tr><td>transaction-layout.test.ts</td><td>PCの表示領域7パターン（84rem境界前後を含む）と参加者名120文字の4条件で横溢れ・項目の折り返し・カテゴリ色線・全選択・フィルタを確認。幅変更による入力とフォーカスの保持・追加送信なし・メモ保存失敗時の入力保持と、スマートフォンの要約/展開をローカルChromiumで検証する。</td></tr>
               <tr><td>import-equal-split.test.ts</td><td>実ImportPanelと定期支払いの追加/編集をPC/mobileのChromiumで操作し、常に3択であること、割合/円から1:1、奇数円と手動再編集、対象行・未選択状態・デフォルト割合の保持、個人費/エラー/重複/保存中/一人参加時の制限を確認。選択時の追加POSTなしと、bulkImportの保存重み1:1を検証する。</td></tr>
               <tr><td>dashboard-controller.test.ts / transaction-refresh.test.ts / bootstrap-updates.test.ts</td><td>esbuildで実hookをbundleし、ローカルChromium/Reactで要求逆順、workspace/tab往復、保存前GET、手動更新の保存待ち・二重実行・失敗・古い応答破棄、metadata/fullの使い分け・同一家計の保持、通知2秒を検証する。実Preview/DB検証とは区別する。</td></tr>
               <tr><td>recurring-payment-calendar.test.ts / recurring-payment-form.test.ts / recurring-payments.test.ts / recurring-payment-handlers.test.ts</td><td>日本時間09:00の直前/境界、未来日・過去日・月末、追加履歴を参照しない予定計算、保存・再開・認可・入力検証、当日処理・処理開始日時・実行APIの環境制限。</td></tr>

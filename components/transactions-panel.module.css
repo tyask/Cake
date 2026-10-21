@@ -90,7 +90,9 @@
     .wrappingTable colgroup { display: none; }
     .wrappingTable thead, .wrappingTable tbody { display: block; }
     .wrappingTable thead tr { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; padding: .55rem; background: var(--surface-muted); }
-    .wrappingTable th { padding: .35rem .45rem; }
+    .wrappingTable th { min-width: 0; max-width: 100%; padding: .35rem .45rem; overflow-wrap: anywhere; }
+    .wrappingTable .columnHeader { min-width: 0; }
+    .wrappingTable .columnHeader > span:last-child { flex-shrink: 0; }
     .wrappingTable thead .updateStatusCell { display: none; }
     .wrappingTable .selectAllLabel { gap: .4rem; }
     .wrappingTable .selectAllLabel > span { display: inline; }

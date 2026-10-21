@@ -28,7 +28,10 @@ test("PC明細は表示領域に合わせて項目を折り返し、入力・絞
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(resolve => server.close(() => resolve())); throw error; });
   try {
-    for (const available of [560, 760, 1000, 1312, 1343, 1344, 1500]) await t.test(`PC表示領域${available}px`, async () => {
+    for (const [available, longNames] of [
+      ...[560, 760, 1000, 1312, 1343, 1344, 1500].map(width => [width, false] as const),
+      ...[560, 760, 1000, 1312].map(width => [width, true] as const),
+    ]) await t.test(`PC表示領域${available}px${longNames ? "・参加者名120文字" : ""}`, async () => {
       const context = await browser.newContext({ viewport: { width: 1920, height: 1100 } });
       const page = await context.newPage();
       const writes: Record<string, unknown>[] = [], errors: string[] = [];
@@ -39,7 +42,7 @@ test("PC明細は表示領域に合わせて項目を折り返し、入力・絞
           writes.push(route.request().postDataJSON());
           await route.fulfill({ status: 503, json: { error: "保存失敗の確認" } });
         });
-        await page.goto(origin);
+        await page.goto(origin + (longNames ? "/?longNames" : ""));
         // PCのサイドバーを除いた明細パネルの表示領域を再現する。
         await page.locator("main").evaluate((element, width) => { element.style.width = `${width + 26}px`; }, available);
         const table = page.getByRole("table", { name: "取引明細", exact: true });
@@ -71,7 +74,7 @@ test("PC明細は表示領域に合わせて項目を折り返し、入力・絞
           assert.ok(Math.abs(line.rowHeight - line.height) <= 2);
           assert.equal(line.color, "rgb(59, 130, 246)");
         }
-        if (process.env.CAKE_LAYOUT_SCREENSHOTS && available === 1000) {
+        if (process.env.CAKE_LAYOUT_SCREENSHOTS && available === 1000 && !longNames) {
           await mkdir(".cake", { recursive: true });
           await page.screenshot({ path: ".cake/transaction-layout-pc.png", fullPage: true });
         }
