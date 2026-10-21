@@ -10,7 +10,8 @@ import { canApplyBootstrapResponse, isDashboardViewCurrent, isWorkspaceViewCurre
 import type { BootstrapData, BootstrapMetadata, BootstrapScope, Category } from "@/lib/types";
 
 const NOTICE_DURATION_MS = 2_000;
-type CategoryDeletionState = CategoryDeletion & { categorySnapshotIds?: ReadonlySet<string> };
+type CategorySnapshot = { ids: ReadonlySet<string>; generation: number };
+type CategoryDeletionState = CategoryDeletion & { categorySnapshot?: CategorySnapshot };
 
 export function useDashboardController(initialData: BootstrapData, initialTab: Tab = "home") {
   const [data, setData] = useState(initialData);
@@ -51,12 +52,14 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
     let next = typeof update === "function" ? update(currentData.current) : update;
     const workspaceId = next.selected?.workspace.id;
     const deletion = workspaceId ? categoryDeletions.current.get(workspaceId) : undefined;
-    if (workspaceId && deletion) next = applyCategoryUpdate(next, workspaceId, deletion);
+    if (workspaceId && deletion && (deletion.deletedCategoryIds.length || deletion.detachedTransactions.length)) {
+      next = applyCategoryUpdate(next, workspaceId, deletion);
+    }
     currentData.current = next;
     setData(next);
   }
 
-  function rememberCategoryDeletion(workspaceId: string, deletion: CategoryDeletion, categorySnapshotIds?: ReadonlySet<string>) {
+  function rememberCategoryDeletion(workspaceId: string, deletion: CategoryDeletion, categorySnapshot?: CategorySnapshot) {
     const previous = categoryDeletions.current.get(workspaceId);
     const transactions = new Map(previous?.detachedTransactions.map(transaction => [transaction.transactionId, transaction]));
     for (const transaction of deletion.detachedTransactions) {
@@ -66,7 +69,7 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
     categoryDeletions.current.set(workspaceId, {
       deletedCategoryIds: [...new Set([...(previous?.deletedCategoryIds ?? []), ...deletion.deletedCategoryIds])],
       detachedTransactions: [...transactions.values()],
-      categorySnapshotIds: categorySnapshotIds ?? previous?.categorySnapshotIds,
+      categorySnapshot: categorySnapshot ?? previous?.categorySnapshot,
     });
   }
 
@@ -105,15 +108,17 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
       const previous = currentData.current.selected;
       const deletedCategoryIds = previous?.workspace.id === nextData.selected.workspace.id
         ? previous.categories.filter(category => !categoryIds.has(category.id)).map(category => category.id) : [];
-      if (deletedCategoryIds.length || (scope === "full" && categoryDeletions.current.has(nextData.selected.workspace.id))) {
-        // Complete metadata establishes absent category UUIDs. A full snapshot
-        // also acknowledges real null revisions, including unseen transactions.
-        rememberCategoryDeletion(nextData.selected.workspace.id, {
-          deletedCategoryIds,
-          detachedTransactions: scope === "full" ? nextData.selected.transactions.filter(transaction => transaction.categoryId === null)
-            .map(transaction => ({ transactionId: transaction.id, categoryId: null, categoryConfirmed: false, categoryRevision: transaction.categoryRevision })) : [],
-        }, scope === "full" ? categoryIds : undefined);
-      }
+      const deletionKnown = deletedCategoryIds.length > 0 || (categoryDeletions.current.get(nextData.selected.workspace.id)?.deletedCategoryIds.length ?? 0) > 0;
+      // Both scopes return all categories. Every adopted response advances the
+      // snapshot, including unchanged/empty lists without a known deletion.
+      // Only a full response can acknowledge real transaction null revisions.
+      rememberCategoryDeletion(nextData.selected.workspace.id, {
+        deletedCategoryIds,
+        detachedTransactions: scope === "full" && deletionKnown ? nextData.selected.transactions.filter(transaction => transaction.categoryId === null)
+          .map(transaction => ({ transactionId: transaction.id, categoryId: null, categoryConfirmed: false, categoryRevision: transaction.categoryRevision })) : [],
+      }, { ids: categoryIds,
+        generation: (categoryDeletions.current.get(nextData.selected.workspace.id)?.categorySnapshot?.generation ?? 0) + 1,
+      });
     }
     workspaceView.current.workspaceId = nextData.selected?.workspace.id;
     updateData(nextData);
@@ -148,6 +153,8 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
 
   async function run(payload: AppActionInput, success: string, workspaceId?: string) {
     const originWorkspaceId = "workspaceId" in payload ? payload.workspaceId : selected?.workspace.id;
+    const categorySnapshotGeneration = originWorkspaceId
+      ? categoryDeletions.current.get(originWorkspaceId)?.categorySnapshot?.generation ?? 0 : 0;
     const generation = workspaceView.current.generation;
     const originTabGeneration = tabGeneration.current;
     const isCurrentView = () => isWorkspaceViewCurrent(
@@ -158,12 +165,16 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
       try {
         const applied = await refresh(originWorkspaceId, generation, "full");
         const deletion = originWorkspaceId ? categoryDeletions.current.get(originWorkspaceId) : undefined;
-        if (applied && isCurrentView() && originWorkspaceId && deletion?.categorySnapshotIds) {
+        const snapshot = deletion?.categorySnapshot;
+        if (applied && isCurrentView() && originWorkspaceId && snapshot) {
           // The successful write preceded this full snapshot. Missing IDs are
           // deleted, while survivors already have their latest parent/revision.
+          const deletedCategoryIds = categoryIds.filter(id => !snapshot.ids.has(id));
           rememberCategoryDeletion(originWorkspaceId, {
-            deletedCategoryIds: categoryIds.filter(id => !deletion.categorySnapshotIds!.has(id)), detachedTransactions: [],
-          }, deletion.categorySnapshotIds);
+            deletedCategoryIds,
+            detachedTransactions: deletedCategoryIds.length ? currentData.current.selected!.transactions.filter(transaction => transaction.categoryId === null)
+              .map(transaction => ({ transactionId: transaction.id, categoryId: null, categoryConfirmed: false, categoryRevision: transaction.categoryRevision })) : [],
+          }, snapshot);
         }
         if (shouldNotify()) setNotice(applied ? success : "変更は保存されました。画面を更新して最新の状態を確認してください。");
       } catch {
@@ -192,11 +203,13 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
           const acknowledged = [...changed, ...("ancestorCategories" in metadataUpdate ? metadataUpdate.ancestorCategories ?? [] : [])] as Category[];
           const deletion = categoryDeletions.current.get(originWorkspaceId);
           const deletedIds = new Set(deletion?.deletedCategoryIds);
+          const snapshot = deletion?.categorySnapshot;
+          const snapshotNeedsRecheck = snapshot && (deletedIds.size > 0 || snapshot.generation > categorySnapshotGeneration);
           const current = new Map(currentData.current.selected?.categories.map(category => [category.id, category]));
           const needsSnapshot = deletion && acknowledged.some(category => {
             const saved = current.get(category.id);
             if (deletedIds.has(category.id) || (saved && saved.revision >= category.revision)) return false;
-            return (!saved && deletion.categorySnapshotIds && !deletion.categorySnapshotIds.has(category.id))
+            return (!saved && snapshot && snapshotNeedsRecheck && !snapshot.ids.has(category.id))
               || (category.parentId !== null && deletedIds.has(category.parentId));
           });
           if (needsSnapshot) await synchronizeCategoryMetadata(acknowledged.map(category => category.id));

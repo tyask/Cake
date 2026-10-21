@@ -118,6 +118,42 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await expectState(f.page, { "selected.categories.0.archivedAt": "2026-10-20T00:00:00.123Z", loading: false });
       assert.equal(f.requests.length, 0);
     });
+    for (const scope of ["full", "metadata"] as const) {
+      for (const retainOther of [false, true]) {
+        await scenario(`${scope}の${retainOther ? "既知カテゴリを残す" : "空の"}後発一覧にない新規IDを遅いCREATE応答で復活させない`, async f => {
+          const other = { id: "other", revision: 1, parentId: null, name: "保持するカテゴリ", colorHex: "#2563eb", sortOrder: 0, archivedAt: null };
+          const expected = retainOther ? [other] : [];
+          const initial = data(); initial.selected!.categories = expected;
+          await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+          await f.reply(await f.take(), initial);
+          await f.page.evaluate(() => window.operation);
+          await f.page.evaluate(() => { window.operation = window.controller.run({ action: "createCategory", workspaceId: "a", parentId: null, name: "削除された新規カテゴリ", colorHex: "#f97316" }, "追加しました。"); });
+          const create = await f.take("POST");
+          await f.page.evaluate(scope => { window.operation = window.controller.refresh(undefined, undefined, scope); }, scope);
+          const later = scope === "full" ? initial : metadata();
+          later.selected!.categories = expected;
+          await f.reply(await f.take(), later);
+          await f.page.evaluate(() => window.operation);
+          await f.reply(create, { ok: true, category: { ...other, id: "deleted-new-category", name: "削除された新規カテゴリ" } });
+          const reconciliation = await f.take();
+          assert.equal(new URL(reconciliation.request().url()).searchParams.has("scope"), false);
+          await expectState(f.page, { "selected.categories": expected });
+          await f.reply(reconciliation, initial);
+          await expectState(f.page, { "selected.categories": expected, loading: false });
+          assert.equal(f.requests.length, 0);
+        });
+      }
+      await scenario(`${scope}取得後に開始した通常CREATEは追加GETを要求しない`, async f => {
+        await f.page.evaluate(scope => { window.operation = window.controller.refresh(undefined, undefined, scope); }, scope);
+        await f.reply(await f.take(), scope === "full" ? data() : metadata());
+        await f.page.evaluate(() => window.operation);
+        await f.page.evaluate(() => { window.operation = window.controller.run({ action: "createCategory", workspaceId: "a", parentId: null, name: "新しいカテゴリ", colorHex: "#f97316" }, "追加しました。"); });
+        const category = { id: "new-category", revision: 1, parentId: null, name: "新しいカテゴリ", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+        await f.reply(await f.take("POST"), { ok: true, category });
+        await expectState(f.page, { "selected.categories": [category], notice: "追加しました。", loading: false });
+        assert.equal(f.requests.length, 0);
+      });
+    }
     await scenario("カテゴリ更新と使用停止の応答が逆順でもDBの新しいrevisionを保持する", async f => {
       const category = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "createCategory", workspaceId: "a", parentId: null, name: "食費", colorHex: "#f97316" }, ""); });
