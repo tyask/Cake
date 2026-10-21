@@ -785,6 +785,13 @@
               <div class="dfd-arrow"><b>→</b><small>削除ID＋明細の実revision</small></div>
               <div class="dfd-node output"><strong>未分類と削除済みIDを反映</strong><small>古い応答での復活を防止<br />明細・清算情報は保持</small></div>
             </div>
+            <div class="dfd-track" role="img" aria-label="metadataでカテゴリが消失した場合、または部分応答が削除後の未知IDや削除済みの親を返す場合は、full取得の成功と要求世代を確認して反映し、失敗や競合による破棄では古い応答を採用しない">
+              <div class="dfd-node source"><strong>取得・保存応答を受信</strong><small>通常は確定値を局所反映<br />消失・未知ID・削除済み親なら再照合</small></div>
+              <div class="dfd-arrow"><b>→</b><small>例外時のみfull取得</small></div>
+              <div class="dfd-node store"><strong>GET /api/app</strong><small>最新カテゴリと明細の実revision<br />workspace・世代・要求・dataRevisionを確認</small></div>
+              <div class="dfd-arrow"><b>→</b><small>成功・採用条件を分岐</small></div>
+              <div class="dfd-node output"><strong>整合した状態を反映</strong><small>失敗・破棄では古い応答を採用しない<br />保存済みなら再送せず画面更新を案内</small></div>
+            </div>
           </div>
           <p>明細カテゴリ割当は同workspaceの複合外部キーとtriggerでカテゴリの使用可否を検証する。カテゴリなしの既存INSERTでは追加照合を行わない。旧archive関数・archivedAt列と既存SQL関数の署名は互換用に維持し、新規migrationを追加する。適用済み014・015は変更しない。</p>
         </section>
