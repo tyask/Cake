@@ -718,6 +718,8 @@
           <h3>ルール編集</h3>
           <p>有効なルールを上から評価し、取引先の部分一致が最初に成立する一件を使う。文字・割合はblur/Enter、区分・デフォルト利用・有効状態は即保存。追加は末尾、ドラッグまたはスペース/上下キーで並び替え、選択したルールをまとめて削除する。操作キューは並び替え・削除と行編集を直列化し、失敗した入力や構造操作の再試行を保持する。ルール変更だけでは保存済み明細を変更しない。</p>
           <p><code>orderedWorkspaceRules</code>はID→ルールのMapと出力済みIDのSetを用い、楽観的な順序に現在存在するルールを一度ずつ配置する。未知・外部削除済みIDは除外し、外部追加は最新取得順で末尾に残す。順序保存の成功時は最新取得順へ戻し、失敗時は操作前の順序へ戻す。選択IDの所属判定にもSetを使う。取引先の部分一致・優先順によるルール適用判定は変更しない。</p>
+          <h3>PC取引明細の折り返し</h3>
+          <p><code>TransactionTable</code>の<code>wrap</code>を取引明細だけで有効にする。表のラッパーをinline-size containerとし、PC幅（48rem超）かつ表示領域84rem未満では明細行をflex-wrap、各セルを項目別の幅を基準に配置する。日時・割合・カテゴリ・メモの入力幅を確保し、既存の<code>data-label</code>を項目名として表示する。見出しのフィルタと全選択も折り返し、保存中表示・全幅のエラー行・カテゴリ色線を維持する。幅変更はCSSだけで切り替え、入力部品の再生成やデータ取得・保存は行わない。84rem以上の列別テーブル、48rem以下の要約と詳細展開、CSV取込と定期支払いの表示はそれぞれの既存レイアウトを使う。</p>
           <h3>取引明細のフィルタ保存</h3>
           <p><code>TransactionsPanel</code>は<code>useTransactionFilters(userId, workspaceId)</code>で列ごとの条件を管理し、<code>lib/transaction-filter-storage.ts</code>を通して<code>localStorage</code>へ保存・復元する。API・DBへは保存しない。</p>
           <p>保存用の列条件は文字列配列のまま保持し、条件または参加者の変更時に<code>createTransactionFilterMatcher</code>が列ごとの検索用Setを準備する。同じ列はOR、列間はAND、空選択は0件とする。<code>transactionListView</code>は各明細の条件を一度だけ判定し、編集中・保存失敗・メモ編集中の条件外行を含む表示と条件外表示の印で結果を共用する。表示ID・未清算ID・選択IDの所属をSetで照合して非表示選択数と全選択状態を求め、削除済み・清算済みIDは一括操作対象から除く。絞り込みでは非表示の選択を保持する。</p>
@@ -761,7 +763,7 @@
               <div class="dfd-node output"><strong>選択と左端の色を更新</strong><small>失敗時はdraftと再試行を保持<br />更新・一括操作の前にfreeze / flush</small></div>
             </div>
           </div>
-          <p>カテゴリ列はメモの直前、PCの幅は10remとする。保存済みカテゴリの色を行のCSS変数へ渡し、背景色は変更しない。PCは選択セルの左端、スマートフォンは展開・スワイプ中もカード左端全体に4pxの線を表示する。未分類では色の線を表示せず、清算済み行の通常の背景も保持する。選択欄の色の点と全経路の補足表示を併用する。</p>
+          <p>カテゴリはメモの直前に配置し、PCの列別テーブルでは幅10rem、折り返し時は12remを基準に表示領域へ配分する。保存済みカテゴリの色を行のCSS変数へ渡し、背景色は変更しない。PCの列別テーブルは選択セルの左端、PCの折り返し表示とスマートフォンは明細の左端全体に4pxの線を表示する。スマートフォンは展開・スワイプ中も線を維持する。未分類では色の線を表示せず、清算済み行の通常の背景も保持する。選択欄の色の点と全経路の補足表示を併用する。</p>
           <p>ツリーの開閉状態はworkspaceごとのCategorySettings内のcollapsed集合が所有する。上部の「すべて開く」は集合を空にし、「すべて閉じる」は現在の全階層のうち子を持つカテゴリIDを集合へ設定する。個別開閉も同じ集合を更新する。一括開閉はAPIや確認ダイアログを呼ばず、カテゴリの選択と名前・色のdraft、移動先の入力を保持する。両ボタンはカテゴリ一覧をaria-controlsで参照し、保存中・ドラッグ中と子カテゴリがない場合は無効にする。狭い画面では上部の操作群を折り返して横溢れを防ぎ、各カテゴリ行の1行配置は維持する。</p>
           <p>カテゴリの移動中の対象・候補は設定画面が所有する。各行の「↑」「↓」は同じ親の使用可能な兄弟をsortOrder・id順で一度準備し、一つ前・後の位置を既存のmoveCategoryへ送る。端のボタンと保存中の操作は無効にする。矢印には枠・背景・押下/フォーカス状態を付ける。PC/mobileともツリーの各行を1行のgridとし、カテゴリ名だけを残り幅へ縮めて省略表示する。完全な経路は選択ボタンのtitleとaria-labelに残す。スマートフォンの操作ボタンは幅2rem・高さ2.75rem、階層の字下げは最大1remとし、狭い幅でも操作を別行に送らない。ドラッグでは行の前・子・後の挿入位置を示し、最上位末尾の専用drop領域と移動先選択肢は設けない。スクロール枠と画面の可視領域内にあるポインターだけを判定し、枠外やクリップされた非表示行へはドロップできない。ハンドルから移動先の選択欄を開く操作も用意し、キーボードで移動先・位置を選択できる。対象・候補の使用可否、子孫と同名重複は画面でも確認し、確定時に<code>moveCategory</code>を送る。移動中は他の保存と同じpending guardで二重操作を防ぐ。未保存の名前・色は保持し、保存済み順序は応答まで変更しない。失敗時は元の順序と入力を保持してエラーを表示する。</p>
           <div class="data-flow">
@@ -1044,6 +1046,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>app-handlers.test.ts / app-services.test.ts / app-store.test.ts</td><td>HTTP応答・入力・未認証・所属拒否・DB失敗、割合継承・招待・清算Snapshot、全19操作のSQL往復とTransaction境界、通常bootstrapの2 SQL。</td></tr>
               <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・ミリ秒保持、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
               <tr><td>db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
+              <tr><td>transaction-layout.test.ts</td><td>PCの表示領域7パターン（84rem境界前後を含む）で横溢れ・項目の折り返し・カテゴリ色線・全選択・フィルタを確認。幅変更による入力とフォーカスの保持・追加送信なし・メモ保存失敗時の入力保持と、スマートフォンの要約/展開をローカルChromiumで検証する。</td></tr>
               <tr><td>import-equal-split.test.ts</td><td>実ImportPanelと定期支払いの追加/編集をPC/mobileのChromiumで操作し、常に3択であること、割合/円から1:1、奇数円と手動再編集、対象行・未選択状態・デフォルト割合の保持、個人費/エラー/重複/保存中/一人参加時の制限を確認。選択時の追加POSTなしと、bulkImportの保存重み1:1を検証する。</td></tr>
               <tr><td>dashboard-controller.test.ts / transaction-refresh.test.ts / bootstrap-updates.test.ts</td><td>esbuildで実hookをbundleし、ローカルChromium/Reactで要求逆順、workspace/tab往復、保存前GET、手動更新の保存待ち・二重実行・失敗・古い応答破棄、metadata/fullの使い分け・同一家計の保持、通知2秒を検証する。実Preview/DB検証とは区別する。</td></tr>
               <tr><td>recurring-payment-calendar.test.ts / recurring-payment-form.test.ts / recurring-payments.test.ts / recurring-payment-handlers.test.ts</td><td>日本時間09:00の直前/境界、未来日・過去日・月末、追加履歴を参照しない予定計算、保存・再開・認可・入力検証、当日処理・処理開始日時・実行APIの環境制限。</td></tr>

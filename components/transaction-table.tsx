@@ -31,13 +31,14 @@ const columnWidths: Record<TransactionTableColumn, string> = {
 
 export const transactionSplitLabel = (members: Pick<WorkspaceMember, "name">[]) => `支払い割合（${members.map(member => member.name).join(", ")}）`;
 
-export function TransactionTable({ columns, header, children, label }: {
+export function TransactionTable({ columns, header, children, label, wrap = false }: {
   columns: readonly TransactionTableColumnDefinition[];
   header: ReactNode;
   children: ReactNode;
   label: string;
+  wrap?: boolean;
 }) {
-  return <div className={styles.tableWrap}><table className={styles.table + (columns.some(column => column.id === "category") ? " " + styles.categoryTable : "")} aria-label={label}>
+  return <div className={styles.tableWrap + (wrap ? " " + styles.wrappingTableWrap : "")}><table className={styles.table + (wrap ? " " + styles.wrappingTable : "")} aria-label={label}>
     <colgroup>{columns.map(column => <col key={column.id} className={columnWidths[column.id]} />)}</colgroup>
     <thead>{header}</thead>
     <tbody>{children}</tbody>
