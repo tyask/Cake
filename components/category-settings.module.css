@@ -1,0 +1,110 @@
+.section { margin-top: 1rem; }
+.description { margin: -.3rem 1.3rem 1rem; color: var(--muted); font-size: .72rem; line-height: 1.7; }
+.layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 1.1rem; margin: 0 1.3rem; }
+.treePanel, .editorPanel { min-width: 0; border: 1px solid var(--line); border-radius: .8rem; }
+.treePanel { align-self: start; overflow: hidden; }
+.treeToolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .7rem; padding: .85rem; background: var(--surface-muted); border-bottom: 1px solid var(--line); }
+.treeToolbar button { min-height: 2.5rem; padding: .5rem .7rem; font-size: .72rem; white-space: nowrap; }
+.treeControls { display: flex; flex-wrap: wrap; gap: .4rem; }
+.treeScroll { max-height: 36rem; overflow: auto; }
+.tree { margin: 0; padding: .5rem; list-style: none; }
+.treeRow { position: relative; display: grid; grid-template-columns: 1.5rem minmax(0, 1fr) repeat(4, 2rem); align-items: center; column-gap: .25rem; min-height: 2.8rem; padding-inline-start: min(calc(var(--category-depth) * .9rem), 3.6rem); border-radius: .5rem; }
+.treeRow:hover { background: var(--surface-muted); }
+.selected, .selected:hover { background: var(--accent-soft); }
+.collapse, .addChild { display: grid; width: 1.75rem; min-height: 2rem; place-items: center; padding: 0; border: 0; border-radius: .4rem; color: var(--accent); background: transparent; cursor: pointer; }
+.collapse { width: 1.5rem; font-size: .85rem; }
+.addChild { font-size: 1.1rem; font-weight: 700; }
+.addChild:hover, .collapse:hover { background: var(--paper); }
+.categoryButton { display: flex; min-width: 0; align-items: center; gap: .5rem; min-height: 2.5rem; padding: .35rem .2rem; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.categoryName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .76rem; font-weight: 700; }
+.colorDot { flex: 0 0 .65rem; width: .65rem; height: .65rem; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .12); }
+.stepButton { display: grid; width: 2rem; min-height: 2.2rem; place-items: center; padding: 0; border: 1px solid var(--line-strong); border-radius: .4rem; color: var(--accent); background: var(--paper); box-shadow: 0 1px 2px rgb(0 0 0 / .08); cursor: pointer; font-size: .95rem; font-weight: 700; }
+.stepButton:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.stepButton:active:not(:disabled) { box-shadow: inset 0 1px 2px rgb(0 0 0 / .12); }
+.stepButton:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stepButton:disabled { border-color: var(--line); color: var(--muted); background: var(--surface-muted); box-shadow: none; cursor: default; opacity: .55; }
+.dragHandle { display: grid; width: 1.9rem; min-height: 2.2rem; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: .4rem; color: var(--muted); background: var(--paper); cursor: grab; font-size: 1.1rem; touch-action: none; }
+.dragHandle:active { cursor: grabbing; }
+.dragHandle:disabled { cursor: default; opacity: .4; }
+.dragging { opacity: .4; }
+.dragOverlay { max-width: 18rem; padding: .65rem 1rem; border: 1px solid var(--accent); border-radius: .5rem; background: var(--paper); box-shadow: var(--shadow); font-size: .8rem; font-weight: 700; overflow-wrap: anywhere; }
+.dropTarget { position: absolute; inset-inline: 0; z-index: 2; pointer-events: none; }
+.before { top: 0; height: 25%; }
+.inside { top: 25%; height: 50%; }
+.after { bottom: 0; height: 25%; }
+.dropOver { border: 2px solid var(--accent); border-radius: .3rem; background: var(--accent-soft); }
+.dropInvalid { border: 2px solid var(--red); border-radius: .3rem; }
+.dropTarget > span { position: absolute; inset-inline-start: .2rem; top: 50%; max-width: calc(100% - .4rem); transform: translateY(-50%); padding: .15rem .3rem; color: var(--accent); background: var(--paper); border-radius: .2rem; font-size: .62rem; line-height: 1.4; overflow-wrap: anywhere; }
+.dropInvalid > span { color: var(--red); }
+.dragStatus, .moveNotice { margin: .4rem .85rem .7rem; color: var(--muted); font-size: .65rem; line-height: 1.6; overflow-wrap: anywhere; }
+.movePanel { padding: .85rem; border-bottom: 1px solid var(--line); background: var(--paper); }
+.moveHeading { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .6rem; font-size: .7rem; overflow-wrap: anywhere; }
+.movePanel select { width: 100%; min-width: 0; font-size: .75rem; }
+.movePanel > button { min-height: 2.2rem; font-size: .7rem; }
+.movePositions { display: flex; flex-wrap: wrap; gap: .6rem; margin: .6rem 0 0; padding: 0; border: 0; }
+.movePositions legend { margin-bottom: .4rem; color: var(--muted); font-size: .65rem; }
+.movePositions label { display: flex; align-items: center; gap: .2rem; font-size: .65rem; }
+.movePositions input { width: .9rem; height: .9rem; margin: 0; }
+.moveNotice { margin-inline: 0; }
+.error { margin: 0 1.3rem 1rem; }
+.error > button { margin-inline-start: .5rem; }
+.editorPanel { padding: 1rem; background: #fff; }
+.editorHeading { display: flex; justify-content: space-between; align-items: center; gap: .8rem; }
+.editorHeading h3 { margin: 0; font-size: .88rem; }
+.path { margin: .45rem 0 1rem; color: var(--muted); font-size: .67rem; overflow-wrap: anywhere; }
+.fields, .colorGroup { min-width: 0; margin: 0; padding: 0; border: 0; }
+.field { display: block; min-width: 0; color: var(--muted); font-size: .69rem; font-weight: 700; }
+.field input { font-size: .8rem; }
+.colorGroup { margin-top: 1rem; }
+.colorGroup legend { margin-bottom: .55rem; padding: 0; color: var(--muted); font-size: .69rem; font-weight: 700; }
+.palette { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .3rem; }
+.paletteButton, .shadeButton { display: flex; min-width: 0; flex-direction: column; align-items: center; gap: .35rem; padding: .35rem .15rem; border: 1px solid transparent; border-radius: .5rem; background: transparent; cursor: pointer; }
+.paletteButton > span, .shadeButton > span { display: block; width: 100%; max-width: 2rem; aspect-ratio: 1; border: 1px solid rgb(0 0 0 / .1); border-radius: .4rem; }
+.paletteButton small, .shadeButton small { font-size: .61rem; white-space: nowrap; }
+.paletteButton:hover, .shadeButton:hover { background: var(--surface-muted); }
+.colorSelected { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+.shades { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .5rem; }
+.shadeButton > span { max-width: none; height: 1.7rem; aspect-ratio: auto; }
+.shadeCaption { display: flex; justify-content: space-between; margin: .3rem .3rem 0; color: var(--muted); font-size: .6rem; }
+.customColor { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: .8rem; margin-top: 1rem; }
+.customColor input[type="color"] { display: block; height: 2.65rem; padding: .3rem; cursor: pointer; }
+.customColor input:not([type="color"]) { height: 2.65rem; font-variant-numeric: tabular-nums; }
+.customNote, .note, .notice { margin: .8rem 0 0; color: var(--muted); font-size: .65rem; line-height: 1.7; }
+.notice { margin-bottom: 1rem; padding: .6rem .7rem; border-radius: .5rem; background: var(--surface-muted); }
+.preview { margin-top: 1rem; padding: .8rem; border: 1px solid var(--line); border-inline-start: 4px solid; border-radius: .6rem; background: var(--paper); }
+.preview > span { display: block; color: var(--muted); font-size: .6rem; }
+.preview b { display: block; margin: .4rem 0 .55rem; font-size: .77rem; overflow-wrap: anywhere; }
+.preview small { display: flex; justify-content: space-between; gap: .6rem; font-size: .7rem; }
+.preview small > span { font-weight: 700; white-space: nowrap; }
+.actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .8rem; margin-top: 1rem; }
+.actions > button { min-height: 2.6rem; font-size: .74rem; }
+.actions > .deleteButton { margin-right: auto; padding: .4rem 0; font-size: .68rem; }
+.placeholder { display: flex; min-height: 18rem; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; text-align: center; }
+.placeholder > span { color: var(--accent); font-size: 1.8rem; }
+.placeholder h3 { margin: .7rem 0 .2rem; font-size: .85rem; }
+.placeholder p { color: var(--muted); font-size: .7rem; line-height: 1.8; }
+.example { display: flex; align-items: center; gap: .55rem; margin-top: .5rem; padding: .55rem .8rem; border: 1px solid var(--line); border-radius: .6rem; font-size: .72rem; }
+.example > span:first-child { width: .65rem; height: .65rem; border-radius: 50%; }
+.exampleArrow { color: var(--muted); }
+.empty { margin: 1rem; color: var(--muted); font-size: .7rem; line-height: 1.7; }
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .treeScroll { max-height: 22rem; }
+}
+@media (max-width: 600px) {
+  .layout { margin: 0 .8rem; gap: .8rem; }
+  .description { margin-inline: .9rem; }
+  .editorPanel { padding: .85rem; }
+  .palette { gap: .12rem; }
+  .paletteButton { padding-inline: .1rem; }
+  .paletteButton small { font-size: .58rem; }
+  .field input { font-size: 16px; }
+  .tree { padding: .35rem; }
+  .treeControls > button { min-height: 2.75rem; }
+  .treeRow { column-gap: .2rem; padding-inline-start: min(calc(var(--category-depth) * .5rem), 1rem); }
+  .categoryButton { gap: .3rem; }
+  .categoryName { font-size: .72rem; }
+  .collapse { width: 1.5rem; }
+  .categoryButton, .collapse, .stepButton, .addChild, .dragHandle { min-height: 2.75rem; }
+  .stepButton, .addChild, .dragHandle { width: 2rem; }
+}

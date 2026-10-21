@@ -39,7 +39,7 @@ interface FixtureOptions {
   initiallyEmpty?: boolean;
   workspaces?: Row[];
   selectedWorkspaceId?: string;
-  overrides?: Partial<Record<"members" | "rules" | "transactions" | "settlement_history" | "pending_invitations", Row[]>>;
+  overrides?: Partial<Record<"categories" | "members" | "rules" | "transactions" | "settlement_history" | "pending_invitations", Row[]>>;
 }
 
 // Keep Neon HTTP decoding in the test so the actual SQL and repository mapping run.
@@ -99,6 +99,7 @@ function databaseFixture(t: TestContext, options: FixtureOptions = {}) {
     const aggregate: Row = {
       workspaces: ownWorkspaces,
       selected_workspace_id: options.selectedWorkspaceId ?? selected?.id ?? null,
+      categories: selected ? options.overrides?.categories ?? [] : [],
       members: selected ? personal ? [members[0]] : options.overrides?.members ?? members : [],
       rules: selected && !personal ? options.overrides?.rules ?? rules : [],
       pending_invitations: options.overrides?.pending_invitations ?? invitations,
@@ -149,7 +150,7 @@ test("既定の読込は1回のSQL通信で明細・メモ・担当者名と清�
   assert.deepEqual(data.selected.transactions, [{
     id: "transaction", occurredAt: "2026-10-08T00:00:00.000Z", merchant: "スーパー", method: "現金",
     type: "PAYMENT", amountYen: 1000, actorUserId: user.id, actorName: "A", expenseClass: "SHARED",
-    settledAt: null, externalId: "manual-1", source: "MANUAL",
+    settledAt: null, externalId: "manual-1", source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0,
     splitWeights: { "member-a": 1, "member-b": 1 }, memo: "レシートあり",
   }]);
   assert.equal(data.selected.settlement?.amountYen, 500);

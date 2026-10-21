@@ -14,7 +14,7 @@ function workspace(memberCount = 2): WorkspaceData {
       { id: "a", name: "A", email: "a@example.test", imageUrl: null, weight: 6, role: "OWNER" as const },
       { id: "b", name: "B", email: "b@example.test", imageUrl: null, weight: 4, role: "MEMBER" as const },
     ].slice(0, memberCount),
-    rules: [{ id: "personal", merchantContains: "personal", expenseClass: "PERSONAL", sortOrder: 0, splitWeights: null, enabled: true }],
+    categories: [], rules: [{ id: "personal", merchantContains: "personal", expenseClass: "PERSONAL", sortOrder: 0, splitWeights: null, enabled: true }],
     transactions: [], settlement: null, settlementHistory: [],
   };
 }

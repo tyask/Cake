@@ -6,7 +6,7 @@ import type { TransactionRecord } from "../lib/types";
 function transaction(id: string, occurredAt: string): TransactionRecord {
   return { id, occurredAt, merchant: "家賃", method: "銀行振込", memo: "", type: "PAYMENT", amountYen: 100000,
     actorUserId: "a", actorName: "A", expenseClass: "PERSONAL", splitWeights: { a: 1 }, settledAt: null,
-    externalId: id, source: "MANUAL" };
+    externalId: id, source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0 };
 }
 
 test("home month excludes the same month in previous years", () => {

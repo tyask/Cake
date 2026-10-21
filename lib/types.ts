@@ -43,6 +43,19 @@ export interface TransactionRecord {
   settledAt: string | null;
   externalId: string;
   source: TransactionSource;
+  categoryId: string | null;
+  categoryConfirmed: boolean;
+  categoryRevision: number;
+}
+
+export interface Category {
+  id: string;
+  revision: number;
+  parentId: string | null;
+  name: string;
+  colorHex: string;
+  sortOrder: number;
+  archivedAt: string | null;
 }
 
 export interface DefaultRule {
@@ -97,6 +110,7 @@ export interface WorkspaceMetadata {
   workspace: WorkspaceSummary;
   members: WorkspaceMember[];
   rules: DefaultRule[];
+  categories: Category[];
 }
 
 export interface WorkspaceData extends WorkspaceMetadata {

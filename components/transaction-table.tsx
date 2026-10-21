@@ -10,7 +10,7 @@ import type { TransactionRecord, WorkspaceMember } from "@/lib/types";
 import { SwipeDelete } from "./swipe-delete";
 import styles from "./transactions-panel.module.css";
 
-export type TransactionTableColumn = "selection" | TransactionColumn | "status" | "updateStatus";
+export type TransactionTableColumn = "selection" | TransactionColumn | "category" | "status" | "updateStatus";
 export type TransactionTableColumnDefinition = { id: TransactionTableColumn; label: string };
 
 const columnWidths: Record<TransactionTableColumn, string> = {
@@ -23,6 +23,7 @@ const columnWidths: Record<TransactionTableColumn, string> = {
   expenseClass: styles.classColumn,
   splitWeights: styles.ratioColumn,
   memo: styles.memoColumn,
+  category: styles.categoryColumn,
   settlement: styles.settlementColumn,
   status: styles.settlementColumn,
   updateStatus: styles.updateStatusColumn,
@@ -36,14 +37,14 @@ export function TransactionTable({ columns, header, children, label }: {
   children: ReactNode;
   label: string;
 }) {
-  return <div className={styles.tableWrap}><table className={styles.table} aria-label={label}>
+  return <div className={styles.tableWrap}><table className={styles.table + (columns.some(column => column.id === "category") ? " " + styles.categoryTable : "")} aria-label={label}>
     <colgroup>{columns.map(column => <col key={column.id} className={columnWidths[column.id]} />)}</colgroup>
     <thead>{header}</thead>
     <tbody>{children}</tbody>
   </table></div>;
 }
 
-export function MobileTransactionSummary({ item, expanded, onToggle, checked, disabled, onSelect, status, selectionLabel, columnCount, dateLabel, amountLabel, indicator, onDelete, deleteDisabled }: {
+export function MobileTransactionSummary({ item, expanded, onToggle, checked, disabled, onSelect, status, selectionLabel, columnCount, dateLabel, amountLabel, categoryLabel, indicator, onDelete, deleteDisabled }: {
   item: Pick<TransactionRecord, "merchant" | "occurredAt" | "actorName" | "amountYen" | "expenseClass"> & Partial<Pick<TransactionRecord, "source">>;
   expanded: boolean;
   onToggle: () => void;
@@ -55,6 +56,7 @@ export function MobileTransactionSummary({ item, expanded, onToggle, checked, di
   columnCount: number;
   dateLabel?: string;
   amountLabel?: string;
+  categoryLabel?: string;
   indicator?: ReactNode;
   onDelete?: () => void;
   deleteDisabled?: boolean;
@@ -62,7 +64,7 @@ export function MobileTransactionSummary({ item, expanded, onToggle, checked, di
   const content = <>
     <input className={styles.checkbox} type="checkbox" aria-label={selectionLabel ?? item.merchant + "の明細を選択"} checked={checked} disabled={disabled} onChange={onSelect} />
     <button type="button" className={styles.summaryButton} aria-expanded={expanded} aria-label={item.merchant + "の詳細を" + (expanded ? "閉じる" : "開く")} onClick={onToggle}>
-      <span className={styles.summaryName}><b>{item.merchant}</b><small>{dateLabel ?? formatJstDateTime(item.occurredAt, DateTimePrecision.Minute)} · {item.actorName}{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</small></span>
+      <span className={styles.summaryName}><b>{item.merchant}</b><small>{dateLabel ?? formatJstDateTime(item.occurredAt, DateTimePrecision.Minute)} · {item.actorName}{item.source === "RECURRING" && <span className={styles.sourceTag}>定期</span>}</small>{categoryLabel && <small className={styles.summaryCategory}>{categoryLabel}</small>}</span>
       <span className={styles.summaryAmount}><strong>{amountLabel ?? formatYen(item.amountYen)}</strong><small>{status ?? (expenseClassLabels[item.expenseClass])}</small></span>
       <span className={styles.summaryChevron} aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
     </button>

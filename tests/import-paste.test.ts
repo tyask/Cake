@@ -12,7 +12,7 @@ const workspace: WorkspaceData = {
     { id: "a", name: "本人", email: "a@example.test", imageUrl: null, weight: 6, role: "OWNER" },
     { id: "b", name: "相手", email: "b@example.test", imageUrl: null, weight: 4, role: "MEMBER" },
   ],
-  rules: [{ id: "personal", merchantContains: "個人", expenseClass: "PERSONAL", sortOrder: 0, splitWeights: null, enabled: true }],
+  categories: [], rules: [{ id: "personal", merchantContains: "個人", expenseClass: "PERSONAL", sortOrder: 0, splitWeights: null, enabled: true }],
   transactions: [], settlement: null, settlementHistory: [],
 };
 const header = "取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号";

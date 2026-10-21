@@ -8,7 +8,7 @@ import { defaultRuleCases, ruleMembers } from "./fixtures/default-rule-cases";
 
 const selected: WorkspaceMetadata = { workspace: { id: "w", name: "家計", type: "SHARED", ownerUserId: "a", memberCount: 2 },
   members: [{ id: "a", email: "a@test", name: "A", imageUrl: null, role: "OWNER", weight: 1 },
-    { id: "b", email: "b@test", name: "B", imageUrl: null, role: "MEMBER", weight: 1 }], rules: [] };
+    { id: "b", email: "b@test", name: "B", imageUrl: null, role: "MEMBER", weight: 1 }], categories: [], rules: [] };
 const config = { dayOfMonth: 27, merchant: "家賃", method: "振込", amountYen: 100000, actorUserId: "a", expenseClass: "SHARED" as const, splitWeights: { a: 1, b: 1 }, memo: "" };
 const payment: RecurringPayment = { id: "r", workspaceId: "w", state: "ACTIVE", revision: 2, authorizedById: "a",
   currentConfig: config,
