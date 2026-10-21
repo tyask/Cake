@@ -57,8 +57,9 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
     const flat = flattenCategories(categories);
     const byId = new Map(categories.map(category => [category.id, category]));
     const parents = new Set(categories.map(category => category.parentId));
+    const branchIds = [...parents].filter((id): id is string => id !== null && byId.has(id));
     const siblingMoves = prepareCategorySiblingMoves(categories);
-    return { flat, byId, parents, siblingMoves };
+    return { flat, byId, parents, branchIds, siblingMoves };
   }, [categories]);
   const visibleCategories = useMemo(() => {
     let hiddenDepth: number | null = null;
@@ -72,6 +73,7 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
     }
     return visible;
   }, [prepared, collapsed]);
+  const hasBranches = prepared.branchIds.length > 0;
   const selected = editor?.categoryId ? prepared.byId.get(editor.categoryId) : undefined;
   // An existing draft follows its category's confirmed parent after a move.
   const editorParentId = editor?.categoryId ? selected?.parentId ?? null : editor?.parentId ?? null;
@@ -225,6 +227,10 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
       <div className={styles.treePanel}>
         <div className={styles.treeToolbar}>
           <button type="button" className="secondary" disabled={busy} onClick={() => beginCreate(null)}>＋ 大分類を追加</button>
+          <div className={styles.treeControls} role="group" aria-label="ツリーの開閉">
+            <button type="button" className="secondary" aria-controls={`${formId}-category-tree`} disabled={busy || !!dragId || !hasBranches} onClick={() => setCollapsed(new Set())}>すべて開く</button>
+            <button type="button" className="secondary" aria-controls={`${formId}-category-tree`} disabled={busy || !!dragId || !hasBranches} onClick={() => setCollapsed(new Set(prepared.branchIds))}>すべて閉じる</button>
+          </div>
         </div>
         {moveId && <form className={styles.movePanel} aria-label="カテゴリを移動" onSubmit={event => { event.preventDefault(); void moveCategory({ sourceId: moveId, target: moveTarget }); }}>
           <div className={styles.moveHeading}><b>「{prepared.byId.get(moveId)?.name ?? "カテゴリ"}」を移動</b><button type="button" className="text-button" disabled={busy} onClick={() => setMoveId(null)}>キャンセル</button></div>
@@ -260,7 +266,7 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
             },
           }}>
           <div ref={treeScroll} data-category-tree-scroll className={styles.treeScroll}>
-            <ul className={styles.tree} aria-label="カテゴリ一覧">
+            <ul id={`${formId}-category-tree`} className={styles.tree} aria-label="カテゴリ一覧">
               {visibleCategories.map(({ category, depth, path }) => <CategoryTreeRow key={category.id} category={category} depth={depth} path={path} selected={editor?.categoryId === category.id}
                 busy={busy} dragging={!!dragId} collapsed={collapsed.has(category.id)} hasChildren={prepared.parents.has(category.id)} destination={moving.destination} siblingMoves={prepared.siblingMoves.get(category.id)}
                 onCollapse={() => setCollapsed(current => { const next = new Set(current); if (next.has(category.id)) next.delete(category.id); else next.add(category.id); return next; })}

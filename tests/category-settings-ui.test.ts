@@ -23,6 +23,8 @@ async function drag(page: Page, sourceId: string, targetId: string, position: st
     await page.mouse.move(start.x - 8, start.y);
   }
   await page.locator(`[data-category-id="${sourceId}"][data-category-dragging="true"]`).waitFor();
+  assert.equal(await page.getByRole("button", { name: "すべて開く", exact: true }).isDisabled(), true, "ドラッグ中は一括展開しない");
+  assert.equal(await page.getByRole("button", { name: "すべて閉じる", exact: true }).isDisabled(), true, "ドラッグ中は一括折りたたみしない");
   for (let step = 1; step <= 10; step++) {
     const targetBox = (await target.boundingBox())!;
     const end = { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 };
@@ -49,7 +51,7 @@ async function drag(page: Page, sourceId: string, targetId: string, position: st
   return preview;
 }
 
-test("カテゴリ設定の上下・マウス・タッチ・キーボード移動、入力保持、拒否・失敗・再試行・子孫削除を検証する", async t => {
+test("カテゴリ設定の一括開閉、上下・マウス・タッチ・キーボード移動、入力保持、拒否・失敗・再試行・子孫削除を検証する", async t => {
   const bundle = await build({ entryPoints: ["tests/fixtures/category-settings.tsx"], bundle: true, write: false, outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
   const server = createServer((req, res) => {
     const asset = bundle.outputFiles.find(file => file.path.endsWith(req.url === "/bundle.css" ? "/bundle.css" : "/bundle.js"));
@@ -112,6 +114,17 @@ test("カテゴリ設定の上下・マウス・タッチ・キーボード移�
         });
         await page.goto(origin);
         saved = JSON.parse((await page.locator("#saved-categories").textContent())!);
+        const expandAll = page.getByRole("button", { name: "すべて開く", exact: true });
+        const collapseAll = page.getByRole("button", { name: "すべて閉じる", exact: true });
+        const toolbarButtons = await page.getByRole("button", { name: /^(すべて開く|すべて閉じる|＋ 大分類を追加)$/ }).evaluateAll(elements => elements.map(element => {
+          const box = element.getBoundingClientRect();
+          return { x: box.x, y: box.y, width: box.width, height: box.height };
+        }));
+        assert.equal(toolbarButtons.length, 3);
+        for (const [index, box] of toolbarButtons.entries()) {
+          assert.ok(box.width > 0 && box.height > 0 && box.x >= 0 && box.x + box.width <= width, "一括開閉・追加ボタンが画面幅に収まる");
+          for (const previous of toolbarButtons.slice(0, index)) assert.ok(previous.x + previous.width <= box.x + 1 || box.x + box.width <= previous.x + 1 || previous.y + previous.height <= box.y + 1 || box.y + box.height <= previous.y + 1, "一括開閉・追加ボタンが重ならない");
+        }
         for (const category of saved) {
           const row = page.locator(`[data-category-id="${category.id}"]`);
           await row.scrollIntoViewIfNeeded();
@@ -133,6 +146,26 @@ test("カテゴリ設定の上下・マウス・タッチ・キーボード移�
         assert.equal(await longName.getAttribute("title"), "食費 › 食料品 › 生鮮食品 › 野菜・果物・食材の買い出し（週末まとめ買い）", "名前を省略してもフルパスを確認できる");
         await longName.click();
         assert.equal(await page.getByLabel("カテゴリ名", { exact: true }).inputValue(), "野菜・果物・食材の買い出し（週末まとめ買い）");
+        await page.getByLabel("カテゴリ名", { exact: true }).fill("開閉中の名前");
+        await page.getByLabel("カラーコード", { exact: true }).fill("#123456");
+        await page.getByRole("button", { name: "食費 › 食料品を折りたたむ", exact: true }).click();
+        await collapseAll.click();
+        const visibleIds = () => page.locator("[data-category-id]").evaluateAll(elements => elements.map(element => element.getAttribute("data-category-id")).sort());
+        assert.deepEqual(await visibleIds(), saved.filter(category => category.parentId === null).map(category => category.id).sort(), "すべて閉じると最上位だけを表示する");
+        assert.equal(await page.getByLabel("カテゴリ名", { exact: true }).inputValue(), "開閉中の名前");
+        assert.equal(await page.getByLabel("カラーコード", { exact: true }).inputValue(), "#123456", "選択行を隠しても未保存の名前と色を保持する");
+        await page.getByRole("button", { name: "食費を展開", exact: true }).click();
+        assert.equal(await page.locator('[data-category-id="grocery"]').count(), 1, "一括折りたたみ後も個別に展開できる");
+        assert.equal(await page.locator('[data-category-id="fresh"]').count(), 0, "深い階層の折りたたみも保持する");
+        await page.getByRole("button", { name: "食費 › 食料品を展開", exact: true }).click();
+        assert.equal(await page.locator('[data-category-id="fresh"]').count(), 1);
+        assert.equal(await page.locator('[data-category-id="leaf"]').count(), 0, "一括折りたたみは孫以降の親にも適用する");
+        await expandAll.click();
+        assert.deepEqual(await visibleIds(), saved.map(category => category.id).sort(), "すべて開くと個別に閉じた枝を含む全階層を表示する");
+        assert.equal(await page.getByLabel("カテゴリ名", { exact: true }).inputValue(), "開閉中の名前");
+        assert.equal(await page.getByLabel("カラーコード", { exact: true }).inputValue(), "#123456");
+        assert.equal(writes.length, 0, "一括・個別開閉では未保存入力を送信しない");
+        assert.equal(dialogs.length, 0, "一括・個別開閉では未保存入力の破棄確認を出さない");
         await page.getByRole("button", { name: "閉じる", exact: true }).click();
         await page.locator('[data-category-id="leaf"]').getByRole("button", { name: /に子カテゴリを追加$/ }).click();
         await page.getByRole("heading", { name: "子カテゴリを追加", exact: true }).waitFor();
@@ -169,6 +202,8 @@ test("カテゴリ設定の上下・マウス・タッチ・キーボード移�
         await page.waitForFunction(() => document.querySelector('section[aria-busy="true"]'));
         assert.equal(await page.getByRole("button", { name: "食費を下へ", exact: true }).isDisabled(), true);
         assert.equal(await page.getByRole("button", { name: "削除する", exact: true }).isDisabled(), true);
+        assert.equal(await expandAll.isDisabled(), true, "保存中は一括展開しない");
+        assert.equal(await collapseAll.isDisabled(), true, "保存中は一括折りたたみしない");
         assert.ok(release); hold = false; release();
         await waitOrder("old-conflict", 1);
         assert.equal(await page.getByLabel("カテゴリ名", { exact: true }).inputValue(), "並べ替え中の名前");

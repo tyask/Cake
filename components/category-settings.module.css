@@ -4,7 +4,8 @@
 .treePanel, .editorPanel { min-width: 0; border: 1px solid var(--line); border-radius: .8rem; }
 .treePanel { align-self: start; overflow: hidden; }
 .treeToolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .7rem; padding: .85rem; background: var(--surface-muted); border-bottom: 1px solid var(--line); }
-.treeToolbar > button { min-height: 2.5rem; padding: .5rem .7rem; font-size: .72rem; }
+.treeToolbar button { min-height: 2.5rem; padding: .5rem .7rem; font-size: .72rem; white-space: nowrap; }
+.treeControls { display: flex; flex-wrap: wrap; gap: .4rem; }
 .treeScroll { max-height: 36rem; overflow: auto; }
 .tree { margin: 0; padding: .5rem; list-style: none; }
 .treeRow { position: relative; display: grid; grid-template-columns: 1.5rem minmax(0, 1fr) repeat(4, 2rem); align-items: center; column-gap: .25rem; min-height: 2.8rem; padding-inline-start: min(calc(var(--category-depth) * .9rem), 3.6rem); border-radius: .5rem; }
@@ -99,6 +100,7 @@
   .paletteButton small { font-size: .58rem; }
   .field input { font-size: 16px; }
   .tree { padding: .35rem; }
+  .treeControls > button { min-height: 2.75rem; }
   .treeRow { column-gap: .2rem; padding-inline-start: min(calc(var(--category-depth) * .5rem), 1rem); }
   .categoryButton { gap: .3rem; }
   .categoryName { font-size: .72rem; }
