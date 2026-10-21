@@ -9,6 +9,7 @@ import { SplitEditor } from "./split-editor";
 import { RecurringPaymentsPanel } from "./recurring-payments-panel";
 import { WorkspaceRules } from "./workspace-rules";
 import { CategorySettings } from "./category-settings";
+import { SettingsSection } from "./settings-section";
 
 export function SettingsPanel({ selected, currentUserId, run, afterDelete }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction; afterDelete: () => Promise<void> }) {
   const [name, setName] = useState(selected.workspace.name);
@@ -47,39 +48,35 @@ export function SettingsPanel({ selected, currentUserId, run, afterDelete }: { s
   }
 
   return <>
-    <div className="settings-grid">
-      <section className="panel settings-section">
-        <div className="panel-head"><div><span>GENERAL</span><h2>基本情報</h2></div></div>
-        <label>ワークスペース名<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label>種類<input value={selected.workspace.type === "SHARED" ? "共有用" : "個人用"} disabled /></label>
-        <button className="secondary" onClick={() => run({ action: "updateWorkspace", workspaceId: selected.workspace.id, name }, "名前を変更しました。")}>変更を保存</button>
-      </section>
-      <section className="panel settings-section">
-        <div className="panel-head"><div><span>DEFAULT SPLIT</span><h2>共有費のデフォルト割合</h2></div></div>
-        {selected.members.map((member) => <div className="member-row" key={member.id}>
-          <span className="avatar">{member.name.slice(0, 1)}</span>
-          <span><b>{member.name}{member.id === currentUserId && "（あなた）"}</b><small>{member.email}</small></span>
-        </div>)}
-        {selected.workspace.type === "SHARED" && <div className="default-split-settings">
-          <SplitEditor members={selected.members} value={weights} onChange={setWeights} disabled={savingWeights || selected.members.length < 2} label="デフォルト割合" />
-          <p className="ratio-note">新しい共有費の初期値に使います。保存済みの明細は、それぞれの割合で清算します。</p>
-          {selected.members.length === 2 && <button className="secondary" disabled={savingWeights} onClick={saveWeights}>{savingWeights ? "保存中…" : "割合を保存"}</button>}
-        </div>}
-        {selected.workspace.type === "SHARED" && selected.members.length < 2 && <div className="invite-form">
-          <label>相手のGoogleアカウントのメール<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="partner@example.com" /></label>
-          <button className="secondary" onClick={invite}>招待リンクを作成</button>
-          {inviteLink && <div className="copy-box"><input readOnly value={inviteLink} /><button onClick={() => navigator.clipboard.writeText(inviteLink)}>コピー</button></div>}
-        </div>}
-        {error && <p className="settings-error form-error" role="alert">{error}</p>}
-      </section>
-    </div>
+    <SettingsSection title="基本情報" contentClassName="settings-section">
+      <label>ワークスペース名<input value={name} onChange={(event) => setName(event.target.value)} /></label>
+      <label>種類<input value={selected.workspace.type === "SHARED" ? "共有用" : "個人用"} disabled /></label>
+      <button className="secondary" onClick={() => run({ action: "updateWorkspace", workspaceId: selected.workspace.id, name }, "名前を変更しました。")}>変更を保存</button>
+    </SettingsSection>
+    <SettingsSection title="ワークスペースのデフォルト割合" contentClassName="settings-section">
+      {selected.members.map((member) => <div className="member-row" key={member.id}>
+        <span className="avatar">{member.name.slice(0, 1)}</span>
+        <span><b>{member.name}{member.id === currentUserId && "（あなた）"}</b><small>{member.email}</small></span>
+      </div>)}
+      {selected.workspace.type === "SHARED" && <div className="default-split-settings">
+        <SplitEditor members={selected.members} value={weights} onChange={setWeights} disabled={savingWeights || selected.members.length < 2} label="デフォルト割合" />
+        <p className="ratio-note">新しい共有費の初期値に使います。保存済みの明細は、それぞれの割合で清算します。</p>
+        {selected.members.length === 2 && <button className="secondary" disabled={savingWeights} onClick={saveWeights}>{savingWeights ? "保存中…" : "割合を保存"}</button>}
+      </div>}
+      {selected.workspace.type === "SHARED" && selected.members.length < 2 && <div className="invite-form">
+        <label>相手のGoogleアカウントのメール<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="partner@example.com" /></label>
+        <button className="secondary" onClick={invite}>招待リンクを作成</button>
+        {inviteLink && <div className="copy-box"><input readOnly value={inviteLink} /><button onClick={() => navigator.clipboard.writeText(inviteLink)}>コピー</button></div>}
+      </div>}
+      {error && <p className="settings-error form-error" role="alert">{error}</p>}
+    </SettingsSection>
     <CategorySettings categories={selected.categories} workspaceId={selected.workspace.id} run={run} />
     <RecurringPaymentsPanel selected={selected} currentUserId={currentUserId} />
     <WorkspaceRules selected={selected} run={run} />
-    <section className="panel danger-zone">
-      <div><span>DANGER ZONE</span><h2>ワークスペースを削除</h2><p>関連する明細、招待、ルール、清算履歴がすべて削除され、元に戻せません。</p></div>
+    <SettingsSection title="ワークスペースを削除" className="danger-settings-panel" contentClassName="danger-zone">
+      <p>関連する明細、招待、ルール、清算履歴がすべて削除され、元に戻せません。</p>
       <label>確認のため「{selected.workspace.name}」と入力<input value={deleteName} onChange={(event) => setDeleteName(event.target.value)} /></label>
       <button disabled={deleteName !== selected.workspace.name} onClick={removeWorkspace}>完全に削除</button>
-    </section>
+    </SettingsSection>
   </>;
 }

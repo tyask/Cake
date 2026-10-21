@@ -6,6 +6,7 @@ import { signOut } from "next-auth/react";
 import { useState } from "react";
 import { PROFILE_NAME_MAX_LENGTH } from "@/lib/user-profile";
 import type { AppUser } from "@/lib/types";
+import { SettingsSection } from "./settings-section";
 
 export function PersonalSettings({ user, run }: {
   user: AppUser;
@@ -19,7 +20,7 @@ export function PersonalSettings({ user, run }: {
 
   return <section className="settings-group" aria-labelledby="personal-settings-title">
     <div className="settings-group-heading"><h2 id="personal-settings-title">個人設定</h2><p>あなたのプロフィールを設定します。</p></div>
-    <section className="panel personal-settings-panel">
+    <SettingsSection title="基本情報" contentClassName="personal-settings-panel">
       <form onSubmit={async event => {
         event.preventDefault();
         setError(null);
@@ -43,6 +44,6 @@ export function PersonalSettings({ user, run }: {
         }}>{loggingOut ? "ログアウト中…" : "ログアウト"}</button>
         {logoutError && <p className="form-error" role="alert">{logoutError}</p>}
       </div>
-    </section>
+    </SettingsSection>
   </section>;
 }

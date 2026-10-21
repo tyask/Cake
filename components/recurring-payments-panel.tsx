@@ -15,6 +15,7 @@ import type { ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/types";
 import { SwipeDelete } from "./swipe-delete";
 import { RefreshButton } from "./refresh-button";
 import { SplitEditor } from "./split-editor";
+import { SettingsSection } from "./settings-section";
 import tableStyles from "./transactions-panel.module.css";
 import styles from "./recurring-payments-panel.module.css";
 
@@ -117,8 +118,8 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
     }
   }
 
-  return <section className={`panel ${tableStyles.panel} ${styles.panel}`} aria-labelledby="recurring-payments-title">
-    <div className={`panel-head ${styles.heading}`}><div><span>RECURRING PAYMENTS</span><h2 id="recurring-payments-title">定期支払い</h2></div>
+  return <SettingsSection title="定期支払い" className={`${tableStyles.panel} ${styles.panel}`} contentClassName={styles.content}>
+    <div className={`panel-head ${styles.heading}`}>
       <div className={styles.headingActions}><RefreshButton refreshing={loading} disabled={busy || loading || form !== null || confirmation !== null} onClick={() => { setLoading(true); void load(); }} />
         <button type="button" className="primary" disabled={busy || loading || !data || data.eligibleActorUserIds.length === 0} onClick={() => setForm({})}>＋ 定期支払いを追加</button></div>
     </div>
@@ -137,7 +138,7 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
       close={() => setForm(null)} save={save} reloadLatest={reloadLatest} />}
     {confirmation && data && <RecurringPaymentConfirmation key={`${confirmation.payment.id}-${confirmation.payment.revision}-${confirmation.action}`} {...confirmation}
       close={() => setConfirmation(null)} save={save} reloadLatest={reloadLatest} />}
-  </section>;
+  </SettingsSection>;
 }
 
 function RecurringPaymentRow({ payment, members, busy, onEdit, onAction }: { payment: RecurringPayment; members: WorkspaceMember[]; busy: boolean; onEdit: () => void; onAction: (action: StateAction) => void }) {
