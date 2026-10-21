@@ -12,7 +12,7 @@ const category = (id: string, name: string, parentId: string | null, sortOrder =
 });
 const categories = [
   category("food", "食費", null), category("grocery", "食料品", "food"), category("fresh", "生鮮食品", "grocery"),
-  category("leaf", "野菜", "fresh"), category("snacks", "お菓子", "grocery", 1), category("old-conflict", "保存前の名前", "food", 1),
+  category("leaf", "野菜・果物・食材の買い出し（週末まとめ買い）", "fresh"), category("snacks", "お菓子", "grocery", 1), category("old-conflict", "保存前の名前", "food", 1),
   category("daily", "日用品", null, 2), category("duplicate", "食料品", "daily"), category("fun", "娯楽", null, 3),
   category("movie", "映画", "fun"), category("books", "書籍", "fun", 1), category("archived", "以前のカテゴリ", null, 1, "2026-10-20T00:00:00Z"),
 ];

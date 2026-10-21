@@ -321,8 +321,8 @@ function CategoryTreeRow({ category, depth, path, selected, busy, dragging, coll
         <span className={styles.colorDot} style={{ backgroundColor: category.colorHex }} />
         <span className={styles.categoryName}>{category.name}</span>
       </button>
-      <button type="button" className={`${styles.stepButton} ${styles.stepUp}`} aria-label={`${path}を上へ`} title="同じ階層で1つ上へ" disabled={busy || dragging || !siblingMoves?.up} onClick={() => { if (siblingMoves?.up) onStep(siblingMoves.up); }}>↑</button>
-      <button type="button" className={`${styles.stepButton} ${styles.stepDown}`} aria-label={`${path}を下へ`} title="同じ階層で1つ下へ" disabled={busy || dragging || !siblingMoves?.down} onClick={() => { if (siblingMoves?.down) onStep(siblingMoves.down); }}>↓</button>
+      <button type="button" className={styles.stepButton} aria-label={`${path}を上へ`} title="同じ階層で1つ上へ" disabled={busy || dragging || !siblingMoves?.up} onClick={() => { if (siblingMoves?.up) onStep(siblingMoves.up); }}>↑</button>
+      <button type="button" className={styles.stepButton} aria-label={`${path}を下へ`} title="同じ階層で1つ下へ" disabled={busy || dragging || !siblingMoves?.down} onClick={() => { if (siblingMoves?.down) onStep(siblingMoves.down); }}>↓</button>
       {!category.archivedAt ? <button type="button" className={styles.addChild} aria-label={`${path}に子カテゴリを追加`} disabled={busy || dragging} onClick={onCreate}>＋</button> : <span />}
       <button type="button" ref={setActivatorNodeRef} {...attributes} {...listeners} data-category-move-handle={category.id} className={styles.dragHandle} aria-label={`${path}を移動`} title="ドラッグで移動。押すと移動先を選べます" disabled={busy || !!category.archivedAt} onClick={onMove}>⠿</button>
       {movePositions.map(({ value }) => {

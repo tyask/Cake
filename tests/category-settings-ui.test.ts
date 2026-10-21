@@ -112,6 +112,32 @@ test("カテゴリ設定の上下・マウス・タッチ・キーボード移�
         });
         await page.goto(origin);
         saved = JSON.parse((await page.locator("#saved-categories").textContent())!);
+        for (const category of saved) {
+          const row = page.locator(`[data-category-id="${category.id}"]`);
+          await row.scrollIntoViewIfNeeded();
+          const buttons = await row.getByRole("button").evaluateAll(elements => elements.map(element => {
+            const box = element.getBoundingClientRect();
+            return { x: box.x, y: box.y, width: box.width, height: box.height, hit: element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)) };
+          }));
+          assert.ok(buttons.length >= 4, `${category.id}: 名前と上下・移動ボタンが表示される`);
+          for (const [index, box] of buttons.entries()) {
+            assert.ok(Math.abs(box.y + box.height / 2 - buttons[0].y - buttons[0].height / 2) <= 1, `${category.id}: カテゴリ名と操作ボタンを同じ行に表示する`);
+            assert.ok(box.width > 0 && box.height > 0 && box.x >= 0 && box.x + box.width <= width, `${category.id}: 操作ボタンが画面内に収まる`);
+            if (index) assert.ok(buttons[index - 1].x + buttons[index - 1].width <= box.x + 1, `${category.id}: 隣の操作ボタンと重ならない`);
+            assert.equal(box.hit, true, `${category.id}: ボタンの中央がほかの要素に隠れない`);
+          }
+          const name = row.getByRole("button", { name: /を選択$/ }).locator("span").last();
+          assert.equal(await name.evaluate(element => { const range = document.createRange(); range.selectNodeContents(element); const lines = [...range.getClientRects()]; return lines.length > 0 && lines.every(line => Math.abs(line.y - lines[0].y) <= 1); }), true, `${category.id}: 長い名前も1行で表示する`);
+        }
+        const longName = page.getByRole("button", { name: "食費 › 食料品 › 生鮮食品 › 野菜・果物・食材の買い出し（週末まとめ買い）を選択", exact: true });
+        assert.equal(await longName.getAttribute("title"), "食費 › 食料品 › 生鮮食品 › 野菜・果物・食材の買い出し（週末まとめ買い）", "名前を省略してもフルパスを確認できる");
+        await longName.click();
+        assert.equal(await page.getByLabel("カテゴリ名", { exact: true }).inputValue(), "野菜・果物・食材の買い出し（週末まとめ買い）");
+        await page.getByRole("button", { name: "閉じる", exact: true }).click();
+        await page.locator('[data-category-id="leaf"]').getByRole("button", { name: /に子カテゴリを追加$/ }).click();
+        await page.getByRole("heading", { name: "子カテゴリを追加", exact: true }).waitFor();
+        await page.getByRole("button", { name: "閉じる", exact: true }).click();
+        assert.equal(writes.length, 0, "長い名前の選択や子追加の開始だけでは保存しない");
         const waitParent = async (id: string, parentId: string | null) => page.waitForFunction(({ id, parentId }) => JSON.parse(document.getElementById("saved-categories")!.textContent!).find((category: Category) => category.id === id).parentId === parentId, { id, parentId });
         const waitOrder = async (id: string, sortOrder: number) => page.waitForFunction(({ id, sortOrder }) => JSON.parse(document.getElementById("saved-categories")!.textContent!).find((category: Category) => category.id === id).sortOrder === sortOrder, { id, sortOrder });
         assert.equal(await page.locator('[data-category-drop-id="root"]').count(), 0);
