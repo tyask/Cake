@@ -1,4 +1,5 @@
-import { config, sameDatabase, uuid, type Database, type Deployment, type Source } from './preview-model';
+import { sameDatabase, uuid, type Database, type Deployment, type Source } from './preview-model';
+import { isProductionDatabaseHostDigest } from '../lib/production-database-hosts.mjs';
 import { receiptMaxBytes } from './preview-receipt';
 import { fullSha, previewUrl, validTaskBranch } from './task-workflow';
 
@@ -50,7 +51,7 @@ function database(value: unknown): Database {
   if (typeof db.branchId !== 'string' || !/^br-[a-z0-9-]+$/.test(db.branchId)
     || typeof db.endpointId !== 'string' || !/^ep-[a-z0-9-]+$/.test(db.endpointId)
     || typeof db.hostDigest !== 'string' || !/^[a-f0-9]{64}$/.test(db.hostDigest)
-    || db.hostDigest === config.productionHostDigest) return invalid();
+    || isProductionDatabaseHostDigest(db.hostDigest)) return invalid();
   return db as Database;
 }
 function checkedDeployment(value: unknown, source: Source, expectedId: string, db: Database): Deployment {

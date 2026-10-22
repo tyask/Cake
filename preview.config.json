@@ -7,5 +7,6 @@
   "vercelTeamId": "team_D1Mcx2TdFWPKcypfu8KzNMub",
   "neonProjectId": "misty-meadow-88903426",
   "neonParentBranchId": "br-lively-frog-b3y2mauu",
-  "productionHostDigest": "600033d07eb267fe31096a1bb98d0c1809be7a0ef7a895ad3bcbc6daabbbf0f6"
+  "productionHostDigest": "600033d07eb267fe31096a1bb98d0c1809be7a0ef7a895ad3bcbc6daabbbf0f6",
+  "productionHostDigests": ["600033d07eb267fe31096a1bb98d0c1809be7a0ef7a895ad3bcbc6daabbbf0f6"]
 }
