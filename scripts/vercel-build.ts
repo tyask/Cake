@@ -4,9 +4,10 @@ import { fileURLToPath } from "node:url";
 import { databaseConnectionString, databaseVariable } from "../lib/database-environment";
 import { clearProvisioningOutput, provisioningBuild, writeProvisioningOutput } from './preview-provisioning';
 
-export type BuildStep = "provision" | "db:setup" | "db:seed:test" | "qa:db:csv-categories" | "build";
+export type BuildStep = "provision" | "db:setup" | "db:seed:test" | "qa:db:csv-categories" | "qa:db:merchant-normalization" | "build";
 type BuildEnvironment = Readonly<Record<string, string | undefined>>;
 const csvCategoryQaMarker = '[cake-db-qa:csv-categories]';
+const merchantNormalizationQaMarker = '[cake-db-qa:merchant-normalization]';
 const csvCategoryQaVariables = [
   'PATH', 'SystemRoot', 'TMPDIR', 'TMP', 'TEMP', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
   'VERCEL_ENV', 'AUTH_MODE', 'VERCEL_DEPLOYMENT_ID',
@@ -40,9 +41,10 @@ export function buildSteps(environment: BuildEnvironment): BuildStep[] {
   const steps: BuildStep[] = ["db:setup"];
   if (environment.AUTH_MODE === "test") {
     steps.push("db:seed:test");
-    if (environment.CAKE_PREVIEW_KIND === undefined
-      && environment.VERCEL_GIT_COMMIT_MESSAGE?.split(/\r?\n/).some(line => line.trim() === csvCategoryQaMarker)) {
-      steps.push("qa:db:csv-categories");
+    if (environment.CAKE_PREVIEW_KIND === undefined) {
+      const markers = environment.VERCEL_GIT_COMMIT_MESSAGE?.split(/\r?\n/).map(line => line.trim()) ?? [];
+      if (markers.includes(merchantNormalizationQaMarker)) steps.push('qa:db:merchant-normalization');
+      else if (markers.includes(csvCategoryQaMarker)) steps.push('qa:db:csv-categories');
     }
   }
   return [...steps, "build"];
@@ -60,10 +62,11 @@ function executeStep(step: BuildStep, environment: BuildEnvironment): number {
     "db:setup": ["scripts/setup-db.mjs"],
     "db:seed:test": ["--import", "tsx", "scripts/seed-test-users.ts"],
     "qa:db:csv-categories": ["--import", "tsx", "scripts/verify-csv-category-concurrency.ts"],
+    "qa:db:merchant-normalization": ["--import", "tsx", "scripts/verify-csv-category-concurrency.ts"],
     build: ["node_modules/next/dist/bin/next", "build"],
   };
   // The opt-in QA receives only its dedicated DB and identity, never provider or application credentials.
-  const childEnvironment = step === 'qa:db:csv-categories'
+  const childEnvironment = step === 'qa:db:csv-categories' || step === 'qa:db:merchant-normalization'
     ? { ...environment, NODE_ENV: 'production' as const }
     : { ...process.env, ...environment };
   const result = spawnSync(process.execPath, args[step], { stdio: "inherit", env: childEnvironment });
@@ -75,7 +78,8 @@ export function runVercelBuild(
   execute: (step: BuildStep, environment: BuildEnvironment) => number = executeStep,
 ): void {
   for (const step of buildSteps(environment)) {
-    const status = execute(step, step === 'qa:db:csv-categories' ? csvCategoryQaEnvironment(environment) : environment);
+    const qa = step === 'qa:db:csv-categories' || step === 'qa:db:merchant-normalization';
+    const status = execute(step, qa ? csvCategoryQaEnvironment(environment) : environment);
     if (status !== 0) throw new Error(`${step} が失敗しました（終了コード ${status}）。`);
   }
 }

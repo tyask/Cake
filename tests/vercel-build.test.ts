@@ -5,6 +5,7 @@ import { buildSteps, runVercelBuild, type BuildStep } from "../scripts/vercel-bu
 import { config } from '../scripts/preview-model';
 
 const csvCategoryQaMarker = '[cake-db-qa:csv-categories]';
+const merchantNormalizationQaMarker = '[cake-db-qa:merchant-normalization]';
 
 const previewEnvironment = {
   VERCEL_ENV: "preview", AUTH_MODE: "test", AUTH_SECRET: "test-secret",
@@ -37,6 +38,41 @@ test('文中・未知・不完全なmarkerでは実DB検証を追加しない', 
   for (const message of [undefined, '', `説明 ${csvCategoryQaMarker}`, `${csvCategoryQaMarker} を実行`, '[cake-db-qa:other]', '[cake-db-qa:CSV-categories]']) {
     assert.deepEqual(buildSteps({ ...previewEnvironment, VERCEL_GIT_COMMIT_MESSAGE: message }), ['db:setup', 'db:seed:test', 'build']);
   }
+});
+
+test('正規化markerはPR applicationだけで同じ隔離環境のQAを一回実行する', () => {
+  const environment = { ...previewEnvironment, VERCEL_GIT_COMMIT_MESSAGE: `正規化を検証\n  ${merchantNormalizationQaMarker}\t\n${csvCategoryQaMarker}`,
+    VERCEL_TOKEN: 'provider-secret', AUTH_GOOGLE_SECRET: 'auth-secret', NEON_API_KEY: 'neon-secret',
+    GH_TOKEN: 'github-secret', VERCEL_OIDC_TOKEN: 'oidc-secret', NODE_OPTIONS: '--require private-hook', DEBUG: '*' };
+  const steps: BuildStep[] = [];
+  runVercelBuild(environment, (step, child) => {
+    steps.push(step);
+    if (step === 'qa:db:merchant-normalization') {
+      assert.equal(child.CAKE_TEST_DATABASE_URL, environment.CAKE_TEST_DATABASE_URL);
+      assert.equal(child.VERCEL_GIT_COMMIT_MESSAGE, environment.VERCEL_GIT_COMMIT_MESSAGE);
+      assert.equal(child.NODE_ENV, 'production');
+      for (const name of ['VERCEL_TOKEN', 'AUTH_SECRET', 'AUTH_GOOGLE_SECRET', 'NEON_API_KEY', 'GH_TOKEN', 'VERCEL_OIDC_TOKEN', 'NODE_OPTIONS', 'DEBUG']) assert.equal(child[name], undefined);
+    }
+    return 0;
+  });
+  assert.deepEqual(steps, ['db:setup', 'db:seed:test', 'qa:db:merchant-normalization', 'build']);
+  for (const message of [`説明 ${merchantNormalizationQaMarker}`, `${merchantNormalizationQaMarker} を実行`]) {
+    assert.deepEqual(buildSteps({ ...previewEnvironment, VERCEL_GIT_COMMIT_MESSAGE: message }), ['db:setup', 'db:seed:test', 'build']);
+  }
+  assert.deepEqual(buildSteps({ ...productionEnvironment, VERCEL_GIT_COMMIT_MESSAGE: merchantNormalizationQaMarker }), ['build', 'db:setup']);
+  assert.deepEqual(buildSteps({ ...previewEnvironment, VERCEL_GIT_COMMIT_MESSAGE: merchantNormalizationQaMarker, CAKE_PREVIEW_KIND: 'main',
+    CAKE_PREVIEW_PR: '0', CAKE_PREVIEW_SOURCE_BRANCH: 'cake-main-preview', VERCEL_GIT_COMMIT_REF: 'cake-main-preview' }), ['db:setup', 'db:seed:test', 'build']);
+  assert.deepEqual(buildSteps({ ...previewEnvironment, VERCEL_GIT_COMMIT_MESSAGE: merchantNormalizationQaMarker, CAKE_PREVIEW_PHASE: 'provisioning',
+    CAKE_PREVIEW_DATABASE_BRANCH_ID: '', CAKE_PREVIEW_DATABASE_HOST_SHA256: '', CAKE_PREVIEW_PRODUCTION_HOST_SHA256: config.productionHostDigest }), ['provision']);
+  for (const VERCEL_ENV of ['development', undefined]) assert.deepEqual(buildSteps({ VERCEL_ENV, VERCEL_GIT_COMMIT_MESSAGE: merchantNormalizationQaMarker }), ['build']);
+});
+
+test('正規化QAの失敗は後続buildを止める', () => {
+  const steps: BuildStep[] = [];
+  assert.throws(() => runVercelBuild({ ...previewEnvironment, VERCEL_GIT_COMMIT_MESSAGE: merchantNormalizationQaMarker }, step => {
+    steps.push(step); return step === 'qa:db:merchant-normalization' ? 1 : 0;
+  }), /qa:db:merchant-normalization が失敗/);
+  assert.deepEqual(steps, ['db:setup', 'db:seed:test', 'qa:db:merchant-normalization']);
 });
 
 test('markerがあってもProduction・準備用・常設Preview・Development・ローカルではCSVの実DB検証を行わない', () => {

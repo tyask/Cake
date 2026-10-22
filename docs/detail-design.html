@@ -781,7 +781,7 @@
             </div>
           </div>
           <p>明細にもcategory_revisionを保存し、割当・解除ごとにDBで加算する。新規カテゴリ付き明細は1、既存/未分類新規は0を初期値とする。DTOと専用保存応答にcategoryRevisionを保持し、古い/同じ版の割当応答は反映しない。タブを往復して保存キューが再生成されても旧カテゴリへ戻らない。編集欄の一時的な保存承認にもcategoryRevisionを使い、保存中に取得した新しいpropを旧応答で隠さない。カテゴリ選択の保存中は選択欄を無効化する。通常項目と同じ保存キューを使い、確定応答はカテゴリIDと確認状態だけを反映する。通常保存の古い全体応答で最新カテゴリやメモを上書きしない。workspace切替後の遅延応答は既存の要求世代で破棄する。</p>
-          <p>新規手動明細は<code>saveTransaction</code>にcategoryIdを指定でき、カテゴリありの場合は先頭SQLで共有の集合検証を行ってからINSERTする。アプリのSQLはカテゴリなしと同じ2本を維持する。既存明細の同actionではcategoryIdを拒否し、専用保存を使用する。カテゴリを選んだ手動操作はサーバーでcategoryConfirmed=true、解除はfalseとする。CSVはプレビューで指定したカテゴリを登録し、未指定は未分類にする。カテゴリありの新規行はcategoryConfirmed=true、未分類はfalse。定期生成は未分類で登録し、一覧から手動設定できる。取引先の正規化・CSV補完・グラフは提供しない。</p>
+          <p>新規手動明細は<code>saveTransaction</code>にcategoryIdを指定でき、カテゴリありの場合は先頭SQLで共有の集合検証を行ってからINSERTする。アプリのSQLはカテゴリなしと同じ2本を維持する。既存明細の同actionではcategoryIdを拒否し、専用保存を使用する。カテゴリを選んだ手動操作はサーバーでcategoryConfirmed=true、解除はfalseとする。CSVはプレビューで指定したカテゴリを登録し、未指定は未分類にする。カテゴリありの新規行はcategoryConfirmed=true、未分類はfalse。定期生成は未分類で登録し、一覧から手動設定できる。取引先の照合用正規化はDBで行い、CSVカテゴリの自動補完・候補API・グラフは提供しない。</p>
           <p><code>moveCategory</code>はnullable parentIdとbeforeCategoryIdで移動先と挿入位置を受け取る。parentId=nullは最上位、beforeCategoryId=nullは兄弟末尾。workspaceロック後の最新の所属、移動対象・親・挿入先兄弟の同workspaceと使用可否、自身・子孫への移動と同親同名を検証する。元と先の兄弟をsortOrder・id順に準備し、対象を除いた移動先の指定位置へ挿入する。親と両側の兄弟順の更新は同じTransactionで確定し、値が変わった行だけrevisionを加算する。応答は使用停止済みを含む元と先の兄弟と各行から最上位までの最新祖先を含む完全なCategoryをmovedCategoriesに返し、変更行だけの応答による取りこぼしを防ぐ。移動対象のID・色と子孫のID・親参照、明細の割当は変更しない。追加migrationで旧APIの署名とカテゴリ追加・編集・停止・割当を維持する。追加・編集・停止のstoreは同じ引数のwrapper関数から旧関数を呼び、workspaceロックを保持した同じTransactionで祖先DTOを追加する。明細への割当では祖先を取得しない。</p>
           <p>カテゴリ操作はworkspace行→membership行の順でロックし、最新の所属・対象の同workspaceを同じTransactionで確認する。<code>deleteCategory</code>はrecursive CTEで対象と子孫を一度列挙し、参照する全明細のcategoryIdをnull・categoryConfirmedをfalseへ一括更新してから、カテゴリを集合単位でDELETEする。categoryRevisionは既存triggerで加算し、金額・メモ・割合・清算日時と清算履歴には触れない。停止済みの旧カテゴリも削除可能。対象不存在・越境・権限喪失や途中の失敗では全体をrollbackする。削除応答はdeletedCategoryIdsと、更新した明細のtransactionId/null/false/実categoryRevisionをdetachedTransactionsに返す。</p>
           <p>controllerはworkspace別に削除済みIDと明細の解除応答の最大revisionを保持し、すべての取得・保存応答の採用後に同じ規則を適用する。後着の追加・編集・移動応答やGETで削除済みカテゴリを復活させない。まだ画面にない新規明細の古い保存応答にも実際の解除revisionを適用し、その後別カテゴリへ保存した新しいrevisionは保持する。採用可能な全カテゴリ取得で既知IDの消失を確認した場合も削除済みIDへ加える。metadata取得で既知カテゴリの消失を検出した場合は、未表示の新規明細も含む実際の解除revisionを得るためfullへ再取得し、不完全なmetadataと古い明細を混ぜず、DBの実revisionを受け取る。失敗時は元の整合した表示を保持する。保存開始後、または削除後に採用した全カテゴリ取得（full / metadata）にない未知IDを部分応答が返す場合や、未取得カテゴリの親が削除済みの場合は、full取得で実在と最新の親を照合してから反映する。カテゴリが最初から空でも全カテゴリ取得の世代とIDを記憶し、未取得だった新規カテゴリの削除も古い保存応答で復活させない。通常の追加・編集は確定応答を局所反映し、照合が必要な競合時だけ再取得する。古い応答の親参照だけで生存カテゴリを削除しない。照合が競合で破棄された場合は古い応答を採用せず、再取得を案内する。workspaceの自動切替・応答破棄の条件は既存の世代・dataRevision・requestIdで確認する。</p>
@@ -896,7 +896,7 @@ amountYen         = abs(payer.balance)</div>
 
         <section id="database">
           <h2>10. データベース物理設計</h2>
-          <p class="lead">PostgreSQL。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜013の順次適用後を指す。</p>
+          <p class="lead">PostgreSQL 18以上・UTF8を使用する。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜019の順次適用後を指す。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>テーブル</th><th>主キー</th><th>主要列・制約・Index</th><th>参照・削除</th></tr></thead>
             <tbody>
@@ -907,7 +907,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>invitations</code></td><td>uuid id</td><td>token_hash UNIQUE、(workspace,email) UNIQUE、status Enum、期限・inviter。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>import_batches</code></td><td>uuid id</td><td>file_name、total/imported/skipped_rows、imported_by、created_at。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>categories</code></td><td>uuid id</td><td>workspace/id UNIQUE、同親の使用中同名を部分UNIQUEで禁止。parentは同workspaceの複合FK、名前1〜40文字、色6桁HEX、sort_order非負、正のrevision。所属は変更不可。親変更時は使用可否と循環をtriggerでも検証する。</td><td>workspace削除時CASCADE。削除時は参照する明細を未分類へ戻してから子孫を含めDELETE。</td></tr>
-              <tr><td><code>transactions</code></td><td>uuid id</td><td>(workspace_id,external_id) UNIQUE、正のinteger amount、type/class/source Enum、actor・created/updated_by、split_weights NOT NULL/object、memo NOT NULL DEFAULT 空文字・最大2000文字。nullable category_idは同workspaceの複合FK。category_confirmedはNOT NULL、未分類はfalse。非負category_revisionは専用保存で加算。workspace/category部分Index。workspace/date、workspace/class/settled_at Index。</td><td>workspace削除時CASCADE、batch削除時SET NULL。清算関連からtransactionを参照。</td></tr>
+              <tr><td><code>transactions</code></td><td>uuid id</td><td>(workspace_id,external_id) UNIQUE、正のinteger amount、type/class/source Enum、actor・created/updated_by、split_weights NOT NULL/object、memo NOT NULL DEFAULT 空文字・最大2000文字。merchant_normalizedはtext COLLATE CのSTORED生成列・NOT NULLで、(workspace_id,merchant_normalized) Btree Index。nullable category_idは同workspaceの複合FK。category_confirmedはNOT NULL、未分類はfalse。非負category_revisionは専用保存で加算。workspace/category部分Index。workspace/date、workspace/class/settled_at Index。</td><td>workspace削除時CASCADE、batch削除時SET NULL。清算関連からtransactionを参照。</td></tr>
               <tr><td><code>recurring_payments</code></td><td>uuid id</td><td>workspace/state Index、毎月の日1〜31、現在の支払い設定8項目、NOT NULLの処理予定日next_scheduled_on、実行承認者、正のrevision、固定blocked_reason、作成/更新の監査列。開始日カラムstart_onは削除済み。旧last_generated_month/active_from_month/pending_config/pending_effective_monthは現行DTO・予定判定・生成では使わない。</td><td>workspace削除時CASCADE。支払者・承認者・作成/更新者はapp_usersを参照。設定削除はARCHIVED。workspace_idの変更をTriggerで禁止する。</td></tr>
               <tr><td><code>default_rules</code></td><td>uuid id</td><td>merchant 1〜120、class Enum、sort_order &gt;= 0、nullable/object split_weights、enabled。sort_order/created_at Index。旧priority列とIndexは互換用に保持。</td><td>workspace削除時CASCADE。</td></tr>
               <tr><td><code>settlements</code></td><td>uuid id</td><td>amount &gt;= 0、weight_snapshot/calculation_snapshot JSONB、payer/payee nullable、completed_by/completed_at。</td><td>workspace削除時CASCADE。</td></tr>
@@ -915,6 +915,23 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>schema_migrations</code></td><td>text name</td><td>適用済みSQLファイル名、applied_at。</td><td>setup-dbが履歴を管理。</td></tr>
             </tbody>
           </table></div>
+          <h3 id="merchant-normalization">取引先の照合用正規化</h3>
+          <p>照合規則の正本は<code>cake_normalize_merchant(text)</code>とし、現行基準はPostgreSQL 18組込みのUnicode 16とする。関数は<code>IMMUTABLE STRICT PARALLEL SAFE</code>で、<code>pg_catalog.normalize</code>のNFKCを適用後、<code>pg_catalog.pg_unicode_fast</code>照合順序を明示した<code>lower</code>で小文字化する。その結果の連続空白を1個の半角スペースへ置き換え、前後のスペースを除去する。小文字化はUnicodeの小文字変換であり、case folding・ひらがなとカタカナの相互変換・記号除去・部分一致への拡張は行わない。</p>
+          <p>空白はECMAScriptのWhiteSpaceとLineTerminatorに相当する固定25コードポイント、<code>U+0009〜U+000D, U+0020, U+00A0, U+1680, U+2000〜U+200A, U+2028, U+2029, U+202F, U+205F, U+3000, U+FEFF</code>を使う。NFKC後にこの集合を適用し、<code>U+0085</code>と<code>U+200B</code>は保持する。空文字・空白だけの入力の結果は空文字、NULL入力の結果はNULLとなる。入力の必須・長さ制約は既存schemaとDB制約を維持する。</p>
+          <p><code>transactions.merchant_normalized</code>は<code>text COLLATE "C" GENERATED ALWAYS AS (cake_normalize_merchant(merchant)) STORED NOT NULL</code>で保持し、<code>(workspace_id, merchant_normalized)</code>のBtree Indexを設ける。NFKCによる展開後の値へ240文字の上限や切捨てを適用せず、例えば<code>㌕</code>240文字は<code>キログラム</code>の繰返し1200文字・3600バイトとして保存・Index登録する。通常の列値として直接指定せず、<code>merchant</code>のINSERT/UPDATEと同じDB処理で計算する。手入力・一覧編集・CSV集合INSERT・定期生成・seed・旧版の保存・直接SQLにも適用され、呼出元の指定漏れで照合用値が古くならない。表示用の<code>merchant</code>と現在の公開API/DTOは保持する。共有費ルールの部分一致、CSV内・既存重複の金額と取引先比較にも照合用値を流用しない。</p>
+          <div class="data-flow">
+            <div class="dfd-track" role="img" aria-label="手入力、一覧編集、CSV、定期生成、seed、旧版、直接SQLの取引先保存をDB共通関数で正規化し、生成列とIndexへ反映する。APIと画面は表示用取引先を保持する">
+              <div class="dfd-node source"><strong>取引先を保存</strong><small>手入力・一覧編集・CSV・定期生成<br />seed・旧版・直接SQL</small></div>
+              <div class="dfd-arrow"><b>→</b><small>INSERT / UPDATE</small></div>
+              <div class="dfd-node store"><strong>transactions.merchant</strong><small>表示用の保存値を維持</small></div>
+              <div class="dfd-arrow"><b>→</b><small>DBの生成式</small></div>
+              <div class="dfd-node process"><strong>cake_normalize_merchant</strong><small>NFKC → Unicode小文字化<br />固定集合の空白整理</small></div>
+              <div class="dfd-arrow"><b>→</b><small>同じ書込みで計算</small></div>
+              <div class="dfd-node store"><strong>merchant_normalized</strong><small>STORED生成列・C照合<br />workspaceとの複合Index</small></div>
+            </div>
+            <div class="dfd-boundary"><b>表示と照合の境界:</b> 取得API/DTOと画面には<code>merchant</code>を返す。照合用値はDB内部で保持し、CSVカテゴリの自動補完・候補API・グラフは提供しない。</div>
+          </div>
+          <p>将来の候補APIは入力群を同じSQL関数へ集合単位で渡し、保存値と同じ規則で照合する。JavaScriptの<code>normalize</code>・<code>toLowerCase</code>はNode.js側のUnicode 17とDB側のUnicode 16のように対応版が異なり得るため、照合用キーの正本にしない。DB更新を含めUnicode規則を変更する際は既存のSTORED値と新規値の一致を保つmigrationで保存値とIndexを再計算し、関数だけを差し替えない。</p>
           <h3>DB関数・Trigger</h3>
           <div class="table-wrap"><table>
             <thead><tr><th>関数 / Trigger</th><th>整合性</th></tr></thead>
@@ -929,6 +946,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>cake_assert_settlement_snapshot</code></td><td>workspace行ロック・所属・全未清算SHARED明細の計算値Snapshot一致を同じTransactionで確認。</td></tr>
               <tr><td><code>cake_bulk_transactions</code></td><td>operationと1〜5000件の一意IDを検証。workspace行ロック、member FOR SHARE、対象をID順FOR UPDATE。全件存在・未清算を確認後、DELETEまたはAPPLY_RULESを実行し、ロック中の確定値を返す。APPLY_RULESは参加者/現在割合の集約を一回行い、LATERALで各明細の有効・部分一致・sort_order/created_at/id順の先頭を選ぶ。実際に使う共有費ルールごとに参加者キーを補完し、最大5000件の仮割合JSONを全件検証して一つのUPDATEで保存する。</td></tr>
               <tr><td><code>cake_normalize_paypay_external_id</code> / <code>cake_assert_paypay_duplicate</code></td><td>PayPay INSERT時の旧ID正規化と、ON CONFLICT条件でのsource・金額・取引先照合。</td></tr>
+              <tr><td><code>cake_normalize_merchant</code></td><td>取引先のNFKC・Unicode小文字化・固定集合の空白整理を一つのSQL関数で定義する。transactionsのSTORED生成列から呼び、全保存経路で照合用値を維持する。</td></tr>
               <tr><td><code>cake_mutate_recurring_payment</code> / <code>cake_generate_recurring_payment</code></td><td>workspace→定期設定→利用者(ID順)・memberの順にロック。所属・利用可否・状態・revision・設定を再確認する。編集は設定を即時更新し、再開は即時ACTIVEにする。追加・編集・再開時に処理予定日を09:00境界で計算する。生成では当日予定の再判定、明細INSERTと処理予定日の翌月への更新を同じTransactionで確定する。</td></tr>
             </tbody>
           </table></div>
@@ -954,8 +972,10 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>016_category_deletion.sql</td><td>カテゴリと子孫の削除関数。最新権限と対象を検証し、清算済みを含む明細のカテゴリ参照解除と削除を同じTransactionで確定する。014・015と既存関数の署名は維持。</td></tr>
               <tr><td>017_preview_sample_seed.sql</td><td>Preview所有権markerがあるDBだけにサンプル初期化の完了日時samples_seeded_atを追加する。既存ユーザーseed状態と業務データは変更しない。</td></tr>
               <tr><td>018_import_categories.sql</td><td>カテゴリ付きINSERTをtransition tableで集合検証する。workspace・最新所属・全カテゴリの共通検証とロック順を揃え、既存行triggerの確認状態・revisionと通常/旧APIの保存互換性を維持する。適用済み014〜017は変更しない。</td></tr>
+              <tr><td>019_merchant_normalization.sql</td><td>PostgreSQL 18以上・UTF8向けの共通正規化関数・取引先の照合用STORED生成列・workspaceとの複合Btree Indexを追加する。既存全明細の生成値を計算し、他列・監査情報・カテゴリrevisionを維持する。適用済み001〜018は変更しない。</td></tr>
             </tbody>
           </table></div>
+          <p>019のSTORED生成列追加は<code>transactions</code>の<code>ACCESS EXCLUSIVE</code>ロックと全テーブル・Indexの書換えを伴い、適用中の明細参照・更新は待機する。現在のデータ規模では関数・生成列・Index・既存行の計算を単一の原子的なmigrationで確定する。アプリ側でUPDATEして補完する方式は使わず、既存の金額・カテゴリ・確認状態・revision・監査列を変更しない。旧版アプリも生成列を指定せずに保存できる。</p>
           <p>017_preview_sample_seed.sqlはPreview所有権markerがあるDBだけにnullableのsamples_seeded_atを追加する。ユーザー登録のseeded_atとは独立し、厳密な001〜011の親fixtureを変更せず、後続migration後に業務サンプルを登録する。scripts/preview-sample-data.tsは親を先にカテゴリ10件をINSERTし、当月1〜8日12時（Asia/Tokyo）の明細8件を集合INSERTする。通常のカテゴリ・割合Triggerを通し、カテゴリ確認とrevisionも確定する。</p>
           <p>seedは所有権guardのadvisory lock下でユーザー初期化を済ませ、samples_seeded_atが未完了の場合だけ対象表をSHARE ROW EXCLUSIVEでlockする。固定ユーザー・workspace・membershipの初期状態と、対象workspaceの業務表が空であることを照合してサンプルを追加し、追加または省略の完了を同じTransactionで記録する。失敗時は全INSERTとmarkerをrollbackする。カテゴリ表がないbaseline検証ではサンプル経路を実行しない。完了後はユーザー停止・降格・名前変更や明細/カテゴリの編集・削除を保持し、復活させない。Productionと従来ローカルseedでは業務サンプルを作らない。</p>
           <div class="code-block" role="img" aria-label="Previewサンプル初期化の分岐">専用DBの所有権照合 → migration → ユーザーseed
@@ -1054,6 +1074,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>transaction-editing.test.ts / transaction-updates.test.ts / transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>
               <tr><td>transaction-filters.test.ts / transaction-filter-storage.test.ts / transaction-list.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗、多数候補・非表示選択・条件外行の保持。</td></tr>
               <tr><td>setup-db.test.ts / scripts/migration-scenarios.ts</td><td>新規/一部適用/全適用時の本文読込・SQL往復数、初回Previewの原文照合と同一世代再実行、SQL/履歴のrollback、後続の不正ファイルによる適用停止。隔離PostgreSQLの独立sessionで同じ未適用一覧を取得し、advisory lock待機後の台帳再確認で二重適用を防ぐことを確認する。</td></tr>
+              <tr><td>merchant-normalization.test.ts / scripts/merchant-normalization-scenarios.ts</td><td>固定fixtureによるNFKC・小文字化・空白集合・保持文字の照合、生成列とIndex、既存行の計算と他列の保持、保存・編集・CSV・定期生成・旧版・直接SQLの共通規則を確認する。実DBのmigration・ロック待機・rollbackは隔離環境の検証と区別する。</td></tr>
               <tr><td>bulk-rule-sql.test.ts / scripts/bulk-rule-*.ts</td><td>共通fixtureのTS/実SQL一致、無効/未一致/同順位/部分一致/新参加者0、最大5000件、不正割合・清算済み/対象不足の全件中止、集合UPDATE中の失敗とrollback。隔離PostgreSQLの独立sessionで編集/清算との実ロック待機を確認し、旧004と同じデータでDB実行時間とpg_stat_statementsの内部回数を比較する。アプリのNeon通信は一回の関数SELECTのまま。互換Triggerの明細ごとの処理は別計数で維持する。</td></tr>
               <tr><td>rule-deletion.test.ts / scripts/rule-deletion-scenarios.ts</td><td>共通削除の実SQL、単件/複数/全件・不存在・他workspace・重複UUID・認可・残存順序・旧版互換と全体rollback。一時PostgreSQLと専用Preview DBで同じシナリオを使い、独立した二つの実DB sessionで同時削除/並べ替え/所属解除のロック待機と確定結果を確認する。</td></tr>
               <tr><td>rule-order.test.ts</td><td>楽観順序の組み立てと解除、多数ルール、外部追加・削除、未知・重複ID、入力配列の維持。</td></tr>

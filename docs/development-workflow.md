@@ -133,7 +133,9 @@ git commit -m '[cake-db-qa:csv-categories]' -m 'CSVカテゴリの実DB並行検
 
 検証にはNative連携が当該buildへ供給した専用接続だけを使う。子プロセスには `CAKE_TEST_DATABASE_URL`、PR・完全SHA・Deployment・DB branch/endpoint・generationと本番分離の照合情報、Node実行・TLSに必要な明示allowlistだけを渡し、provider token・アプリ認証secret・共通 `DATABASE_URL` は渡さない。WSLへの資格情報コピーや環境ファイルの生成は行わない。接続前と各独立sessionで既存のDB所有権を照合し、二つの実DB sessionと監視sessionでロック待機・確定結果・全体rollbackを確認する。
 
-buildログの `cake-csv-category-db-qa/v1` 結果で対象identity、検証成否、ロック待機、後片付け件数と既存データ保持を確認し、前後の正式statusとも照合する。業務DTO・接続文字列・生例外はログやartifactへ保存しない。通常のmigration・初回seedによる更新と、検証用fixtureの残存0件は区別して報告する。この実DB検証は `npm test`、Actionsのprovider照合receipt、現在HEADの正式ブラウザ証拠とはそれぞれ別の検証である。
+buildログの `cake-csv-category-db-qa/v1` 結果で対象identity、検証成否、ロック待機、後片付け件数と既存データ保持を確認し、前後の正式statusとも照合する。長い集約結果はVercelの1イベント4KiB制限を避け、`cake-csv-category-db-qa-result-part/v1`のbase64分割行で出す。同一runId・SHAの全partを番号順に揃え、総数・総byte数・SHA-256一致を確認してから元のJSONを復元し、欠落・重複・順序不正・不一致では受理しない。業務DTO・接続文字列・生例外はログやartifactへ保存しない。通常のmigration・初回seedによる更新と、検証用fixtureの残存0件は区別して報告する。この実DB検証は `npm test`、Actionsのprovider照合receipt、現在HEADの正式ブラウザ証拠とはそれぞれ別の検証である。
+
+取引先正規化の実DB検証は、現在commitの独立行 `[cake-db-qa:merchant-normalization]` で要求する。同じ隔離環境・所有権・TLS検査を使い、`qa:db:merchant-normalization` として上記のCSVカテゴリ競合回帰に続けて、全保存経路の共通正規化、2000行のCSV、旧版互換、完全一致Indexの利用可能性を確認する。正規化fixtureは専用workspaceだけに作成して削除する。019のバックフィル・DDLの全体rollback・ACCESS EXCLUSIVEによる更新待機は、同じ専用DB内の新規scratch schemaで実SQLを適用して検証する。既存public schemaの適用済みmigrationを戻さず、scratchのschema・table・function・Indexの残存0件を確認する。両markerがある場合も正規化を含むQAを一度だけ実行し、同じ`cake-csv-category-db-qa/v1`結果の`normalization`・`normalizationMigration`に追加結果を記録する。通常migration/seed後のpublic各表を前後照合し、scratch検証と実public migrationの適用時間・影響を区別する。
 
 ### mainの常設Preview
 
