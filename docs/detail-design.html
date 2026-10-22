@@ -946,8 +946,19 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>014_categories.sql</td><td>カテゴリ表・親子/明細の同workspace制約・同親同名制約・階層固定trigger・カテゴリ割当trigger・更新関数。既存明細は未分類・未確認で初期化する。</td></tr>
               <tr><td>015_category_moves.sql</td><td>階層固定triggerを所属固定・循環検証へ置き換え、移動専用関数で親と兄弟順を原子的に更新する。カテゴリ操作の確定応答へ祖先の最新DTOを添えるwrapperも追加する。014と既存APIの署名は変更せず、カテゴリID・色・明細割当を保持する。</td></tr>
               <tr><td>016_category_deletion.sql</td><td>カテゴリと子孫の削除関数。最新権限と対象を検証し、清算済みを含む明細のカテゴリ参照解除と削除を同じTransactionで確定する。014・015と既存関数の署名は維持。</td></tr>
+              <tr><td>017_preview_sample_seed.sql</td><td>Preview所有権markerがあるDBだけにサンプル初期化の完了日時samples_seeded_atを追加する。既存ユーザーseed状態と業務データは変更しない。</td></tr>
             </tbody>
           </table></div>
+          <p>017_preview_sample_seed.sqlはPreview所有権markerがあるDBだけにnullableのsamples_seeded_atを追加する。ユーザー登録のseeded_atとは独立し、厳密な001〜011の親fixtureを変更せず、後続migration後に業務サンプルを登録する。scripts/preview-sample-data.tsは親を先にカテゴリ10件をINSERTし、当月1〜8日12時（Asia/Tokyo）の明細8件を集合INSERTする。通常のカテゴリ・割合Triggerを通し、カテゴリ確認とrevisionも確定する。</p>
+          <p>seedは所有権guardのadvisory lock下でユーザー初期化を済ませ、samples_seeded_atが未完了の場合だけ対象表をSHARE ROW EXCLUSIVEでlockする。固定ユーザー・workspace・membershipの初期状態と、対象workspaceの業務表が空であることを照合してサンプルを追加し、追加または省略の完了を同じTransactionで記録する。失敗時は全INSERTとmarkerをrollbackする。カテゴリ表がないbaseline検証ではサンプル経路を実行しない。完了後はユーザー停止・降格・名前変更や明細/カテゴリの編集・削除を保持し、復活させない。Productionと従来ローカルseedでは業務サンプルを作らない。</p>
+          <div class="code-block" role="img" aria-label="Previewサンプル初期化の分岐">専用DBの所有権照合 → migration → ユーザーseed
+  ├─ カテゴリ表なし（baseline検証） → サンプル処理なし
+  └─ カテゴリ表あり
+       ├─ samples_seeded_atあり → 既存データ保持
+       └─ 未完了 → 対象表lock → 初期状態と空データを照合
+            ├─ 一致 → カテゴリ10件 → 明細8件 → 完了marker
+            └─ 不一致 → 追加を省略 → 完了marker
+サンプル判定・登録・marker更新は同一Transaction。失敗は全体rollback。</div>
           <p><code>scripts/setup-db.mjs</code>は環境に応じたDB接続（PreviewはCAKE_TEST_DATABASE_URL、それ以外はDATABASE_URL）を確認する。台帳初期化を1回実行し、<code>schema_migrations</code>の履歴を一度読みSetで照合して、未適用SQLの本文だけをファイル名順に読み込む。全適用済みの通常再実行は本文0読込・2往復、未適用がN件なら本文N読込・N+2往復となる。各SQLは共通advisory lock取得後に台帳を再確認し、SQLと履歴INSERTを同じDO文/Transactionで確定する。同時実行や失敗時にも二重適用・台帳だけの記録を防ぎ、既存データや適用日時を保持する。</p>
           <p>Previewでは接続前にendpoint等の環境情報とmigration名・番号順を検証する。既存markerの照合と台帳初期化を同じDO文へまとめ、所有権・世代不一致は停止する。marker欠落のSQLSTATE <code>P0001</code>と固定エラー文面が一致するときだけ、失敗したDO文の全体rollback後に初回処理へ進む。初回は全migrationの原文・承認済み001〜011のhash・002の本番bootstrap除去を確認してから、空DBまたは承認済みfixtureのDB照合・marker確保・台帳初期化を行う。この初回経路は追加の検査を要するため、通常再実行の2往復とは区別する。既存同一世代では適用履歴を使い、未適用分の原文だけを検証する。repository全体の承認済み原文照合は回帰テストでも維持する。</p>
           <p><code>006_paypay_external_ids.sql</code>は<code>source = PAYPAY</code>の既存外部IDを、保存済み<code>occurred_at AT TIME ZONE 'Asia/Tokyo'</code>から生成した<code>PayPay_YYYYMMDDHHMMSS_{取引番号}</code>へ移行する。すでに新形式の外部IDと手動明細は変更しない。UUID主キーと参照関係は保持し、キー衝突時は一意制約で移行全体を失敗させる。移行前に日時を編集していた明細は元のCSV日時を復元できないため、再取込時の重複判定が一致しない場合がある。</p>
@@ -1055,7 +1066,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>preview-receipt.test.ts / preview-checks.test.ts</td><td>4,096 UTF-8 bytes上限、公開項目とrunAttempt、notice escape、厳密JSON、workflow/run/attempt/job/check/suite/repositoryの結合、全件取得、欠落・重複・古い値・マスク・metadata変化の拒否。</td></tr>
               <tr><td>Actions verify関連テスト</td><td>独立capabilityと最新main control checkout、PR/完全SHA/Deployment一致、provider非GET拒否、status前後のDB保持照合、成功/失敗receiptの来歴と4,096 bytes上限、remote proof再照合。実Actionsのブラウザ/OIDC成功はスタブ検証と分ける。</td></tr>
               <tr><td>database-environment.test.ts / vercel-build.test.ts</td><td>Preview専用接続の必須化、本番接続へのfallback禁止、PreviewのDB更新・seed、Productionのビルド後DB更新、失敗時の公開停止。</td></tr>
-              <tr><td>seed-startup.test.ts / seed-error.test.ts</td><td>@next/env実起動、環境変数のロード、DB登録失敗の段階・原因を秘密情報なしで整形。</td></tr>
+              <tr><td>preview-sample-seed.test.ts / seed-startup.test.ts / seed-error.test.ts</td><td>Previewサンプルの初回登録、継承fixture、既存データ保持、失敗rollback、@next/env実起動、環境変数のロード、DB登録失敗の段階・原因を秘密情報なしで整形。</td></tr>
             </tbody>
           </table></div>
           <p>全テストは<code>tests/</code>配下。純粋関数、SQL/外部コマンドのスタブ、スクリプト起動を検証する。実DBの制約・同時操作とブラウザ操作は別途実環境で確認する。</p>
@@ -1070,7 +1081,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td><code>npm test</code></td><td><code>node --import tsx --test tests/*.test.ts</code>。</td></tr>
               <tr><td><code>npm run lint</code> / <code>npm run build</code></td><td>ESLintとNext.js Production build・型/ルート検証。</td></tr>
               <tr><td><code>npm run db:setup</code></td><td>未適用番号付きSQLと適用履歴をatomicに追加。</td></tr>
-              <tr><td><code>npm run db:seed:test</code></td><td>従来ローカルはA/Bを非管理者として登録する。新QAはdummyのAをサイト管理者・共有OWNER、Bを一般・MEMBERとする固定二人だけを使用する。空DBでは初回だけ登録し、厳密一致する継承fixtureではseed済みidentityを使用する。同PRのデータ・名前・権限・停止状態を維持し、自動修復しない。</td></tr>
+              <tr><td><code>npm run db:seed:test</code></td><td>従来ローカルはA/Bを非管理者として登録する。新QAはdummyのAをサイト管理者・共有OWNER、Bを一般・MEMBERとする固定二人だけを使用する。空DBでは初回だけ登録し、厳密一致する継承fixtureではseed済みidentityを使用する。Previewでは独立したsamples_seeded_atにより未使用の共有workspaceへカテゴリ10件・明細8件を一度だけ登録する。同PRのデータ・名前・権限・停止状態を維持し、自動修復しない。</td></tr>
               <tr><td><code>npm run build:vercel</code></td><td>Previewは必須環境変数・DB接続前guard確認 → DB内の所有権/初回受入条件（空DBまたは承認済みQA初期fixture）確認 → db:setup → テスト認証時db:seed:test → build。Productionは必須環境変数確認 → build → db:setup。いずれも失敗時に公開停止。Development/ローカルはbuildのみ。</td></tr>
               <tr><td><code>npm run deploy:preview</code></td><td>WSL/Windows共通の開発・QA運用コマンド。引数・実行順序・検証・中断時の対応は<a href="development-workflow.md">開発・QA運用手順</a>を参照。</td></tr>
               <tr><td><code>npm run qa:verify</code></td><td>対象PRのworktreeで既存ローカルブラウザ検証。前後statusと現在HEADを照合し、<code>.cake/verification.json</code>へ保存。</td></tr>

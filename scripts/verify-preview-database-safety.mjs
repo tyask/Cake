@@ -317,11 +317,16 @@ try {
         generation: inheritedIdentity.generation, branch_id: inheritedIdentity.branchId, database_host: inheritedIdentity.databaseHost, database_name: inheritedIdentity.databaseName,
       }]);
     });
-    await check('Claimed baseline applies later migrations without changing inherited business rows', async () => {
-      const before = await fixtureSnapshot(inheritedDb);
+    await check('Claimed baseline applies later migrations and seeds business samples once', async () => {
       await setupDatabase(inheritedEnvironment, { connect: () => ({ query: (sql) => inheritedDb.query(sql) }) });
       await inheritedDb.query(testSeedSql(inheritedEnvironment));
-      assert.equal(await fixtureSnapshot(inheritedDb), before);
+      await assertFixtures(inheritedDb, ['test-a@cake.local', 'test-b@cake.local'], true);
+      assert.equal(await scalar('SELECT COUNT(*)::int FROM categories', inheritedDb), 10);
+      assert.equal(await scalar('SELECT COUNT(*)::int FROM transactions', inheritedDb), 8);
+      assert.equal(await scalar('SELECT samples_seeded_at IS NOT NULL FROM cake_preview_database_identity', inheritedDb), true);
+      const before = await databaseSnapshot(inheritedDb);
+      await inheritedDb.query(testSeedSql(inheritedEnvironment));
+      assert.equal(await databaseSnapshot(inheritedDb), before);
       assert.equal(await scalar('SELECT COUNT(*)::int FROM schema_migrations', inheritedDb), migrationCount);
       assert.equal(await scalar("SELECT to_regprocedure('cake_delete_default_rules(uuid,text,uuid[],boolean)') IS NOT NULL", inheritedDb), true);
     });
