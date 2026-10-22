@@ -53,6 +53,14 @@ function fixture(initial=false) {
   return {service:new PreviewService(new PreviewProvider(api),async()=>{}),api,writes,deployments,branches,endpoints,
     close:()=>{state='closed';return {...s,state:'closed' as const};},lose:()=>{lost=true;},unknown:()=>{unknownCreate=true;},failDelete:()=>{failDelete=true;},failProvision:(value:string)=>{provisionState=value;}};
 }
+async function retainedApplicationFixture() {
+  const f=fixture(), first=await f.service.deploy(s,operation);
+  f.deployments.splice(0,1);
+  f.deployments[0].createdAt=Date.parse('2026-10-16T00:05:00Z');
+  assert.ok(Date.parse(String(f.branches[0].created_at)) < Number(f.deployments[0].createdAt)-60_000);
+  f.writes.length=0;
+  return {...f,first};
+}
 test('Native provisioning precedes the application; no DB credential or fixed alias is sent',async()=>{
   const f=fixture();const r=await f.service.deploy(s,operation);
   assert.equal(r.deployment?.state,'READY');assert.equal(r.database?.branchId,'br-child');
@@ -83,6 +91,53 @@ test('a surviving Native branch is reused; a missing established DB stops creati
   const f=fixture(true);await f.service.deploy(s,'30000000-0000-4000-8000-000000000003');assert.equal(f.writes.filter(w=>w.method==='POST').length,1);
   f.lose();await assert.rejects(f.service.deploy(s,operation),/DATABASE_LOST/);assert.equal(f.writes.filter(w=>w.method==='POST').length,1);
 });
+test('準備用Deploymentがなくても既知DBのstatusと同一SHAの再利用を照合できる',async()=>{
+  const f=await retainedApplicationFixture();
+  const status=await f.service.status(s), deployed=await f.service.deploy(s,'30000000-0000-4000-8000-000000000003');
+  for(const result of [status,deployed]) {
+    assert.deepEqual(result.database,f.first.database);
+    assert.equal(result.deployment?.id,f.first.deployment?.id);
+    assert.equal(result.deployment?.generation,f.first.deployment?.generation);
+  }
+  assert.equal(f.writes.length,0);
+});
+test('既知DBがない場合は最古Deploymentより前の同名DBを引き続き拒否する',async()=>{
+  const f=fixture(true);f.deployments[0].createdAt=Date.parse('2026-10-16T00:05:00Z');
+  await assert.rejects(f.service.status(s),{message:'PREVIEW_DATABASE_IDENTITY'});
+  await assert.rejects(f.service.deploy(s,operation),{message:'PREVIEW_DATABASE_IDENTITY'});
+  assert.equal(f.writes.length,0);
+});
+test('既知DBでも元のPR作成前に存在したDBは拒否する',async()=>{
+  const f=await retainedApplicationFixture();f.branches[0].created_at='2026-10-14T23:59:59Z';
+  await assert.rejects(f.service.status(s),{message:'PREVIEW_DATABASE_IDENTITY'});
+  await assert.rejects(f.service.deploy(s,operation),{message:'PREVIEW_DATABASE_IDENTITY'});
+  assert.equal(f.writes.length,0);
+});
+test('既知DBでも所有権・本番分離・endpoint・世代が不正なら更新せず停止する',async()=>{
+  type Established=Awaited<ReturnType<typeof retainedApplicationFixture>>;
+  const meta=(f:Established)=>f.deployments[0].meta as Record<string,unknown>;
+  const cases:{name:string;code:string;change:(f:Established)=>void}[]=[
+    {name:'別branch',code:'PREVIEW_DATABASE_IDENTITY',change:f=>{f.branches[0].id='br-replaced';f.endpoints[0].branch_id='br-replaced';}},
+    {name:'別endpoint',code:'PREVIEW_DATABASE_IDENTITY',change:f=>{f.endpoints[0].id='ep-replaced';}},
+    {name:'別host',code:'PREVIEW_DATABASE_IDENTITY',change:f=>{f.endpoints[0].host='ep-replaced.ap-southeast-1.aws.neon.tech';}},
+    {name:'DB metadata不一致',code:'PREVIEW_DATABASE_IDENTITY',change:f=>{meta(f).cakePreviewDatabaseDigest='1'.repeat(64);}},
+    {name:'本番DB digest',code:'PREVIEW_DATABASE_IDENTITY',change:f=>{meta(f).cakePreviewDatabaseDigest=config.productionHostDigest;}},
+    {name:'別の親branch',code:'PREVIEW_DATABASE_IDENTITY',change:f=>{f.branches[0].parent_id='br-other-parent';}},
+    {name:'保護済みbranch',code:'PREVIEW_DATABASE_IDENTITY',change:f=>{f.branches[0].protected=true;}},
+    {name:'別projectのendpoint',code:'PREVIEW_DATABASE_IDENTITY',change:f=>{f.endpoints[0].project_id='other-project';}},
+    {name:'read-only endpoint',code:'PREVIEW_DATABASE_IDENTITY',change:f=>{f.endpoints[0].type='read_only';}},
+    {name:'複数endpoint',code:'PREVIEW_DATABASE_IDENTITY',change:f=>{f.endpoints.push({...f.endpoints[0],id:'ep-duplicate'});}},
+    {name:'同名DBの重複',code:'PREVIEW_DATABASE_AMBIGUOUS',change:f=>{f.branches.push({...f.branches[0],id:'br-duplicate'});}},
+    {name:'複数世代',code:'PREVIEW_GENERATION_CONFLICT',change:f=>{f.deployments.push({...f.deployments[0],id:'dpl_otherGeneration',meta:{...meta(f),cakePreviewGeneration:'30000000-0000-4000-8000-000000000003'}});}},
+    {name:'既存Deployment間のDB不一致',code:'PREVIEW_DATABASE_CONFLICT',change:f=>{f.deployments.push({...f.deployments[0],id:'dpl_otherDatabase',meta:{...meta(f),cakePreviewDatabaseBranch:'br-other'}});}},
+  ];
+  for(const entry of cases) {
+    const f=await retainedApplicationFixture();entry.change(f);
+    await assert.rejects(f.service.status(s),{message:entry.code},entry.name);
+    await assert.rejects(f.service.deploy(s,operation),{message:entry.code},entry.name);
+    assert.equal(f.writes.length,0,entry.name);
+  }
+});
 test('cleanup requires closed PR and retains a provider anchor until the exact DB is gone',async()=>{
   const f=fixture();await f.service.deploy(s,operation);
   await assert.rejects(f.service.cleanup(s),/NOT_CLOSED/);
@@ -91,6 +146,33 @@ test('cleanup requires closed PR and retains a provider anchor until the exact D
   assert.equal(deletes[0].provider,'vercel');assert.equal(deletes[1].provider,'neon');assert.equal(deletes[2].provider,'vercel');
   assert.equal(f.deployments.length,0);assert.equal(f.branches.length,0);
   await f.service.cleanup(closed);assert.equal(f.writes.filter(w=>w.method==='DELETE').length,3);
+});
+test('準備用Deployment消失後のcleanupも既知DBを照合し、DB削除後に最後のanchorを削除する',async()=>{
+  const f=await retainedApplicationFixture(), requests:{provider:string;path:string;method:string}[]=[];
+  const provider=new PreviewProvider(async(provider,path,method='GET',body,missing)=>{
+    requests.push({provider,path,method});return f.api(provider,path,method,body,missing);
+  });
+  const service=new PreviewService(provider,async()=>{}), closed=f.close();
+  await service.cleanup(closed);
+  const deletes=f.writes.filter(w=>w.method==='DELETE');
+  assert.deepEqual(deletes.map(w=>[w.provider,w.path]),[
+    ['neon',`/projects/${config.neonProjectId}/branches/br-child`],
+    ['vercel',`/v13/deployments/${f.first.deployment!.id}`],
+  ]);
+  const dbDelete=requests.findIndex(r=>r.provider==='neon'&&r.method==='DELETE');
+  const anchorDelete=requests.findIndex(r=>r.provider==='vercel'&&r.method==='DELETE');
+  const between=requests.slice(dbDelete+1,anchorDelete);
+  assert.ok(between.some(r=>r.provider==='neon'&&r.path.endsWith('/branches/br-child')&&r.method==='GET'));
+  assert.ok(between.some(r=>r.provider==='neon'&&r.path.endsWith('/endpoints/ep-child')&&r.method==='GET'));
+  assert.ok(between.some(r=>r.provider==='neon'&&r.path.includes('/branches?')));
+  assert.ok(between.some(r=>r.provider==='neon'&&r.path.endsWith('/endpoints')));
+  assert.equal(f.deployments.length,0);assert.equal(f.branches.length,0);assert.equal(f.endpoints.length,0);
+  await service.cleanup(closed);assert.equal(f.writes.length,2);
+});
+test('cleanupでも既知endpointが変わっていたら資源を削除しない',async()=>{
+  const f=await retainedApplicationFixture();f.endpoints[0].id='ep-replaced';
+  await assert.rejects(f.service.cleanup(f.close()),{message:'PREVIEW_DATABASE_IDENTITY'});
+  assert.equal(f.writes.length,0);assert.equal(f.deployments.length,1);assert.equal(f.branches.length,1);
 });
 test('uncertain deployment deletion preserves DB and the anchor for recovery',async()=>{
   const f=fixture();await f.service.deploy(s,operation);f.failDelete();await assert.rejects(f.service.cleanup(f.close()),/RESPONSE_UNKNOWN/);
