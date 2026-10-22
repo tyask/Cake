@@ -103,7 +103,7 @@ PR本文の要約は次の形式を使う。各値は今回の実際のレビュ
 | --- | --- |
 | 初回Deployment | provisioningとapplicationの最大2回の作成要求。provisioningはNative準備を起動し、DB接続・migration・seed・アプリのFunctionを持たない静的な準備中ページを生成してREADYになる。専用DB照合後のapplicationがREADYになった時点で検証可能とする |
 | 専用DB | PR branchに対応するNative child branchとread-write endpointを準備。親・所属・作成時刻・世代・endpointを照合する |
-| 初期化 | 専用DBの所有権marker、番号順migration・適用履歴、QAユーザーA/B・共有workspace・membershipのseed |
+| 初期化 | 専用DBの所有権marker、番号順migration・適用履歴、QAユーザーA/B・共有workspace・membership、カテゴリ10件・明細8件のseed |
 | 同PRの更新 | 同じDB/endpoint/generationを維持し、未適用migrationとbuildを実行。初回seed済みのデータ・ユーザー名・権限を上書きしない |
 | PR merge/close | 紐づく全Deployment（準備用・旧版・失敗したものを含む）と専用DB/endpointを削除 |
 
@@ -114,6 +114,10 @@ DB setupは台帳初期化後に履歴を一度取得し、未適用ファイル
 Native連携で生成される実資源数は作成後に照合する。別PR・本番endpointとの一致、DB消失、複数世代、未管理の同名branchでは停止する。空DBまたは承認済みの完全一致fixtureだけを初期化し、既存markerを別PRへ付け替えない。本番接続文字列をPreviewへ渡さず、Previewは `CAKE_TEST_DATABASE_URL` を使う。
 
 QAのAはテスト管理者・共有OWNER、Bは一般・MEMBER。正規QA用ログインは登録済みユーザーをSELECTし、自動作成・権限修復しない。ただし認証後のホームや `GET /api/app` は所属workspaceが0件なら個人workspaceとOWNER membershipをINSERTし得る。ローカルテスト認証のユーザー登録、Googleログイン時のプロフィール更新もDB書込として区別する。
+
+Previewの「テスト共有家計」には食費・暮らし・交通・趣味・収入とその子孫のカテゴリ10件、初期化時の日本時間の当月1〜8日の架空明細8件を設定する。明細は `[サンプル]` で識別し、A/Bの支払い、共通費・個人費、3:2の割合、受け取り、未分類を含める。全件未清算で編集・削除できる。親DBの承認済みfixtureは変更せず、専用DBのmigration後に登録する。ユーザー初期化の `seeded_at` と独立した `samples_seeded_at` により、継承fixtureにも一度だけ登録し、再buildで編集値を上書きしたり削除済みデータを復活させたりしない。
+
+既存Previewにも未処理なら同じ条件を適用する。固定ユーザーの名前・権限・利用可否、共有workspaceの名前・所有者、二人の所属・割合が初期状態と一致し、対象workspaceに明細・カテゴリ・ルール・招待・取込履歴・定期支払い・清算履歴がない場合だけ追加する。入力済み・変更済みなら追加を省略したことを完了markerへ記録し、後から空になっても再追加しない。判定・登録・marker更新は所有権guardとtable lock下の同一Transactionで行い、失敗時は全体を取り消す。従来ローカルのseedには業務サンプルを追加しない。常設Previewにも同じ初期化条件を適用する。
 
 自動deployはActionsのSummaryとnoticeで結果を確認する。手動deployが必要な場合だけ `npm run deploy:preview` を使う。手動の作成・状態照合・削除はnpmコマンドから `scripts/preview-command.ts` を経由してmainのActionsへ要求し、PR作成・Ready管理には `npm run task:pr` を使う。自動runはrun ID由来の安定したoperation UUIDで再実行を照合し、不明なPOSTを盲目的に再発行しない。PRのHEADがイベントから進んだ場合もprovider書込前に停止する。
 

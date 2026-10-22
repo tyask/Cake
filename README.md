@@ -156,6 +156,8 @@ Previewの手動操作は下記のnpmコマンドを使います。作成・状�
 
 同一repositoryの `codex/*` からmainへのPR作成・更新・再openで、draftを含めて専用Vercel PreviewとNeon Native DBを自動作成・更新します。PR未作成のpushだけでは作成せず、Vercel Git連携のfeature deployは止めたままmainのActionsで管理します。PR作成・更新は専用DBへのmigration/seedを、merge/closeは資源削除を起動するため、対象と影響が承認された範囲で実行してください。
 
+Previewの未使用の「テスト共有家計」には階層付きカテゴリ10件と、当月の `[サンプル]` 明細8件を自動設定します。A/Bの支払い・個人費・共通費・受け取り・未分類を確認でき、編集・削除した内容はPR更新後も保持します。入力済み・初期ユーザーや所属を変更済みの環境への追加は省略します。詳細は[初期化とデータ保持](docs/development-workflow.md#3-自動previewとdb書込)を参照してください。
+
 ```bash
 npm run qa:status
 npm run deploy:preview    # 手動の作成/更新が必要な場合

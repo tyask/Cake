@@ -723,6 +723,8 @@
           <h3>ルール編集</h3>
           <p>有効なルールを上から評価し、取引先の部分一致が最初に成立する一件を使う。文字・割合はblur/Enter、区分・デフォルト利用・有効状態は即保存。追加は末尾、ドラッグまたはスペース/上下キーで並び替え、選択したルールをまとめて削除する。操作キューは並び替え・削除と行編集を直列化し、失敗した入力や構造操作の再試行を保持する。ルール変更だけでは保存済み明細を変更しない。</p>
           <p><code>orderedWorkspaceRules</code>はID→ルールのMapと出力済みIDのSetを用い、楽観的な順序に現在存在するルールを一度ずつ配置する。未知・外部削除済みIDは除外し、外部追加は最新取得順で末尾に残す。順序保存の成功時は最新取得順へ戻し、失敗時は操作前の順序へ戻す。選択IDの所属判定にもSetを使う。取引先の部分一致・優先順によるルール適用判定は変更しない。</p>
+          <h3>PC取引明細の折り返し</h3>
+          <p><code>TransactionTable</code>の<code>wrap</code>を取引明細だけで有効にする。表のラッパーをinline-size containerとし、PC幅（48rem超）かつ表示領域84rem未満では明細行をflex-wrap、各セルを項目別の幅を基準に配置する。日時・割合・カテゴリ・メモの入力幅を確保し、既存の<code>data-label</code>を項目名として表示する。見出しのフィルタと全選択も折り返し、保存中表示・全幅のエラー行・カテゴリ色線を維持する。幅変更はCSSだけで切り替え、入力部品の再生成やデータ取得・保存は行わない。84rem以上の列別テーブル、48rem以下の要約と詳細展開、CSV取込と定期支払いの表示はそれぞれの既存レイアウトを使う。</p>
           <h3>取引明細のフィルタ保存</h3>
           <p><code>TransactionsPanel</code>は<code>useTransactionFilters(userId, workspaceId)</code>で列ごとの条件を管理し、<code>lib/transaction-filter-storage.ts</code>を通して<code>localStorage</code>へ保存・復元する。API・DBへは保存しない。</p>
           <p>保存用の列条件は文字列配列のまま保持し、条件または参加者の変更時に<code>createTransactionFilterMatcher</code>が列ごとの検索用Setを準備する。同じ列はOR、列間はAND、空選択は0件とする。<code>transactionListView</code>は各明細の条件を一度だけ判定し、編集中・保存失敗・メモ編集中の条件外行を含む表示と条件外表示の印で結果を共用する。表示ID・未清算ID・選択IDの所属をSetで照合して非表示選択数と全選択状態を求め、削除済み・清算済みIDは一括操作対象から除く。絞り込みでは非表示の選択を保持する。</p>
@@ -766,7 +768,7 @@
               <div class="dfd-node output"><strong>選択と左端の色を更新</strong><small>失敗時はdraftと再試行を保持<br />更新・一括操作の前にfreeze / flush</small></div>
             </div>
           </div>
-          <p>カテゴリ列はメモの直前、PCの幅は10remとする。保存済みカテゴリの色を行のCSS変数へ渡し、背景色は変更しない。PCは選択セルの左端、スマートフォンは展開・スワイプ中もカード左端全体に4pxの線を表示する。未分類では色の線を表示せず、清算済み行の通常の背景も保持する。選択欄の色の点と全経路の補足表示を併用する。</p>
+          <p>カテゴリはメモの直前に配置し、PCの列別テーブルでは幅10rem、折り返し時は12remを基準に表示領域へ配分する。保存済みカテゴリの色を行のCSS変数へ渡し、背景色は変更しない。PCの列別テーブルは選択セルの左端、PCの折り返し表示とスマートフォンは明細の左端全体に4pxの線を表示する。スマートフォンは展開・スワイプ中も線を維持する。未分類では色の線を表示せず、清算済み行の通常の背景も保持する。選択欄の色の点と全経路の補足表示を併用する。</p>
           <p>ツリーの開閉状態はworkspaceごとのCategorySettings内のcollapsed集合が所有する。上部の「すべて開く」は集合を空にし、「すべて閉じる」は現在の全階層のうち子を持つカテゴリIDを集合へ設定する。個別開閉も同じ集合を更新する。一括開閉はAPIや確認ダイアログを呼ばず、カテゴリの選択と名前・色のdraft、移動先の入力を保持する。両ボタンはカテゴリ一覧をaria-controlsで参照し、保存中・ドラッグ中と子カテゴリがない場合は無効にする。狭い画面では上部の操作群を折り返して横溢れを防ぎ、各カテゴリ行の1行配置は維持する。</p>
           <p>カテゴリの移動中の対象・候補は設定画面が所有する。各行の「↑」「↓」は同じ親の使用可能な兄弟をsortOrder・id順で一度準備し、一つ前・後の位置を既存のmoveCategoryへ送る。端のボタンと保存中の操作は無効にする。矢印には枠・背景・押下/フォーカス状態を付ける。PC/mobileともツリーの各行を1行のgridとし、カテゴリ名だけを残り幅へ縮めて省略表示する。完全な経路は選択ボタンのtitleとaria-labelに残す。スマートフォンの操作ボタンは幅2rem・高さ2.75rem、階層の字下げは最大1remとし、狭い幅でも操作を別行に送らない。ドラッグでは行の前・子・後の挿入位置を示し、最上位末尾の専用drop領域と移動先選択肢は設けない。スクロール枠と画面の可視領域内にあるポインターだけを判定し、枠外やクリップされた非表示行へはドロップできない。ハンドルから移動先の選択欄を開く操作も用意し、キーボードで移動先・位置を選択できる。対象・候補の使用可否、子孫と同名重複は画面でも確認し、確定時に<code>moveCategory</code>を送る。移動中は他の保存と同じpending guardで二重操作を防ぐ。未保存の名前・色は保持し、保存済み順序は応答まで変更しない。失敗時は元の順序と入力を保持してエラーを表示する。</p>
           <div class="data-flow">
@@ -949,8 +951,19 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>014_categories.sql</td><td>カテゴリ表・親子/明細の同workspace制約・同親同名制約・階層固定trigger・カテゴリ割当trigger・更新関数。既存明細は未分類・未確認で初期化する。</td></tr>
               <tr><td>015_category_moves.sql</td><td>階層固定triggerを所属固定・循環検証へ置き換え、移動専用関数で親と兄弟順を原子的に更新する。カテゴリ操作の確定応答へ祖先の最新DTOを添えるwrapperも追加する。014と既存APIの署名は変更せず、カテゴリID・色・明細割当を保持する。</td></tr>
               <tr><td>016_category_deletion.sql</td><td>カテゴリと子孫の削除関数。最新権限と対象を検証し、清算済みを含む明細のカテゴリ参照解除と削除を同じTransactionで確定する。014・015と既存関数の署名は維持。</td></tr>
+              <tr><td>017_preview_sample_seed.sql</td><td>Preview所有権markerがあるDBだけにサンプル初期化の完了日時samples_seeded_atを追加する。既存ユーザーseed状態と業務データは変更しない。</td></tr>
             </tbody>
           </table></div>
+          <p>017_preview_sample_seed.sqlはPreview所有権markerがあるDBだけにnullableのsamples_seeded_atを追加する。ユーザー登録のseeded_atとは独立し、厳密な001〜011の親fixtureを変更せず、後続migration後に業務サンプルを登録する。scripts/preview-sample-data.tsは親を先にカテゴリ10件をINSERTし、当月1〜8日12時（Asia/Tokyo）の明細8件を集合INSERTする。通常のカテゴリ・割合Triggerを通し、カテゴリ確認とrevisionも確定する。</p>
+          <p>seedは所有権guardのadvisory lock下でユーザー初期化を済ませ、samples_seeded_atが未完了の場合だけ対象表をSHARE ROW EXCLUSIVEでlockする。固定ユーザー・workspace・membershipの初期状態と、対象workspaceの業務表が空であることを照合してサンプルを追加し、追加または省略の完了を同じTransactionで記録する。失敗時は全INSERTとmarkerをrollbackする。カテゴリ表がないbaseline検証ではサンプル経路を実行しない。完了後はユーザー停止・降格・名前変更や明細/カテゴリの編集・削除を保持し、復活させない。Productionと従来ローカルseedでは業務サンプルを作らない。</p>
+          <div class="code-block" role="img" aria-label="Previewサンプル初期化の分岐">専用DBの所有権照合 → migration → ユーザーseed
+  ├─ カテゴリ表なし（baseline検証） → サンプル処理なし
+  └─ カテゴリ表あり
+       ├─ samples_seeded_atあり → 既存データ保持
+       └─ 未完了 → 対象表lock → 初期状態と空データを照合
+            ├─ 一致 → カテゴリ10件 → 明細8件 → 完了marker
+            └─ 不一致 → 追加を省略 → 完了marker
+サンプル判定・登録・marker更新は同一Transaction。失敗は全体rollback。</div>
           <p><code>scripts/setup-db.mjs</code>は環境に応じたDB接続（PreviewはCAKE_TEST_DATABASE_URL、それ以外はDATABASE_URL）を確認する。台帳初期化を1回実行し、<code>schema_migrations</code>の履歴を一度読みSetで照合して、未適用SQLの本文だけをファイル名順に読み込む。全適用済みの通常再実行は本文0読込・2往復、未適用がN件なら本文N読込・N+2往復となる。各SQLは共通advisory lock取得後に台帳を再確認し、SQLと履歴INSERTを同じDO文/Transactionで確定する。同時実行や失敗時にも二重適用・台帳だけの記録を防ぎ、既存データや適用日時を保持する。</p>
           <p>Previewでは接続前にendpoint等の環境情報とmigration名・番号順を検証する。既存markerの照合と台帳初期化を同じDO文へまとめ、所有権・世代不一致は停止する。marker欠落のSQLSTATE <code>P0001</code>と固定エラー文面が一致するときだけ、失敗したDO文の全体rollback後に初回処理へ進む。初回は全migrationの原文・承認済み001〜011のhash・002の本番bootstrap除去を確認してから、空DBまたは承認済みfixtureのDB照合・marker確保・台帳初期化を行う。この初回経路は追加の検査を要するため、通常再実行の2往復とは区別する。既存同一世代では適用履歴を使い、未適用分の原文だけを検証する。repository全体の承認済み原文照合は回帰テストでも維持する。</p>
           <p><code>006_paypay_external_ids.sql</code>は<code>source = PAYPAY</code>の既存外部IDを、保存済み<code>occurred_at AT TIME ZONE 'Asia/Tokyo'</code>から生成した<code>PayPay_YYYYMMDDHHMMSS_{取引番号}</code>へ移行する。すでに新形式の外部IDと手動明細は変更しない。UUID主キーと参照関係は保持し、キー衝突時は一意制約で移行全体を失敗させる。移行前に日時を編集していた明細は元のCSV日時を復元できないため、再取込時の重複判定が一致しない場合がある。</p>
@@ -1049,6 +1062,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>app-handlers.test.ts / app-services.test.ts / app-store.test.ts</td><td>HTTP応答・入力・未認証・所属拒否・DB失敗、割合継承・招待・清算Snapshot、全19操作のSQL往復とTransaction境界、通常bootstrapの2 SQL。</td></tr>
               <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・ミリ秒保持、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
               <tr><td>db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
+              <tr><td>transaction-layout.test.ts</td><td>PCの表示領域7パターン（84rem境界前後を含む）と参加者名120文字の4条件で横溢れ・項目の折り返し・カテゴリ色線・全選択・フィルタを確認。幅変更による入力とフォーカスの保持・追加送信なし・メモ保存失敗時の入力保持と、スマートフォンの要約/展開をローカルChromiumで検証する。</td></tr>
               <tr><td>import-equal-split.test.ts</td><td>実ImportPanelと定期支払いの追加/編集をPC/mobileのChromiumで操作し、常に3択であること、割合/円から1:1、奇数円と手動再編集、対象行・未選択状態・デフォルト割合の保持、個人費/エラー/重複/保存中/一人参加時の制限を確認。選択時の追加POSTなしと、bulkImportの保存重み1:1を検証する。</td></tr>
               <tr><td>dashboard-controller.test.ts / transaction-refresh.test.ts / bootstrap-updates.test.ts</td><td>esbuildで実hookをbundleし、ローカルChromium/Reactで要求逆順、workspace/tab往復、保存前GET、手動更新の保存待ち・二重実行・失敗・古い応答破棄、metadata/fullの使い分け・同一家計の保持、通知2秒を検証する。実Preview/DB検証とは区別する。</td></tr>
               <tr><td>recurring-payment-calendar.test.ts / recurring-payment-form.test.ts / recurring-payments.test.ts / recurring-payment-handlers.test.ts</td><td>日本時間09:00の直前/境界、未来日・過去日・月末、追加履歴を参照しない予定計算、保存・再開・認可・入力検証、当日処理・処理開始日時・実行APIの環境制限。</td></tr>
@@ -1057,7 +1071,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>preview-receipt.test.ts / preview-checks.test.ts</td><td>4,096 UTF-8 bytes上限、公開項目とrunAttempt、notice escape、厳密JSON、workflow/run/attempt/job/check/suite/repositoryの結合、全件取得、欠落・重複・古い値・マスク・metadata変化の拒否。</td></tr>
               <tr><td>Actions verify関連テスト</td><td>独立capabilityと最新main control checkout、PR/完全SHA/Deployment一致、provider非GET拒否、status前後のDB保持照合、成功/失敗receiptの来歴と4,096 bytes上限、remote proof再照合。実Actionsのブラウザ/OIDC成功はスタブ検証と分ける。</td></tr>
               <tr><td>database-environment.test.ts / vercel-build.test.ts</td><td>Preview専用接続の必須化、本番接続へのfallback禁止、PreviewのDB更新・seed、Productionのビルド後DB更新、失敗時の公開停止。</td></tr>
-              <tr><td>seed-startup.test.ts / seed-error.test.ts</td><td>@next/env実起動、環境変数のロード、DB登録失敗の段階・原因を秘密情報なしで整形。</td></tr>
+              <tr><td>preview-sample-seed.test.ts / seed-startup.test.ts / seed-error.test.ts</td><td>Previewサンプルの初回登録、継承fixture、既存データ保持、失敗rollback、@next/env実起動、環境変数のロード、DB登録失敗の段階・原因を秘密情報なしで整形。</td></tr>
             </tbody>
           </table></div>
           <p>全テストは<code>tests/</code>配下。純粋関数、SQL/外部コマンドのスタブ、スクリプト起動を検証する。実DBの制約・同時操作とブラウザ操作は別途実環境で確認する。</p>
@@ -1072,7 +1086,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td><code>npm test</code></td><td><code>node --import tsx --test tests/*.test.ts</code>。</td></tr>
               <tr><td><code>npm run lint</code> / <code>npm run build</code></td><td>ESLintとNext.js Production build・型/ルート検証。</td></tr>
               <tr><td><code>npm run db:setup</code></td><td>未適用番号付きSQLと適用履歴をatomicに追加。</td></tr>
-              <tr><td><code>npm run db:seed:test</code></td><td>従来ローカルはA/Bを非管理者として登録する。新QAはdummyのAをサイト管理者・共有OWNER、Bを一般・MEMBERとする固定二人だけを使用する。空DBでは初回だけ登録し、厳密一致する継承fixtureではseed済みidentityを使用する。同PRのデータ・名前・権限・停止状態を維持し、自動修復しない。</td></tr>
+              <tr><td><code>npm run db:seed:test</code></td><td>従来ローカルはA/Bを非管理者として登録する。新QAはdummyのAをサイト管理者・共有OWNER、Bを一般・MEMBERとする固定二人だけを使用する。空DBでは初回だけ登録し、厳密一致する継承fixtureではseed済みidentityを使用する。Previewでは独立したsamples_seeded_atにより未使用の共有workspaceへカテゴリ10件・明細8件を一度だけ登録する。同PRのデータ・名前・権限・停止状態を維持し、自動修復しない。</td></tr>
               <tr><td><code>npm run build:vercel</code></td><td>Previewは必須環境変数・DB接続前guard確認 → DB内の所有権/初回受入条件（空DBまたは承認済みQA初期fixture）確認 → db:setup → テスト認証時db:seed:test → build。Productionは必須環境変数確認 → build → db:setup。いずれも失敗時に公開停止。Development/ローカルはbuildのみ。</td></tr>
               <tr><td><code>npm run deploy:preview</code></td><td>WSL/Windows共通の開発・QA運用コマンド。引数・実行順序・検証・中断時の対応は<a href="development-workflow.md">開発・QA運用手順</a>を参照。</td></tr>
               <tr><td><code>npm run qa:verify</code></td><td>対象PRのworktreeで既存ローカルブラウザ検証。前後statusと現在HEADを照合し、<code>.cake/verification.json</code>へ保存。</td></tr>
