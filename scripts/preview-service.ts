@@ -19,8 +19,11 @@ export class PreviewService {
     const apps = ds.filter(d => d.database);
     const known = apps.at(-1)?.database;
     if (known && apps.some(d => !sameDatabase(d.database!, known))) throw new Error('PREVIEW_DATABASE_CONFLICT');
-    // Native is created after a Vercel request; a small clock skew tolerance does not admit an older PR's DB.
-    const notBefore = Math.max(Date.parse(s.createdAt), (ds[0]?.createdAt ?? Date.now()) - 60_000);
+    // A verified application pins the existing DB even when the initial
+    // provisioning Deployment is no longer retained. The request-time bound is
+    // only needed when establishing ownership of a previously unknown DB.
+    const sourceCreatedAt = Date.parse(s.createdAt);
+    const notBefore = known ? sourceCreatedAt : Math.max(sourceCreatedAt, (ds[0]?.createdAt ?? Date.now()) - 60_000);
     const database = await this.provider.database(s, notBefore, known);
     if (!ds.length && database) throw new Error('PREVIEW_UNOWNED_DATABASE');
     if (known && !database && s.state === 'open') throw new Error('PREVIEW_DATABASE_LOST');

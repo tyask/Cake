@@ -35,10 +35,12 @@ test('常設Previewは専用branch・kind・予約ID・DBを照合し、PR用と
 });
 function fixture() {
   let comparison = 'ahead';
+  let deploymentCreatedAt = Date.parse('2026-10-18T13:40:00Z');
+  let deploymentCounter = 0;
   let mirror: string | undefined, main = sha, protection = 'all_except_custom_domains', alias: unknown = null;
   const writes: {provider: string; path: string; method: string; body: unknown}[] = [];
   const deployments: Record<string, unknown>[] = [], branches: unknown[] = [], endpoints: unknown[] = [];
-  const branch = { id: 'br-staging', project_id: config.neonProjectId, parent_id: config.neonParentBranchId, name: `preview/${staging.branch}`, default: false, protected: false, created_at: new Date().toISOString() };
+  const branch = { id: 'br-staging', project_id: config.neonProjectId, parent_id: config.neonParentBranchId, name: `preview/${staging.branch}`, default: false, protected: false, created_at: '2026-10-18T13:40:01Z' };
   const endpoint = { id: 'ep-staging', project_id: config.neonProjectId, branch_id: branch.id, type: 'read_write', host: 'ep-staging.ap-southeast-1.aws.neon.tech' };
   const api: Transport = async (provider, path, method = 'GET', body) => {
     if (method !== 'GET') writes.push({provider, path, method, body});
@@ -61,8 +63,9 @@ function fixture() {
         assert.equal(b.env.CAKE_PREVIEW_KIND, 'main'); assert.equal(b.env.CAKE_PREVIEW_PR, '0');
         assert.ok(!('CAKE_TEST_DATABASE_URL' in b.env));
         if (b.meta.cakePreviewPhase === 'provisioning') {branches.push(branch); endpoints.push(endpoint);}
-        const d = {id: `dpl_stage${deployments.length}`, projectId: config.vercelProjectId, target: null, url: `cake-stage${deployments.length}.vercel.app`,
-          gitSource: {type:'github', repoId:config.repositoryId, ref:staging.branch, sha:main}, meta:b.meta, readyState:'READY', createdAt:Date.now()};
+        const deploymentIndex = deploymentCounter++;
+        const d = {id: `dpl_stage${deploymentIndex}`, projectId: config.vercelProjectId, target: null, url: `cake-stage${deploymentIndex}.vercel.app`,
+          gitSource: {type:'github', repoId:config.repositoryId, ref:staging.branch, sha:main}, meta:b.meta, readyState:'READY', createdAt:deploymentCreatedAt};
         deployments.push(d); return d;
       }
       return deployments.find(d => d.id === path.split('/').at(-1));
@@ -78,7 +81,8 @@ function fixture() {
     throw new Error(`Unexpected ${provider} ${method} ${path}`);
   };
   const provider = new StagingProvider(api), service = new PreviewService(provider, async()=>{});
-  return {provider, service, writes, deployments, setMain:(value:string)=>{main=value;}, setMirror:(value:string)=>{mirror=value;},
+  return {provider, service, writes, deployments, branch, setMain:(value:string)=>{main=value;}, setMirror:(value:string)=>{mirror=value;},
+    setDeploymentCreatedAt:(value:number)=>{deploymentCreatedAt=value;},
     diverge:()=>{comparison='diverged';}, unprotect:()=>{protection='none';}, setAlias:(value:unknown)=>{alias=value;}};
 }
 test('mainをfast-forward同期し、Native準備→application→固定alias、次のmainでも同じDB・世代を保持する', async () => {
@@ -93,6 +97,33 @@ test('mainをfast-forward同期し、Native準備→application→固定alias、
   assert.deepEqual(f.writes.find(w=>w.method==='PATCH')?.body,{sha:next.sha,force:false});
   assert.ok(!f.writes.some(w=>w.method==='DELETE'));
   await assert.rejects(f.service.cleanup({...next,state:'closed'}), /SOURCE_CHANGED/);
+});
+test('準備用Deployment消失後も古い常設DBを保持して新しいmainを配置し、aliasを更新する', async () => {
+  const f = fixture(); await f.provider.sync(source);
+  const first = await f.service.deploy(source, generation);
+  await f.provider.alias(source, first.deployment!);
+  // Native DB precedes the first application by several minutes. Retention has
+  // removed the original provisioning record, leaving only its application.
+  f.deployments.splice(0, 1);
+  f.deployments[0].createdAt = Date.parse('2026-10-18T13:49:00Z');
+  assert.ok(Date.parse(f.branch.created_at) < Number(f.deployments[0].createdAt) - 60_000);
+  const writesBefore = f.writes.length;
+  const next = {...source, sha:'b'.repeat(40)};
+  f.setMain(next.sha); f.setDeploymentCreatedAt(Date.parse('2026-10-22T12:00:00Z'));
+  await f.provider.sync(next);
+  const second = await f.service.deploy(next, '20000000-0000-4000-8000-000000000002');
+  await f.provider.alias(next, second.deployment!);
+  assert.deepEqual(second.database, first.database);
+  assert.equal(second.deployment?.generation, first.deployment?.generation);
+  assert.equal(second.deployment?.sha, next.sha);
+  assert.notEqual(second.deployment?.id, first.deployment?.id);
+  assert.equal((await f.service.status(next)).deployment?.id, second.deployment?.id);
+  const updates = f.writes.slice(writesBefore);
+  const creates = updates.filter(w=>w.path.includes('forceNew'));
+  assert.equal(creates.length, 1);
+  assert.equal((creates[0].body as {meta:{cakePreviewPhase:string}}).meta.cakePreviewPhase, 'application');
+  assert.equal(updates.filter(w=>w.path.includes('/aliases') && w.method==='POST').length, 1);
+  assert.ok(!updates.some(w=>w.provider==='neon' || w.method==='DELETE'));
 });
 test('保護なし・mainの変化・管理外branch/aliasでは書込や上書きを停止する', async () => {
   const unprotected=fixture(); unprotected.unprotect(); await assert.rejects(unprotected.provider.sync(source),/PROTECTION/); assert.equal(unprotected.writes.length,0);
