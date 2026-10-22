@@ -18,6 +18,7 @@ export interface PayPayPreviewRow {
   externalId: string;
   expenseClass: ExpenseClass;
   splitWeights: SplitWeights;
+  categoryId: string | null;
   duplicate: boolean;
   error: string | null;
 }
@@ -99,6 +100,7 @@ export function parsePayPayCsv(
         amountYen,
         externalId,
         ...transactionDefaults(merchant, matchRule, members, actorUserId, "SHARED"),
+        categoryId: null,
         duplicate,
         error,
       };

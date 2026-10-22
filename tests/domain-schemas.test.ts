@@ -31,6 +31,20 @@ const bulk = { action: "bulkImport", workspaceId, fileName: "sample.csv", totalR
 const csv = (amount: number, merchant = "店舗", method = "現金") =>
   `取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n2026/10/18 09:00:00,${amount},支払い,${merchant},${method},boundary-test`;
 
+test("CSVのカテゴリは通常保存と同じUUID/nullを受け付け、旧APIの省略互換を保持する", () => {
+  for (const categoryId of [undefined, null, transactionId]) {
+    const parsed = parseAppActionInput({ ...bulk, items: [{ ...imported, categoryId, categoryConfirmed: false }] });
+    assert.equal(parsed.action, "bulkImport");
+    if (parsed.action === "bulkImport") {
+      assert.equal(parsed.items[0].categoryId, categoryId);
+      assert.equal("categoryConfirmed" in parsed.items[0], false, "確認状態はクライアントから受け付けない");
+    }
+  }
+  for (const categoryId of ["", "invalid", 1, {}, []]) {
+    assert.equal(appActionInputSchema.safeParse({ ...bulk, items: [{ ...imported, categoryId }] }).success, false);
+  }
+});
+
 test("共有分類の全値をschemaが受け付け、未知値を拒否する", () => {
   for (const [schema, values] of [
     [workspaceTypeSchema, workspaceTypes], [expenseClassSchema, expenseClasses], [transactionTypeSchema, transactionTypes],

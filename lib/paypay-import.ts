@@ -12,6 +12,7 @@ export interface PayPayImportItem {
   actorUserId: string;
   expenseClass: ExpenseClass;
   splitWeights: SplitWeights;
+  categoryId?: string | null;
 }
 
 export interface PayPayImportInput {
@@ -27,26 +28,46 @@ export async function persistPayPayImport(input: PayPayImportInput) {
   const items = input.items.map((item) => ({
     ...item, externalId: normalizePayPayExternalId(item.occurredAt, item.externalId),
   })).sort((first, second) => first.externalId < second.externalId ? -1 : first.externalId > second.externalId ? 1 : 0);
+  const firstByExternalId = new Map<string, PayPayImportItem>();
+  for (const item of items) {
+    const previous = firstByExternalId.get(item.externalId);
+    if (previous && (previous.merchant !== item.merchant || previous.amountYen !== item.amountYen)) {
+      throw new Error("同じ取引日・取引番号に異なる金額または取引先の明細が登録されています。CSVと登録済み明細を確認してください。");
+    }
+    if (!previous) firstByExternalId.set(item.externalId, item);
+  }
   const sql = db();
   const batchId = randomUUID();
+  // Validate every requested category, including rows that will be skipped as
+  // duplicates, while holding the same workspace/member/category locks as INSERT.
+  const categories = [...new Set(items.map(item => item.categoryId ?? null))];
+  const categoryTargets = (categories.length ? categories : [null]).map(categoryId => ({
+    workspaceId: input.workspaceId, userId: input.userId, categoryId,
+  }));
   const results = await sql.transaction([
-    sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+    sql`SELECT cake_assert_transaction_categories(${JSON.stringify(categoryTargets)}::jsonb)`,
     sql`
       INSERT INTO import_batches (id, workspace_id, imported_by, file_name, total_rows, imported_rows, skipped_rows)
       VALUES (${batchId}::uuid, ${input.workspaceId}::uuid, ${input.userId}, ${input.fileName}, ${input.totalRows}, 0, ${input.totalRows})
     `,
-    ...items.map((item) => sql`
+    sql`
       INSERT INTO transactions (workspace_id, occurred_at, merchant, method, type, amount_yen, actor_user_id,
-        expense_class, split_weights, external_id, source, import_batch_id, created_by, updated_by)
-      VALUES (${input.workspaceId}::uuid, ${item.occurredAt}::timestamptz, ${item.merchant}, ${item.method}, 'PAYMENT',
-        ${item.amountYen}, ${item.actorUserId}, ${item.expenseClass}, ${JSON.stringify(item.splitWeights)}::jsonb,
-        ${item.externalId}, 'PAYPAY', ${batchId}::uuid, ${input.userId}, ${input.userId})
+        expense_class, split_weights, external_id, source, import_batch_id, created_by, updated_by,
+        category_id, category_confirmed)
+      SELECT ${input.workspaceId}::uuid, item."occurredAt", item.merchant, item.method, 'PAYMENT',
+        item."amountYen", item."actorUserId", item."expenseClass", item."splitWeights",
+        item."externalId", 'PAYPAY', ${batchId}::uuid, ${input.userId}, ${input.userId},
+        item."categoryId", item."categoryId" IS NOT NULL
+      FROM jsonb_to_recordset(${JSON.stringify([...firstByExternalId.values()])}::jsonb) AS item(
+        "occurredAt" timestamptz, merchant text, method text, "amountYen" integer, "actorUserId" text,
+        "expenseClass" text, "splitWeights" jsonb, "externalId" text, "categoryId" uuid
+      ) ORDER BY item."externalId"
       ON CONFLICT (workspace_id, external_id) DO UPDATE
         SET external_id = transactions.external_id
         WHERE cake_assert_paypay_duplicate(transactions.source, transactions.merchant, transactions.amount_yen,
           EXCLUDED.merchant, EXCLUDED.amount_yen)
       RETURNING id
-    `),
+    `,
     sql`
       WITH imported AS (
         SELECT COUNT(*)::integer AS count FROM transactions WHERE import_batch_id = ${batchId}::uuid

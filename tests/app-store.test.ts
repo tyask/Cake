@@ -112,6 +112,17 @@ const cases: { input: Row; counts: number[]; transactions?: number[]; result?: R
   { input: { action: "completeSettlement", workspaceId }, counts: [1, 4], transactions: [1] },
 ];
 
+test("カテゴリ付き手動登録は先頭で同じ集合検証を行い、保存SQLを2本に保つ", async t => {
+  const f = fixture(t);
+  assert.equal((await f.post({ ...save, categoryId: ruleId })).status, 200);
+  const write = f.trips.at(-1)!;
+  assert.equal(write.transaction, true);
+  assert.equal(write.queries.length, 2);
+  assert.match(write.queries[0].query, /cake_assert_transaction_categories/);
+  assert.deepEqual(JSON.parse(String(write.queries[0].params[0])), [{ workspaceId, userId: user.id, categoryId: ruleId }]);
+  assert.match(write.queries[1].query, /category_id, category_confirmed/);
+});
+
 for (const [index, scenario] of cases.entries()) {
   test(`アプリ操作のSQL往復・Transaction境界・成功応答: ${index + 1} ${scenario.input.action}`, async (t) => {
     const f = fixture(t);

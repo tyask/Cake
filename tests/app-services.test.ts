@@ -134,9 +134,9 @@ test("個人費ルールの明示割合と一括削除のDB失敗を拒否し、
   assert.equal(f.calls.filter(call => call.name === "deleteRules").length, 2);
 });
 
-test("取込は共有費既定・有効ルールを使い、保存された件数を返す", async () => {
+test("取込は共有費既定・有効ルールを使い、選択カテゴリを保持して保存された件数を返す", async () => {
   const f = fixture({ persistPayPayImport: async () => ({ imported: 1, skipped: 2 }) });
-  const item = { occurredAt: save.occurredAt, merchant: "店", method: "PayPay", amountYen: 300, actorUserId: "a", externalId: "123" };
+  const item = { occurredAt: save.occurredAt, merchant: "店", method: "PayPay", amountYen: 300, actorUserId: "a", externalId: "123", categoryId: transactionId };
   assert.deepEqual(await f.execute({ action: "bulkImport", workspaceId, fileName: "qa.csv", totalRows: 3, items: [item] }), { ok: true, imported: 1, skipped: 2 });
   const persisted = f.calls[3].args[0] as { userId: string; items: unknown[] };
   assert.equal(persisted.userId, user.id);

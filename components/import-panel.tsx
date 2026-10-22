@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { RunAppAction } from "@/lib/app-input";
 import { defaultSplitWeights, personalSplitWeights, validateSplitWeights } from "@/lib/expense-splits";
 import { isPayPayRowImportable, parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
@@ -9,6 +9,8 @@ import type { ExpenseClass, WorkspaceData } from "@/lib/types";
 import { ImportPreviewTable } from "./import-preview-table";
 import { PageHeading } from "./dashboard-ui";
 import { ImportHelpDialog } from "./import-help-dialog";
+import { CategorySelect, prepareCategoryChoices } from "./category-select";
+import styles from "./import-panel.module.css";
 
 const importFormats = { PAYPAY: { label: "PayPay", parse: parsePayPayCsv } };
 const pastedFileName = "PayPay貼り付け.csv";
@@ -33,6 +35,8 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
   const [saving, setSaving] = useState(false);
   const [reading, setReading] = useState(false);
   const [helpUrl, setHelpUrl] = useState<string | null>(null);
+  const [bulkCategoryId, setBulkCategoryId] = useState<string | null>(null);
+  const categoryChoices = useMemo(() => prepareCategoryChoices(selected.categories), [selected.categories]);
   const fileRequest = useRef(0);
   const importableRows = rows.filter(isPayPayRowImportable);
   const selectedCount = importableRows.filter(row => row.selected).length;
@@ -45,6 +49,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
     const requestId = ++fileRequest.current;
     setReading(true);
     setRows([]);
+    setBulkCategoryId(null);
     setFileName("");
     setError(null);
     try {
@@ -119,6 +124,12 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
     setRows((current) => current.map((row) => row.selected ? changeClass(row, expenseClass) : row));
   }
 
+  function bulkCategory() {
+    if (saving || selectedCount === 0) return;
+    setRows(current => current.map(row => row.selected && isPayPayRowImportable(row)
+      ? { ...row, categoryId: bulkCategoryId } : row));
+  }
+
   async function submit() {
     setError(null);
     setSaving(true);
@@ -127,6 +138,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
         occurredAt: payPayDateToIso(row.occurredAt), merchant: row.merchant, method: row.method,
         amountYen: row.amountYen, externalId: row.externalId, expenseClass: row.expenseClass, actorUserId: actorId,
         splitWeights: validateSplitWeights(row.splitWeights, selected.members, row.expenseClass, actorId),
+        categoryId: row.categoryId,
       }));
       if (items.length === 0) { setError("登録可能な明細がありません。"); return; }
       await run({ action: "bulkImport", workspaceId: selected.workspace.id, fileName, totalRows, items }, "明細を取り込みました。");
@@ -171,16 +183,22 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
         <div><span>取込先の家計</span><b>{selected.workspace.name}</b></div><div><span>取込元</span><b>{fileName}</b></div><div><span>取込対象</span><b>{importableRows.length} / {rows.length}件</b></div>
         <label>支払者<select disabled={saving} value={actorId} onChange={(event) => changeActor(event.target.value)}>{selected.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
       </div>
-      <div className="bulk-bar"><span>{selectedCount}件を選択中</span>
+      <div className={`bulk-bar ${styles.bulkBar}`}><span>{selectedCount}件を選択中</span>
         <button disabled={saving || selectedCount === 0} onClick={() => bulk("PERSONAL")}>個人費に変更</button><button disabled={saving || selectedCount === 0} onClick={() => bulk("SHARED")}>共通費に変更</button>
         <button disabled={saving || selectedCount === 0} onClick={removeSelectedPreviewRows}>削除</button>
+        <div className={styles.categoryBulk}>
+          <div className={styles.categoryChoice}><CategorySelect choices={categoryChoices} value={bulkCategoryId}
+            label="選択行のカテゴリ" disabled={saving || selectedCount === 0} onChange={setBulkCategoryId} /></div>
+          <button disabled={saving || selectedCount === 0} onClick={bulkCategory}>カテゴリを設定</button>
+        </div>
         <button disabled={saving} className="text-button" onClick={() => { setRows([]); setFileName(""); }}>やり直す</button>
       </div>
-      <ImportPreviewTable onDelete={removePreviewRow} rows={rows} members={selected.members} actorId={actorId} saving={saving}
+      <ImportPreviewTable onDelete={removePreviewRow} rows={rows} members={selected.members} actorId={actorId} saving={saving} categoryChoices={categoryChoices}
         onSelect={(key, checked) => setRows(current => current.map(row => row.key === key ? { ...row, selected: checked } : row))}
         onSelectAll={checked => setRows(current => current.map(row => isPayPayRowImportable(row) ? { ...row, selected: checked } : row))}
         onChangeClass={(key, expenseClass) => setRows(current => current.map(row => row.key === key ? changeClass(row, expenseClass) : row))}
-        onChangeSplit={(key, splitWeights) => setRows(current => current.map(row => row.key === key ? { ...row, splitWeights } : row))} />
+        onChangeSplit={(key, splitWeights) => setRows(current => current.map(row => row.key === key ? { ...row, splitWeights } : row))}
+        onChangeCategory={(key, categoryId) => setRows(current => current.map(row => row.key === key && isPayPayRowImportable(row) && !saving ? { ...row, categoryId } : row))} />
       {error && <p className="import-error form-error" role="alert">{error}</p>}
       <div className="sticky-actions"><button className="secondary" disabled={saving} onClick={() => { setRows([]); setFileName(""); }}>キャンセル</button>
         <button className="primary" disabled={saving || importableRows.length === 0} onClick={submit}>{saving ? "登録中…" : "登録"}</button>
