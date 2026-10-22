@@ -82,7 +82,7 @@ function runWithSourceConfiguration(configuration: Record<string, unknown>, body
       mkdirSync(dirname(target), { recursive: true });
       copyFileSync(new URL(name, root), target);
     }
-    symlinkSync(fileURLToPath(new URL('node_modules', root)), join(directory, 'node_modules'), 'dir');
+    symlinkSync(fileURLToPath(new URL('node_modules', root)), join(directory, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
     const source = JSON.parse(readFileSync(new URL('preview.config.json', root), 'utf8'));
     writeFileSync(join(directory, 'preview.config.json'), JSON.stringify({ ...source, ...configuration }));
     writeFileSync(join(directory, 'fixture.mts'), body);
