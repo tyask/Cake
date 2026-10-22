@@ -212,9 +212,8 @@ export async function verifyCsvCategoryConcurrency(first: CsvCategoryDatabase, s
     if (operation === "delete") await client.query("SELECT cake_delete_category($1::uuid,$2,$3::uuid)", [fixture.workspaceId, actorA, fixture.categoryIds[0]]);
     else if (operation === "archive") await client.query("SELECT cake_mutate_category_with_ancestors($1::uuid,$2,'ARCHIVE',$3::uuid,NULL::uuid,NULL,NULL,NULL::uuid)", [fixture.workspaceId, actorA, fixture.categoryIds[0]]);
     else {
-      // Membership has no current application removal endpoint. Use the same workspace-first
-      // lock order as category operations, then remove only this fixture's B membership.
-      await client.query("UPDATE workspaces SET updated_at=now() WHERE id=$1::uuid", [fixture.workspaceId]);
+      // There is no membership-removal endpoint. Delete only this fixture's B row
+      // directly so the test observes the membership FOR SHARE lock itself.
       assert.equal((await client.query("DELETE FROM workspace_members WHERE workspace_id=$1::uuid AND user_id=$2 RETURNING user_id", [fixture.workspaceId, actorB])).rows.length, 1);
     }
   }
