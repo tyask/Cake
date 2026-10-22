@@ -539,6 +539,7 @@
           <p>Actions検証は専用protocol/title <code>cake-preview-verify/v1</code>の成功・失敗noticeを4,096 UTF-8 bytes以下で返す。OIDCは既存資格情報からメモリ内へ取得し、対象originの各redirect hopだけへ付与する。失敗は安全なstage/codeとして扱い、成功証拠はcontrol側の<code>.cake/verify-&lt;PR&gt;.json</code>へ保存する。検証CLI自体はReadyにせず、Codexが差分レビューと完了条件を確認して<code>task:pr --remote-proof</code>を実行し、対象とActionsの来歴を再照合する。新CLIのない別の対象PRは、最新mainのcontrol checkoutから任意の<code>--target-worktree</code>を併用できる。remote proof必須・非draft専用で、controlと対象のcleanなHEADを検査し、旧対象コードは実行しない。ローカル証拠の再照合も維持し、Ready後はこのチャットでPRリンク・判断理由・検証結果・未実施項目・残る資源を日本語で通知する。</p>
           <p>固定QA URL、QA枠、予約・貸出、Canneleと常設管理DBへの依存を廃止する。PR・完全SHA・Deployment ID・DB世代とNative branch/endpointを照合し、同PRのDBを維持する。本番DBへのfallbackと別PRのDB再利用は禁止する。</p>
           <p>DB setupは適用履歴を一度読み、未適用migrationだけを読み込んで番号順に適用する。全適用済みの通常再実行は本文0読込・2往復となる。Previewの初回所有権確保前は全原文と承認済みfixtureを照合し、同一世代の再実行では既存データを保持する。各migrationのロック・台帳再確認・失敗時rollbackを維持する。</p>
+          <p>Previewの未使用の「テスト共有家計」には階層付きカテゴリ10件と当月の架空明細8件を設定する。A/Bの支払い、共通費・個人費、異なる割合、受け取り、未分類を含み、全件未清算で編集・削除できる。親DBは変更せず、専用DBのmigration後に一度だけ追加する。入力済み・ユーザーや所属を変更済みの環境では追加を省略し、再buildで編集・削除を取り消さない。常設Previewも同じ条件を使い、Productionと従来ローカルseedにはサンプルを追加しない。</p>
           <p>初回Native provisioningはDB接続・migration・seed・アプリのFunctionを持たない静的な準備中ページだけを生成して正常終了する。準備用READYをPreview完成とは扱わず、providerで専用endpointを照合したapplication配置だけがmigration・seedを行う。準備用の対象不明・生成失敗は引き続き停止する。初回以降はQA入力済みデータを上書きしない。保護アクセスは同projectの短期development OIDCを対象originへ限定し、証明書検証を維持したChromiumを使用する。</p>
           <p>PR作成・更新は専用Preview/DBの自動作成・migration/seedを起動し、merge/closeは信頼済みmainのActionsによるcleanupを起動する。対象と影響が承認された範囲で実行し、承認済みの操作に重複確認を求めない。応答不明や所属不明では停止し、読取で状態を照合する。cleanup成功後も記録済みIDの直接GET不在とprovider一覧を再照合する。現在の手順は<a href="development-workflow.md">開発・QA運用手順</a>、個別の成否・実行時間・証跡は日本語のPR本文・検証結果に記録する。</p>
           <p>本番はmainへのmergeを検知するVercel Git連携でbuild後のDB更新が成功してから公開する。Actions検証機能をmainへ導入するmergeもこのProduction deployを起動し得るため、実装draft PR作成や検証の承認とは分ける。手動Production操作は別途明示依頼時だけ行う。</p>
@@ -799,7 +800,7 @@
             <li>有効な通常利用者は管理者を含め二人までとする。固定テストユーザーA/Bは人数上限から除外する。</li>
             <li>清算済み明細と清算履歴の関連付けをDBトランザクションで一括更新する。</li>
             <li>取引IDは同一ワークスペース内で一意とする。手動追加時はアプリが自動発行する。</li>
-            <li>原則として適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。現行スキーマは001〜016の適用結果。007は開始日を持たない定期設定1表・処理予定日・即時変更/再開・実行日時による生成関数とsource制約の拡張を追加する。008は同じ生成仕様を維持し、009は旧変更予約を現在設定へ移す。010は適用済みPreview DBに残る開始日カラムを削除し、workspace移動禁止と月初制約を維持する。011は既存設定の処理予定日を設定日と適用時刻の09:00境界から初期化し、現行の変更・生成関数を適用する。012は既存表と旧版の呼出しを保持してルール共通削除関数を追加する。013は一括ルール適用の参加者集約を一回にし、選択全体を集合UPDATEで更新する。現行アプリは削除列を参照しない。追加済み明細は変更しない。</li>
+            <li>原則として適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。現行スキーマは001〜017の適用結果。007は開始日を持たない定期設定1表・処理予定日・即時変更/再開・実行日時による生成関数とsource制約の拡張を追加する。008は同じ生成仕様を維持し、009は旧変更予約を現在設定へ移す。010は適用済みPreview DBに残る開始日カラムを削除し、workspace移動禁止と月初制約を維持する。011は既存設定の処理予定日を設定日と適用時刻の09:00境界から初期化し、現行の変更・生成関数を適用する。012は既存表と旧版の呼出しを保持してルール共通削除関数を追加する。013は一括ルール適用の参加者集約を一回にし、選択全体を集合UPDATEで更新する。現行アプリは削除列を参照しない。追加済み明細は変更しない。</li>
           </ul>
         </section>
 
