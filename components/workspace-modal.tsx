@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { RunAppAction } from "@/lib/app-input";
-import { MAX_WORKSPACE_NAME_LENGTH, workspaceTypeLabels } from "@/lib/domain-values";
-import type { WorkspaceType } from "@/lib/types";
+import type { RunAppAction } from "@/lib/shared/schemas/app-input";
+import { MAX_WORKSPACE_NAME_LENGTH, workspaceTypeLabels } from "@/lib/shared/domain-values";
+import type { WorkspaceType } from "@/lib/shared/types";
 import { Modal } from "./dashboard-ui";
 
 export function WorkspaceModal({ close, run }: { close: () => void; run: RunAppAction }) {

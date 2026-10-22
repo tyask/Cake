@@ -21,6 +21,8 @@ npm run task:start -- feature-name
 
 実装前に[設計・実装原則](design-principles.md)を読み、変更する操作のデータ経路・共有する規則・保存と取得の順序・処理量・更新の整合性を確認する。関係する判断と分岐は基本/詳細設計へ反映し、同じ観点を自己レビュー・別Agentレビューでも確認する。
 
+新しいライブラリは実行場所に応じて `lib/client/`・`lib/server/`・`lib/shared/` へ配置する。スクリプトは `scripts/` の用途別ディレクトリ、テストは `tests/` の対象領域別ディレクトリへ追加する。配置表、依存方向、既存サービスとDB storeの境界は[詳細設計の実装構成](detail-design.html#architecture)を参照する。npmコマンドとworkflowからの正式な運用経路、receipt・資格情報・資源照合の契約は維持する。
+
 ## 2. ローカル検証と日本語のdraft PR
 
 開発は、実装・関連テスト・自己レビュー → commit → 別Agentレビュー → 指摘への対応・必要な再レビュー → 最終SHAでのローカル検証 → draft PR → 現在HEADのCI・自動Preview・変更に必要な検証 → Readyの順に進める。文書のみの変更にも別Agentレビューを適用する。
@@ -44,7 +46,7 @@ npm test
 npm run build
 ```
 
-`npm test` はfixture・PGlite・スタブ・ローカルChromiumを使い、実DBへ接続しない。ローカルCake全体の起動や実Previewでの操作とは区別する。文書のみの変更はリンク、コマンド、現行実装との整合性を確認する。アプリテストを省略した場合は理由を報告する。
+`npm test` は Node.js 24 の `node --import tsx --test --test-concurrency=2 "tests/**/*.test.ts"` で対象領域別のテストと `tests/architecture/` の依存境界検査を再帰的に実行する。globは引用してNodeへ渡し、下位ディレクトリのテストを取りこぼさない。ファイルごとのプロセス分離を保ち、同時実行を2つまでに制限する。fixture・PGlite・スタブ・ローカルChromiumを使い、実DBへ接続しない。ローカルCake全体の起動や実Previewでの操作とは区別する。文書のみの変更はリンク、コマンド、現行実装との整合性を確認する。アプリテストを省略した場合は理由を報告する。
 
 PRのタイトル・本文・コメント・レビューコメント・検証報告は日本語にする。コマンド、識別子、エラーコード、引用するログは原文のままでよい。PR本文は最終的な問題・変更内容・検証結果を記載し、作業途中の経緯や過去の受入記録を混ぜない。
 
@@ -119,7 +121,7 @@ Previewの「テスト共有家計」には食費・暮らし・交通・趣味�
 
 既存Previewにも未処理なら同じ条件を適用する。固定ユーザーの名前・権限・利用可否、共有workspaceの名前・所有者、二人の所属・割合が初期状態と一致し、対象workspaceに明細・カテゴリ・ルール・招待・取込履歴・定期支払い・清算履歴がない場合だけ追加する。入力済み・変更済みなら追加を省略したことを完了markerへ記録し、後から空になっても再追加しない。判定・登録・marker更新は所有権guardとtable lock下の同一Transactionで行い、失敗時は全体を取り消す。従来ローカルのseedには業務サンプルを追加しない。常設Previewにも同じ初期化条件を適用する。
 
-自動deployはActionsのSummaryとnoticeで結果を確認する。手動deployが必要な場合だけ `npm run deploy:preview` を使う。手動の作成・状態照合・削除はnpmコマンドから `scripts/preview-command.ts` を経由してmainのActionsへ要求し、PR作成・Ready管理には `npm run task:pr` を使う。自動runはrun ID由来の安定したoperation UUIDで再実行を照合し、不明なPOSTを盲目的に再発行しない。PRのHEADがイベントから進んだ場合もprovider書込前に停止する。
+自動deployはActionsのSummaryとnoticeで結果を確認する。手動deployが必要な場合だけ `npm run deploy:preview` を使う。手動の作成・状態照合・削除はnpmコマンドから `scripts/preview/preview-command.ts` を経由してmainのActionsへ要求し、PR作成・Ready管理には `npm run task:pr` を使う。自動runはrun ID由来の安定したoperation UUIDで再実行を照合し、不明なPOSTを盲目的に再発行しない。PRのHEADがイベントから進んだ場合もprovider書込前に停止する。
 
 ### PR Preview build内の実DB並行検証
 
@@ -129,7 +131,7 @@ CSVカテゴリの実DB並行検証は、対象DBへのテストデータ作成�
 git commit -m '[cake-db-qa:csv-categories]' -m 'CSVカテゴリの実DB並行検証を有効にする'
 ```
 
-`build:vercel` はVercelの `VERCEL_GIT_COMMIT_MESSAGE` をそのbuildの完全SHA・branchと照合された環境で読み、PR用のPreview/test/applicationに限って `db:setup` → `db:seed:test` → `qa:db:csv-categories` → Next buildの順に実行する。検証は `node --import tsx scripts/verify-csv-category-concurrency.ts` を子プロセスとして起動し、失敗時はbuildと公開を止める。次のcommitにmarkerがなければ検証しない。Production・準備用・常設Preview・Development・ローカルではmarkerによる実DB検証を実行しない。
+`build:vercel` はVercelの `VERCEL_GIT_COMMIT_MESSAGE` をそのbuildの完全SHA・branchと照合された環境で読み、PR用のPreview/test/applicationに限って `db:setup` → `db:seed:test` → `qa:db:csv-categories` → Next buildの順に実行する。検証は `node --import tsx scripts/qa/db/verify-csv-category-concurrency.ts` を子プロセスとして起動し、失敗時はbuildと公開を止める。次のcommitにmarkerがなければ検証しない。Production・準備用・常設Preview・Development・ローカルではmarkerによる実DB検証を実行しない。
 
 検証にはNative連携が当該buildへ供給した専用接続だけを使う。子プロセスには `CAKE_TEST_DATABASE_URL`、PR・完全SHA・Deployment・DB branch/endpoint・generationと本番分離の照合情報、Node実行・TLSに必要な明示allowlistだけを渡し、provider token・アプリ認証secret・共通 `DATABASE_URL` は渡さない。WSLへの資格情報コピーや環境ファイルの生成は行わない。接続前と各独立sessionで既存のDB所有権を照合し、二つの実DB sessionと監視sessionでロック待機・確定結果・全体rollbackを確認する。
 

@@ -31,6 +31,17 @@ iPhoneでのPayPay共有ショートカットとCSV貼り付けの確認方法�
 
 明細の取引先は表示用の値を保持し、NFKC・小文字化・空白整理による照合用の値をDBの生成列へ保存します。手入力・CSV・定期支払いなどの保存経路で同じSQL関数を使い、既存明細もmigrationで補完します。照合規則と互換性は[取引先の照合用正規化](docs/detail-design.html#merchant-normalization)を参照してください。CSVカテゴリの自動補完とグラフは未提供です。
 
+ソースは実行場所と用途で分けています。依存方向と各境界の責務は[詳細設計書の実装構成](docs/detail-design.html#architecture)を参照してください。
+
+| 配置 | 用途 |
+| --- | --- |
+| `app/`・`components/` | 画面、Route Handler、UIと画面状態 |
+| `lib/client/` | 取得・保存制御、応答反映、ブラウザ保存 |
+| `lib/server/` | 認証、HTTP境界、用途別サービス、DB store・接続 |
+| `lib/shared/` | 型、定数、`schemas/`、CSV変換・割合・清算などの共通計算 |
+| `scripts/` | `task/`・`preview/`・`build/`・`db/`・`qa/db/`・`qa/windows/` の運用処理 |
+| `tests/` | `shared/`・`client/`・`server/`・`tooling/` の回帰と `architecture/` の依存境界検査 |
+
 ## ローカルセットアップ
 
 ### DB接続なしの開発・テスト
@@ -49,7 +60,7 @@ npm test
 npm run build
 ```
 
-`npm test` はローカルfixture・PGlite・スタブ等を使い、実DBへ接続しません。Chromium fixtureも実Cake全体のE2Eとは別です。最終commitのSHA・clean状態・各コマンドの時間を記録します。文書だけの変更はリンク・コマンド・実装との整合性を確認し、必要な検証を選びます。CIのNode版は `.github/workflows/ci.yml` を参照してください。
+`npm test` は `tests/` 配下のテストと依存境界検査を再帰的に実行します。ローカルfixture・PGlite・スタブ等を使い、実DBへ接続しません。Chromium fixtureも実Cake全体のE2Eとは別です。最終commitのSHA・clean状態・各コマンドの時間を記録します。文書だけの変更はリンク・コマンド・実装との整合性を確認し、必要な検証を選びます。CIのNode版は `.github/workflows/ci.yml` を参照してください。
 
 以下はlocalhostでCake全体を起動する場合の追加準備です。ログイン後の操作には承認された隔離DB・認証設定・migration/seedが必要です。通常の回帰テストの前提ではなく、他環境から資格情報をコピーしません。既存Previewの検証は[開発手順](docs/development-workflow.md)に従ってください。
 
@@ -149,14 +160,14 @@ QAのDB初回照合・fixture・migration/seed・同PR更新時のデータ保�
 npm run dev       # 開発サーバー
 npm run build     # production build
 npm run lint      # ESLint
-npm test          # 清算・CSV解析テスト
+npm test          # 回帰テスト・依存境界検査
 npm run db:setup  # 未適用のDBマイグレーションを適用
 npm run db:seed:test # テストユーザーA・Bと共有ワークスペースを登録
 ```
 
 ## PR Preview
 
-Previewの手動操作は下記のnpmコマンドを使います。作成・状態照合・削除は `scripts/preview-command.ts` を入口としてmainのActionsへ要求し、PR作成・Ready管理は `npm run task:pr` を使います。
+Previewの手動操作は下記のnpmコマンドを使います。作成・状態照合・削除は `scripts/preview/preview-command.ts` を入口としてmainのActionsへ要求し、PR作成・Ready管理は `npm run task:pr` を使います。
 
 同一repositoryの `codex/*` からmainへのPR作成・更新・再openで、draftを含めて専用Vercel PreviewとNeon Native DBを自動作成・更新します。PR未作成のpushだけでは作成せず、Vercel Git連携のfeature deployは止めたままmainのActionsで管理します。PR作成・更新は専用DBへのmigration/seedを、merge/closeは資源削除を起動するため、対象と影響が承認された範囲で実行してください。
 

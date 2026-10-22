@@ -1,12 +1,12 @@
 "use client";
 
-import { formatYen, formatJstDateTime, DateTimePrecision } from "@/lib/display-formatters";
+import { formatYen, formatJstDateTime, DateTimePrecision } from "@/lib/shared/display-formatters";
 
-import { expenseClassLabels } from "@/lib/domain-values";
+import { expenseClassLabels } from "@/lib/shared/domain-values";
 
 import type { ReactNode } from "react";
-import type { TransactionColumn } from "@/lib/transaction-filters";
-import type { TransactionRecord, WorkspaceMember } from "@/lib/types";
+import type { TransactionColumn } from "@/lib/shared/transaction-filters";
+import type { TransactionRecord, WorkspaceMember } from "@/lib/shared/types";
 import { SwipeDelete } from "./swipe-delete";
 import styles from "./transactions-panel.module.css";
 

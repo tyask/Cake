@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { RunAppAction } from "@/lib/app-input";
-import { commonExpenseClassLabels, expenseClasses, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/domain-values";
-import { defaultSplitWeights, personalSplitWeights, prepareDefaultRuleMatcher, transactionDefaults, validateSplitWeights } from "@/lib/expense-splits";
-import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
-import type { ExpenseClass, SplitWeights, WorkspaceData } from "@/lib/types";
+import type { RunAppAction } from "@/lib/shared/schemas/app-input";
+import { commonExpenseClassLabels, expenseClasses, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/shared/domain-values";
+import { defaultSplitWeights, personalSplitWeights, prepareDefaultRuleMatcher, transactionDefaults, validateSplitWeights } from "@/lib/shared/expense-splits";
+import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/shared/schemas/transaction-memo";
+import type { ExpenseClass, SplitWeights, WorkspaceData } from "@/lib/shared/types";
 import { SplitEditor } from "./split-editor";
 import { Modal } from "./dashboard-ui";
 import { CategorySelect, prepareCategoryChoices } from "./category-select";

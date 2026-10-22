@@ -34,4 +34,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-        run: node --import tsx scripts/staging-workflow.ts
+        run: node --import tsx scripts/preview/staging-workflow.ts

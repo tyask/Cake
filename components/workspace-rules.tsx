@@ -1,19 +1,19 @@
 "use client";
 
-import { expenseClassLabels, expenseClasses, MAX_RULE_MERCHANT_LENGTH, MAX_SPLIT_WEIGHT } from "@/lib/domain-values";
+import { expenseClassLabels, expenseClasses, MAX_RULE_MERCHANT_LENGTH, MAX_SPLIT_WEIGHT } from "@/lib/shared/domain-values";
 
-import type { AppActionInput, RunAppAction, WorkspaceActionDraft } from "@/lib/app-input";
+import type { AppActionInput, RunAppAction, WorkspaceActionDraft } from "@/lib/shared/schemas/app-input";
 
-import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/autosave";
+import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/client/autosave";
 
 import { useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { defaultSplitWeights, validateSplitWeights } from "@/lib/expense-splits";
-import { ruleMerchantSchema } from "@/lib/domain-schemas";
-import { orderedWorkspaceRules } from "@/lib/rule-order";
-import type { DefaultRule, ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/types";
+import { defaultSplitWeights, validateSplitWeights } from "@/lib/shared/expense-splits";
+import { ruleMerchantSchema } from "@/lib/shared/schemas/domain-schemas";
+import { orderedWorkspaceRules } from "@/lib/shared/rule-order";
+import type { DefaultRule, ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/shared/types";
 import { SwipeDelete } from "./swipe-delete";
 import { SettingsSection } from "./settings-section";
 import styles from "./workspace-rules.module.css";

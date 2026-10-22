@@ -1,11 +1,11 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
-import { isTestAuthEnabled } from "@/lib/auth-mode";
-import { findTestUser } from "@/lib/test-users";
-import { activeTestUsers } from "@/lib/test-fixture-context";
-import { createAuthCallbacks } from "@/lib/auth-callbacks";
-import { ensureTestUser, findRegisteredUser, updateRegisteredProfile } from "@/lib/user-access";
+import { isTestAuthEnabled } from "@/lib/server/auth/auth-mode";
+import { findTestUser } from "@/lib/shared/test-users";
+import { activeTestUsers } from "@/lib/server/auth/test-fixture-context";
+import { createAuthCallbacks } from "@/lib/server/auth/auth-callbacks";
+import { ensureTestUser, findRegisteredUser, updateRegisteredProfile } from "@/lib/server/auth/user-access";
 
 const testAuthEnabled = isTestAuthEnabled();
 

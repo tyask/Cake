@@ -1,0 +1,91 @@
+import { MAX_SPLIT_WEIGHT } from "./domain-values";
+import { weightSchema } from "./schemas/domain-schemas";
+import type { DefaultRule, ExpenseClass, SplitWeights, WorkspaceMember } from "./types";
+
+type MemberWeight = Pick<WorkspaceMember, "id" | "weight">;
+type MemberIdentity = { id: string } | string;
+
+/** Return a copy so changing a form or the defaults never changes a saved ratio. */
+export function validateSplitWeights(
+  input: unknown,
+  members: readonly MemberIdentity[],
+  expenseClass?: ExpenseClass,
+  actorUserId?: string,
+): SplitWeights {
+  const ids = members.map((member) => typeof member === "string" ? member : member.id);
+  if (ids.length === 0 || new Set(ids).size !== ids.length) {
+    throw new Error("割合の参加者が不正です。");
+  }
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("負担割合を設定してください。");
+  }
+  const values = input as Record<string, unknown>;
+  const keys = Object.keys(values);
+  if (keys.length !== ids.length || keys.some((key) => !ids.includes(key))) {
+    throw new Error("負担割合の参加者が一致しません。");
+  }
+  const entries = ids.map((id) => {
+    const parsed = weightSchema.safeParse(values[id]);
+    if (!parsed.success) {
+      throw new Error(`割合は0から${MAX_SPLIT_WEIGHT}までの整数で設定してください。`);
+    }
+    return [id, parsed.data] as const;
+  });
+  if (entries.every(([, weight]) => weight === 0)) {
+    throw new Error("割合は少なくとも一人を1以上にしてください。");
+  }
+  if (expenseClass === "PERSONAL") {
+    if (!actorUserId || !ids.includes(actorUserId)) {
+      throw new Error("個人費の担当者が参加者に含まれていません。");
+    }
+    if (entries.some(([id, weight]) => weight !== (id === actorUserId ? 1 : 0))) {
+      throw new Error("個人費の割合は担当者が1、ほかの参加者が0です。");
+    }
+  }
+  return Object.fromEntries(entries);
+}
+
+export function defaultSplitWeights(members: readonly MemberWeight[]): SplitWeights {
+  if (members.length === 0) return {};
+  return validateSplitWeights(Object.fromEntries(members.map((member) => [member.id, member.weight])), members);
+}
+
+export function personalSplitWeights(members: readonly { id: string }[], actorUserId: string): SplitWeights {
+  if (members.length === 0) return {};
+  return validateSplitWeights(
+    Object.fromEntries(members.map((member) => [member.id, member.id === actorUserId ? 1 : 0])),
+    members,
+    "PERSONAL",
+    actorUserId,
+  );
+}
+
+export type DefaultRuleMatcher = (merchant: string) => DefaultRule | undefined;
+
+/** Reuse for an immutable rule list; prepare again when that list changes. */
+export function prepareDefaultRuleMatcher(rules: readonly DefaultRule[]): DefaultRuleMatcher {
+  const enabled = rules.filter(rule => rule.enabled);
+  // Stable sort preserves input order for tied priorities and leaves rules untouched.
+  if (enabled.length > 1) enabled.sort((a, b) => a.sortOrder - b.sortOrder);
+  return merchant => enabled.find(rule => merchant.includes(rule.merchantContains));
+}
+
+export function transactionDefaults(
+  merchant: string,
+  matchRule: DefaultRuleMatcher,
+  members: readonly MemberWeight[],
+  actorUserId: string,
+  fallbackExpenseClass: ExpenseClass = "PERSONAL",
+): { expenseClass: ExpenseClass; splitWeights: SplitWeights } {
+  const rule = matchRule(merchant);
+  const expenseClass = rule?.expenseClass ?? fallbackExpenseClass;
+  if (expenseClass === "PERSONAL") {
+    return { expenseClass, splitWeights: personalSplitWeights(members, actorUserId) };
+  }
+  const splitWeights = rule?.splitWeights == null
+    ? defaultSplitWeights(members)
+    : members.length === 0
+      ? {}
+      : validateSplitWeights(Object.fromEntries(members.map((member) => [member.id, rule.splitWeights?.[member.id] ?? 0])), members);
+  return { expenseClass, splitWeights };
+}

@@ -1,11 +1,11 @@
 "use client";
 
-import type { RunAppAction } from "@/lib/app-input";
+import type { RunAppAction } from "@/lib/shared/schemas/app-input";
 
 import { signOut } from "next-auth/react";
 import { useState } from "react";
-import { PROFILE_NAME_MAX_LENGTH } from "@/lib/user-profile";
-import type { AppUser } from "@/lib/types";
+import { PROFILE_NAME_MAX_LENGTH } from "@/lib/shared/schemas/user-profile";
+import type { AppUser } from "@/lib/shared/types";
 import { SettingsSection } from "./settings-section";
 
 export function PersonalSettings({ user, run }: {

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
-import { TEST_USERS } from "@/lib/test-users";
+import { TEST_USERS } from "@/lib/shared/test-users";
 
 export function TestLoginButtons({ redirectTo = "/" }: { redirectTo?: string }) {
   const [pending, setPending] = useState<string | null>(null);

@@ -5,10 +5,11 @@
 ## 1. 責務とデータの流れを先に決める
 
 - UIは入力と描画、controller/hookは取得・更新・通知と応答の採用条件、HTTP境界は認証・入力parse・応答変換、サービスは業務条件、store/repositoryはSQLを担当する。純粋な業務計算にHTTP・DB・画面状態を持ち込まない。既存の境界を使い、単純な機能に層ごとのファイルや汎用基盤を機械的に増やさない。
+- ライブラリは実行場所に応じて `lib/client/`・`lib/server/`・`lib/shared/` へ置く。運用スクリプトとテストは用途・対象領域にまとめ、依存を追加するときは[配置と依存境界](detail-design.html#architecture)を確認する。`npm test` の境界検査を維持し、共有定義へサーバー処理やUI・運用処理を持ち込まない。
 - 入力途中の値、サーバーで確定した値、表示から導く値の所有者を決める。同じ確定データを複数箇所で独立更新せず、派生値は確定値から計算する。
 - ボタンや自動保存を起点に、送るpayload、分岐条件、呼ぶAPI/サービス、DBで読む・書く対象、応答の反映先を追えるようにする。複数の取得範囲や保存後分岐がある場合は詳細設計にデータフロー図と操作表を置き、ローカル入力だけを変える操作と通信する操作も区別する。
 
-参照：[Dashboardのデータフロー](detail-design.html#dashboard-data-flow)、[HTTP境界](../lib/app-handlers.ts)、[用途別サービス](../lib/app-service.ts)。
+参照：[Dashboardのデータフロー](detail-design.html#dashboard-data-flow)、[HTTP境界](../lib/server/handlers/app-handlers.ts)、[用途別サービス](../lib/server/services/app-service.ts)。
 
 ## 2. 同じ業務規則は入口によらず共有する
 
@@ -18,7 +19,7 @@
 - APIでは日時のミリ秒など、保存・比較に必要な精度を保持する。円・タイムゾーン・表示桁の整形は表示境界の共通formatterに集め、Intlの同じ設定は再利用する。入力欄の変換と表示書式は分ける。
 - 別実装が必要なTS/SQLの業務計算は共通fixtureで結果を照合する。丸めの位置・対象・未一致時の結果まで契約に含める。
 
-参照：[分類値](../lib/domain-values.ts)、[入力schema](../lib/domain-schemas.ts)、[ルールと割合](../lib/expense-splits.ts)、[表示書式](../lib/display-formatters.ts)、[TS/SQL共通fixture](../tests/fixtures/default-rule-cases.ts)。
+参照：[分類値](../lib/shared/domain-values.ts)、[入力schema](../lib/shared/schemas/domain-schemas.ts)、[ルールと割合](../lib/shared/expense-splits.ts)、[表示書式](../lib/shared/display-formatters.ts)、[TS/SQL共通fixture](../tests/shared/fixtures/default-rule-cases.ts)。
 
 ## 3. 保存・再取得・遅延応答を一つの流れとして設計する
 
@@ -27,7 +28,7 @@
 - workspace・画面の切替、保存後のrevision、要求順序を考慮して応答の採用条件を決める。古いworkspaceの応答を現在の画面へ混ぜない。同じworkspaceでの表示反映と、現在タブへの通知の条件も区別する。
 - ブラウザで応答を破棄しても、開始済みのサーバー更新が取り消されるとは扱わない。重複更新・再試行・同時実行の整合性はサーバー/DB側でも保証する。
 
-参照：[保存制御](../lib/autosave.ts)、[保存待ち更新](../lib/transaction-refresh.ts)、[応答採用条件](../lib/dashboard-requests.ts)。
+参照：[保存制御](../lib/client/autosave.ts)、[保存待ち更新](../lib/client/transaction-refresh.ts)、[応答採用条件](../lib/client/dashboard-requests.ts)。
 
 ## 4. 共通UIの標準動作を共通部品で保証する
 
@@ -45,7 +46,7 @@
 - ReactのuseMemoは入力が変わる単位で準備を再利用する場合に使い、依存値を揃える。正しさをキャッシュの存続に依存させず、ユーザー/workspaceをまたぐ可変グローバルキャッシュを作らない。
 - 性能の説明ではソート・走査・ファイル本文読込・通信など対象を示す。計算量の改善と実測時間の改善を区別し、時間を主張するときは同じデータ・初期状態・実行条件で測る。
 
-参照：[準備済みルール判定](../lib/expense-splits.ts)、[一覧計算](../lib/transaction-list.ts)、[フィルタ](../lib/transaction-filters.ts)。
+参照：[準備済みルール判定](../lib/shared/expense-splits.ts)、[一覧計算](../lib/shared/transaction-list.ts)、[フィルタ](../lib/shared/transaction-filters.ts)。
 
 ## 6. 用途に必要な取得と集合更新を使う
 
@@ -54,7 +55,7 @@
 - 軽量応答で未取得項目を空配列に置き換えない。部分応答の型と同一workspaceへの併合条件を明確にし、更新応答で確定値を反映するか再取得するかを選ぶ。
 - migrationは適用台帳を一度取得し、未適用本文だけを読む。初回の所有権・原文・接続先検査など、安全性に必要な確認は省略しない。
 
-参照：[取得範囲](../lib/bootstrap.ts)、[明細用業務処理](../lib/app-services/transactions.ts)、[清算store](../lib/settlement-store.ts)、[migration実行](../scripts/setup-db.mjs)。
+参照：[取得範囲](../lib/client/bootstrap.ts)、[明細用業務処理](../lib/server/services/transactions.ts)、[清算store](../lib/server/stores/settlement-store.ts)、[migration実行](../scripts/db/setup-db.mjs)。
 
 ## 7. 複数対象の更新を原子的に確定する
 
@@ -63,7 +64,7 @@
 - 履歴・関連行・本体更新・再採番は必要な単位で一緒に確定し、失敗時は全体をrollbackする。競合・再試行時の結果を定義し、不要な行やworkspaceを更新しない。
 - 適用済migrationの原文を書き換えず、新しい番号のmigrationを追加する。公開中の旧版との切替期間を含めて互換性を考える。migration本体と適用台帳の記録も一緒に確定する。
 
-参照：[清算のロック・snapshot](detail-design.html#domain)、[DB更新store](../lib/app-store.ts)、[migration設計](detail-design.html#database)。
+参照：[清算のロック・snapshot](detail-design.html#domain)、[DB更新store](../lib/server/stores/app-store.ts)、[migration設計](detail-design.html#database)。
 
 ## 8. 維持する挙動と運用経路までレビューする
 

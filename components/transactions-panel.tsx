@@ -1,27 +1,27 @@
 "use client";
 
-import { formatYen, formatJstDateTime } from "@/lib/display-formatters";
+import { formatYen, formatJstDateTime } from "@/lib/shared/display-formatters";
 
-import { expenseClassLabels, expenseClasses, transactionActorLabels, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/domain-values";
+import { expenseClassLabels, expenseClasses, transactionActorLabels, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/shared/domain-values";
 
-import type { RunAppAction } from "@/lib/app-input";
+import type { RunAppAction } from "@/lib/shared/schemas/app-input";
 
-import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/autosave";
+import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/client/autosave";
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
-import { transactionActorPatch, transactionDateInput, transactionDateToIso, transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues } from "@/lib/transaction-editing";
-import type { ExpenseClass, TransactionRecord, WorkspaceData, WorkspaceMember } from "@/lib/types";
+import { transactionActorPatch, transactionDateInput, transactionDateToIso, transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues } from "@/lib/shared/transaction-editing";
+import type { ExpenseClass, TransactionRecord, WorkspaceData, WorkspaceMember } from "@/lib/shared/types";
 import styles from "./transactions-panel.module.css";
-import { splitAmounts } from "@/lib/split-allocations";
+import { splitAmounts } from "@/lib/shared/split-allocations";
 import { SplitEditor } from "./split-editor";
 import { TransactionFilterDialog } from "./transaction-filter-dialog";
 import { SelectionCheckbox } from "./selection-checkbox";
 import { TransactionMemoEditor, type SaveTransactionMemo, type TransactionMemoHandle } from "./transaction-memo-editor";
 import { RefreshButton } from "./refresh-button";
-import { refreshTransactionEditors } from "@/lib/transaction-refresh";
-import { transactionMemoSchema } from "@/lib/transaction-memo";
-import { createTransactionFilterMatcher, transactionColumns, transactionFilterOptions, type TransactionColumn } from "@/lib/transaction-filters";
-import { transactionListView } from "@/lib/transaction-list";
+import { refreshTransactionEditors } from "@/lib/client/transaction-refresh";
+import { transactionMemoSchema } from "@/lib/shared/schemas/transaction-memo";
+import { createTransactionFilterMatcher, transactionColumns, transactionFilterOptions, type TransactionColumn } from "@/lib/shared/transaction-filters";
+import { transactionListView } from "@/lib/shared/transaction-list";
 import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } from "./transaction-table";
 import { useTransactionFilters } from "./use-transaction-filters";
 import { prepareCategoryChoices, type CategoryChoices } from "./category-select";

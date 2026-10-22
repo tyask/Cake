@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { transactionColumns, type FilterOption, type TransactionColumn } from "@/lib/transaction-filters";
+import { transactionColumns, type FilterOption, type TransactionColumn } from "@/lib/shared/transaction-filters";
 import styles from "./transactions-panel.module.css";
 import { SelectionCheckbox } from "./selection-checkbox";
 

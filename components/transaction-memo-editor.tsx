@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { MAX_TRANSACTION_MEMO_LENGTH, transactionMemoSchema } from "@/lib/transaction-memo";
+import { MAX_TRANSACTION_MEMO_LENGTH, transactionMemoSchema } from "@/lib/shared/schemas/transaction-memo";
 import styles from "./transactions-panel.module.css";
 
 export type SaveTransactionMemo = (id: string, memo: string) => Promise<string>;

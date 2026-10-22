@@ -71,10 +71,10 @@ import { execFileSync } from 'node:child_process';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { source } from './scripts/preview-model.ts';
-import { cleanTaskHead } from './scripts/task-workflow.ts';
-import { requestReceipt } from './scripts/preview-command.ts';
-import { verifyBrowser, sameVerifiedDeployment, BrowserVerificationError } from './scripts/preview-browser.ts';
+import { source } from './scripts/preview/preview-model.ts';
+import { cleanTaskHead } from './scripts/task/task-workflow.ts';
+import { requestReceipt } from './scripts/preview/preview-command.ts';
+import { verifyBrowser, sameVerifiedDeployment, BrowserVerificationError } from './scripts/preview/preview-browser.ts';
 
 let proof;
 const cwd = process.cwd(), directory = join(cwd, '.cake');
@@ -134,8 +134,8 @@ node --import tsx --input-type=module - "$PR" <<'JS'
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { source } from './scripts/preview-model.ts';
-import { requestReceipt } from './scripts/preview-command.ts';
+import { source } from './scripts/preview/preview-model.ts';
+import { requestReceipt } from './scripts/preview/preview-command.ts';
 try {
   const [pr] = process.argv.slice(2);
   assert.match(pr, /^[1-9][0-9]*$/);

@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type CollisionDetection } from "@dnd-kit/core";
-import type { RunAppAction } from "@/lib/app-input";
-import { categoryColorSchema, categoryNameSchema } from "@/lib/category-input";
-import { CATEGORY_NAME_MAX_LENGTH, CATEGORY_PALETTE, categoryPath, flattenCategories, suggestCategoryColor } from "@/lib/categories";
-import { prepareCategoryMove, prepareCategorySiblingMoves, type CategoryMoveDestination, type CategoryMovePosition, type CategoryMoveTarget } from "@/lib/category-move";
-import type { Category } from "@/lib/types";
+import type { RunAppAction } from "@/lib/shared/schemas/app-input";
+import { categoryColorSchema, categoryNameSchema } from "@/lib/shared/schemas/category-input";
+import { CATEGORY_NAME_MAX_LENGTH, CATEGORY_PALETTE, categoryPath, flattenCategories, suggestCategoryColor } from "@/lib/shared/categories";
+import { prepareCategoryMove, prepareCategorySiblingMoves, type CategoryMoveDestination, type CategoryMovePosition, type CategoryMoveTarget } from "@/lib/shared/category-move";
+import type { Category } from "@/lib/shared/types";
 import { SettingsSection } from "./settings-section";
 import styles from "./category-settings.module.css";
 

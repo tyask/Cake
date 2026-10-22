@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import type { RunAppAction } from "@/lib/app-input";
-import { postAction } from "@/lib/app-client";
-import { defaultSplitWeights, validateSplitWeights } from "@/lib/expense-splits";
-import type { SplitWeights, WorkspaceData } from "@/lib/types";
+import type { RunAppAction } from "@/lib/shared/schemas/app-input";
+import { postAction } from "@/lib/client/app-client";
+import { defaultSplitWeights, validateSplitWeights } from "@/lib/shared/expense-splits";
+import type { SplitWeights, WorkspaceData } from "@/lib/shared/types";
 import { SplitEditor } from "./split-editor";
 import { RecurringPaymentsPanel } from "./recurring-payments-panel";
 import { WorkspaceRules } from "./workspace-rules";

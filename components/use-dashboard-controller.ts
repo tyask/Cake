@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { AppActionInput } from "@/lib/app-input";
-import { postAction } from "@/lib/app-client";
-import { applyTransactionUpdate } from "@/lib/transaction-updates";
-import { applyCategoryUpdate, type CategoryDeletion } from "@/lib/category-updates";
-import { bootstrapScopeForTab, mergeBootstrapMetadata, type DashboardTab as Tab } from "@/lib/bootstrap";
-import { canApplyBootstrapResponse, isDashboardViewCurrent, isWorkspaceViewCurrent } from "@/lib/dashboard-requests";
-import type { BootstrapData, BootstrapMetadata, BootstrapScope, Category } from "@/lib/types";
+import type { AppActionInput } from "@/lib/shared/schemas/app-input";
+import { postAction } from "@/lib/client/app-client";
+import { applyTransactionUpdate } from "@/lib/client/transaction-updates";
+import { applyCategoryUpdate, type CategoryDeletion } from "@/lib/shared/category-updates";
+import { bootstrapScopeForTab, mergeBootstrapMetadata } from "@/lib/client/bootstrap";
+import type { DashboardTab as Tab } from "@/lib/shared/types";
+import { canApplyBootstrapResponse, isDashboardViewCurrent, isWorkspaceViewCurrent } from "@/lib/client/dashboard-requests";
+import type { BootstrapData, BootstrapMetadata, BootstrapScope, Category } from "@/lib/shared/types";
 
 const NOTICE_DURATION_MS = 2_000;
 type CategorySnapshot = { ids: ReadonlySet<string>; generation: number };

@@ -1,7 +1,7 @@
-import { getCurrentUser } from "@/lib/current-user";
-import { appHandlers } from "@/lib/app-handlers";
-import { createAppService } from "@/lib/app-service";
-import { createAppStore } from "@/lib/app-store";
+import { getCurrentUser } from "@/lib/server/auth/current-user";
+import { appHandlers } from "@/lib/server/handlers/app-handlers";
+import { createAppService } from "@/lib/server/services/app-service";
+import { createAppStore } from "@/lib/server/stores/app-store";
 
 export const runtime = "nodejs";
 
