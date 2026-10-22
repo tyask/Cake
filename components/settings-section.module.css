@@ -3,10 +3,14 @@
 .summary::-webkit-details-marker { display: none; }
 .summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .summary h3 { min-width: 0; margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
-.chevron { flex-shrink: 0; color: var(--muted); font-size: 1.25rem; line-height: 1; }
+.marker { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; color: var(--accent); background: var(--accent-soft); }
+.chevron { display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform .18s ease; }
 .section[open] > .summary .chevron { transform: rotate(180deg); }
 .content { min-width: 0; }
 .section:not([open]) > .content { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .chevron { transition: none; }
+}
 @media (max-width: 48rem) {
   .summary { padding: 1rem; }
 }

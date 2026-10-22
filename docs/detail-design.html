@@ -626,7 +626,7 @@
           <p>対応する実装：<a href="../components/dashboard.tsx">Dashboard</a>、<a href="../components/use-dashboard-controller.ts">controller hook</a>、<a href="../lib/dashboard-requests.ts">応答採用条件</a>、<a href="../lib/transaction-refresh.ts">保存待ち更新</a>、<a href="../lib/app-handlers.ts">HTTP境界</a>、<a href="../lib/app-service.ts">action振分け</a>。</p>
 
           <h3>設定枠の開閉</h3>
-          <p>個人設定は「基本情報」、ワークスペース設定は「基本情報」「ワークスペースのデフォルト割合」「集計用カテゴリ」「定期支払い」「費用区分のデフォルトルール」「ワークスペースを削除」を縦に並べる。共通の<a href="../components/settings-section.tsx">SettingsSection</a>がnativeのdetails / summaryで各枠を初期状態では閉じ、見出し全体のクリック・タップ、Enter・Spaceで個別に開閉する。矢印の向きも開閉に合わせる。</p>
+          <p>個人設定は「基本情報」、ワークスペース設定は「基本情報」「ワークスペースのデフォルト割合」「集計用カテゴリ」「定期支払い」「費用区分のデフォルトルール」「ワークスペースを削除」を縦に並べる。共通の<a href="../components/settings-section.tsx">SettingsSection</a>がnativeのdetails / summaryで各枠を初期状態では閉じ、見出し全体のクリック・タップ、Enter・Spaceで個別に開閉する。開閉マークは直径28pxの淡い丸背景に20pxのSVG矢印を置き、閉じているときは下、開いているときは上を向く。回転は短いアニメーションで示し、動きを減らす利用者設定ではアニメーションを行わない。マーク自体は装飾として読み上げとフォーカスの対象外とする。</p>
           <p>開閉状態は各detailsが保持し、サーバーへの保存や永続化は行わない。本文の子コンポーネントは閉じてもunmountしないため、名前・割合・カテゴリの編集中の値、ルールの選択、保存中・失敗状態を保持する。画面を離れて再表示した場合やワークスペース切替で再マウントした枠は閉じて開始する。開閉自体ではAPIを呼ばず、定期支払いの表示時GET・日付境界の再取得と各設定の既存の保存契機は維持する。</p>
 
           <h3>Dashboardと取得・更新hookの状態</h3>
