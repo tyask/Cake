@@ -63,6 +63,12 @@ function insertedItems(batch: Batch) {
   return batch.queries.filter(({ query }) => /INSERT INTO transactions\b/.test(query));
 }
 
+function insertedValues(batch: Batch) {
+  const inserts = insertedItems(batch);
+  assert.equal(inserts.length, 1, "明細数によらず集合INSERTを1回実行する");
+  return JSON.parse(String(inserts[0].params[4])) as PayPayImportItem[];
+}
+
 test("保存する外部IDはUTC日時から日本時間のYYYYMMDDHHMMSSを使い、未加工の旧API取引番号にも対応する", async (t) => {
   const requests = fixture(t, { imported: 2 });
   const result = await persistPayPayImport(input([
@@ -71,15 +77,15 @@ test("保存する外部IDはUTC日時から日本時間のYYYYMMDDHHMMSSを使�
   ]));
   assert.deepEqual(result, { imported: 2, skipped: 0 });
   assert.equal(requests.length, 1);
-  const inserts = insertedItems(requests[0].batch);
-  assert.deepEqual(inserts.map(({ params }) => params[8]), [
+  const inserts = insertedValues(requests[0].batch);
+  assert.deepEqual(inserts.map(item => item.externalId), [
     "PayPay_20261009235959_987654321", "PayPay_20261010000001_123456789",
   ]);
-  assert.equal(inserts[1].params[1], "2026-10-09T15:00:01.000Z");
-  assert.equal(inserts[1].params[2], "スーパー");
-  assert.equal(inserts[1].params[4], "1200");
-  assert.equal(inserts[1].params[5], "member-a");
-  assert.equal(inserts[1].params[7], JSON.stringify({ "member-a": 1, "member-b": 0 }));
+  assert.equal(inserts[1].occurredAt, "2026-10-09T15:00:01.000Z");
+  assert.equal(inserts[1].merchant, "スーパー");
+  assert.equal(inserts[1].amountYen, 1200);
+  assert.equal(inserts[1].actorUserId, "member-a");
+  assert.deepEqual(inserts[1].splitWeights, { "member-a": 1, "member-b": 0 });
 });
 
 test("新形式キーに含まれる日時が取引日時と違えばDB通信前に拒否する", async (t) => {
@@ -95,7 +101,7 @@ test("同時取込で重複が増えても、取込履歴と戻り値は実際�
   ], 4)), { imported: 1, skipped: 3 });
   assert.equal(requests.length, 1);
   const batch = requests[0].batch;
-  assert.match(batch.queries[0].query, /UPDATE workspaces/);
+  assert.match(batch.queries[0].query, /cake_assert_transaction_categories/);
   const history = batch.queries[1];
   assert.match(history.query, /INSERT INTO import_batches/);
   assert.equal(history.params[4], "4");
@@ -106,7 +112,7 @@ test("同時取込で重複が増えても、取込履歴と戻り値は実際�
   assert.match(countQuery.query, /skipped_rows = GREATEST\(0, total_rows - imported\.count\)/);
   assert.ok(countQuery.params.every((param) => param === batchId));
   for (const insert of insertedItems(batch)) {
-    assert.equal(insert.params[9], batchId);
+    assert.equal(insert.params[1], batchId);
     assert.match(insert.query, /ON CONFLICT \(workspace_id, external_id\) DO UPDATE/);
     assert.match(insert.query, /SET external_id = transactions\.external_id/);
     assert.match(insert.query, /WHERE cake_assert_paypay_duplicate\(transactions\.source, transactions\.merchant, transactions\.amount_yen,\s*EXCLUDED\.merchant, EXCLUDED\.amount_yen\)/);
@@ -127,7 +133,7 @@ test("同じ外部IDで内容が異なる競合はDBエラーを伝え、履歴�
   assert.equal(requests.length, 1);
   const queries = requests[0].batch.queries;
   assert.match(queries[1].query, /INSERT INTO import_batches/);
-  assert.equal(insertedItems(requests[0].batch).length, 2);
+  assert.equal(insertedValues(requests[0].batch).length, 2);
   assert.match(queries[queries.length - 1].query, /UPDATE import_batches/);
 });
 
@@ -138,7 +144,31 @@ test("入力順序が反対でも同じキー順に保存して競合行をロ�
   await persistPayPayImport(input([second, first]));
   await persistPayPayImport(input([first, second]));
   assert.equal(requests.length, 2);
-  const keys = requests.map(({ batch }) => insertedItems(batch).map(({ params }) => params[8]));
+  const keys = requests.map(({ batch }) => insertedValues(batch).map(item => item.externalId));
   assert.deepEqual(keys[0], keys[1]);
   assert.deepEqual(keys[0], ["PayPay_20261010000001_123456789", "PayPay_20261010000001_123456790"]);
+});
+
+test("カテゴリは全入力の一意なIDを保存と同じTransactionで検証し、件数に比例するSQLを増やさない", async (t) => {
+  const requests = fixture(t, { imported: 2000 });
+  const categoryId = "00000000-0000-4000-8000-000000000003";
+  await persistPayPayImport(input([item({ categoryId })]));
+  await persistPayPayImport(input(Array.from({ length: 2000 }, (_, index) => item({ externalId: String(index), categoryId }))));
+  assert.equal(requests.length, 2);
+  for (const { batch } of requests) {
+    assert.equal(batch.queries.length, 4);
+    assert.deepEqual(JSON.parse(String(batch.queries[0].params[0])), [{ workspaceId, userId: "member-b", categoryId }]);
+    assert.ok(insertedValues(batch).every(item => item.categoryId === categoryId));
+    assert.match(insertedItems(batch)[0].query, /category_id, category_confirmed/);
+  }
+});
+
+test("同一入力内の一致重複は最初の値だけ登録し、カテゴリ検証には後続行も含める", async (t) => {
+  const requests = fixture(t, { imported: 1, skipped: 1 });
+  const categoryId = "00000000-0000-4000-8000-000000000003";
+  await persistPayPayImport(input([item({ categoryId: null }), item({ categoryId })]));
+  assert.deepEqual(insertedValues(requests[0].batch).map(item => item.categoryId), [null]);
+  assert.equal(JSON.parse(String(requests[0].batch.queries[0].params[0])).length, 2);
+  await assert.rejects(persistPayPayImport(input([item(), item({ amountYen: 999 })])), { message: collisionMessage });
+  assert.equal(requests.length, 1);
 });

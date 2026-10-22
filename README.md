@@ -10,7 +10,7 @@
 - [明細の絞り込みと画面の手動更新](docs/detail-design.html#client)
 - [明細の一括削除・共有費ルールの適用](docs/detail-design.html#client)
 - [毎月指定日の定期支払い](docs/detail-design.html#recurring-payments)
-- [PayPay CSVのプレビュー・取込・重複確認](docs/detail-design.html#domain)
+- [PayPay CSVのプレビュー・カテゴリ設定・取込・重複確認](docs/detail-design.html#domain)
 - [取引先ごとの費用区分・負担割合のデフォルトルール](docs/detail-design.html#client)
 - [明細ごとの負担割合に基づく清算額の計算](docs/detail-design.html#domain)
 - [清算完了と清算履歴](docs/detail-design.html#domain)

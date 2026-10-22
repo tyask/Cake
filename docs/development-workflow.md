@@ -121,6 +121,20 @@ Previewの「テスト共有家計」には食費・暮らし・交通・趣味�
 
 自動deployはActionsのSummaryとnoticeで結果を確認する。手動deployが必要な場合だけ `npm run deploy:preview` を使う。手動の作成・状態照合・削除はnpmコマンドから `scripts/preview-command.ts` を経由してmainのActionsへ要求し、PR作成・Ready管理には `npm run task:pr` を使う。自動runはrun ID由来の安定したoperation UUIDで再実行を照合し、不明なPOSTを盲目的に再発行しない。PRのHEADがイベントから進んだ場合もprovider書込前に停止する。
 
+### PR Preview build内の実DB並行検証
+
+CSVカテゴリの実DB並行検証は、対象DBへのテストデータ作成・削除が承認されたPRで明示的に有効にする。対象commitのメッセージに独立した行で `[cake-db-qa:csv-categories]` を含める。前後の空白を除いた行全体が一致したときだけ有効で、文中の記載や未知のmarkerは無視する。たとえば次のようにcommitメッセージの先頭行へ追加する。
+
+```bash
+git commit -m '[cake-db-qa:csv-categories]' -m 'CSVカテゴリの実DB並行検証を有効にする'
+```
+
+`build:vercel` はVercelの `VERCEL_GIT_COMMIT_MESSAGE` をそのbuildの完全SHA・branchと照合された環境で読み、PR用のPreview/test/applicationに限って `db:setup` → `db:seed:test` → `qa:db:csv-categories` → Next buildの順に実行する。検証は `node --import tsx scripts/verify-csv-category-concurrency.ts` を子プロセスとして起動し、失敗時はbuildと公開を止める。次のcommitにmarkerがなければ検証しない。Production・準備用・常設Preview・Development・ローカルではmarkerによる実DB検証を実行しない。
+
+検証にはNative連携が当該buildへ供給した専用接続だけを使う。子プロセスには `CAKE_TEST_DATABASE_URL`、PR・完全SHA・Deployment・DB branch/endpoint・generationと本番分離の照合情報、Node実行・TLSに必要な明示allowlistだけを渡し、provider token・アプリ認証secret・共通 `DATABASE_URL` は渡さない。WSLへの資格情報コピーや環境ファイルの生成は行わない。接続前と各独立sessionで既存のDB所有権を照合し、二つの実DB sessionと監視sessionでロック待機・確定結果・全体rollbackを確認する。
+
+buildログの `cake-csv-category-db-qa/v1` 結果で対象identity、検証成否、ロック待機、後片付け件数と既存データ保持を確認し、前後の正式statusとも照合する。業務DTO・接続文字列・生例外はログやartifactへ保存しない。通常のmigration・初回seedによる更新と、検証用fixtureの残存0件は区別して報告する。この実DB検証は `npm test`、Actionsのprovider照合receipt、現在HEADの正式ブラウザ証拠とはそれぞれ別の検証である。
+
 ### mainの常設Preview
 
 `.github/workflows/staging.yml`はmainへのpushとmain上の手動dispatchを受け、同じ完全SHAを予約branch `cake-main-preview`へfast-forward同期する。Vercel Git連携の `**: false` / `main: true` は維持し、mainのProductionは従来どおり自動更新する。常設Previewのデプロイは信頼済みmainのActionsが行い、Hobbyで利用できる標準Previewを使う。

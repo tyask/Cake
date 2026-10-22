@@ -1,0 +1,4 @@
+.bulkBar { flex-wrap: wrap; }
+.categoryBulk { display: flex; align-items: center; gap: .5rem; max-width: 100%; }
+.categoryChoice { width: 10rem; min-width: 0; flex-shrink: 1; }
+.categoryBulk > button { flex-shrink: 0; }

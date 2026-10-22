@@ -135,7 +135,9 @@ export function createAppStore() {
     async insertTransaction(input: Action<"saveTransaction">, user: AppUser, split: TransactionSplit, id: string) {
       const sql = db();
       const results = await sql.transaction([
-        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+        input.categoryId != null
+          ? sql`SELECT cake_assert_transaction_categories(${JSON.stringify([{ workspaceId: input.workspaceId, userId: user.id, categoryId: input.categoryId }])}::jsonb)`
+          : sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
         sql`
           INSERT INTO transactions (id, workspace_id, occurred_at, merchant, method, type, amount_yen,
             actor_user_id, expense_class, split_weights, external_id, source, created_by, updated_by, memo, category_id, category_confirmed)

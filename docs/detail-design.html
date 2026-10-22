@@ -302,9 +302,9 @@
                 <div class="dfd-arrow"><b>→</b><small>File.text() / readText()<br />処理内の一時値</small></div>
                 <div class="dfd-node process"><strong>parsePayPayCsv</strong><small>PapaParse・Header検証<br />支払い抽出・Rule適用</small></div>
                 <div class="dfd-arrow"><b>→</b><small>PreviewRow[]</small></div>
-                <div class="dfd-node output"><strong>取込プレビュー</strong><small>選択・担当者<br />費用区分を編集</small></div>
+                <div class="dfd-node output"><strong>取込プレビュー</strong><small>選択・担当者・費用区分<br />割合・カテゴリを編集</small></div>
                 <div class="dfd-arrow"><b>→</b><small>登録可能な全items<br />JSON 最大2000件</small></div>
-                <div class="dfd-node process"><strong>bulkImport</strong><small>再検証・所属確認<br />重複内容の一致確認</small></div>
+                <div class="dfd-node process"><strong>bulkImport</strong><small>再検証・所属確認<br />カテゴリ・重複内容を検証</small></div>
                 <div class="dfd-arrow"><b>→</b><small>Transaction</small></div>
                 <div class="dfd-node store"><strong>Neon PostgreSQL</strong><small>import_batches<br />transactions</small></div>
               </div>
@@ -469,7 +469,7 @@
               <tr><td><code>createRule</code> / <code>updateRule</code></td><td>所属、merchantContains 1〜120、class、任意splitWeights/null、任意enabled。更新はrule UUID。</td><td>新規はsort_order末尾、enabled既定true。共有割合nullは現在のデフォルトを利用、個人費ルールはnull。更新時に省略した割合は区分同一なら保持。<code>{ ok }</code>。</td></tr>
               <tr><td><code>reorderRules</code></td><td>所属、全rule UUID配列最大5000。</td><td>DB関数で現在の全ルールとの完全一致・重複なしを確認し、sort_orderを0始まりで更新。<code>{ ok }</code>。</td></tr>
               <tr><td><code>deleteRule</code> / <code>deleteRules</code></td><td>所属、単一UUIDまたは重複のない配列1〜5000。複数削除は全対象の存在確認。</td><td>共通DB関数でworkspaceをロックし、最新所属・全対象確認・削除・sort_order再採番を原子的に実行。単件不存在は成功、複数の一部不存在は全件中止。対象workspace内だけ操作する。<code>{ ok }</code> / <code>{ ok, deleted }</code>。</td></tr>
-              <tr><td><code>bulkImport</code></td><td>所属、fileName 1〜240、totalRows非負、items最大2000。各actor・class・割合・金額・ISO日時・外部IDを検証。</td><td>PAYPAY/PAYMENT明細とbatchを同一Transactionで登録。外部ID順で登録し一致重複は省略、不一致は全体を中止。<code>{ ok, imported, skipped }</code>。</td></tr>
+              <tr><td><code>bulkImport</code></td><td>所属、fileName 1〜240、totalRows非負、items最大2000。各actor・class・割合・金額・ISO日時・外部IDとnullable categoryIdを検証。categoryId省略は未分類。</td><td>全入力カテゴリを同じTransactionで集合検証し、PAYPAY/PAYMENT明細とbatchを保存。明細は外部ID順の単一INSERTで登録し一致重複は既存カテゴリも変更せず省略、不一致は全体を中止。<code>{ ok, imported, skipped }</code>。</td></tr>
               <tr><td><code>completeSettlement</code></td><td>workspace UUID・所属、最新full参照で対象明細あり。</td><td>対象計算値をロック下で再照合し、履歴・関連行・settled_atを一括保存。<code>{ ok }</code>。</td></tr>
             </tbody>
           </table></div>
@@ -583,11 +583,11 @@
                 <div class="dfd-arrow"><b>→</b><small>workspaceId<br />externalIds</small></div>
                 <div class="dfd-node store"><strong>POST /api/import/duplicates</strong><small>所属確認 → DBの既存ID照会<br />既存の金額・取引先・source</small></div>
                 <div class="dfd-arrow"><b>→</b><small>transactions</small></div>
-                <div class="dfd-node output"><strong>ImportPanelのrows</strong><small>重複・衝突を表示<br />行の選択・割合を編集<br />共通費の1:1もプレビューだけ更新</small></div>
+                <div class="dfd-node output"><strong>ImportPanelのrows</strong><small>重複・衝突を表示<br />行の選択・割合・カテゴリを編集<br />一括設定もプレビューだけ更新</small></div>
               </div>
               <div class="dfd-track" role="img" aria-label="登録ボタンで残った登録可能な全明細をbulkImportとしてrunへ送りDBへ保存し、metadataを再取得する。取引明細タブに切り替えたときにfullで明細を取得する">
-                <div class="dfd-node source"><strong>「登録」</strong><small>登録可能な全行を検証<br />日時・金額・actor・割合</small></div>
-                <div class="dfd-arrow"><b>→</b><small>run(bulkImport)<br />fileName / items</small></div>
+                <div class="dfd-node source"><strong>「登録」</strong><small>登録可能な全行を検証<br />日時・金額・actor・割合・categoryId</small></div>
+                <div class="dfd-arrow"><b>→</b><small>run(bulkImport)<br />fileName / items（categoryId含む）</small></div>
                 <div class="dfd-node store"><strong>POST /api/app → DB</strong><small>明細・batchをTransaction保存<br />imported / skippedを返す</small></div>
                 <div class="dfd-arrow"><b>→</b><small>metadata GET</small></div>
                 <div class="dfd-node output"><strong>登録数通知・プレビュー解除</strong><small>取込タブの情報を更新<br />明細タブを押すとfull GET</small></div>
@@ -664,7 +664,7 @@
             <tbody>
               <tr><td>ホーム</td><td>今月の支払い、未清算共通費、次の送金、最近6件、保留招待数、登録/取込/清算への導線。lib/home-summary.tsで日本時間の年・月が一致する明細を抽出する。</td></tr>
               <tr><td>取引明細</td><td>全明細の列フィルタ、未清算行のインライン保存、清算済みもメモ・カテゴリ保存、選択削除/ルール適用。</td></tr>
-              <tr><td>CSV取込</td><td>ファイルまたは貼り付け本文を、metadataのルール・参加者で共通解析し、外部IDだけを専用APIで照合。選択行の費用区分を一括変更し、行ごとの割合を編集してbulkImport。</td></tr>
+              <tr><td>CSV取込</td><td>ファイルまたは貼り付け本文を、metadataのルール・参加者で共通解析し、外部IDだけを専用APIで照合。選択行の費用区分・カテゴリを一括変更し、行ごとの割合・カテゴリを編集してbulkImport。</td></tr>
               <tr><td>清算</td><td>保存割合による清算内訳、対象明細、最新20件の履歴、清算完了。</td></tr>
               <tr><td>設定</td><td>本人表示名、workspace名・デフォルト割合・招待・削除、共有ルール、定期支払い、管理者だけの利用者登録/停止。</td></tr>
             </tbody>
@@ -781,7 +781,7 @@
             </div>
           </div>
           <p>明細にもcategory_revisionを保存し、割当・解除ごとにDBで加算する。新規カテゴリ付き明細は1、既存/未分類新規は0を初期値とする。DTOと専用保存応答にcategoryRevisionを保持し、古い/同じ版の割当応答は反映しない。タブを往復して保存キューが再生成されても旧カテゴリへ戻らない。編集欄の一時的な保存承認にもcategoryRevisionを使い、保存中に取得した新しいpropを旧応答で隠さない。カテゴリ選択の保存中は選択欄を無効化する。通常項目と同じ保存キューを使い、確定応答はカテゴリIDと確認状態だけを反映する。通常保存の古い全体応答で最新カテゴリやメモを上書きしない。workspace切替後の遅延応答は既存の要求世代で破棄する。</p>
-          <p>新規手動明細は<code>saveTransaction</code>にcategoryIdを指定できる。既存明細の同actionではcategoryIdを拒否し、専用保存を使用する。カテゴリを選んだ手動操作はサーバーでcategoryConfirmed=true、解除はfalseとする。CSV・定期生成は未分類で登録し、一覧から手動設定できる。取引先の正規化・CSV補完・グラフは提供しない。</p>
+          <p>新規手動明細は<code>saveTransaction</code>にcategoryIdを指定でき、カテゴリありの場合は先頭SQLで共有の集合検証を行ってからINSERTする。アプリのSQLはカテゴリなしと同じ2本を維持する。既存明細の同actionではcategoryIdを拒否し、専用保存を使用する。カテゴリを選んだ手動操作はサーバーでcategoryConfirmed=true、解除はfalseとする。CSVはプレビューで指定したカテゴリを登録し、未指定は未分類にする。カテゴリありの新規行はcategoryConfirmed=true、未分類はfalse。定期生成は未分類で登録し、一覧から手動設定できる。取引先の正規化・CSV補完・グラフは提供しない。</p>
           <p><code>moveCategory</code>はnullable parentIdとbeforeCategoryIdで移動先と挿入位置を受け取る。parentId=nullは最上位、beforeCategoryId=nullは兄弟末尾。workspaceロック後の最新の所属、移動対象・親・挿入先兄弟の同workspaceと使用可否、自身・子孫への移動と同親同名を検証する。元と先の兄弟をsortOrder・id順に準備し、対象を除いた移動先の指定位置へ挿入する。親と両側の兄弟順の更新は同じTransactionで確定し、値が変わった行だけrevisionを加算する。応答は使用停止済みを含む元と先の兄弟と各行から最上位までの最新祖先を含む完全なCategoryをmovedCategoriesに返し、変更行だけの応答による取りこぼしを防ぐ。移動対象のID・色と子孫のID・親参照、明細の割当は変更しない。追加migrationで旧APIの署名とカテゴリ追加・編集・停止・割当を維持する。追加・編集・停止のstoreは同じ引数のwrapper関数から旧関数を呼び、workspaceロックを保持した同じTransactionで祖先DTOを追加する。明細への割当では祖先を取得しない。</p>
           <p>カテゴリ操作はworkspace行→membership行の順でロックし、最新の所属・対象の同workspaceを同じTransactionで確認する。<code>deleteCategory</code>はrecursive CTEで対象と子孫を一度列挙し、参照する全明細のcategoryIdをnull・categoryConfirmedをfalseへ一括更新してから、カテゴリを集合単位でDELETEする。categoryRevisionは既存triggerで加算し、金額・メモ・割合・清算日時と清算履歴には触れない。停止済みの旧カテゴリも削除可能。対象不存在・越境・権限喪失や途中の失敗では全体をrollbackする。削除応答はdeletedCategoryIdsと、更新した明細のtransactionId/null/false/実categoryRevisionをdetachedTransactionsに返す。</p>
           <p>controllerはworkspace別に削除済みIDと明細の解除応答の最大revisionを保持し、すべての取得・保存応答の採用後に同じ規則を適用する。後着の追加・編集・移動応答やGETで削除済みカテゴリを復活させない。まだ画面にない新規明細の古い保存応答にも実際の解除revisionを適用し、その後別カテゴリへ保存した新しいrevisionは保持する。採用可能な全カテゴリ取得で既知IDの消失を確認した場合も削除済みIDへ加える。metadata取得で既知カテゴリの消失を検出した場合は、未表示の新規明細も含む実際の解除revisionを得るためfullへ再取得し、不完全なmetadataと古い明細を混ぜず、DBの実revisionを受け取る。失敗時は元の整合した表示を保持する。保存開始後、または削除後に採用した全カテゴリ取得（full / metadata）にない未知IDを部分応答が返す場合や、未取得カテゴリの親が削除済みの場合は、full取得で実在と最新の親を照合してから反映する。カテゴリが最初から空でも全カテゴリ取得の世代とIDを記憶し、未取得だった新規カテゴリの削除も古い保存応答で復活させない。通常の追加・編集は確定応答を局所反映し、照合が必要な競合時だけ再取得する。古い応答の親参照だけで生存カテゴリを削除しない。照合が競合で破棄された場合は古い応答を採用せず、再取得を案内する。workspaceの自動切替・応答破棄の条件は既存の世代・dataRevision・requestIdで確認する。</p>
@@ -801,7 +801,7 @@
               <div class="dfd-node output"><strong>整合した状態を反映</strong><small>失敗・破棄では古い応答を採用しない<br />保存済みなら再送せず画面更新を案内</small></div>
             </div>
           </div>
-          <p>明細カテゴリ割当は同workspaceの複合外部キーとtriggerでカテゴリの使用可否を検証する。カテゴリなしの既存INSERTでは追加照合を行わない。旧archive関数・archivedAt列と既存SQL関数の署名は互換用に維持し、新規migrationを追加する。適用済み014・015は変更しない。</p>
+          <p>明細カテゴリ割当は同workspaceの複合外部キーとtriggerでカテゴリの使用可否を検証する。018のINSERT行triggerは確認状態と初期revisionだけを整え、AFTER INSERTのtransition tableでカテゴリ付き新規行を集合検証する。共有SQL関数はworkspaceをID順でロック・更新後、membership、カテゴリを同じ順序で照合し、削除・使用停止との競合を直列化する。カテゴリなしの既存INSERTでは追加照合を行わない。UPDATEの既存行triggerは同じ共有検証を適用し、確認状態とrevision加算を維持する。旧archive関数・archivedAt列と既存SQL関数の署名は互換用に維持し、新規migrationを追加する。適用済み014・015は変更しない。</p>
         </section>
 
         <section id="domain">
@@ -810,6 +810,7 @@
           <p><code>SplitWeights = Record&lt;userId, number&gt;</code>は現在の参加者IDをすべて含み、余分なIDなし、各値0〜2147483647の整数、合計は正とする。<code>validateSplitWeights()</code>は入力のコピーを返す。個人費はactorが1・ほか0、共通費は任意の有効割合を保存する。</p>
           <p><code>prepareDefaultRuleMatcher(rules)</code>は有効なルールだけを新しい配列へ抽出し、<code>sortOrder</code>昇順の安定ソートを一度行って、先頭から最初に部分一致したルールを返す判定関数を作る。同順位は入力順を維持し、入力配列を変更せず、未整列入力も受け付ける。<code>transactionDefaults()</code>は準備済み判定関数を一度呼び、区分と割合を返す。CSV解析はファイル全行、取込APIはリクエスト内の全明細で一つの判定関数を共有し、単件登録も同じ方式で準備する。明細追加・定期支払いフォームはルール一覧を依存値にした<code>useMemo</code>で準備し、取引先の変更や再描画で再ソートせず、一覧更新時に作り直す。グローバルなルールキャッシュは持たない。未一致は既定PERSONAL、明細追加・定期支払いの共有workspace・CSV取込ではSHAREDフォールバックを指定する。共通費のルール割合nullはmemberの現在デフォルトをコピーする。明示ルールの新参加者IDがない場合は0として補う。個人費は担当者1・ほか0とし、デフォルトやルール変更だけでは過去明細の保存割合を変更しない。</p>
           <h3>PayPay CSV解析</h3>
+          <p>カテゴリの入力値はImportPanelのrows[].categoryIdが所有し、解析時はnull（未分類）。選択肢はmetadataのcategoriesからuseMemoで一度準備した共通CategoryChoicesを各行と一括欄で共有し、使用停止済みを新規選択肢から除く。行別CategorySelectはチェック状態にかかわらず登録可能な行を更新し、一括欄のbulkCategoryIdは「カテゴリを設定」を押したときだけ選択中かつ登録可能な行へ適用する。未分類も同じ操作で解除できる。行・一括欄とも保存中は無効、対象0件では一括欄を無効にする。支払者・区分・割合の変更はcategoryIdを変更せず、選択・カテゴリ変更だけでは通信しない。プレビューの全経路・色線は入力値から導出する。登録時に全登録可能行の最終categoryIdを送信し、失敗時はカテゴリ・選択・他の入力を保持、成功時は確認表を解除する。workspaceやタブ切替時は画面Stateごと破棄し、遅延応答は既存の要求世代で抑止する。</p>
           <p><code>parsePayPayCsv(text, rules, existingExternalIds, members?, actorUserId?): PayPayPreviewRow[]</code></p>
           <div class="state-flow"><span>BOM除去</span><i>→</i><span>PapaParse</span><i>→</i><span>必須Header検証</span><i>→</i><span>「支払い」抽出</span><i>→</i><span>行検証・Rule適用</span><i>→</i><span>ID照合後Preview</span></div>
           <div class="table-wrap"><table>
@@ -822,13 +823,13 @@
               <tr><td>重複・衝突</td><td>全行の初期選択はOFF。既存IDとCSV内同一キーの一致行は選択・編集不可。登録済み行はPCの行・mobileの要約と展開詳細をグレー表示する。同一CSVの繰返しは最初の一件だけ登録候補。同じキーで金額/取引先が異なる場合、既存sourceがPAYPAY以外の場合は衝突エラーとして登録不可。</td></tr>
               <tr><td>専用API照合</td><td>有効な外部IDをまとめ、最大2000件ずつ選択workspaceへ照合。照合完了前や失敗後に未確認のプレビューは表示しない。ファイル変更時の遅延応答は破棄する。</td></tr>
               <tr><td>CSV原本・確認表</td><td><code>File.text()</code>またはタップ時の<code>navigator.clipboard.readText()</code>で取得した本文を共通解析する。readTextはreadCsv内の最初のawaitより前に呼び、タップのuser activationを保持する。CSV本文の入力欄・下書きStateは持たず、原本は読取処理内の一時値として解析し、明細のrowsだけを画面Stateへ反映する。拒否・非対応時はペースト許可の確認と再試行・ファイル選択を案内する。空本文・支払い行なし・ヘッダー不備・照合失敗では確認表を出さずエラーを表示し、再試行はCSVをコピーし直すかファイルを選び直す。読み込み中は形式・両入口を無効化し、ドロップも受け付けない。workspace切替後の読取結果は照会開始前に破棄し、古い照会結果も反映しない。貼り付けのファイル名は固定の表示名を使う。サーバーへ送るのは照会用外部IDと、登録時の登録可能な全items・ファイル名・件数で、CSV本文は送信・保存しない。登録失敗は確認表・行選択を保持し、成功時は確認表を解除する。ImportPanelは利用者・workspaceに属する画面Stateとし、workspaceやタブの切替で破棄する。取込先の家計名を入力画面と確認表へ表示する。</td></tr>
-              <tr><td>選択・削除・登録</td><td>rowsはImportPanelが所有する。チェックは一括費用区分変更と削除だけに使う。共通のisPayPayRowImportable（errorなし・duplicateでない）で登録可否を判定し、「取込対象」件数・全選択・登録APIのitemsに使う。「共通費に変更」の右隣の「削除」は選択件数を確認後に選択行だけrowsから除去し、他行の編集値と選択は保持する。取消ではrowsを変更しない。削除時のAPI通信・DB更新はない。元のtotalRowsは保持して削除行を履歴のスキップ件数へ含める。「登録」はチェックに関係なく残った登録可能行を送信し、対象0件または登録中は無効。登録中は選択・編集・削除も無効にする。</td></tr>
+              <tr><td>選択・削除・登録</td><td>rowsはImportPanelが所有する。チェックは費用区分・カテゴリの一括変更と削除だけに使う。共通のisPayPayRowImportable（errorなし・duplicateでない）で登録可否を判定し、「取込対象」件数・全選択・登録APIのitemsに使う。「共通費に変更」の右隣の「削除」は選択件数を確認後に選択行だけrowsから除去し、他行の編集値と選択は保持する。取消ではrowsを変更しない。削除時のAPI通信・DB更新はない。元のtotalRowsは保持して削除行を履歴のスキップ件数へ含める。「登録」はチェックに関係なく残った登録可能行を送信し、対象0件または登録中は無効。登録中は選択・編集・削除も無効にする。</td></tr>
               <tr><td>取込ヘルプ</td><td>見出しは「クリップボードから貼り付け」、実行ボタンは「貼り付け」。既存のページ説明・貼付説明・ファイル説明・末尾注記は表示せず、指定の注記はSafariのときだけ表示し、小さい「ヘルプ」は全ブラウザに置く。navigator.userAgentのVersion/Safari識別子から判定し、Chrome・Firefox・Edge・Operaなどの識別子は除外する。useSyncExternalStoreのサーバーsnapshotはfalseとし、hydration時には注記を出さず、client snapshotで表示を決める。ヘルプ操作では親Stateに現在originから構築した<code>/?tab=import</code>だけを保存し、ImportHelpDialogをnative dialogのshowModalで開く。現在URLのquery/hash、workspaceId、CSV本文、認証情報は渡さない。ショートカットの作成・共有受取・テキスト化・コピー・URLを開く設定とPayPayからの使い方を表示し、「URLをコピー」の明示操作時だけwriteTextを呼ぶ。コピー失敗は固定の長押し案内を表示する。開閉だけでは通信・clipboard APIを呼ばない。native dialogでfocus trapとEscapeを使い、閉じる操作はdialog.closeからonCloseで親Stateを破棄してトリガーへfocusを戻す。トリガーを明示focusしてから開き、モバイルのfocus復帰も確保する。ヘルプ本文だけをスクロールし、上下の閉じる操作は常に使える。読取・登録中はヘルプを無効化する。</td></tr>
-              <tr><td>DB登録</td><td>外部IDを正規化し、キー順にTransactionへ追加。同一キーは競合行のロック下でsource・金額・取引先を確認。一致は省略、不一致は履歴も含め全体をロールバック。</td></tr>
+              <tr><td>DB登録</td><td>外部IDを正規化し、同一入力内のキー重複は最初を維持して金額・取引先差異を拒否する。全入力のカテゴリIDを重複除去し、skip候補も含めてworkspace・最新所属・同workspaceの有効カテゴリを同じTransactionで集合検証する。batchを作成し、jsonb_to_recordsetから外部ID順の単一INSERTを行い、batchの実挿入件数を確定する。アプリ側SQLは入力件数によらず4本。既存の割合検証行triggerは維持し、新しいカテゴリ所属照会を行ごとに増やさない。登録済みキーはロック下でsource・金額・取引先を確認し、一致は既存カテゴリも含めて保持、不一致は履歴も全行もrollbackする。カテゴリIDは登録時に再選択・自動補完せず、最終選択を保存する。</td></tr>
             </tbody>
           </table></div>
           <p>取込直リンクは<code>/?tab=import</code>とし、<code>workspaceId</code>を併用できる。app/page.tsxで初期タブを決め、Dashboardとhookのtab/currentTabへ同じ初期値を渡す。初回Bootstrapのfull取得は維持し、以後の取込画面のrefreshはmetadataを使う。LoginScreenはサーバーで構築した内部パスをGoogle/テストログインのredirectToへ渡し、ログイン後も取込画面と取込先指定へ復帰する。任意URLへのredirect入力は追加しない。</p>
-          <div class="state-flow"><span>解析・重複照合 → rows（全チェックOFF）</span><i>→</i><span>チェック → 区分一括変更／確認後にプレビュー削除</span><i>→</i><span>「登録」→ 残った登録可能行すべて → bulkImport API → 所属・値・重複再検証 → DB Transaction</span><i>→</i><span>成功：確認表解除／失敗：編集値・チェック保持</span></div>
+          <div class="state-flow"><span>解析・重複照合 → rows（全チェックOFF）</span><i>→</i><span>チェック → 区分・カテゴリ一括変更／確認後にプレビュー削除</span><i>→</i><span>「登録」→ 残った登録可能行すべて（最終categoryId） → bulkImport API → 所属・値・カテゴリ・重複再検証 → DB Transaction</span><i>→</i><span>成功：確認表解除／失敗：編集値・チェック保持</span></div>
           <h3>清算計算</h3>
           <p><code>calculateSettlement(members, transactions): SettlementResult | null</code></p>
           <ol>
@@ -952,6 +953,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>015_category_moves.sql</td><td>階層固定triggerを所属固定・循環検証へ置き換え、移動専用関数で親と兄弟順を原子的に更新する。カテゴリ操作の確定応答へ祖先の最新DTOを添えるwrapperも追加する。014と既存APIの署名は変更せず、カテゴリID・色・明細割当を保持する。</td></tr>
               <tr><td>016_category_deletion.sql</td><td>カテゴリと子孫の削除関数。最新権限と対象を検証し、清算済みを含む明細のカテゴリ参照解除と削除を同じTransactionで確定する。014・015と既存関数の署名は維持。</td></tr>
               <tr><td>017_preview_sample_seed.sql</td><td>Preview所有権markerがあるDBだけにサンプル初期化の完了日時samples_seeded_atを追加する。既存ユーザーseed状態と業務データは変更しない。</td></tr>
+              <tr><td>018_import_categories.sql</td><td>カテゴリ付きINSERTをtransition tableで集合検証する。workspace・最新所属・全カテゴリの共通検証とロック順を揃え、既存行triggerの確認状態・revisionと通常/旧APIの保存互換性を維持する。適用済み014〜017は変更しない。</td></tr>
             </tbody>
           </table></div>
           <p>017_preview_sample_seed.sqlはPreview所有権markerがあるDBだけにnullableのsamples_seeded_atを追加する。ユーザー登録のseeded_atとは独立し、厳密な001〜011の親fixtureを変更せず、後続migration後に業務サンプルを登録する。scripts/preview-sample-data.tsは親を先にカテゴリ10件をINSERTし、当月1〜8日12時（Asia/Tokyo）の明細8件を集合INSERTする。通常のカテゴリ・割合Triggerを通し、カテゴリ確認とrevisionも確定する。</p>
@@ -990,7 +992,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>SettlementPerson</code> / <code>SettlementResult</code></td><td>一人分のuserId/name/weight/payments/receipts/actual/target/balance。結果はtransactionIds、paymentTotal/receiptTotal/netTotal、people、nullable payerUserId/payerName/payeeUserId/payeeName、amountYen。</td></tr>
               <tr><td><code>SettlementHistory</code> / <code>PendingInvitation</code></td><td>履歴はid/nullable payerName・payeeName/amountYen/completedAt。招待はid/workspaceName/inviterName/expiresAt。</td></tr>
               <tr><td><code>BootstrapScope</code></td><td>full | metadata。</td></tr>
-              <tr><td><code>PayPayPreviewRow</code></td><td>key、selected、CSVのJST occurredAt、merchant/method/amountYen/externalId、expenseClass/splitWeights、duplicate、nullable error。</td></tr>
+              <tr><td><code>PayPayPreviewRow</code></td><td>key、selected、CSVのJST occurredAt、merchant/method/amountYen/externalId、expenseClass/splitWeights、nullable categoryId、duplicate、nullable error。</td></tr>
             </tbody>
           </table></div>
           <h3>DTO関係</h3>
@@ -1063,6 +1065,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・ミリ秒保持、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
               <tr><td>db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
               <tr><td>transaction-layout.test.ts</td><td>PCの表示領域7パターン（84rem境界前後を含む）と参加者名120文字の4条件で横溢れ・項目の折り返し・カテゴリ色線・全選択・フィルタを確認。幅変更による入力とフォーカスの保持・追加送信なし・メモ保存失敗時の入力保持と、スマートフォンの要約/展開をローカルChromiumで検証する。</td></tr>
+              <tr><td>import-categories.test.ts</td><td>PC/mobileで3階層・使用停止カテゴリ・カテゴリ0件、未分類初期値、未選択行の個別編集、選択行だけの一括設定と解除、区分・担当者・割合変更でのカテゴリ保持、操作中の通信なし、保存payload、失敗後の入力・選択保持、保存中・不正・重複行の無効化、色線と全経路表示をChromiumで確認する。</td></tr>
               <tr><td>import-equal-split.test.ts</td><td>実ImportPanelと定期支払いの追加/編集をPC/mobileのChromiumで操作し、常に3択であること、割合/円から1:1、奇数円と手動再編集、対象行・未選択状態・デフォルト割合の保持、個人費/エラー/重複/保存中/一人参加時の制限を確認。選択時の追加POSTなしと、bulkImportの保存重み1:1を検証する。</td></tr>
               <tr><td>dashboard-controller.test.ts / transaction-refresh.test.ts / bootstrap-updates.test.ts</td><td>esbuildで実hookをbundleし、ローカルChromium/Reactで要求逆順、workspace/tab往復、保存前GET、手動更新の保存待ち・二重実行・失敗・古い応答破棄、metadata/fullの使い分け・同一家計の保持、通知2秒を検証する。実Preview/DB検証とは区別する。</td></tr>
               <tr><td>recurring-payment-calendar.test.ts / recurring-payment-form.test.ts / recurring-payments.test.ts / recurring-payment-handlers.test.ts</td><td>日本時間09:00の直前/境界、未来日・過去日・月末、追加履歴を参照しない予定計算、保存・再開・認可・入力検証、当日処理・処理開始日時・実行APIの環境制限。</td></tr>
@@ -1070,12 +1073,13 @@ BootstrapData extends BootstrapMetadata
               <tr><td>preview-service.test.ts / preview-command.test.ts</td><td>専用ブランチ、HEADとPreviewの完全一致、Native照合・応答不明・DB消失時の停止、closed cleanupと検証証拠の一致。mainのtransport未導入はdispatch前に停止する。</td></tr>
               <tr><td>preview-receipt.test.ts / preview-checks.test.ts</td><td>4,096 UTF-8 bytes上限、公開項目とrunAttempt、notice escape、厳密JSON、workflow/run/attempt/job/check/suite/repositoryの結合、全件取得、欠落・重複・古い値・マスク・metadata変化の拒否。</td></tr>
               <tr><td>Actions verify関連テスト</td><td>独立capabilityと最新main control checkout、PR/完全SHA/Deployment一致、provider非GET拒否、status前後のDB保持照合、成功/失敗receiptの来歴と4,096 bytes上限、remote proof再照合。実Actionsのブラウザ/OIDC成功はスタブ検証と分ける。</td></tr>
-              <tr><td>database-environment.test.ts / vercel-build.test.ts</td><td>Preview専用接続の必須化、本番接続へのfallback禁止、PreviewのDB更新・seed、Productionのビルド後DB更新、失敗時の公開停止。</td></tr>
+              <tr><td>database-environment.test.ts / vercel-build.test.ts</td><td>Preview専用接続の必須化、本番接続へのfallback禁止、PreviewのDB更新・seed、現在commitの独立行markerによるCSV実DB検証の実行条件・順序・子プロセス環境の限定、Productionのビルド後DB更新、失敗時の公開停止。</td></tr>
               <tr><td>preview-sample-seed.test.ts / seed-startup.test.ts / seed-error.test.ts</td><td>Previewサンプルの初回登録、継承fixture、既存データ保持、失敗rollback、@next/env実起動、環境変数のロード、DB登録失敗の段階・原因を秘密情報なしで整形。</td></tr>
             </tbody>
           </table></div>
           <p>全テストは<code>tests/</code>配下。純粋関数、SQL/外部コマンドのスタブ、スクリプト起動を検証する。実DBの制約・同時操作とブラウザ操作は別途実環境で確認する。</p>
           <p>定期支払いの実DB回帰は、承認された対象タスクの<code>CAKE_TEST_DATABASE_URL</code>を設定し、<code>npx tsx scripts/verify-recurring-payments.ts</code>で実行する。09:00境界・月末・即時変更/再開・設定日変更後の月内複数登録・同時実行・失敗時rollbackを検証し、新規検証データだけを作成・削除する。環境ファイルや本番の<code>DATABASE_URL</code>は読み込まない。日付比較はNeonが直接SELECTで返すDateとJSONB内のYYYY-MM-DD文字列を同じ暦日へ整形し、日時比較はミリ秒を保持する。通常の<code>npm test</code>でもUTC・Asia/Tokyo・America/Los_Angelesでドライバーの返却型を使う回帰を実行するが、こちらはDBへ接続せず、実DB回帰とは別の検証である。</p>
+          <p>CSVカテゴリの実DB並行検証は、承認されたPRの現在commitに独立行<code>[cake-db-qa:csv-categories]</code>がある場合だけ、Native専用接続を持つPreview/test/application build内で<code>scripts/verify-csv-category-concurrency.ts</code>を実行する。行の前後空白だけを除いて比較し、文中・未知のmarkerは無視する。Production・準備用・常設Preview・Development・ローカルでは実行しない。子プロセスへ渡す環境は専用接続、完全SHA・branch・Deployment・DB世代等のidentity、Node/TLSの明示allowlistに限定し、provider token・認証secret・共通DATABASE_URLを継承しない。接続前と各sessionで本番分離・既存DB markerを確認し、独立した二つの実DB sessionと監視sessionでロック待機・確定結果・rollbackを検証する。新規fixtureだけを削除し、既存データ保持と残存0件を確認する。公開結果<code>cake-csv-category-db-qa/v1</code>をbuildログへ記録し、通常migration・初回seedの更新は検証fixtureとは別に報告する。秘密値・業務DTO・生例外は保存しない。実行方法と前後statusの照合は<a href="development-workflow.md#pr-preview-build内の実db並行検証">開発・QA運用手順</a>を参照する。</p>
           <h3>コマンドとデプロイ</h3>
           <p>WindowsのPowerShellではnpm.cmd/npx.cmdと既存gh認証を使い、PATHの補完は当該プロセスに限定する。専用worktreeごとに依存・build・証拠・環境ファイルを分離し、追跡テキストはLFで保持する。同じ開発commitで検証してからdraft PRを作成し、必要なPreviewをWindowsで検証する。Readyは変更に必要な検証・現在HEADのCI・差分レビューを確認したCodexが追加確認を待たず実施し、このチャットで日本語で通知する。文書のみの変更の検証範囲は開発手順に従う。Actions管理契約は維持する。詳細は<a href="development-workflow.md">開発・QA運用手順</a>を参照する。</p>
           <p>共通の<code>qa:windows</code>は<code>scripts/windows-qa.ts</code>と<code>scripts/windows-token-helper/*.cs</code>から操作ごとに<code>.cake/windows-tools/run-&lt;一意ID&gt;</code>へ構築する。保存先はGit外の<code>%LOCALAPPDATA%\CakeQa\vercel-token.dpapi.json</code>とし、本人ACL・DPAPI CurrentUserの検査、既存ファイル上書き拒否、公開結果の秘密排除、専用子プロセスへの限定供給を行う。Git/ghにVercel tokenを渡さない。対象worktree（既定は実行worktree）のPR/完全SHA・Deployment・Native DB・generationを前後照合し、実装とruntimeのSHAを別々に記録する。特定PC・日付付きpath・PR・ブラウザキャッシュは固定しない。人による入力・再設定と同一Windowsユーザーによる復号可能性は<a href="windows-qa-credentials.md">資格情報手順</a>を参照する。</p>
@@ -1087,7 +1091,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td><code>npm run lint</code> / <code>npm run build</code></td><td>ESLintとNext.js Production build・型/ルート検証。</td></tr>
               <tr><td><code>npm run db:setup</code></td><td>未適用番号付きSQLと適用履歴をatomicに追加。</td></tr>
               <tr><td><code>npm run db:seed:test</code></td><td>従来ローカルはA/Bを非管理者として登録する。新QAはdummyのAをサイト管理者・共有OWNER、Bを一般・MEMBERとする固定二人だけを使用する。空DBでは初回だけ登録し、厳密一致する継承fixtureではseed済みidentityを使用する。Previewでは独立したsamples_seeded_atにより未使用の共有workspaceへカテゴリ10件・明細8件を一度だけ登録する。同PRのデータ・名前・権限・停止状態を維持し、自動修復しない。</td></tr>
-              <tr><td><code>npm run build:vercel</code></td><td>Previewは必須環境変数・DB接続前guard確認 → DB内の所有権/初回受入条件（空DBまたは承認済みQA初期fixture）確認 → db:setup → テスト認証時db:seed:test → build。Productionは必須環境変数確認 → build → db:setup。いずれも失敗時に公開停止。Development/ローカルはbuildのみ。</td></tr>
+              <tr><td><code>npm run build:vercel</code></td><td>Previewは必須環境変数・DB接続前guard確認 → DB内の所有権/初回受入条件（空DBまたは承認済みQA初期fixture）確認 → db:setup → テスト認証時db:seed:test → PRの現在commitで明示した場合だけqa:db:csv-categories → build。Productionは必須環境変数確認 → build → db:setup。いずれも失敗時に公開停止。Development/ローカルはbuildのみ。</td></tr>
               <tr><td><code>npm run deploy:preview</code></td><td>WSL/Windows共通の開発・QA運用コマンド。引数・実行順序・検証・中断時の対応は<a href="development-workflow.md">開発・QA運用手順</a>を参照。</td></tr>
               <tr><td><code>npm run qa:verify</code></td><td>対象PRのworktreeで既存ローカルブラウザ検証。前後statusと現在HEADを照合し、<code>.cake/verification.json</code>へ保存。</td></tr>
               <tr><td><code>npm run qa:windows -- status|input|preflight|self-test|verify</code></td><td>Windowsの保存済み資格情報を扱う共通入口。verifyはPR・完全SHA・Deployment・DB・generation必須、対象worktreeは任意指定。同じ正式ブラウザ検証の証跡、<code>.cake/windows-qa-launch-&lt;UUID&gt;.json</code>と<code>.cake/windows-qa-progress-&lt;UUID&gt;.json</code>を対象worktreeへ保存。Readyへは変更せず、旧PR管理のremote proof条件も緩めない。</td></tr>

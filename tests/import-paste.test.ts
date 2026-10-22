@@ -293,9 +293,9 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
             action: "bulkImport", workspaceId: "workspace", fileName: "PayPay貼り付け.csv", totalRows: 5,
             items: [
               { occurredAt: "2026-10-18T03:00:42.000Z", merchant: "和食のお店", method: "PayPay残高", amountYen: 1234,
-                externalId: "PayPay_20261018120042_00001234", expenseClass: "SHARED", actorUserId: "a", splitWeights: { a: 6, b: 4 } },
+                externalId: "PayPay_20261018120042_00001234", expenseClass: "SHARED", actorUserId: "a", splitWeights: { a: 6, b: 4 }, categoryId: null },
               { occurredAt: "2026-10-18T03:01:43.000Z", merchant: "個人カフェ", method: "PayPayカード", amountYen: 650,
-                externalId: "PayPay_20261018120143_00001235", expenseClass: "PERSONAL", actorUserId: "a", splitWeights: { a: 1, b: 0 } },
+                externalId: "PayPay_20261018120143_00001235", expenseClass: "PERSONAL", actorUserId: "a", splitWeights: { a: 1, b: 0 }, categoryId: null },
             ],
           });
           await Promise.all([
