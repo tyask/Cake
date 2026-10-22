@@ -1,0 +1,30 @@
+{
+  "protocol": "cake-production-db-migration/v1",
+  "repository": "tyask/Cake",
+  "repositoryId": 1318171856,
+  "workflow": ".github/workflows/production-db-migration.yml",
+  "organizationId": "org-twilight-grass-67941976",
+  "regionId": "aws-ap-southeast-1",
+  "vercelTeamId": "team_D1Mcx2TdFWPKcypfu8KzNMub",
+  "vercelProjectId": "prj_Z37vquodhpRd08ZTAtYnP0qa59jD",
+  "targetStoreId": "store_IfZ6qePiVKqmYyWz",
+  "maxDatabaseBytes": 67108864,
+  "source": {
+    "projectId": "shy-wave-07435387",
+    "branchId": "br-small-morning-azdm8g48",
+    "endpointId": "ep-ancient-flower-az7oh01x",
+    "hostDigest": "600033d07eb267fe31096a1bb98d0c1809be7a0ef7a895ad3bcbc6daabbbf0f6",
+    "majorVersion": 17,
+    "database": "neondb",
+    "role": "neondb_owner"
+  },
+  "target": {
+    "projectId": "noisy-wind-66979379",
+    "branchId": "br-lingering-poetry-a1t13r0u",
+    "endpointId": "ep-odd-wildflower-a1kwkl1v",
+    "hostDigest": "68939cf43ff8b955c8fd656808b1c252efe2ed5e4888e0f7a03f73c397f10f78",
+    "majorVersion": 18,
+    "database": "neondb",
+    "role": "neondb_owner"
+  }
+}

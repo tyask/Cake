@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import config from '../preview.config.json';
+import { isProductionDatabaseHostDigest } from '../lib/production-database-hosts.mjs';
 import { fullSha, previewUrl, validTaskBranch } from './task-workflow';
 export { config };
 export const protocol = 'cake-preview/v1';
@@ -31,7 +32,7 @@ export function deployment(value: unknown, expected: Source): Deployment {
   let database: Database | undefined;
   if (m.cakePreviewPhase === 'application') {
     if (!/^br-[a-z0-9-]+$/.test(String(m.cakePreviewDatabaseBranch)) || !/^ep-[a-z0-9-]+$/.test(String(m.cakePreviewDatabaseEndpoint))
-      || !/^[a-f0-9]{64}$/.test(String(m.cakePreviewDatabaseDigest)) || m.cakePreviewDatabaseDigest === config.productionHostDigest) throw new Error('PREVIEW_DATABASE_IDENTITY');
+      || !/^[a-f0-9]{64}$/.test(String(m.cakePreviewDatabaseDigest)) || isProductionDatabaseHostDigest(m.cakePreviewDatabaseDigest)) throw new Error('PREVIEW_DATABASE_IDENTITY');
     database = { branchId: String(m.cakePreviewDatabaseBranch), endpointId: String(m.cakePreviewDatabaseEndpoint), hostDigest: String(m.cakePreviewDatabaseDigest) };
   }
   const createdAt = Number(d.createdAt ?? d.created);
