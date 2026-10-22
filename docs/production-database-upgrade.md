@@ -31,6 +31,26 @@
 
 019は `transactions` のACCESS EXCLUSIVEロック・STORED生成列計算・Index作成を伴う。リハーサルでの処理時間を最終実行時間と混同せず、本番では実時間と件数を別に記録する。
 
+### Actionsによる対象固定のコピー
+
+`.github/workflows/production-db-migration.yml` は `production-migration.config.json` に固定したsourceと未接続targetだけを扱う。レビュー済みmainへ導入後、`workflow_dispatch` の `action` に `inventory` または `rehearsal`、`controlSha` に現在mainの完全SHA、`operation` に新しいUUIDを指定する。任意のSQL・project・branch・接続文字列は入力しない。通常のPreview管理workflowへ本番IDを渡さない。
+
+既存のActions Secret `NEON_API_KEY` と `VERCEL_TOKEN` を使い、最初に `inventory` で両projectへの権限と実対象を確認する。Secretの存在だけをアクセス成功とは扱わない。`rehearsal` は空の候補へ一度コピーする操作であり、既存データへの上書き、migration、seed、本番の停止・接続先切替・削除は行わない。`rehearsal` のActions rerunは拒否する。
+
+sourceでは一貫したread-only snapshotを維持し、dumpと照合値を同じsnapshotから取得する。targetは復元直前にも未接続・空状態とprovider所属を確認する。PG18クライアントと証明書検証を使い、資格情報はrunnerのメモリと限定した子プロセス環境、一時dump/復元SQLは非公開の一時ファイルだけで扱う。raw SQL・業務行・接続文字列をログやartifactへ保存しない。
+
+結果は `cake-production-db-migration/v1` のnoticeで受け取り、run/attempt・完全SHA・operation・config hash・source/target project・時刻・処理段階・件数/hash・成否・一時ファイル除去を照合する。run成功だけではコピー成功としない。noticeの欠落・重複・不一致・応答不明なら状態をread-onlyで確認し、再dispatchやtarget削除で解消しない。コピー後の候補が不一致なら保持して調査し、最終切替へ進まない。
+
+### Cakeのデータとprovider管理情報
+
+Cakeの認証はAuth.jsのGoogleログインとJWTを使い、利用者情報は `public.app_users` に保存する。Native projectに `neon_auth` がある場合も、未使用とは推定せず、両側のaccount・invitation・member・organization・session・user・verificationが0件であることを確認する。既知の管理9表だけが存在し、publicからの外部キー・関数・policy等の依存がなく、外部からもNeon Authを利用していない場合に限り、Cakeのpublicを移送対象にできる。利用データや未知の依存があれば停止し、Authを含めた移行方法を別に確認する。
+
+この場合も `neon_auth.jwks` と `neon_auth.project_config` の内容は取得・複製せず、元projectの管理情報と新projectの新しい管理情報をそれぞれ保持する。Authの別projectへの移送を実証したとは報告しない。管理表のschemaと利用表0件は復元後にも照合する。
+
+public限定dumpはschema外の依存を自動では含めない。pgcryptoを明示的に含め、sourceの版がtargetで利用可能であることを確認して同じ版を復元する。targetの既存publicは削除せず、owner一致を確認してCREATE SCHEMAだけを除く。Cakeの列・表・関数のowner/ACLを保持し、既定権限やextension内の権限変更も確認する。
+
+`cloud_admin` が管理するpublicの既定ACLは通常のCake権限と分ける。対応する既知の定義だけを厳密に確認し、target側のprovider設定を保持して復元前後の不変を照合する。PostgreSQL版によるprovider既定値の差を、Cakeの権限コピーの成功として混同しない。
+
 ## 更新停止から公開まで
 
 1. 許容停止時間・再開責任者・切戻し条件を決め、対象のmain merge/deployと外部writerを止める。通常POSTの遮断だけでは足りない。Googleログインのプロフィール更新、workspaceがない利用者の認証済みGET、Cron、旧Deploymentの固有URL、開始済み処理を含めて書込みを停止する。
@@ -55,6 +75,9 @@
 
 - [Neon major version更新](https://neon.com/docs/postgresql/postgres-upgrade)
 - [Neon Import Data Assistant](https://neon.com/docs/import/import-data-assistant)
+- [Neon Authの構成](https://neon.com/docs/auth/about)
+- [PostgreSQL 18 pg_dump](https://www.postgresql.org/docs/18/app-pgdump.html)
+- [PostgreSQL 18 pg_restore](https://www.postgresql.org/docs/18/app-pgrestore.html)
 - [Vercel Native連携](https://neon.com/docs/guides/vercel-managed-integration)
 - [Vercel環境変数](https://vercel.com/docs/environment-variables)
 - [Production公開を遅らせるdeploy](https://vercel.com/docs/cli/deploy#skip-domain)

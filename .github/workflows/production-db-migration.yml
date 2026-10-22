@@ -1,0 +1,74 @@
+name: Cake Production DB Migration
+run-name: Production DB ${{ inputs.action }} ${{ inputs.operation }}
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        required: true
+        options: [inventory, rehearsal]
+      controlSha:
+        description: Exact reviewed trusted main SHA; must match the workflow checkout
+        type: string
+        required: true
+      operation:
+        description: UUID for this operation; rehearsal reruns are refused
+        type: string
+        required: true
+permissions: {}
+concurrency:
+  group: cake-production-db-migration
+  cancel-in-progress: false
+jobs:
+  migration:
+    if: >-
+      github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' && inputs.controlSha == github.sha
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Check out trusted main only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Install PostgreSQL 18 clients
+        if: inputs.action == 'rehearsal'
+        run: |
+          # The hosted image removes PGDG after installing its default PG16.
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl --fail --silent --show-error --location \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            --output "$RUNNER_TEMP/cake-pgdg-key.asc"
+          sudo install -m 0644 "$RUNNER_TEMP/cake-pgdg-key.asc" /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          printf '%s\n' \
+            'Types: deb' \
+            'URIs: https://apt.postgresql.org/pub/repos/apt' \
+            'Suites: noble-pgdg' \
+            'Architectures: amd64' \
+            'Components: main' \
+            'Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' \
+            | sudo tee /etc/apt/sources.list.d/cake-pgdg.sources > /dev/null
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y postgresql-client-18
+          /usr/lib/postgresql/18/bin/pg_dump --version
+          /usr/lib/postgresql/18/bin/pg_restore --version
+          /usr/lib/postgresql/18/bin/psql --version
+          echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
+      - name: Inventory or copy the fixed isolated Production candidate
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: node --import tsx scripts/production-db-migration.ts
+      - name: Publish the public receipt
+        if: success() || failure()
+        run: node --import tsx scripts/production-db-migration.ts --notice
