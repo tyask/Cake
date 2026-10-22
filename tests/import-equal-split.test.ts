@@ -125,6 +125,7 @@ test("割合の単位は共通の3択で、CSV取込と定期支払いの保存�
           });
           await page.addInitScript(selected => { window.importWorkspace = selected; }, workspace());
           await page.goto(origin + "/?view=recurring");
+          await page.locator("summary").click();
           await page.getByRole("button", { name: "＋ 定期支払いを追加", exact: true }).click();
           let dialog = page.getByRole("dialog", { name: "定期支払いを追加", exact: true });await dialog.waitFor();
           const unit = () => dialog.getByRole("combobox", { name: /支払い割合.*の単位/ });

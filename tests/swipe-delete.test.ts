@@ -78,6 +78,7 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
           await route.fulfill({ json: path === "/api/recurring-payments" ? { payment: { ...payment, state: "ARCHIVED", revision: 2 } } : { ok: true, transaction: { ...payload, id: payload.transactionId, actorName: "A", source: "MANUAL", settledAt: null, memo: "" } } });
         });
         await page.goto(`${origin}/?view=${view}`);
+        if (view === "rules" || view === "recurring") await page.locator("summary").click();
         if (view === "import") {
           const csv = "取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n2026/10/18 12:00:00,100,支払い,first,現金,1\n2026/10/18 12:01:00,200,支払い,second,現金,2";
           if (entry === "import-paste") {

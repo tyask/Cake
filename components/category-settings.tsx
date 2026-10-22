@@ -7,6 +7,7 @@ import { categoryColorSchema, categoryNameSchema } from "@/lib/category-input";
 import { CATEGORY_NAME_MAX_LENGTH, CATEGORY_PALETTE, categoryPath, flattenCategories, suggestCategoryColor } from "@/lib/categories";
 import { prepareCategoryMove, prepareCategorySiblingMoves, type CategoryMoveDestination, type CategoryMovePosition, type CategoryMoveTarget } from "@/lib/category-move";
 import type { Category } from "@/lib/types";
+import { SettingsSection } from "./settings-section";
 import styles from "./category-settings.module.css";
 
 type Editor = {
@@ -218,8 +219,7 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
     }
   }
 
-  return <section className={`panel settings-section ${styles.section}`} aria-busy={busy}>
-    <div className="panel-head"><div><span>CATEGORIES</span><h2>集計用カテゴリ</h2></div></div>
+  return <SettingsSection title="集計用カテゴリ" className={styles.section} contentClassName="settings-section" busy={busy}>
     <p className={styles.description}>明細に設定するカテゴリを管理します。「＋」で子カテゴリを追加できます。</p>
     <p className={styles.description}>↑・↓で同じ階層の順番を1つずつ変えられます。右端のハンドルをドラッグすると、前・子・後へ移動できます。ハンドルを押して移動先を選ぶ操作も使えます。入力中の名前と色は移動後も保持します。</p>
     {error && <div className={`form-error ${styles.error}`} role="alert">{error}{failedMove && <button type="button" className="text-button" disabled={busy} onClick={() => { void moveCategory(failedMove); }}>移動を再試行</button>}</div>}
@@ -309,7 +309,7 @@ function CategorySettingsEditor({ categories, workspaceId, run }: Props) {
         </form> : <div className={styles.placeholder}><span aria-hidden="true">◈</span><h3>カテゴリと色を設定</h3><p>一覧のカテゴリを選択するか、<br />「＋」から新しいカテゴリを追加してください。</p><div className={styles.example}><span style={{ backgroundColor: CATEGORY_PALETTE[0].shades[2] }} />食費<span className={styles.exampleArrow}>›</span>外食費</div></div>}
       </div>
     </div>
-  </section>;
+  </SettingsSection>;
 }
 
 function CategoryTreeRow({ category, depth, path, selected, busy, dragging, collapsed, hasChildren, destination, siblingMoves, onCollapse, onEdit, onCreate, onMove, onStep }: {

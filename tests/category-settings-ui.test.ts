@@ -113,6 +113,7 @@ test("カテゴリ設定の一括開閉、上下・マウス・タッチ・キ�
           await route.fulfill({ json: { ok: true, movedCategories: saved.filter(category => category.parentId === oldParentId || category.parentId === payload.parentId) } });
         });
         await page.goto(origin);
+        await page.locator("summary").click();
         saved = JSON.parse((await page.locator("#saved-categories").textContent())!);
         const expandAll = page.getByRole("button", { name: "すべて開く", exact: true });
         const collapseAll = page.getByRole("button", { name: "すべて閉じる", exact: true });
@@ -199,7 +200,7 @@ test("カテゴリ設定の一括開閉、上下・マウス・タッチ・キ�
         assert.equal(saved.find(category => category.id === "old-conflict")!.sortOrder, 0);
         fail = false; hold = true;
         await page.getByRole("button", { name: "移動を再試行", exact: true }).click();
-        await page.waitForFunction(() => document.querySelector('section[aria-busy="true"]'));
+        await page.waitForFunction(() => document.querySelector('[aria-busy="true"]'));
         assert.equal(await page.getByRole("button", { name: "食費を下へ", exact: true }).isDisabled(), true);
         assert.equal(await page.getByRole("button", { name: "削除する", exact: true }).isDisabled(), true);
         assert.equal(await expandAll.isDisabled(), true, "保存中は一括展開しない");
@@ -242,7 +243,7 @@ test("カテゴリ設定の一括開閉、上下・マウス・タッチ・キ�
           fail = false; hold = true;
           const beforeRetry = writes.length;
           await page.getByRole("button", { name: "移動を再試行", exact: true }).click();
-          await page.waitForFunction(() => document.querySelector('section[aria-busy="true"]'));
+          await page.waitForFunction(() => document.querySelector('[aria-busy="true"]'));
           assert.equal(await page.locator('[data-category-move-handle="movie"]').isDisabled(), true);
           assert.equal(await page.getByRole("button", { name: "＋ 大分類を追加", exact: true }).isDisabled(), true);
           assert.equal(writes.length, beforeRetry + 1);
@@ -311,7 +312,7 @@ test("カテゴリ設定の一括開閉、上下・マウス・タッチ・キ�
         assert.equal(saved.some(category => category.id === "fresh"), true);
         fail = false; hold = true;
         await page.getByRole("button", { name: "削除する", exact: true }).click();
-        await page.waitForFunction(() => document.querySelector('section[aria-busy="true"]'));
+        await page.waitForFunction(() => document.querySelector('[aria-busy="true"]'));
         assert.equal(await page.getByRole("button", { name: "削除する", exact: true }).isDisabled(), true);
         assert.equal(await page.getByRole("button", { name: "保存中…", exact: true }).isDisabled(), true);
         assert.ok(release); hold = false; release();

@@ -15,6 +15,7 @@ import { ruleMerchantSchema } from "@/lib/domain-schemas";
 import { orderedWorkspaceRules } from "@/lib/rule-order";
 import type { DefaultRule, ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/types";
 import { SwipeDelete } from "./swipe-delete";
+import { SettingsSection } from "./settings-section";
 import styles from "./workspace-rules.module.css";
 
 type RunAction = RunAppAction;
@@ -126,8 +127,7 @@ function RulesEditor({ selected, run }: { selected: WorkspaceData; run: RunActio
   }
 
   return (
-    <section className={`panel settings-section ${styles.section}`} aria-busy={pending > 0}>
-      <div className="panel-head"><div><span>WORKSPACE RULES</span><h2>費用区分のデフォルトルール</h2></div></div>
+    <SettingsSection title="費用区分のデフォルトルール" className={styles.section} contentClassName="settings-section" busy={pending > 0}>
       <p className={styles.description}>ワークスペースの共有設定です。上から最初に一致する有効なルールを適用します。文字と割合は欄を離れるかEnterで保存し、費用区分・デフォルト・有効の変更はすぐ保存します。</p>
       <p className={styles.description}>右端のハンドルをドラッグして並べ替えます。キーボードではスペースキーで開始し、上下キーで移動、スペースキーで確定します。</p>
       {error && <div className={`form-error ${styles.error}`} role="alert">{error}{failedAction && failedAction.payload.action !== "createRule" && <button type="button" className="text-button" disabled={structuralBusy} onClick={() => { void perform(failedAction); }}>再試行</button>}</div>}
@@ -161,7 +161,7 @@ function RulesEditor({ selected, run }: { selected: WorkspaceData; run: RunActio
       </DndContext>
       {orderedRules.length === 0 && <p className={styles.empty}>デフォルトルールはまだありません。</p>}
       <p className={styles.footnote}>新しいルールは一番下に追加します。保存済みの明細の割合は変わりません。</p>
-    </section>
+    </SettingsSection>
   );
 }
 
