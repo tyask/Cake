@@ -34,7 +34,8 @@
 .note { margin: .75rem 1rem; color: var(--muted); font-size: .7rem; line-height: 1.6; }
 .tableWrap { width: 100%; overflow-x: auto; }
 .table { width: 100%; min-width: 72rem; border-collapse: collapse; table-layout: fixed; font-size: .72rem; }
-.categoryTable { min-width: 82rem; }
+.wrappingTableWrap { container: transaction-table / inline-size; overflow: visible; }
+.wrappingTable { min-width: 84rem; }
 .categoryColumn { width: 10rem; }
 .categoryCell { color: var(--ink); }
 .memoColumn { width: 12rem; }
@@ -82,6 +83,35 @@
 .error { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; color: var(--red); font-size: .65rem; line-height: 1.5; }
 .settled { color: var(--muted); background: var(--surface-muted); }
 .empty { margin: 0; padding: 2rem 1rem; color: var(--muted); font-size: .8rem; text-align: center; }
+
+@media (width > 48rem) {
+  @container transaction-table (width < 84rem) {
+    .wrappingTable { display: block; min-width: 0; }
+    .wrappingTable colgroup { display: none; }
+    .wrappingTable thead, .wrappingTable tbody { display: block; }
+    .wrappingTable thead tr { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; padding: .55rem; background: var(--surface-muted); }
+    .wrappingTable th { min-width: 0; max-width: 100%; padding: .35rem .45rem; overflow-wrap: anywhere; }
+    .wrappingTable .columnHeader { min-width: 0; }
+    .wrappingTable .columnHeader > span:last-child { flex-shrink: 0; }
+    .wrappingTable thead .updateStatusCell { display: none; }
+    .wrappingTable .selectAllLabel { gap: .4rem; }
+    .wrappingTable .selectAllLabel > span { display: inline; }
+    .wrappingTable .transactionRow { position: relative; display: flex; flex-wrap: wrap; padding: .35rem; border-top: 1px solid var(--line); }
+    .wrappingTable .transactionRow::before { position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--transaction-category-color, transparent); pointer-events: none; content: ""; }
+    .wrappingTable td { display: block; flex: 1 1 8rem; min-width: 0; border: 0; }
+    .wrappingTable td::before { display: block; margin-bottom: .3rem; color: var(--muted); font-size: .62rem; content: attr(data-label); }
+    .wrappingTable .dateCell { flex-basis: 12rem; white-space: normal; }
+    .wrappingTable .splitCell { flex-basis: 15rem; }
+    .wrappingTable .categoryCell { flex-basis: 12rem; }
+    .wrappingTable td:has(textarea) { flex-basis: 15rem; }
+    .wrappingTable .transactionRow > .selectionCell { flex: 0 0 2.5rem; box-shadow: none; }
+    .wrappingTable .updateStatusCell { flex: 0 0 2.25rem; align-self: center; }
+    .wrappingTable .updateStatusCell::before { display: none; }
+    .wrappingTable .settlementCell { white-space: normal; }
+    .wrappingTable .feedbackRow { display: block; }
+    .wrappingTable .feedbackCell::before { display: none; }
+  }
+}
 
 @media (max-width: 48rem) {
   .bulkBar { padding: .85rem; }
