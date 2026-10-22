@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { runCsvCategoryDatabaseQa } from '../scripts/verify-csv-category-concurrency';
+import { logDatabaseQaResult, runCsvCategoryDatabaseQa } from '../scripts/verify-csv-category-concurrency';
 import { config } from '../scripts/preview-model';
 
 const host = 'ep-fixture.ap-southeast-1.aws.neon.tech';
@@ -17,6 +17,37 @@ const fixture = {
   CAKE_PREVIEW_PRODUCTION_HOST_SHA256: config.productionHostDigest,
   CAKE_TEST_DATABASE_URL: 'postgresql://fixture:fixture-secret@ep-fixture-pooler.ap-southeast-1.aws.neon.tech/cake?sslmode=require',
 };
+
+test('実DBの長い集約結果はVercelの4KiB制限でも完全に復元して照合できる', () => {
+  const result = { protocol: 'cake-csv-category-db-qa/v1', runId: '00000000-0000-4000-8000-000000000001',
+    sha: 'a'.repeat(40), success: true, cases: Array.from({ length: 19 }, (_, i) => ({ name: `正規化・並行検証${i}😀`,
+      status: 'passed', detail: '日本語の検証結果とcleanup確認'.repeat(20) })), failures: [] };
+  const lines: string[] = [];
+  logDatabaseQaResult(result, line => lines.push(Buffer.from(line).subarray(0, 4096).toString('utf8')));
+  assert.ok(lines.length > 1);
+  assert.ok(lines.every(line => Buffer.byteLength(line, 'utf8') <= 3500));
+  const parts = lines.map(line => {
+    assert.ok(line.startsWith('Cake DB QA result part: '));
+    return JSON.parse(line.slice('Cake DB QA result part: '.length));
+  });
+  const serialized = Buffer.concat(parts.map((part, i) => {
+    assert.equal(part.protocol, 'cake-csv-category-db-qa-result-part/v1');
+    assert.equal(part.runId, result.runId); assert.equal(part.sha, result.sha);
+    assert.equal(part.part, i + 1); assert.equal(part.total, parts.length);
+    assert.equal(part.byteLength, parts[0].byteLength); assert.equal(part.sha256, parts[0].sha256);
+    return Buffer.from(part.data, 'base64');
+  }));
+  assert.equal(serialized.length, parts[0].byteLength);
+  assert.equal(createHash('sha256').update(serialized).digest('hex'), parts[0].sha256);
+  assert.deepEqual(JSON.parse(serialized.toString('utf8')), result);
+});
+
+test('短い実DB結果は従来の単一result行で公開する', () => {
+  const result = { protocol: 'cake-csv-category-db-qa/v1', runId: 'fixture', success: false, failures: [{ code: '28P01' }] };
+  const lines: string[] = [];
+  logDatabaseQaResult(result, line => lines.push(line));
+  assert.deepEqual(lines, [`Cake DB QA result: ${JSON.stringify(result)}`]);
+});
 
 test('実DB並行QAはPreviewの明示要求と専用identityがない場合に接続しない', async () => {
   for (const change of [

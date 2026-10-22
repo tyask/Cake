@@ -23,6 +23,23 @@ const failureCode = (error: unknown) => {
   return typeof code === 'string' && /^(?:[0-9A-Z]{5}|E[A-Z_]{1,30})$/.test(code) ? code : 'QA_VALIDATION_FAILED';
 };
 
+/** Vercel cuts a build-log event at 4 KiB. Keep each part independently parseable. */
+export function logDatabaseQaResult(result: { runId: string; sha?: unknown }, log: (message: string) => void) {
+  const serialized = Buffer.from(JSON.stringify(result), 'utf8');
+  const single = `Cake DB QA result: ${serialized.toString('utf8')}`;
+  if (Buffer.byteLength(single, 'utf8') <= 3500) {
+    log(single);
+    return;
+  }
+  const chunkBytes = 1800, total = Math.ceil(serialized.length / chunkBytes);
+  const sha256 = createHash('sha256').update(serialized).digest('hex');
+  for (let index = 0; index < total; index++) {
+    log(`Cake DB QA result part: ${JSON.stringify({ protocol: 'cake-csv-category-db-qa-result-part/v1',
+      runId: result.runId, sha: result.sha, part: index + 1, total, byteLength: serialized.length, sha256,
+      data: serialized.subarray(index * chunkBytes, (index + 1) * chunkBytes).toString('base64') })}`);
+  }
+}
+
 /** Connections, provider tokens and business rows never appear in the returned/logged evidence. */
 export async function runCsvCategoryDatabaseQa(env: Environment, options: Options = {}) {
   const started = performance.now(), clients: QaClient[] = [];
@@ -172,7 +189,7 @@ export async function runCsvCategoryDatabaseQa(env: Environment, options: Option
     scenario: scenario ? { success: scenario.success, head: scenario.head, sourceSha256: scenario.sourceSha256, migrationSha256: scenario.migrationSha256,
       backendPids: scenario.backendPids, sqlContract: scenario.sqlContract, failures: scenario.failures, cleanup: scenario.cleanup, seconds: scenario.seconds,
       cases: scenario.cases.map(item => ({ name: item.name, status: item.status, lockWaitObserved: item.wait?.observed ?? false, cleanup: item.cleanup })) } : null };
-  log(`Cake DB QA result: ${JSON.stringify(result)}`);
+  logDatabaseQaResult(result, log);
   return result;
 }
 
