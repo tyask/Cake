@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  assertBinding, config, connection, hash, parseConnection, productionApi,
+  assertBinding, config, connection, hash, MigrationError, parseConnection, productionApi,
   type Api, type Binding,
 } from '../scripts/production-db-migration-provider';
 
@@ -73,8 +73,8 @@ test('connection requests the explicit branch, endpoint, role, database and unpo
   assert.equal(calls, 1);
 });
 
-const environment = { NEON_API_KEY: 'fixture-neon-token', VERCEL_TOKEN: 'fixture-vercel-token' };
-test('productionApi routes both providers with GET, redirect refusal and separate credentials', async () => {
+const environment = { NEON_API_KEY: 'fixture-neon-token', VERCEL_TOKEN: 'fixture-vercel-token', GH_TOKEN: 'fixture-github-token' };
+test('productionApi routes all providers with GET, redirect refusal and separate credentials', async () => {
   const calls: { url: URL; init?: RequestInit }[] = [];
   const request: typeof fetch = async (input, init) => {
     calls.push({ url: new URL(String(input)), init });
@@ -83,12 +83,14 @@ test('productionApi routes both providers with GET, redirect refusal and separat
   const api = productionApi(environment, request);
   assert.deepEqual(await api('neon', `${base}?limit=1`), { found: true });
   assert.deepEqual(await api('vercel', '/v13/deployments/dpl_fixture?teamId=other&limit=1'), { found: true });
+  assert.deepEqual(await api('github', '/repos/fixture/cake/commits/main'), { found: true });
   assert.equal(calls[0].url.href, `https://console.neon.tech/api/v2${base}?limit=1`);
   assert.equal(calls[1].url.origin, 'https://api.vercel.com');
   assert.equal(calls[1].url.pathname, '/v13/deployments/dpl_fixture');
   assert.equal(calls[1].url.searchParams.get('teamId'), config.vercelTeamId);
   assert.equal(calls[1].url.searchParams.getAll('teamId').length, 1);
   assert.equal(calls[1].url.searchParams.get('limit'), '1');
+  assert.equal(calls[2].url.href, 'https://api.github.com/repos/fixture/cake/commits/main');
   for (const [index, { init }] of calls.entries()) {
     assert.equal(init?.method, 'GET');
     assert.equal(init?.redirect, 'error');
@@ -96,7 +98,7 @@ test('productionApi routes both providers with GET, redirect refusal and separat
     assert.ok(init?.signal instanceof AbortSignal);
     const headers = new Headers(init?.headers);
     assert.equal(headers.get('accept'), 'application/json');
-    assert.equal(headers.get('authorization'), `Bearer ${index === 0 ? environment.NEON_API_KEY : environment.VERCEL_TOKEN}`);
+    assert.equal(headers.get('authorization'), `Bearer ${[environment.NEON_API_KEY, environment.VERCEL_TOKEN, environment.GH_TOKEN][index]}`);
   }
 });
 
@@ -107,6 +109,9 @@ test('productionApi rejects alternate origins and malformed routing before makin
     '/projects/fixture#fragment', '/projects/fixture\\other', '/projects/fixture\r\nheader']) {
     await assert.rejects(api('neon', path), { message: 'PRODUCTION_MIGRATION_INVALID_REQUEST' });
   }
+  await assert.rejects(api('private-unrecognized-provider' as Parameters<Api>[0], base), {
+    message: 'PRODUCTION_MIGRATION_INVALID_REQUEST',
+  });
   assert.equal(calls, 0);
 });
 
@@ -124,26 +129,56 @@ test('productionApi rejects missing or multiline credentials before making a req
   assert.equal(calls, 0);
 });
 
-test('productionApi suppresses HTTP bodies, transport errors and invalid JSON details', async () => {
-  const privateDetail = `private-provider-detail:${uri()}`;
+const privateDetail = `private-provider-detail:${uri()}`;
+const privatePath = '/private-request-path?access_token=private-query-token';
+function safeProviderFailure(error: unknown, code: string): boolean {
+  assert.ok(error instanceof MigrationError);
+  assert.equal(error.message, `PRODUCTION_MIGRATION_${code}`);
+  assert.equal(error.cause, undefined);
+  const visible = `${error}\n${error.stack}\n${JSON.stringify(error)}`;
+  for (const secret of [privateDetail, uri(), privatePath, 'private-response-header', 'private-status-text',
+    'private-query-token', ...Object.values(environment)]) {
+    assert.ok(!visible.includes(secret), 'provider error must not expose request or response details');
+  }
+  return true;
+}
+
+for (const provider of ['neon', 'vercel', 'github'] as const) {
   for (const status of [302, 401, 403, 404, 503]) {
-    let calls = 0;
-    const request: typeof fetch = async () => { calls++; return new Response(privateDetail, { status }); };
-    await assert.rejects(productionApi(environment, request)('neon', base), {
-      message: `PRODUCTION_MIGRATION_${status === 401 || status === 403 ? 'CREDENTIAL_SCOPE' : 'PROVIDER_READ_FAILED'}`,
-    });
-    assert.equal(calls, 1);
-  }
-  const failures: (typeof fetch)[] = [
-    async () => { throw new Error(privateDetail); },
-    async () => new Response(privateDetail, { status: 200 }),
-  ];
-  for (const request of failures) {
-    await assert.rejects(productionApi(environment, request)('vercel', '/v9/projects'), {
-      message: 'PRODUCTION_MIGRATION_PROVIDER_READ_FAILED',
+    test(`productionApi reports ${provider} HTTP ${status} without reading or exposing the response body`, async () => {
+      let calls = 0;
+      const response = new Response(privateDetail, { status, statusText: 'private-status-text',
+        headers: { 'x-private-detail': 'private-response-header' } });
+      const request: typeof fetch = async () => { calls++; return response; };
+      await assert.rejects(productionApi(environment, request)(provider, privatePath), error =>
+        safeProviderFailure(error, `PROVIDER_${provider.toUpperCase()}_HTTP_${status}`));
+      assert.equal(response.bodyUsed, false);
+      assert.equal(calls, 1);
     });
   }
-});
+
+  test(`productionApi distinguishes ${provider} transport failures from invalid JSON without exposing details`, async () => {
+    const failures: [string, typeof fetch][] = [
+      ['TRANSPORT', async () => { throw new Error(privateDetail, { cause: environment.NEON_API_KEY }); }],
+      ['JSON', async () => new Response(privateDetail, { status: 200 })],
+    ];
+    for (const [kind, request] of failures) {
+      await assert.rejects(productionApi(environment, request)(provider, privatePath), error =>
+        safeProviderFailure(error, `PROVIDER_${provider.toUpperCase()}_${kind}`));
+    }
+  });
+
+  test(`productionApi rejects ${provider} invalid status values without reflecting external text`, async () => {
+    for (const status of [0, 99, 600, 401.5, NaN, '503', privateDetail]) {
+      const response = new Response(privateDetail);
+      Object.defineProperty(response, 'status', { value: status });
+      const request: typeof fetch = async () => response;
+      await assert.rejects(productionApi(environment, request)(provider, privatePath), error =>
+        safeProviderFailure(error, `PROVIDER_${provider.toUpperCase()}_INVALID_STATUS`));
+      assert.equal(response.bodyUsed, false);
+    }
+  });
+}
 
 type ProviderRecord = Record<string, unknown>;
 type Fixture = {

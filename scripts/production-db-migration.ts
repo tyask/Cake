@@ -117,8 +117,10 @@ export function serializeReceipt(value: Receipt): string {
   if (value.protocol !== config.protocol || value.configHash !== result.configHash || value.sourceProject !== config.source.projectId || value.targetProject !== config.target.projectId
     || !['inventory','rehearsal'].includes(result.action) || !fullSha(result.controlSha) || !decimal(result.runId)
     || !Number.isSafeInteger(result.runAttempt) || result.runAttempt < 1
-    || !/^[a-f0-9-]{36}$/.test(result.operation) || !['bindings','source-inventory','target-inventory','dump','restore','copy-verification','post-bindings','completed'].includes(result.stage)
-    || !/^(OK|PRODUCTION_MIGRATION_[A-Z_]+)$/.test(result.code)
+    || !/^[a-f0-9-]{36}$/.test(result.operation) || !['bindings','main-check','source-binding','target-binding','target-store',
+      'source-connection','target-connection','source-connect','target-connect','source-inventory','target-inventory',
+      'dump','restore','copy-verification','post-bindings','completed'].includes(result.stage)
+    || !/^(OK|PRODUCTION_MIGRATION_(?:[A-Z_]+|PROVIDER_(?:NEON|VERCEL|GITHUB)_HTTP_[1-5][0-9]{2}))$/.test(result.code)
     || [result.startedAt,result.checkedAt].some(time => !Number.isFinite(Date.parse(time)) || new Date(time).toISOString() !== time)
     || typeof result.success !== 'boolean' || typeof result.restored !== 'boolean' || typeof result.temporaryFilesRemoved !== 'boolean'
     || result.success && (result.code !== 'OK' || result.stage !== 'completed' || !result.source || !result.target || !result.temporaryFilesRemoved
@@ -144,13 +146,23 @@ export async function runMigration(environment: Environment = process.env, overr
   let sourceClient: Sql | undefined, targetClient: Sql | undefined, directory: string | undefined;
   try {
     if (!environment.NEON_API_KEY?.trim() || !environment.VERCEL_TOKEN?.trim() || !environment.GH_TOKEN?.trim() || environment.NODE_TLS_REJECT_UNAUTHORIZED === '0') return fail('CREDENTIALS_MISSING');
+    receipt.stage = 'main-check';
     await assertCurrentMain(dependencies.api, request);
+    receipt.stage = 'source-binding';
     await dependencies.binding(dependencies.api, config.source);
+    receipt.stage = 'target-binding';
     await dependencies.binding(dependencies.api, config.target);
+    receipt.stage = 'target-store';
     await assertUnconnectedTarget(dependencies.api);
-    const sourceConnection = await dependencies.resolveConnection(dependencies.api, config.source), targetConnection = await dependencies.resolveConnection(dependencies.api, config.target);
+    receipt.stage = 'source-connection';
+    const sourceConnection = await dependencies.resolveConnection(dependencies.api, config.source);
+    receipt.stage = 'target-connection';
+    const targetConnection = await dependencies.resolveConnection(dependencies.api, config.target);
     sourceClient = dependencies.client(sourceConnection); targetClient = dependencies.client(targetConnection);
-    await sourceClient.connect(); await targetClient.connect();
+    receipt.stage = 'source-connect';
+    await sourceClient.connect();
+    receipt.stage = 'target-connect';
+    await targetClient.connect();
     receipt.stage = 'source-inventory';
     const snapshot = await dependencies.begin(sourceClient, config.source);
     const source = await dependencies.inspect(sourceClient, config.source); receipt.source = source.summary;

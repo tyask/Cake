@@ -41,6 +41,8 @@ sourceでは一貫したread-only snapshotを維持し、dumpと照合値を同�
 
 結果は `cake-production-db-migration/v1` のnoticeで受け取り、run/attempt・完全SHA・operation・config hash・source/target project・時刻・処理段階・件数/hash・成否・一時ファイル除去を照合する。run成功だけではコピー成功としない。noticeの欠落・重複・不一致・応答不明なら状態をread-onlyで確認し、再dispatchやtarget削除で解消しない。コピー後の候補が不一致なら保持して調査し、最終切替へ進まない。
 
+DB接続前の失敗は、main・source/targetのprovider所属・Native接続数・接続情報取得・SQL接続のどこで止まったかを `stage` で区別する。providerの読取失敗は固定したprovider名とHTTP status、通信失敗、JSON解析失敗を `code` に記録する。401/403は認証・scopeの確認対象であり、404だけで資源の不在や権限不足を断定しない。応答本文・URL・生例外・資格情報は公開せず、記録した段階と対象を確認してから修正する。
+
 ### Cakeのデータとprovider管理情報
 
 Cakeの認証はAuth.jsのGoogleログインとJWTを使い、利用者情報は `public.app_users` に保存する。Native projectに `neon_auth` がある場合も、未使用とは推定せず、両側のaccount・invitation・member・organization・session・user・verificationが0件であることを確認する。既知の管理9表だけが存在し、publicからの外部キー・関数・policy等の依存がなく、外部からもNeon Authを利用していない場合に限り、Cakeのpublicを移送対象にできる。利用データや未知の依存があれば停止し、Authを含めた移行方法を別に確認する。
