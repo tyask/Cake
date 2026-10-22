@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { checkDependencyBoundaries, formatBoundaryViolations, readProjectSources } from "./dependency-boundaries";
 
@@ -8,6 +11,32 @@ const rules = (sources: Record<string, string>, rule: string) => check(sources).
 test("製品コードの実行場所と推移的な依存境界を維持する", async () => {
   const violations = checkDependencyBoundaries(await readProjectSources(process.cwd()));
   assert.equal(violations.length, 0, formatBoundaryViolations(violations));
+});
+
+test("build/outという名前の下位ソースを収集し、rootの生成物だけを除外する", async t => {
+  const root = await mkdtemp(join(tmpdir(), "cake-boundary-sources-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const files = {
+    "app/build/page.tsx": '"use client"; import "@/lib/server/db";',
+    "app/out/page.tsx": '"use client"; import "@/lib/server/db";',
+    "scripts/build/vercel-build.ts": "export const build = true;",
+    "lib/server/db.ts": "export const database = true;",
+    "build/generated.ts": "export const output = true;",
+    "out/generated.ts": "export const output = true;",
+    "node_modules/package/index.ts": "export const dependency = true;",
+  };
+  for (const [path, source] of Object.entries(files)) {
+    const parts = path.split("/");
+    await mkdir(join(root, ...parts.slice(0, -1)), { recursive: true });
+    await writeFile(join(root, ...parts), source);
+  }
+  const sources = await readProjectSources(root);
+  assert.deepEqual([...sources.keys()].sort(), [
+    "app/build/page.tsx", "app/out/page.tsx", "lib/server/db.ts", "scripts/build/vercel-build.ts",
+  ]);
+  assert.deepEqual(checkDependencyBoundaries(sources).filter(violation => violation.rule === "client").map(violation => violation.path), [
+    ["app/build/page.tsx", "lib/server/db.ts"], ["app/out/page.tsx", "lib/server/db.ts"],
+  ]);
 });
 
 test("型専用import・再exportを除き、混在する実行時importは追跡する", () => {

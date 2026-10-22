@@ -10,7 +10,7 @@ type Module = { client: boolean; dependencies: Dependency[] };
 
 const sourceExtension = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 const assetExtension = /\.(?:css|json|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|otf)$/;
-const ignoredDirectories = new Set([".git", ".cake", ".next", "node_modules", "out", "build"]);
+const ignoredDirectories = new Set([".git", ".cake", ".next", "node_modules"]);
 const sharedPackages = new Set(["zod", "papaparse"]);
 // Package entry points are deliberate: next-auth/react is a browser entry; next-auth is not.
 const browserPackages = new Set([
@@ -35,7 +35,8 @@ export async function readProjectSources(root: string): Promise<Map<string, stri
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
       const path = join(directory, entry.name);
-      if (entry.isDirectory() && !ignoredDirectories.has(entry.name)) await visit(path);
+      const generatedOutput = directory === root && (entry.name === "out" || entry.name === "build");
+      if (entry.isDirectory() && !ignoredDirectories.has(entry.name) && !generatedOutput) await visit(path);
       else if (entry.isFile() && sourceExtension.test(entry.name)) {
         sources.set(relative(root, path).split(sep).join("/"), await readFile(path, "utf8"));
       }
