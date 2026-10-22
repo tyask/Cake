@@ -135,6 +135,8 @@ git commit -m '[cake-db-qa:csv-categories]' -m 'CSVカテゴリの実DB並行検
 
 buildログの `cake-csv-category-db-qa/v1` 結果で対象identity、検証成否、ロック待機、後片付け件数と既存データ保持を確認し、前後の正式statusとも照合する。業務DTO・接続文字列・生例外はログやartifactへ保存しない。通常のmigration・初回seedによる更新と、検証用fixtureの残存0件は区別して報告する。この実DB検証は `npm test`、Actionsのprovider照合receipt、現在HEADの正式ブラウザ証拠とはそれぞれ別の検証である。
 
+取引先正規化の実DB検証は、現在commitの独立行 `[cake-db-qa:merchant-normalization]` で要求する。同じ隔離環境・所有権・TLS検査を使い、`qa:db:merchant-normalization` として上記のCSVカテゴリ競合回帰に続けて、全保存経路の共通正規化、2000行のCSV、旧版互換、完全一致Indexの利用可能性を確認する。正規化fixtureは専用workspaceだけに作成して削除する。019のバックフィル・DDLの全体rollback・ACCESS EXCLUSIVEによる更新待機は、同じ専用DB内の新規scratch schemaで実SQLを適用して検証する。既存public schemaの適用済みmigrationを戻さず、scratchのschema・table・function・Indexの残存0件を確認する。両markerがある場合も正規化を含むQAを一度だけ実行し、同じ`cake-csv-category-db-qa/v1`結果の`normalization`・`normalizationMigration`に追加結果を記録する。通常migration/seed後のpublic各表を前後照合し、scratch検証と実public migrationの適用時間・影響を区別する。
+
 ### mainの常設Preview
 
 `.github/workflows/staging.yml`はmainへのpushとmain上の手動dispatchを受け、同じ完全SHAを予約branch `cake-main-preview`へfast-forward同期する。Vercel Git連携の `**: false` / `main: true` は維持し、mainのProductionは従来どおり自動更新する。常設Previewのデプロイは信頼済みmainのActionsが行い、Hobbyで利用できる標準Previewを使う。

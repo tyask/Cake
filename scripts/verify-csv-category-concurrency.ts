@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,8 +7,11 @@ import { Client } from 'pg';
 import { databaseConnectionString, previewDatabaseGuardSql, previewDatabaseIdentity } from '../lib/database-environment';
 import { config, hostDigest } from './preview-model';
 import { verifyCsvCategoryConcurrency, type CsvCategoryConcurrencyReport, type CsvCategoryDatabase } from './csv-category-concurrency-scenarios';
+import { verifyMerchantNormalizationScenarios, type MerchantNormalizationReport } from './merchant-normalization-scenarios';
+import { verifyMerchantNormalizationMigration, type MerchantNormalizationMigrationReport } from './merchant-normalization-migration-scenario';
 
 const requestMarker = '[cake-db-qa:csv-categories]';
+const normalizationMarker = '[cake-db-qa:merchant-normalization]';
 type Environment = Readonly<Record<string, string | undefined>>;
 type QaClient = CsvCategoryDatabase & { connect(): Promise<void>; end(): Promise<void>; on(name: 'error', listener: () => void): unknown;
   connection?: { stream?: { encrypted?: boolean; authorized?: boolean } } };
@@ -25,6 +28,8 @@ export async function runCsvCategoryDatabaseQa(env: Environment, options: Option
   const started = performance.now(), clients: QaClient[] = [];
   const log = options.log ?? console.log;
   let stage = '接続前のPreview照合', success = false, scenario: CsvCategoryConcurrencyReport | undefined;
+  let normalization: MerchantNormalizationReport | undefined, normalizationMigration: MerchantNormalizationMigrationReport | undefined;
+  let normalizationEvidence: { migrationSha256: string; scenarioSha256: string; unicodeVersion: string } | undefined;
   let baseline: Map<string, unknown> | undefined;
   let baselinePreserved = false, connectionError = false, closeSucceeded = true;
   const failures: { stage: string; code: string }[] = [];
@@ -44,7 +49,9 @@ export async function runCsvCategoryDatabaseQa(env: Environment, options: Option
   try {
     assert.equal(env.VERCEL_ENV, 'preview'); assert.equal(env.AUTH_MODE, 'test');
     assert.equal(env.CAKE_PREVIEW_PHASE, 'application');
-    assert.ok(env.VERCEL_GIT_COMMIT_MESSAGE?.split(/\r?\n/).some(line => line.trim() === requestMarker));
+    const markers = env.VERCEL_GIT_COMMIT_MESSAGE?.split(/\r?\n/).map(line => line.trim()) ?? [];
+    const normalizationRequested = markers.includes(normalizationMarker);
+    assert.ok(normalizationRequested || markers.includes(requestMarker));
     assert.match(env.VERCEL_DEPLOYMENT_ID ?? '', /^dpl_[A-Za-z0-9]+$/);
     assert.equal(env.CAKE_PREVIEW_PRODUCTION_HOST_SHA256, config.productionHostDigest);
     assert.ok(!env.CAKE_PREVIEW_KIND && env.NODE_TLS_REJECT_UNAUTHORIZED !== '0');
@@ -109,6 +116,37 @@ export async function runCsvCategoryDatabaseQa(env: Environment, options: Option
       },
     });
     assert.equal(scenario.success, true);
+    if (normalizationRequested) {
+      stage = '取引先正規化の実関数照合';
+      const normalizationSql = await readFile(new URL('019_merchant_normalization.sql', directory), 'utf8');
+      const functionBody = normalizationSql.split('$cake_normalize_merchant$');
+      assert.equal(functionBody.length, 3);
+      const actual = (await clients[0].query("SELECT prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='cake_normalize_merchant'")).rows;
+      assert.equal(actual.length, 1); assert.equal(String(actual[0].prosrc).trim(), functionBody[1].trim()); functionsVerified++;
+      normalizationEvidence = {
+        migrationSha256: createHash('sha256').update(normalizationSql).digest('hex'),
+        scenarioSha256: createHash('sha256').update(await readFile(new URL('./merchant-normalization-scenarios.ts', import.meta.url))).digest('hex'),
+        unicodeVersion: String((await clients[0].query('SELECT unicode_version() AS version')).rows[0].version),
+      };
+      stage = '取引先正規化の実DBシナリオ';
+      normalization = await verifyMerchantNormalizationScenarios(clients[0], {
+        actorA: 'test-user-a', actorB: 'test-user-b', prefix: `verify-merchant-${runId}`,
+        async runCase(name, run) {
+          const at = performance.now();
+          await run();
+          log(`Cake DB QA normalization case: ${JSON.stringify({ protocol: 'cake-csv-category-db-qa/v1', runId, sha: env.CAKE_PREVIEW_SOURCE_SHA,
+            name, status: 'passed', seconds: (performance.now() - at) / 1000 })}`);
+        },
+      });
+      assert.equal(normalization.success, true);
+      stage = '取引先正規化の実migration・DDL待機';
+      normalizationMigration = await verifyMerchantNormalizationMigration(clients[0], clients[1], clients[2], normalizationSql, { prefix: `verify-merchant-${runId}` });
+      assert.equal(normalizationMigration.success, true);
+      log(`Cake DB QA normalization migration: ${JSON.stringify({ protocol: 'cake-csv-category-db-qa/v1', runId, sha: env.CAKE_PREVIEW_SOURCE_SHA, ...normalizationMigration })}`);
+      stage = '取引先正規化の既存全行照合';
+      const invalid = (await clients[0].query('SELECT count(*)::int AS n FROM transactions WHERE merchant_normalized IS DISTINCT FROM cake_normalize_merchant(merchant)')).rows;
+      assert.equal(invalid[0].n, 0);
+    }
     stage = '後片付け後の全既存データ照合';
     assert.deepEqual(await snapshot(clients[0]), baseline); baselinePreserved = true;
     stage = '終了marker照合';
@@ -130,6 +168,7 @@ export async function runCsvCategoryDatabaseQa(env: Environment, options: Option
     success: success && closeSucceeded && failures.length === 0, serverVersion, node: process.version,
     elapsedMs: Math.round(performance.now() - started), migrationsVerified, functionsVerified, tablesVerified,
     baselinePreserved, tlsVerified: clients.length === 3 && serverVersion !== '', closeSucceeded, failures,
+    normalization: normalization ?? null, normalizationMigration: normalizationMigration ?? null, normalizationEvidence: normalizationEvidence ?? null,
     scenario: scenario ? { success: scenario.success, head: scenario.head, sourceSha256: scenario.sourceSha256, migrationSha256: scenario.migrationSha256,
       backendPids: scenario.backendPids, sqlContract: scenario.sqlContract, failures: scenario.failures, cleanup: scenario.cleanup, seconds: scenario.seconds,
       cases: scenario.cases.map(item => ({ name: item.name, status: item.status, lockWaitObserved: item.wait?.observed ?? false, cleanup: item.cleanup })) } : null };

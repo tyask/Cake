@@ -77,3 +77,24 @@ test('実DB並行QAはクライアントTLS暗号化・証明書検証を確認�
     assert.equal(result.failures[0].stage, 'クライアントTLS暗号化・証明書確認');
   }
 });
+
+test('正規化の独立行markerも同じ専用DB/TLS境界を使い、文中markerは接続しない', async () => {
+  for (const [message, allowed] of [
+    ['正規化QA\n\n  [cake-db-qa:merchant-normalization]\t', true],
+    ['説明 [cake-db-qa:merchant-normalization]', false],
+  ] as const) {
+    let connected = false, closed = false;
+    const logs: string[] = [];
+    const result = await runCsvCategoryDatabaseQa({ ...fixture, VERCEL_GIT_COMMIT_MESSAGE: message }, {
+      log: line => logs.push(line), createClient(settings) {
+        assert.equal(settings.host, host); assert.equal(settings.ssl.rejectUnauthorized, true);
+        connected = true;
+        return { async connect() { throw Object.assign(new Error('fixture-secret'), { code: '28P01' }); },
+          async end() { closed = true; }, on() {}, async query() { assert.fail('接続失敗後のSQL禁止'); } };
+      },
+    });
+    assert.equal(connected, allowed); assert.equal(closed, allowed); assert.equal(result.success, false);
+    assert.equal(result.failures[0].stage, allowed ? '独立接続とTLS' : '接続前のPreview照合');
+    assert.ok(!JSON.stringify({ result, logs }).includes('fixture-secret'));
+  }
+});

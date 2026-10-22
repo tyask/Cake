@@ -24,10 +24,12 @@ iPhoneでのPayPay共有ショートカットとCSV貼り付けの確認方法�
 - Next.js 16 / React 19 / TypeScript
 - Node.js 24 / npm
 - Auth.js（Google OAuth）
-- Neon PostgreSQL
+- Neon PostgreSQL 18以上（UTF8）
 - Vercel
 
 データ取得・DBクエリログの仕様は[詳細設計書のRepository・データ取得設計](docs/detail-design.html#repository)を参照してください。
+
+明細の取引先は表示用の値を保持し、NFKC・小文字化・空白整理による照合用の値をDBの生成列へ保存します。手入力・CSV・定期支払いなどの保存経路で同じSQL関数を使い、既存明細もmigrationで補完します。照合規則と互換性は[取引先の照合用正規化](docs/detail-design.html#merchant-normalization)を参照してください。CSVカテゴリの自動補完とグラフは未提供です。
 
 ## ローカルセットアップ
 
@@ -110,6 +112,8 @@ npm.cmd run dev
 ### 初回ログインと利用者登録
 
 `npm run db:setup`は未適用のマイグレーションを番号順に適用します。既存DBの更新時にも実行してください。 適用履歴を一度取得して未適用ファイルの本文だけを読み、全適用済みの通常再実行は本文0読込・DB往復2回で完了します。Previewの初回所有権確保時は全原文の照合も行います。各migrationはロック下で履歴を再確認し、SQLと履歴を一体で確定します。
+
+取引先の照合用生成列を追加する`019_merchant_normalization.sql`は、既存全明細の値を計算し、テーブルとIndexを書き直します。適用中は`transactions`の`ACCESS EXCLUSIVE`ロックを保持するため、明細の参照・更新が待機します。現在のデータ規模では一つの原子的なmigrationとして適用します。
 
 初回の利用者管理マイグレーションで、`t.yasu417@gmail.com`を管理者として登録します。このアカウントでGoogleログインし、設定の「利用者管理」からもう一人のGoogleアカウントのメールアドレスを登録してください。権限や利用停止の仕様は[詳細設計書の認証・セッション詳細設計](docs/detail-design.html#auth)を参照してください。
 

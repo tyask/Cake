@@ -782,7 +782,7 @@
               <tr><td><code>workspace_members</code></td><td>workspace_id, user_id, role, weight, joined_at</td><td>複合主キー。weightは共有費のデフォルト重み。個人用一人・共有用最大二人をDBでも強制。</td></tr>
               <tr><td><code>invitations</code></td><td>id, workspace_id, email, token_hash, status, expires_at, invited_by</td><td>トークンのハッシュを保存。現在はPENDINGからACCEPTEDへ更新し、期限を日時で判定。DBにはDECLINED／EXPIREDも許容するが更新操作はない。</td></tr>
               <tr><td><code>categories</code></td><td>id, workspace_id, parent_id, name, color_hex, sort_order, archived_at, revision</td><td>workspace単位の任意階層。明細参照と親参照は同workspaceに制限。削除時は明細の参照解除と子孫の削除を同じTransactionで確定する。archived_atは旧client互換。</td></tr>
-              <tr><td><code>transactions</code></td><td>id, workspace_id, occurred_at, merchant, method, type, amount_yen, actor_user_id, expense_class, split_weights, memo, settled_at, external_id, source, category_id, category_confirmed, category_revision</td><td>PAYMENT／RECEIPTとPERSONAL／SHAREDを保持。明細固有の割合・メモを保存し、workspace_idとexternal_idの組で重複防止。</td></tr>
+              <tr><td><code>transactions</code></td><td>id, workspace_id, occurred_at, merchant, merchant_normalized, method, type, amount_yen, actor_user_id, expense_class, split_weights, memo, settled_at, external_id, source, category_id, category_confirmed, category_revision</td><td>PAYMENT／RECEIPTとPERSONAL／SHAREDを保持。明細固有の割合・メモを保存し、workspace_idとexternal_idの組で重複防止。取引先の表示値とは別にDB生成の照合用値を保持し、workspaceと合わせたIndexを設ける。</td></tr>
               <tr><td><code>recurring_payments</code></td><td>id, workspace_id, state, 支払い設定8項目, next_scheduled_on, authorized_by, revision, blocked_reason, 監査列。開始日カラムstart_onは削除済み。旧last_generated_month/active_from_month/pending_config/pending_effective_monthは予定判定・生成に使用しない。</td><td>定期設定・処理予定日を保持。workspace削除時CASCADE、設定削除はARCHIVED。明細登録の成功時に処理予定日を翌月へ進める。</td></tr>
               <tr><td><code>default_rules</code></td><td>id, workspace_id, merchant_contains, expense_class, sort_order, split_weights, enabled, priority</td><td>取引先の部分一致で費用区分・割合の初期値を決定。sort_orderの昇順で評価。priorityは旧バージョン互換用に同期。</td></tr>
               <tr><td><code>import_batches</code></td><td>id, workspace_id, imported_by, file_name, total_rows, imported_rows, skipped_rows, created_at</td><td>取込単位の結果を記録。CSV本文は保存しない。</td></tr>
@@ -792,6 +792,9 @@
               <tr><td><code>schema_migrations</code></td><td>name, applied_at</td><td>番号付きマイグレーションの適用履歴。台帳を一度読み、未適用分だけ本文読込・実行する。実行時もロック下で履歴を再確認し、SQLと記録を一体で確定する。</td></tr>
             </tbody>
           </table></div>
+          <h3>取引先の照合用正規化</h3>
+          <p>PostgreSQL 18以上・UTF8の共通SQL関数で、取引先をNFKC正規化・小文字化し、連続空白を1半角スペースへまとめて前後の空白を除去する。現行基準はPostgreSQL 18組込みのUnicode 16で、固定した空白集合を使う。表示用の<code>merchant</code>を保持したまま<code>merchant_normalized</code>生成列へ保存し、NFKCで長くなった値も切り捨てない。手入力・一覧編集・CSV・定期生成・seed・旧版アプリ・直接SQLのINSERT/UPDATEでDBが同じ規則を適用する。既存明細も追加migrationで計算し、金額・カテゴリ・確認状態・revision・監査列は変えない。</p>
+          <p>照合用値は現在のAPI・DTOへ公開せず、共有費ルールの部分一致とCSV重複時の取引先比較は従来の規則を維持する。CSVカテゴリの自動補完・候補API・グラフは提供しない。将来の完全一致照合も同じSQL関数を使い、JavaScript側で照合用キーを再実装しない。詳細な空白・照合規則は<a href="detail-design.html#merchant-normalization">詳細設計</a>を参照する。</p>
           <h3>データ整合性</h3>
           <ul>
             <li>取引金額は1〜2147483647円の整数とし、通常保存・CSV取込・一覧編集・定期支払いで共通の入力制約を使用する。上限超過はAPIでDB登録前に拒否し、CSVプレビューでは登録対象から外す。CSVの取引先は240文字、方法は120文字までとし、超過行もプレビューで登録不可にする。清算金額は0円以上。割合は0以上の整数で全員0をAPI側で禁止する。</li>
@@ -801,7 +804,7 @@
             <li>有効な通常利用者は管理者を含め二人までとする。固定テストユーザーA/Bは人数上限から除外する。</li>
             <li>清算済み明細と清算履歴の関連付けをDBトランザクションで一括更新する。</li>
             <li>取引IDは同一ワークスペース内で一意とする。手動追加時はアプリが自動発行する。</li>
-            <li>原則として適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。現行スキーマは001〜017の適用結果。007は開始日を持たない定期設定1表・処理予定日・即時変更/再開・実行日時による生成関数とsource制約の拡張を追加する。008は同じ生成仕様を維持し、009は旧変更予約を現在設定へ移す。010は適用済みPreview DBに残る開始日カラムを削除し、workspace移動禁止と月初制約を維持する。011は既存設定の処理予定日を設定日と適用時刻の09:00境界から初期化し、現行の変更・生成関数を適用する。012は既存表と旧版の呼出しを保持してルール共通削除関数を追加する。013は一括ルール適用の参加者集約を一回にし、選択全体を集合UPDATEで更新する。現行アプリは削除列を参照しない。追加済み明細は変更しない。</li>
+            <li>適用済みマイグレーションを変更せず、<code>db/migrations/</code>へ番号付きファイルを追加する。現行スキーマは001〜019の適用結果。定期支払いの予定日・即時変更/再開、明細の集合更新、カテゴリの所属・階層・割当をDBでも保証する。019は取引先の照合用生成列とIndexを追加し、既存全明細を計算する。テーブルとIndexの書換えを伴うため、適用中は<code>transactions</code>を<code>ACCESS EXCLUSIVE</code>でロックする。現在のデータ規模では単一の原子的なmigrationとし、既存の業務値と監査情報を維持する。</li>
           </ul>
         </section>
 
