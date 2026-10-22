@@ -10,7 +10,8 @@ import { verifyCsvCategoryConcurrency, type CsvCategoryConcurrencyReport, type C
 
 const requestMarker = '[cake-db-qa:csv-categories]';
 type Environment = Readonly<Record<string, string | undefined>>;
-type QaClient = CsvCategoryDatabase & { connect(): Promise<void>; end(): Promise<void>; on(name: 'error', listener: () => void): unknown };
+type QaClient = CsvCategoryDatabase & { connect(): Promise<void>; end(): Promise<void>; on(name: 'error', listener: () => void): unknown;
+  connection?: { stream?: { encrypted?: boolean; authorized?: boolean } } };
 type ClientSettings = { host: string; port: number; user: string; password: string; database: string; ssl: { rejectUnauthorized: true; servername: string };
   enableChannelBinding: true; connectionTimeoutMillis: number; query_timeout: number; application_name: string };
 type Options = { createClient?: (settings: ClientSettings) => QaClient; log?: (message: string) => void };
@@ -64,8 +65,11 @@ export async function runCsvCategoryDatabaseQa(env: Environment, options: Option
       const client = options.createClient ? options.createClient(settings) : new Client(settings) as unknown as QaClient;
       clients.push(client); client.on('error', () => { connectionError = true; }); await client.connect();
       await client.query("SET statement_timeout='30000ms'"); await client.query("SET lock_timeout='15000ms'");
-      const ssl = (await client.query('SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()')).rows;
-      assert.equal(ssl.length, 1); assert.equal(ssl[0].ssl, true);
+      // Neon terminates client TLS at its proxy; pg_stat_ssl describes the internal
+      // proxy-to-backend hop. Verify the actual Node TLS socket and certificate here.
+      stage = 'クライアントTLS暗号化・証明書確認';
+      assert.equal(client.connection?.stream?.encrypted, true);
+      assert.equal(client.connection?.stream?.authorized, true);
       stage = '各接続の既存marker照合';
       // This DO block is autocommitted before any scenario transaction; its advisory lock is released.
       await client.query(previewDatabaseGuardSql(identity, false));

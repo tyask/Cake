@@ -57,3 +57,23 @@ test('実DB並行QAは検証済みdirect endpointと厳密TLSを使い、接続�
   const publicResult = JSON.stringify({ result, logs });
   for (const secret of ['fixture-secret', 'sensitive-sentinel', 'postgres://']) assert.ok(!publicResult.includes(secret));
 });
+
+
+test('実DB並行QAはクライアントTLS暗号化・証明書検証を確認できない接続でSQLを始めない', async () => {
+  for (const stream of [{ encrypted: false, authorized: true }, { encrypted: true, authorized: false }, {}]) {
+    let queries = 0, closed = false;
+    const result = await runCsvCategoryDatabaseQa(fixture, {
+      log() {}, createClient() {
+        return { connection: { stream }, async connect() {}, async end() { closed = true; }, on() {},
+          async query(statement) {
+            queries++;
+            assert.ok(statement.startsWith('SET '), 'session timeout設定後、業務SQLの前に止める');
+            return { rows: [] };
+          },
+        };
+      },
+    });
+    assert.equal(result.success, false); assert.equal(closed, true); assert.equal(queries, 2);
+    assert.equal(result.failures[0].stage, 'クライアントTLS暗号化・証明書確認');
+  }
+});
