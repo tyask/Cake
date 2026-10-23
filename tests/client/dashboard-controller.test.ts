@@ -102,12 +102,12 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.page.evaluate(() => window.controller.openTab("analytics"));
       const lightweight = await f.take();
       await f.reply(older, olderFails ? { error: "古い要求の失敗" } : data("b"), olderFails ? 500 : 200);
-      await expectState(f.page, { tab: "analytics", workspaceSwitching: true, "selected.workspace.id": "a" });
+      await expectState(f.page, { tab: "analytics", workspaceSwitching: true, "selected.workspace.id": "a", notice: null });
       await f.reply(lightweight, metadata("b"));
       const full = await f.take();
       await expectState(f.page, { workspaceSwitching: true, "selected.workspace.id": "a" });
       await f.reply(full, data("b"));
-      await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "b", loading: false });
+      await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "b", loading: false, notice: null });
     });
     await scenario("切替中の集計タブ取得が失敗したら元の家計へ戻り、遅い切替応答も破棄する", async f => {
       await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });

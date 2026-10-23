@@ -275,9 +275,11 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
     workspaceView.current = { workspaceId, generation };
     setWorkspaceSwitching(true);
     startLoading(); setNotice(null);
-    try { await refresh(workspaceId, generation, "full"); }
+    const pending = refresh(workspaceId, generation, "full");
+    const requestId = refreshRequest.current;
+    try { await pending; }
     catch (error) {
-      if (generation === workspaceView.current.generation) {
+      if (generation === workspaceView.current.generation && requestId === refreshRequest.current) {
         setNotice(error instanceof Error ? error.message : "読込に失敗しました。");
       }
     } finally { finishLoading(); }
