@@ -21,14 +21,14 @@ function contrastingColor(background: string): string {
 /** Share one canvas for the prepared labels and use the same fixed font as the SVG text. */
 export function createChartAmountMeasurer() {
   const context = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
-  if (context) context.font = `${CHART_AMOUNT_FONT_WEIGHT} ${CHART_AMOUNT_FONT_SIZE}px ${CHART_AMOUNT_FONT_FAMILY}`;
-  return (text: string, colorHex: string): ChartAmountLabel | null => {
+  return (text: string, colorHex: string, fontSize = CHART_AMOUNT_FONT_SIZE): ChartAmountLabel | null => {
     if (!context) return null;
+    context.font = `${CHART_AMOUNT_FONT_WEIGHT} ${fontSize}px ${CHART_AMOUNT_FONT_FAMILY}`;
     const metrics = context.measureText(text);
     return {
       text, color: contrastingColor(colorHex),
       width: Math.ceil(Math.max(metrics.width, metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight)) + 2,
-      height: Math.ceil(Math.max(CHART_AMOUNT_FONT_SIZE * 1.2, metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent)),
+      height: Math.ceil(Math.max(fontSize * 1.2, metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent)),
     };
   };
 }

@@ -83,7 +83,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
     return { context, page, requests, urls, errors, take, reply, total, stable };
   }
   try {
-    for (const width of [1440, 1000, 390, 320]) await t.test(`${width}px: 対象者・費用区分・階層・表・説明を変えても再通信しない`, async () => {
+    for (const width of [1440, 1000, 850, 800, 769, 390, 320]) await t.test(`${width}px: 対象者・費用区分・階層・表・説明を変えても再通信しない`, async () => {
       const f = await fixture(width);
       try {
         const request = await f.take();
@@ -114,6 +114,13 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
           await f.page.getByRole("heading", { name: "集計", exact: true }).hover();
           await f.page.getByText("対象者", { exact: true }).focus();
           assert.equal(await f.page.getByRole("tooltip").innerText(), description);
+          if (width === 1440) {
+            await f.page.setViewportSize({ width: 769, height: 1000 });
+            await f.stable();
+            const resized = (await f.page.getByRole("tooltip").boundingBox())!;
+            assert.ok(resized.x >= 16 && resized.x + resized.width <= 769 - 16, "開いた説明もリサイズ時に画面内へ補正する");
+            await f.page.setViewportSize({ width, height: 1000 });
+          }
           await f.page.keyboard.press("Escape");
           await f.page.getByText("対象者", { exact: true }).blur();
         } else {
@@ -203,6 +210,47 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
       } finally { await f.context.close(); }
     });
 
+    async function centerWithinHole(page: Awaited<ReturnType<typeof fixture>>["page"], expected: string) {
+      const center = page.locator('[data-analytics-center="total"]');
+      await center.locator("text").last().waitFor();
+      assert.equal(await center.locator("text").last().textContent(), expected, "中央合計も全桁を保持する");
+      const lines = await center.locator("text").last().locator("tspan").allTextContents();
+      assert.ok(lines.slice(0, -1).every(line => line.endsWith(",")), "改行は桁区切りで行う");
+      assert.ok(await center.evaluate(element => {
+        const group = element as SVGGElement, inverse = group.getScreenCTM()!.inverse();
+        const cx = Number(group.getAttribute("data-center-x")), cy = Number(group.getAttribute("data-center-y"));
+        const radius = Number(group.getAttribute("data-inner-radius"));
+        return radius > 0 && [...group.querySelectorAll("text")].every(text => {
+          const bounds = text.getBoundingClientRect();
+          return [[bounds.left, bounds.top], [bounds.left, bounds.bottom], [bounds.right, bounds.top], [bounds.right, bounds.bottom]].every(([x, y]) => {
+            const point = new DOMPoint(x, y).matrixTransform(inverse);
+            return Math.hypot(point.x - cx, point.y - cy) < radius;
+          });
+        });
+      }), "中央の合計と金額は円の内側に収まる");
+    }
+
+    for (const width of [1440, 1000, 390, 320]) await t.test(`${width}px: 大きい中央合計もリングと重ならず表示する`, async () => {
+      const f = await fixture(width);
+      try {
+        const first = await f.take();
+        const initial = dataset(queryFromRoute(first));
+        initial.buckets = [{ ...initial.buckets[0], burdenYen: "100000" }];
+        await f.reply(first, initial); await f.total("￥100,000");
+        await centerWithinHole(f.page, "￥100,000");
+        await f.page.getByRole("button", { name: "更新", exact: false }).click();
+        const next = await f.take(), data = dataset(queryFromRoute(next));
+        data.buckets = [{ ...data.buckets[0], burdenYen: "10000000" }];
+        await f.reply(next, data); await f.total("￥10,000,000");
+        await centerWithinHole(f.page, "￥10,000,000");
+        if (process.env.CAKE_ANALYTICS_SCREENSHOTS) {
+          await mkdir(".cake/output/playwright", { recursive: true });
+          await f.page.screenshot({ path: `.cake/output/playwright/analytics-center-${width}.png`, fullPage: true, animations: "disabled" });
+        }
+        assert.equal(f.urls.length, 2); assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
     await t.test("グラフ内の金額は安全整数を超えても元の整数を表示する", async () => {
       const f = await fixture();
       try {
@@ -210,6 +258,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         const exact = "9007199254740993";
         data.buckets = ["current", "trend"].map(scope => ({ scope: scope as "current" | "trend", month: "2026-10", memberId: "a", expenseClass: "SHARED", categoryId: "grocery", burdenYen: exact }));
         await f.reply(request, data); await f.total(formatYen(BigInt(exact)));
+        await centerWithinHole(f.page, formatYen(BigInt(exact)));
         await f.page.locator('[data-analytics-amount="trend"]').first().waitFor();
         assert.deepEqual(await f.page.locator('[data-analytics-amount="trend"]').allTextContents(), [formatYen(BigInt(exact))]);
         assert.equal(f.urls.length, 1); assert.deepEqual(f.errors, []);

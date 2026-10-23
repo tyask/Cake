@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { analyticsQuerySchema, analyticsToday, type AnalyticsQuery, type AnalyticsRange } from "@/lib/shared/analytics";
 import { buildAnalyticsView, prepareAnalyticsDataset } from "@/lib/shared/analytics-view";
 import { formatJstDateTime, formatYen } from "@/lib/shared/display-formatters";
@@ -21,7 +21,22 @@ export function analyticsRangeLabel(range: AnalyticsRange) {
 function MemberHelp() {
   const id = useId();
   const container = useRef<HTMLSpanElement>(null);
+  const tooltip = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const keepInViewport = () => {
+      const element = tooltip.current;
+      if (!element) return;
+      element.style.transform = "";
+      const bounds = element.getBoundingClientRect();
+      const left = Math.max(16, Math.min(bounds.left, document.documentElement.clientWidth - 16 - bounds.width));
+      element.style.transform = `translateX(${left - bounds.left}px)`;
+    };
+    keepInViewport();
+    window.addEventListener("resize", keepInViewport);
+    return () => { window.removeEventListener("resize", keepInViewport); };
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
@@ -43,7 +58,7 @@ function MemberHelp() {
       onFocus={event => { if (event.currentTarget.matches(":focus-visible")) setOpen(true); }}>対象者</span>
     <button type="button" className={styles.helpInfo} aria-label="対象者の説明" aria-expanded={open}
       aria-controls={open ? id : undefined} onClick={() => setOpen(value => !value)}>ⓘ</button>
-    {open && <span id={id} role="tooltip" className={styles.helpTooltip}>{burdenDescription}</span>}
+    {open && <span ref={tooltip} id={id} role="tooltip" className={styles.helpTooltip}>{burdenDescription}</span>}
   </span>;
 }
 

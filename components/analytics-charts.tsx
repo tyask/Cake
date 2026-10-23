@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Label, LabelList, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, type LabelProps } from "recharts";
 import { barAmountPosition, CHART_AMOUNT_FONT_FAMILY, CHART_AMOUNT_FONT_SIZE, CHART_AMOUNT_FONT_WEIGHT, createChartAmountMeasurer, pieAmountPosition, type ChartAmountLabel, type ChartAmountPosition } from "@/lib/client/analytics-chart-labels";
 import { analyticsChangeRate, type AnalyticsDataset, type AnalyticsRow, type AnalyticsView } from "@/lib/shared/analytics";
 import { formatYen } from "@/lib/shared/display-formatters";
@@ -31,6 +31,52 @@ function AmountLabel({ label, position, kind, categoryId, month }: {
     transform={position.rotation ? `rotate(${position.rotation} ${position.x} ${position.y})` : undefined}
     fill={label.color} fontSize={CHART_AMOUNT_FONT_SIZE} fontFamily={CHART_AMOUNT_FONT_FAMILY} fontWeight={CHART_AMOUNT_FONT_WEIGHT}
     aria-hidden="true" pointerEvents="none" data-analytics-amount={kind} data-category-id={categoryId} data-month={month}>{label.text}</text>;
+}
+
+function donutCenterLayout(totalText: string, innerRadius: number) {
+  const measure = createChartAmountMeasurer();
+  // A square inscribed in the inner circle keeps every corner away from the ring.
+  const side = Math.max(0, (innerRadius - 6) * Math.SQRT2);
+  const titleHeight = 14, gap = 6;
+  const groups = totalText.match(/[^,]+,?/g) ?? [totalText];
+  for (const wrap of [false, true]) for (let fontSize = 24; fontSize >= 12; fontSize--) {
+    const lineHeight = Math.ceil(fontSize * 1.2);
+    const lines: string[] = [];
+    let line = "";
+    let fits = true;
+    for (const group of wrap ? groups : [totalText]) {
+      const size = measure(line + group, "#fffef8", fontSize);
+      if (!size || size.width > side) {
+        if (!wrap || !line) { fits = false; break; }
+        lines.push(line);
+        line = group;
+        if ((measure(line, "#fffef8", fontSize)?.width ?? Infinity) > side
+          || titleHeight + gap + (lines.length + 1) * lineHeight > side) { fits = false; break; }
+      } else line += group;
+    }
+    if (!fits) continue;
+    if (line) lines.push(line);
+    const height = titleHeight + gap + lines.length * lineHeight;
+    if (height <= side) return { fontSize, lineHeight, lines, height, titleHeight, gap };
+  }
+  // The full amount remains available in the summary and table above the 12px floor.
+  return { fontSize: 12, lineHeight: 15, lines: [], height: titleHeight, titleHeight, gap };
+}
+
+function DonutCenter({ viewBox, totalText }: LabelProps & { totalText: string }) {
+  const polar = viewBox && "cx" in viewBox && "innerRadius" in viewBox ? viewBox : null;
+  const innerRadius = polar?.innerRadius ?? 0;
+  const layout = useMemo(() => donutCenterLayout(totalText, innerRadius), [innerRadius, totalText]);
+  if (!polar || innerRadius < 20) return null;
+  const { cx, cy } = polar;
+  const top = cy - layout.height / 2;
+  return <g data-analytics-center="total" data-inner-radius={innerRadius} data-center-x={cx} data-center-y={cy}
+    aria-hidden="true" pointerEvents="none" fill="var(--ink)" fontFamily={CHART_AMOUNT_FONT_FAMILY} fontWeight={CHART_AMOUNT_FONT_WEIGHT} textAnchor="middle">
+    <text x={cx} y={top + layout.titleHeight / 2} dominantBaseline="central" fontSize={10} fill="var(--muted)">合計</text>
+    {layout.lines.length > 0 && <text data-analytics-center-amount="true" dominantBaseline="central" fontSize={layout.fontSize}>
+      {layout.lines.map((line, index) => <tspan key={index} x={cx} y={top + layout.titleHeight + layout.gap + layout.lineHeight * (index + .5)}>{line}</tspan>)}
+    </text>}
+  </g>;
 }
 
 type TipItem = { name?: string | number; dataKey?: string | number; payload?: { row?: AnalyticsRow; monthIndex?: number } };
@@ -86,9 +132,9 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
                   return <AmountLabel label={label} position={pieAmountPosition(geometry, label)} kind="pie" categoryId={row.id} />;
                 }}>
                 {composition.map(entry => <Cell key={entry.row.id} fill={entry.row.colorHex} />)}
+                <Label content={<DonutCenter totalText={formatYen(view.totalYen)} />} />
               </Pie><Tooltip content={<ChartTooltip />} />
             </PieChart></ResponsiveContainer>
-            <div className={styles.donutCenter}><span>合計</span><strong>{formatYen(view.totalYen)}</strong></div>
           </div> : <p className={styles.chartEmpty}>この期間の負担額はありません。</p>}
           <ul className={styles.categoryList} aria-label="全カテゴリの負担額と割合">{view.rows.map(row => <li key={row.id}><CategoryName row={row} /><strong>{formatYen(row.currentYen)}</strong><span>{share(row.currentYen, view.totalYen)}</span></li>)}</ul>
         </div>
