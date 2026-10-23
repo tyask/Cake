@@ -4,7 +4,7 @@ import { config, hash, parseConnection, type Api, type Binding } from './product
 const scopes = ['DEFAULT', 'MAIN', 'BUILD', 'RUNTIME'] as const;
 const reasons = ['SHAPE', 'VALUE_TYPE', 'CONTEXT', 'TEST_AUTH', 'TLS', 'PREVIEW', 'DATABASE_MISSING', 'DATABASE_EMPTY',
   'DATABASE_REDACTED', 'URI_INVALID', 'ROLE_MISMATCH', 'DATABASE_MISMATCH', 'ENDPOINT_MISMATCH', 'HOST_MISMATCH',
-  'PASSWORD', 'PORT', 'SSLMODE', 'URL_OPTIONS', 'CONNECTION'] as const;
+  'PASSWORD', 'PORT', 'SSLMODE', 'URL_OPTIONS', 'CONNECTION', 'SECRET_METADATA'] as const;
 export type ProductionEnvironmentScope = typeof scopes[number];
 export type ProductionEnvironmentReason = typeof reasons[number];
 export type EnvironmentFailureCode = `ENVIRONMENT_${ProductionEnvironmentScope}_${ProductionEnvironmentReason}`;
@@ -67,12 +67,46 @@ export function validateProductionEnvironment(value: unknown, expected: Binding,
   }
 }
 
+/** A masked value is acceptable only when the provider identifies this Production variable as a Secret. */
+export async function assertProductionSecretDatabase(api: Api, scope: ProductionEnvironmentScope): Promise<void> {
+  const response = await api('vercel', `/v10/projects/${config.vercelProjectId}/env?decrypt=false`);
+  const fail = (): never => { throw new ProductionEnvironmentError(scope, 'SECRET_METADATA'); };
+  if (response === null || typeof response !== 'object' || Array.isArray(response)) return fail();
+  const envs = (response as Record<string, unknown>).envs;
+  if (!Array.isArray(envs)) return fail();
+  const applicable: Record<string, unknown>[] = [];
+  for (const value of envs) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return fail();
+    const row = value as Record<string, unknown>;
+    if (row.key !== 'DATABASE_URL') continue;
+    const targets = typeof row.target === 'string' ? [row.target] : row.target;
+    if (!Array.isArray(targets) || targets.some(target => typeof target !== 'string')) return fail();
+    if (!targets.includes('production')) continue;
+    if (row.gitBranch != null) return fail();
+    applicable.push(row);
+  }
+  if (applicable.length !== 1 || !(applicable[0].type === 'sensitive' || applicable[0].visibility === 'secret')) return fail();
+}
+
+/** Provider exports hide Secrets; readable values still use the complete strict connection check. */
+export async function assertProviderProductionEnvironment(api: Api, value: unknown, expected: Binding,
+  scope: ProductionEnvironmentScope, requireDatabase = true): Promise<void> {
+  try { validateProductionEnvironment(value, expected, scope, requireDatabase); }
+  catch (error) {
+    if (!(error instanceof ProductionEnvironmentError)
+      || ![`ENVIRONMENT_${scope}_DATABASE_EMPTY`, `ENVIRONMENT_${scope}_DATABASE_REDACTED`].includes(error.code)) throw error;
+    await assertProductionSecretDatabase(api, scope);
+    // Recheck all non-DB guards; Native connection metadata remains the binding source for hidden Secrets.
+    const visible = { ...(value as Record<string, unknown>) }; delete visible.DATABASE_URL;
+    validateProductionEnvironment(visible, expected, scope, false);
+  }
+}
+
 /** Only these two fixed GET routes can retrieve the effective project environment. */
 export async function assertProductionProjectEnvironment(api: Api, expected: Binding): Promise<void> {
   for (const [suffix, scope] of [['', 'DEFAULT'], ['/main', 'MAIN']] as const) {
-    // Preserve the API's fixed MigrationError instead of relabeling transport/HTTP failures.
     const response = await api('vercel', `/v3/env/pull/${config.vercelProjectId}/production${suffix}`);
     if (response === null || typeof response !== 'object' || Array.isArray(response)) throw new ProductionEnvironmentError(scope, 'SHAPE');
-    validateProductionEnvironment((response as Record<string, unknown>).env, expected, scope);
+    await assertProviderProductionEnvironment(api, (response as Record<string, unknown>).env, expected, scope);
   }
 }

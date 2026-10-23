@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  assertProductionProjectEnvironment, environmentFailureCodes, ProductionEnvironmentError, validateProductionEnvironment,
+  assertProductionProjectEnvironment, assertProviderProductionEnvironment, environmentFailureCodes, ProductionEnvironmentError, validateProductionEnvironment,
   type ProductionEnvironmentReason, type ProductionEnvironmentScope,
 } from '../scripts/production-db-cutover-environment';
 import { config, hash, MigrationError, parseConnection, type Api, type Binding } from '../scripts/production-db-migration-provider';
@@ -100,12 +100,15 @@ test('project実効値は固定projectのProduction default→mainのGETだけ�
     ['vercel', `/v3/env/pull/${config.vercelProjectId}/production/main`]]);
 });
 
-test('defaultの失敗でmainを取得せず、mainの失敗はMAIN codeとする', async () => {
+test('不可視値のSecret metadataが無ければscope付き固定codeで止める', async () => {
   for (const failureAt of [1, 2]) {
-    let calls = 0;
-    const api: Api = async () => ++calls === failureAt ? { env: { DATABASE_URL: '[SENSITIVE]' } } : { env: environment() };
-    await assert.rejects(assertProductionProjectEnvironment(api, expected), error => safeFailure(error, failureAt === 1 ? 'DEFAULT' : 'MAIN', 'DATABASE_REDACTED'));
-    assert.equal(calls, failureAt);
+    let envReads = 0, metadataReads = 0;
+    const api: Api = async (_provider, path) => {
+      if (path.includes('/env?')) { metadataReads++; return { envs: [] }; }
+      return ++envReads === failureAt ? { env: { DATABASE_URL: '[SENSITIVE]' } } : { env: environment() };
+    };
+    await assert.rejects(assertProductionProjectEnvironment(api, expected), error => safeFailure(error, failureAt === 1 ? 'DEFAULT' : 'MAIN', 'SECRET_METADATA'));
+    assert.equal(envReads, failureAt); assert.equal(metadataReads, 1);
   }
 });
 
@@ -122,4 +125,28 @@ test('outer responseとenvのshape不正はscope固定error、API失敗は元Mig
     }, expected), error => error === original);
     assert.equal(calls, failureAt);
   }
+});
+
+
+test('APIの不可視値はProduction DATABASE_URLが明示Secretの時だけ許し、実値検査は弱めない', async () => {
+  for (const scope of scopes) for (const metadata of [{ type: 'sensitive' }, { type: 'encrypted', visibility: 'secret' }]) {
+    const paths: string[] = [];
+    const api: Api = async (provider, path) => { assert.equal(provider, 'vercel'); paths.push(path);
+      return { envs: [{ id: 'env_fixture', key: 'DATABASE_URL', target: ['production'], ...metadata, value: password }] }; };
+    for (const value of ['', '[SENSITIVE]']) await assertProviderProductionEnvironment(api, { ...environment(), DATABASE_URL: value }, expected, scope);
+    assert.deepEqual(paths, Array(2).fill(`/v10/projects/${config.vercelProjectId}/env?decrypt=false`));
+    await assert.rejects(assertProviderProductionEnvironment(api, { ...environment(), DATABASE_URL: uri().replace('ep-fixture.', 'ep-other.') }, expected, scope), error => safeFailure(error, scope, 'ENDPOINT_MISMATCH'));
+    assert.equal(paths.length, 2);
+    assert.throws(() => validateProductionEnvironment({ DATABASE_URL: '' }, expected, scope), error => safeFailure(error, scope, 'DATABASE_EMPTY'));
+  }
+});
+
+test('Secret metadataの欠落・重複・不正scope・非Secret・読取失敗を成功扱いしない', async () => {
+  const variable = { id: 'env_fixture', key: 'DATABASE_URL', target: ['production'], type: 'sensitive' };
+  const values = [null, [], {}, { envs: null }, { envs: [null] }, { envs: [] }, { envs: [variable, variable] },
+    { envs: [{ ...variable, target: ['preview'] }] }, { envs: [{ ...variable, gitBranch: 'main' }] },
+    { envs: [{ ...variable, type: 'encrypted', visibility: 'config' }] }, { envs: [{ ...variable, target: null }] }];
+  for (const value of values) await assert.rejects(assertProviderProductionEnvironment(async () => value, { DATABASE_URL: '' }, expected, 'BUILD'), error => safeFailure(error, 'BUILD', 'SECRET_METADATA'));
+  const original = new MigrationError('PROVIDER_VERCEL_HTTP_403');
+  await assert.rejects(assertProviderProductionEnvironment(async () => { throw original; }, { DATABASE_URL: '' }, expected, 'BUILD'), error => error === original);
 });

@@ -12,11 +12,12 @@ const databaseUrl = (target: 'source' | 'target', pooled = true) => `postgresql:
 const productionEnvironment = (target: 'source' | 'target') => ({ DATABASE_URL: databaseUrl(target), AUTH_MODE: 'google', VERCEL_ENV: 'production' });
 const productionEnvPath = `/v3/env/pull/${config.vercelProjectId}/production`;
 const candidateEnvPath = `/v3/env/pull/${newId}`;
+const oidcExpiry = Math.floor(Date.now() / 1000) + 3600;
 const oidc = (changes = {}) => `header.${Buffer.from(JSON.stringify({ project_id: config.vercelProjectId, owner_id: config.vercelTeamId,
-  environment: 'development', exp: Math.floor(Date.now() / 1000) + 3600, ...changes })).toString('base64url')}.signature`;
+  environment: 'development', exp: oidcExpiry, ...changes })).toString('base64url')}.signature`;
 type Call = { url: URL; method: string; body: Record<string, unknown> | undefined; headers: Headers };
 type FixtureOptions = {
-  mixed?: boolean; stagedBranch?: boolean; staleKnown?: boolean;
+  mixed?: boolean; stagedBranch?: boolean; staleKnown?: boolean; secret?: boolean;
   productionReference?: string; canonicalState?: 'READY' | 'ERROR' | 'BUILDING';
   before?: (call: Call, state: State) => Response | undefined;
   after?: (call: Call, state: State, response: Response) => Response | undefined;
@@ -70,6 +71,9 @@ function fixture(options: FixtureOptions = {}) {
       else if (url.pathname === productionEnvPath || url.pathname === `${productionEnvPath}/main`) {
         assert.equal(method, 'GET'); assert.equal(url.searchParams.has('gitBranch'), false);
         response = json({ env: productionEnvironment(state.target.some(row => row.environments.includes('production')) ? 'target' : 'source') });
+      } else if (url.pathname === `/v10/projects/${config.vercelProjectId}/env`) {
+        assert.equal(method, 'GET'); assert.equal(url.searchParams.get('decrypt'), 'false');
+        response = json({ envs: options.secret ? [{ key: 'DATABASE_URL', target: ['production'], type: 'encrypted', visibility: 'secret' }] : [] });
       } else if (url.pathname === candidateEnvPath) {
         assert.equal(method, 'GET'); assert.equal(url.searchParams.has('gitBranch'), false);
         assert.ok(state.candidate); response = json({ env: productionEnvironment('target'), buildEnv: productionEnvironment('target') });
@@ -124,6 +128,26 @@ test('Production接続だけを切り替えて固定SHA候補を検証し、同�
   assert.deepEqual(report.after!.known.map(row => row[1]), [newId,newId,newId]);
   assert.equal(f.state.aliases.find(row => row.alias === 'cake-main-preview-fumin1.vercel.app')!.deploymentId, previewId);
   assert.deepEqual(report.deployment, { id: newId, url: 'https://cake-new-production.vercel.app', sha }); sanitized(report);
+});
+
+test('Secretの非公開API値はmetadataとNative接続を照合して既存のbuild・probe・公開へ進む', async () => {
+  for (const masked of ['', '[SENSITIVE]']) {
+    const f = fixture({ secret: true, after: (call, _state, response) => {
+      if (call.url.pathname.startsWith(productionEnvPath)) return json({ env: { ...productionEnvironment('source'), DATABASE_URL: masked } });
+      if (call.url.pathname === candidateEnvPath) return json({ env: { DATABASE_URL: masked }, buildEnv: { ...productionEnvironment('target'), DATABASE_URL: masked } });
+      return response;
+    } });
+    const report = await f.run();
+    assert.equal(report.success, true); assert.equal(report.nativeVerified, true); assert.equal(report.ready, true);
+    assert.equal(report.probed, true); assert.equal(report.promoted, true); assert.equal(mutations(f.state).length, 4); sanitized(report);
+  }
+});
+
+test('Secretでも読める接続不一致・値の欠落・本番guardの違反は変更前に拒否する', async () => {
+  for (const env of [{ ...productionEnvironment('target') }, {}, { ...productionEnvironment('source'), DATABASE_URL: '', AUTH_MODE: 'test' }]) {
+    const f = fixture({ secret: true, after: (call, _state, response) => call.url.pathname === productionEnvPath ? json({ env }) : response });
+    const report = await f.run(); assert.equal(report.success, false); assert.equal(mutations(f.state).length, 0); sanitized(report);
+  }
 });
 
 test('失敗した直近Production参照があっても、配信中のREADYなcanonicalを基準に切り替える', async () => {
