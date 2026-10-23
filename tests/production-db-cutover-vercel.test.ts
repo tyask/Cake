@@ -17,6 +17,7 @@ const oidc = (changes = {}) => `header.${Buffer.from(JSON.stringify({ project_id
 type Call = { url: URL; method: string; body: Record<string, unknown> | undefined; headers: Headers };
 type FixtureOptions = {
   mixed?: boolean; stagedBranch?: boolean; staleKnown?: boolean;
+  productionReference?: string; canonicalState?: 'READY' | 'ERROR' | 'BUILDING';
   before?: (call: Call, state: State) => Response | undefined;
   after?: (call: Call, state: State, response: Response) => Response | undefined;
 };
@@ -38,7 +39,7 @@ function fixture(options: FixtureOptions = {}) {
   };
   state.aliases.push({ alias: 'cake-main-preview-fumin1.vercel.app', deploymentId: previewId, projectId: config.vercelProjectId });
   state.domains.push({ name: 'preview.example.test', projectId: config.vercelProjectId, verified: true, gitBranch: 'cake-main-preview', customEnvironmentId: null, redirect: null });
-  const old = { id: oldId, projectId: config.vercelProjectId, ownerId: config.vercelTeamId, target: 'production', readyState: 'READY',
+  const old = { id: oldId, projectId: config.vercelProjectId, ownerId: config.vercelTeamId, target: 'production', readyState: options.canonicalState ?? 'READY',
     url: 'cake-old-production.vercel.app', gitSource: { type: 'github', repoId: config.repositoryId, ref: 'main', sha: 'b'.repeat(40) }, meta: {} };
   const request: typeof fetch = async (input, init) => {
     const url = new URL(String(input)), method = init?.method ?? 'GET';
@@ -61,7 +62,7 @@ function fixture(options: FixtureOptions = {}) {
       else if (url.pathname === `/v9/projects/${config.vercelProjectId}/domains`) response = json({ domains: url.searchParams.get('production') === 'true'
         ? state.domains.filter(row => row.gitBranch === null) : state.domains, pagination: { next: null } });
       else if (url.pathname === `/v9/projects/${config.vercelProjectId}`) response = json({ id: config.vercelProjectId, accountId: config.vercelTeamId,
-        link: { type: 'github', repoId: config.repositoryId }, targets: { production: { id: state.promoted ? newId : oldId } }, privateText });
+        link: { type: 'github', repoId: config.repositoryId }, targets: { production: { id: state.promoted ? newId : options.productionReference ?? oldId } }, privateText });
       else if (url.pathname === `/v13/deployments/${oldId}`) { assert.equal(url.searchParams.get('withGitRepoInfo'), 'true'); response = json(old); }
       else if (url.pathname === `/v13/deployments/${newId}`) { assert.equal(url.searchParams.get('withGitRepoInfo'), 'true'); response = json(state.candidate); }
       else if (url.pathname === '/v6/deployments') response = json({ deployments: [old, ...(state.candidate ? [state.candidate] : [])], pagination: { next: null } });
@@ -123,6 +124,22 @@ test('Production接続だけを切り替えて固定SHA候補を検証し、同�
   assert.deepEqual(report.after!.known.map(row => row[1]), [newId,newId,newId]);
   assert.equal(f.state.aliases.find(row => row.alias === 'cake-main-preview-fumin1.vercel.app')!.deploymentId, previewId);
   assert.deepEqual(report.deployment, { id: newId, url: 'https://cake-new-production.vercel.app', sha }); sanitized(report);
+});
+
+test('失敗した直近Production参照があっても、配信中のREADYなcanonicalを基準に切り替える', async () => {
+  const f = fixture({ productionReference: 'dpl_FailedLatest' }), report = await f.run();
+  assert.equal(report.success, true); assert.equal(report.promoted, true); assert.equal(report.aliasVerified, true);
+  assert.equal(report.before!.known[0][1], oldId); assert.equal(report.after!.known[0][1], newId);
+  assert.ok(f.state.calls.some(call => call.url.pathname === `/v13/deployments/${oldId}`));
+  assert.equal(mutations(f.state).length, 4); sanitized(report);
+});
+
+test('配信中のcanonical自身がREADYでなければProduction接続を変更しない', async () => {
+  for (const canonicalState of ['ERROR', 'BUILDING'] as const) {
+    const f = fixture({ productionReference: 'dpl_FailedLatest', canonicalState }), report = await f.run();
+    assert.equal(report.success, false); assert.equal(report.stage, 'preflight'); assert.equal(report.code, 'DEPLOYMENT_BINDING');
+    assert.equal(mutations(f.state).length, 0); assert.equal(report.targetConnected, false); sanitized(report);
+  }
 });
 
 test('mixed scopeはProductionだけ除き、staged branch aliasの更新と旧generated aliasを区別して報告する', async () => {
