@@ -148,7 +148,7 @@ test("APIのcomposition rootはstoreを組み立て、サービスとhandlerは�
 
 test("sharedとclientでは外部packageのbrowser入口を区別してNode・サーバーSDKを拒否する", () => {
   assert.deepEqual(check({
-    "components/view.tsx": `"use client"; import "react"; import "next/image"; import "next-auth/react"; import "@dnd-kit/core"; import "./view.module.css";`,
+    "components/view.tsx": `"use client"; import "react"; import "next/image"; import "next-auth/react"; import "@dnd-kit/core"; import "recharts"; import "./view.module.css";`,
     "lib/shared/input.ts": `import "zod"; import "papaparse";`,
   }), []);
   for (const dependency of ["node:fs", "fs/promises", "@neondatabase/serverless", "next-auth", "next/headers", "next/server", "server-only", "unknown-package"]) {

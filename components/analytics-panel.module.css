@@ -1,0 +1,107 @@
+.analytics { min-width: 0; }
+.analytics[hidden] { display: none; }
+.refresh,.customDates button,.error button { min-height: 2.75rem; padding: .55rem .85rem; border: 1px solid var(--line-strong); border-radius: .55rem; background: var(--paper); cursor: pointer; font-size: .75rem; }
+.conditions { position: static; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1.1rem 1.5rem; padding: 1.1rem 1.25rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--paper); }
+.periodGroup { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .65rem; }
+.field { display: flex; flex-direction: column; gap: .45rem; min-width: 0; color: var(--muted); font-size: .67rem; }
+.field input,.field select { min-height: 2.75rem; max-width: 100%; min-width: 0; padding: .5rem .65rem; border: 1px solid var(--line-strong); border-radius: .45rem; color: var(--ink); background: #fff; font-size: .75rem; }
+.checkGroup { min-width: 0; max-width: 100%; margin: 0; padding: 0; border: 0; }
+.checkGroup legend { padding: 0; margin-bottom: .35rem; color: var(--muted); font-size: .67rem; }
+.checks { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1rem; min-height: 2.75rem; }
+.checks label { display: inline-flex; align-items: center; gap: .45rem; min-height: 2.75rem; max-width: 100%; color: var(--ink); font-size: .76rem; cursor: pointer; overflow-wrap: anywhere; }
+.checks input { flex: none; width: 1rem; height: 1rem; margin: 0; }
+.memberHelp { position: relative; display: inline-flex; align-items: center; gap: .15rem; }
+.helpLabel { border-bottom: 1px dotted var(--muted); cursor: help; }
+.helpLabel:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.helpInfo { display: none; }
+.helpTooltip { position: absolute; z-index: 7; top: calc(100% + .45rem); right: 0; width: max-content; max-width: min(20rem, calc(100vw - 4rem)); padding: .65rem .8rem; border-radius: .5rem; color: #fff; background: var(--ink); box-shadow: 0 .25rem .8rem #0002; font-size: .75rem; line-height: 1.6; }
+.helpTooltip::before { content: ""; position: absolute; right: 0; bottom: 100%; left: 0; height: .45rem; }
+.customDates { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: flex-end; gap: .65rem; padding-top: .9rem; border-top: 1px solid var(--line); }
+.customDates > span { padding-bottom: .75rem; color: var(--muted); font-size: .7rem; }
+.customDates button { background: var(--surface-muted); }
+.periodError { flex-basis: 100%; margin: 0; color: var(--red); font-size: .75rem; }
+.scopeNote { margin: .7rem 0 1rem; color: var(--muted); font-size: .65rem; line-height: 1.7; }
+.selectionLine { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 1rem; margin-bottom: .8rem; color: var(--muted); font-size: .66rem; line-height: 1.7; }
+.selectionLine b { color: var(--ink); font-weight: 500; }
+.stats { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: .9rem; margin-bottom: 1.25rem; }
+.stat { min-width: 0; padding: 1.1rem 1.2rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--paper); }
+.primaryStat { border-color: #ecd790; background: #fff1b8; }
+.stat > span { color: var(--muted); font-size: .72rem; }
+.stat strong { display: block; margin: .65rem 0 .4rem; font-size: clamp(1.25rem, 2.5vw, 1.9rem); font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.stat small { display: block; color: var(--muted); font-size: .64rem; line-height: 1.7; overflow-wrap: anywhere; }
+.chartGrid { display: grid; grid-template-columns: minmax(0,.9fr) minmax(0,1.1fr); gap: 1.1rem; align-items: start; }
+.card { min-width: 0; padding: 1.3rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--paper); }
+.cardHeading { display: flex; align-items: start; justify-content: space-between; gap: .6rem; }
+.cardHeading h2 { margin: 0; font-size: 1rem; font-weight: 700; line-height: 1.6; }
+.cardHeading > span { flex: none; padding: .2rem .45rem; border: 1px solid var(--line); border-radius: .3rem; color: var(--muted); font-size: .6rem; }
+.cardSubtitle { margin: .35rem 0 0; color: var(--muted); font-size: .66rem; line-height: 1.8; }
+.donutChart { position: relative; width: 100%; height: 16.5rem; max-width: 21rem; margin: .1rem auto; }
+.categoryList { margin: .4rem 0 0; padding: 0; list-style: none; }
+.categoryList li { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: .6rem; padding: .65rem 0; border-top: 1px solid var(--line); font-size: .72rem; }
+.categoryList strong { font-size: .72rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.categoryList li > span:last-child { min-width: 2.7rem; color: var(--muted); font-size: .65rem; text-align: right; font-variant-numeric: tabular-nums; }
+.categoryName { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.categoryName > i { flex: none; width: .55rem; height: .55rem; border-radius: .15rem; }
+.categoryName > span { min-width: 0; overflow-wrap: anywhere; }
+.miniNote,.comparisonNote { margin: .8rem 0 0; color: var(--muted); font-size: .6rem; line-height: 1.8; }
+.trendChart { height: 16.5rem; margin-top: 1.1rem; }
+.legend { display: flex; flex-wrap: wrap; gap: .6rem 1rem; padding: 0; margin: 1rem 0 0; color: var(--muted); font-size: .63rem; list-style: none; }
+.tableDetails { margin-top: 1rem; padding-top: .6rem; border-top: 1px solid var(--line); }
+.tableDetails summary { min-height: 2.75rem; padding: .7rem 0; color: var(--accent); font-size: .7rem; cursor: pointer; }
+.tableDetails summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tableScroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.tableScroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tableScroll table { width: 100%; border-collapse: collapse; font-size: .7rem; font-variant-numeric: tabular-nums; }
+.tableScroll caption { padding: .65rem 0; color: var(--muted); font-size: .65rem; text-align: left; }
+.tableScroll th,.tableScroll td { padding: .75rem .55rem; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; font-weight: 400; }
+.tableScroll th:first-child { min-width: 5rem; max-width: 15rem; padding-left: 0; text-align: left; white-space: normal; }
+.tableScroll td:last-child { padding-right: 0; }
+.tableScroll thead th { color: var(--muted); font-size: .65rem; }
+.tableScroll tfoot th,.tableScroll tfoot td { border-bottom: 0; font-weight: 700; }
+.comparison { margin-top: 1.1rem; }
+.comparisonBody { display: grid; grid-template-columns: minmax(0,.85fr) minmax(0,1.15fr); align-items: start; gap: 1.25rem; margin-top: 1rem; }
+.differenceChart { min-width: 0; }
+.comparisonNote { padding: .65rem .8rem; border-radius: .4rem; background: var(--surface-muted); }
+.chartTooltip { max-width: min(18rem, calc(100vw - 3rem)); padding: .65rem .8rem; border: 1px solid var(--line); border-radius: .5rem; color: var(--ink); background: var(--paper); box-shadow: 0 .25rem .8rem #0002; font-size: .68rem; }
+.chartTooltip > b { display: block; margin-bottom: .5rem; }
+.chartTooltip p { display: flex; justify-content: space-between; gap: .7rem; margin: .3rem 0; }
+.chartTooltip p > span { overflow-wrap: anywhere; }.chartTooltip strong { white-space: nowrap; }
+.empty { padding: 3rem 1rem; color: var(--muted); text-align: center; font-size: .8rem; line-height: 1.9; }
+.chartEmpty { display: grid; min-height: 12rem; align-items: center; margin: 0; color: var(--muted); font-size: .76rem; text-align: center; }
+.error { margin-top: 1rem; padding: 1rem; border: 1px solid #d8a89b; border-radius: .6rem; color: var(--red); background: #fff5ef; font-size: .8rem; }
+.error p { margin: 0 0 .8rem; }.muted { color: var(--muted); font-size: .7rem; }
+.snapshot { margin: 1rem 0 0; color: var(--muted); font-size: .63rem; text-align: right; line-height: 1.8; }
+@media (max-width: 75rem) {
+  .chartGrid { grid-template-columns: minmax(0,1fr); }
+  .compositionBody { display: grid; grid-template-columns: minmax(0,.8fr) minmax(0,1.2fr); align-items: center; gap: 1rem; }
+  .comparisonBody { grid-template-columns: minmax(0,1fr); }
+}
+@media (max-width: 48rem) {
+  .conditions { position: static; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: 1rem .7rem; padding: .9rem; }
+  .periodGroup { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .7rem; }
+  .conditions > .field { grid-column: 1 / -1; }
+  .field input,.field select { width: 100%; }
+  .checkGroup { position: relative; padding-top: .75rem; border-top: 1px solid var(--line); }
+  .checkGroup legend { min-height: 1.5rem; line-height: 1.5rem; }
+  .memberHelp { position: static; }
+  .helpLabel { border-bottom: 0; }
+  .helpInfo { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: .2rem; background: transparent; color: var(--muted); font-size: .85rem; line-height: 1; }
+  .helpTooltip { top: 1.6rem; right: auto; left: 0; max-width: min(20rem, calc(100vw - 4rem)); }
+  .checks { align-items: flex-start; gap: .2rem .7rem; }
+  .checks label { font-size: .72rem; }
+  .customDates { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: .5rem; }
+  .customDates button { grid-column: 1 / -1; }.periodError { grid-column: 1 / -1; }
+  .scopeNote { margin-top: .6rem; font-size: .61rem; }
+  .selectionLine { font-size: .62rem; }
+  .stats { grid-template-columns: repeat(2,minmax(0,1fr)); gap: .65rem; }
+  .stat { padding: .95rem .85rem; }.primaryStat { grid-column: 1 / -1; }
+  .stat strong { font-size: 1.3rem; }.primaryStat strong { font-size: 2rem; }
+  .stat > span { font-size: .65rem; }.stat small { font-size: .58rem; }
+  .card { padding: 1.1rem .95rem; }.cardHeading h2 { font-size: .95rem; }
+  .compositionBody { display: block; }
+  .categoryList li { gap: .4rem; font-size: .68rem; }.categoryList strong { font-size: .68rem; }
+  .categoryList li > span:last-child { min-width: 2.5rem; font-size: .6rem; }
+  .tableScroll table { font-size: .65rem; }.tableScroll th,.tableScroll td { padding: .7rem .4rem; }
+  .tableScroll th:first-child { min-width: 5.5rem; }.cardSubtitle { font-size: .62rem; }
+  .comparisonBody { gap: .65rem; }.snapshot { font-size: .58rem; }
+}

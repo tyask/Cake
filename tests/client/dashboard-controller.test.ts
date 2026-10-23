@@ -70,6 +70,56 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
     return { context, page, requests, errors, take, reply };
   }
   try {
+    await scenario("集計はmetadataを取得し、保存成功の世代とworkspace切替中を公開する", async f => {
+      await expectState(f.page, { analyticsRevision: 0, workspaceSwitching: false });
+      await f.page.evaluate(() => window.controller.openTab("analytics"));
+      const request = await f.take();
+      assert.equal(new URL(request.request().url()).searchParams.get("scope"), "metadata");
+      await f.reply(request, metadata());
+      await expectState(f.page, { tab: "analytics", loading: false, "selected.transactions.0.merchant": "initial" });
+      await f.page.evaluate(() => {
+        window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: null }, "");
+      });
+      const save = await f.take("POST");
+      await expectState(f.page, { analyticsRevision: 0 });
+      await f.reply(save, { ok: true, transactionId: "transaction-a", categoryId: null, categoryConfirmed: false, categoryRevision: 1 });
+      await expectState(f.page, { analyticsRevision: 1, loading: false });
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
+      const change = await f.take();
+      await expectState(f.page, { workspaceSwitching: true, "selected.workspace.id": "a" });
+      await f.reply(change, data("b"));
+      await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "b", loading: false });
+    });
+    await scenario("workspace切替に失敗したら切替中を解除し、元の家計を再表示できる", async f => {
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
+      await expectState(f.page, { workspaceSwitching: true });
+      await f.reply(await f.take(), { error: "切替に失敗しました。" }, 500);
+      await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "a", loading: false });
+    });
+    for (const olderFails of [false, true]) await scenario(`workspace切替の元要求が${olderFails ? "失敗" : "成功"}しても、後発の集計タブ取得が採用されるまで旧家計を隠す`, async f => {
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
+      const older = await f.take();
+      await f.page.evaluate(() => window.controller.openTab("analytics"));
+      const lightweight = await f.take();
+      await f.reply(older, olderFails ? { error: "古い要求の失敗" } : data("b"), olderFails ? 500 : 200);
+      await expectState(f.page, { tab: "analytics", workspaceSwitching: true, "selected.workspace.id": "a", notice: null });
+      await f.reply(lightweight, metadata("b"));
+      const full = await f.take();
+      await expectState(f.page, { workspaceSwitching: true, "selected.workspace.id": "a" });
+      await f.reply(full, data("b"));
+      await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "b", loading: false, notice: null });
+    });
+    await scenario("切替中の集計タブ取得が失敗したら元の家計へ戻り、遅い切替応答も破棄する", async f => {
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
+      const older = await f.take();
+      await f.page.evaluate(() => window.controller.openTab("analytics"));
+      await f.reply(await f.take(), metadata("b"));
+      const latest = await f.take();
+      await f.reply(latest, { error: "切替先を取得できませんでした。" }, 500);
+      await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "a", notice: "切替先を取得できませんでした。" });
+      await f.reply(older, data("b"));
+      await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "a", loading: false });
+    });
     await scenario("取込から開始すると初回描画からimportを選び、更新はmetadata、homeへの移動はfullを要求する", async f => {
       await expectState(f.page, { tab: "import", loading: false }); assert.equal(f.requests.length, 0);
       await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
