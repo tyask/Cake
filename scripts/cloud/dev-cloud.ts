@@ -33,7 +33,7 @@ export function assertCloudStartupAllowed(environment: Environment, directory = 
 }
 
 /** Keep networking/CA/cache settings, without inheriting application/provider credentials. */
-export function cloudChildEnvironment(environment: Environment, database: Pick<MemoryDatabase, "url" | "connectionString">, port: number): NodeJS.ProcessEnv {
+export function cloudChildEnvironment(environment: Environment, database: Pick<MemoryDatabase, "url" | "connectionString">): NodeJS.ProcessEnv {
   const child: NodeJS.ProcessEnv = { NODE_ENV: "development" };
   for (const key of [
     "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP",
@@ -50,7 +50,7 @@ export function cloudChildEnvironment(environment: Environment, database: Pick<M
   }
   return Object.assign(child, {
     CAKE_CLOUD_MODE: "memory", CAKE_MEMORY_DATABASE_URL: database.url, DATABASE_URL: database.connectionString,
-    AUTH_MODE: "test", AUTH_SECRET: randomBytes(32).toString("hex"), AUTH_URL: `http://127.0.0.1:${port}`,
+    AUTH_MODE: "test", AUTH_SECRET: randomBytes(32).toString("hex"),
     NODE_ENV: "development", DB_QUERY_LOG: "off", NEXT_TELEMETRY_DISABLED: "1",
   });
 }
@@ -152,7 +152,7 @@ export async function startCloudServer({ port: requestedPort, hostname = "0.0.0.
     if (closing) throw new Error("CLOUD_STARTUP_INTERRUPTED");
     // Check again after migration/seed, before Next can load any environment file.
     assertCloudStartupAllowed(process.env);
-    const environment = cloudChildEnvironment(process.env, database, port);
+    const environment = cloudChildEnvironment(process.env, database);
     const next = createRequire(import.meta.url).resolve("next/dist/bin/next");
     child = spawn(process.execPath, [next, "dev", "--hostname", hostname, "--port", String(port)], {
       cwd: rootDirectory, env: environment, detached: true, stdio: ["ignore", "pipe", "pipe"],

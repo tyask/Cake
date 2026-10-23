@@ -34,14 +34,14 @@ test("Next子環境はCA・proxy・cacheを維持し、既存DB・認証・provi
     NODE_EXTRA_CA_CERTS: "/certs/cloud.pem", SSL_CERT_DIR: "/certs", HTTPS_PROXY: "http://proxy.local:8080",
     NO_PROXY: "127.0.0.1,localhost", npm_config_cache: "/cache/npm", PLAYWRIGHT_BROWSERS_PATH: "/cache/browsers",
     NODE_USE_SYSTEM_CA: "1", NODE_USE_ENV_PROXY: "1",
-    DATABASE_URL: "private-database", CAKE_TEST_DATABASE_URL: "private-test-database", AUTH_SECRET: "private-auth",
+    DATABASE_URL: "private-database", CAKE_TEST_DATABASE_URL: "private-test-database", AUTH_SECRET: "private-auth", AUTH_URL: "https://private-origin.example",
     AUTH_GOOGLE_ID: "private-google-id", AUTH_GOOGLE_SECRET: "private-google-secret", GH_TOKEN: "private-gh",
     GITHUB_TOKEN: "private-github", VERCEL_TOKEN: "private-vercel", NEON_API_KEY: "private-neon",
     OPENAI_API_KEY: "private-openai", NEXT_PUBLIC_PRIVATE_VALUE: "private-client", NODE_OPTIONS: "--require private-loader",
   });
   const database = { url: "http://127.0.0.1:34567/sql/" + "a".repeat(48), connectionString: "postgresql://cake:memory@cloud.cake.local/cake" };
-  const first = cloudChildEnvironment(inherited, database, 3001);
-  const second = cloudChildEnvironment(inherited, database, 3001);
+  const first = cloudChildEnvironment(inherited, database);
+  const second = cloudChildEnvironment(inherited, database);
   for (const key of ["PATH", "HOME", "TMPDIR", "XDG_CACHE_HOME", "NODE_EXTRA_CA_CERTS", "SSL_CERT_DIR", "HTTPS_PROXY", "NO_PROXY", "npm_config_cache", "PLAYWRIGHT_BROWSERS_PATH", "NODE_USE_SYSTEM_CA", "NODE_USE_ENV_PROXY"] as const) {
     assert.equal(first[key], inherited[key]);
   }
@@ -52,7 +52,7 @@ test("Next子環境はCA・proxy・cacheを維持し、既存DB・認証・provi
   assert.equal(first.CAKE_MEMORY_DATABASE_URL, database.url);
   assert.equal(first.CAKE_CLOUD_MODE, "memory");
   assert.equal(first.AUTH_MODE, "test");
-  assert.equal(first.AUTH_URL, "http://127.0.0.1:3001");
+  assert.equal(first.AUTH_URL, undefined, "Auth.js uses the current request origin, including forwarded Cloud hosts");
   assert.match(first.AUTH_SECRET!, /^[a-f0-9]{64}$/);
   assert.notEqual(first.AUTH_SECRET, second.AUTH_SECRET);
   assert.equal(first.NODE_ENV, "development");
