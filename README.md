@@ -10,7 +10,7 @@
 - [明細の絞り込みと画面の手動更新](docs/detail-design.html#client)
 - [明細の一括削除・共有費ルールの適用](docs/detail-design.html#client)
 - [毎月指定日の定期支払い](docs/detail-design.html#recurring-payments)
-- [PayPay CSVのプレビュー・カテゴリ設定・取込・重複確認](docs/detail-design.html#domain)
+- [PayPay CSVのプレビュー・カテゴリ設定と履歴からの補完・取込・重複確認](docs/detail-design.html#domain)
 - [取引先ごとの費用区分・負担割合のデフォルトルール](docs/detail-design.html#client)
 - [明細ごとの負担割合に基づく清算額の計算](docs/detail-design.html#domain)
 - [清算完了と清算履歴](docs/detail-design.html#domain)
@@ -29,7 +29,9 @@ iPhoneでのPayPay共有ショートカットとCSV貼り付けの確認方法�
 
 データ取得・DBクエリログの仕様は[詳細設計書のRepository・データ取得設計](docs/detail-design.html#repository)を参照してください。
 
-明細の取引先は表示用の値を保持し、NFKC・小文字化・空白整理による照合用の値をDBの生成列へ保存します。手入力・CSV・定期支払いなどの保存経路で同じSQL関数を使い、既存明細もmigrationで補完します。照合規則と互換性は[取引先の照合用正規化](docs/detail-design.html#merchant-normalization)を参照してください。CSVカテゴリの自動補完とグラフは未提供です。
+明細の取引先は表示用の値を保持し、NFKC・小文字化・空白整理による照合用の値をDBの生成列へ保存します。手入力・CSV・定期支払いなどの保存経路で同じSQL関数を使い、既存明細もmigrationで補完します。照合規則と互換性は[取引先の照合用正規化](docs/detail-design.html#merchant-normalization)を参照してください。
+
+CSVの「カテゴリ自動補完」は、チェック状態に関係なく登録可能な未分類行へ候補を設定します。同じワークスペース・正規化後の取引先に一致する確認済み支払い履歴の最新30件から最多カテゴリを選び、同率なら最新の履歴を優先します。設定済みカテゴリは保持し、結果は登録前に変更できます。「確認して登録」で最終値を保存し、カテゴリ付き明細を次回の補完に利用します。グラフは未提供です。
 
 ソースは実行場所と用途で分けています。依存方向と各境界の責務は[詳細設計書の実装構成](docs/detail-design.html#architecture)を参照してください。
 

@@ -57,7 +57,7 @@ async function openFixture(browser: Browser, origin: string, width: number, sele
   await page.addInitScript(data => { window.importWorkspace = data; }, selected);
   await page.goto(origin);
   await page.locator("input[type=file]").setInputFiles({ name: "categories.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
-  await page.getByRole("button", { name: "登録", exact: true }).waitFor();
+  await page.getByRole("button", { name: "確認して登録", exact: true }).waitFor();
   const row = (merchant: string) => page.locator("[data-import-key]").filter({ has: page.locator('td[data-label="取引先"] b', { hasText: new RegExp(`^${merchant}$`) }) });
   if (width < 700) for (const merchant of merchants) await row(merchant).getByRole("button", { name: `${merchant}の詳細を開く`, exact: true }).click();
   return { context, page, requests, errors, row, completeSave: async () => { assert.ok(releaseSave); await releaseSave(); } };
@@ -150,7 +150,7 @@ test("CSVカテゴリはプレビュー内で個別・選択行へ設定し、�
           assert.equal(requests[0].path, "/api/import/duplicates");
           assert.deepEqual(await page.evaluate(() => window.importWorkspace.categories), categories);
 
-          await page.getByRole("button", { name: "登録", exact: true }).click();
+          await page.getByRole("button", { name: "確認して登録", exact: true }).click();
           await page.getByRole("alert").filter({ hasText: "検証用のカテゴリ登録失敗" }).waitFor();
           assert.equal(await page.locator("[data-import-key]").count(), merchants.length);
           for (const [index, merchant] of merchants.entries()) assert.equal(await category(merchant).inputValue(), expectedCategories[index], "登録失敗時に入力を保持する");
@@ -170,7 +170,7 @@ test("CSVカテゴリはプレビュー内で個別・選択行へ設定し、�
           assert.deepEqual(items[0].splitWeights, { a: 700, b: 300 });
           assert.deepEqual(items.find(item => item.merchant === "personal")!.splitWeights, { a: 0, b: 1 });
 
-          await page.getByRole("button", { name: "登録", exact: true }).click();
+          await page.getByRole("button", { name: "確認して登録", exact: true }).click();
           await page.getByRole("button", { name: "登録中…", exact: true }).waitFor();
           for (const merchant of merchants) assert.equal(await category(merchant).isDisabled(), true, "保存中はすべてのカテゴリを無効にする");
           assert.equal(await bulkCategory.isDisabled(), true);
@@ -198,7 +198,7 @@ test("CSVカテゴリはプレビュー内で個別・選択行へ設定し、�
           await bulkCategory.selectOption("");
           await page.getByRole("button", { name: "カテゴリを設定", exact: true }).click();
           assert.equal(requests.length, 1);
-          await page.getByRole("button", { name: "登録", exact: true }).click();
+          await page.getByRole("button", { name: "確認して登録", exact: true }).click();
           await page.getByRole("alert").filter({ hasText: "検証用のカテゴリ登録失敗" }).waitFor();
           assert.ok((requests[1].payload.items as ImportedItem[]).every(item => item.categoryId === null));
           assert.deepEqual(errors, []);
