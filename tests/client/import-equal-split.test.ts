@@ -56,7 +56,7 @@ test("割合の単位は共通の3択で、CSV取込と定期支払いの保存�
           await page.addInitScript(selected => { window.importWorkspace = selected; }, workspace(memberCount));
           await page.goto(origin);
           await page.locator("input[type=file]").setInputFiles({ name: "equal.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
-          await page.getByRole("button", { name: "登録", exact: true }).waitFor();
+          await page.getByRole("button", { name: "確認して登録", exact: true }).waitFor();
           const row = (merchant: string) => page.locator("[data-import-key]").filter({ has: page.locator('td[data-label="取引先"] b', { hasText: new RegExp(`^${merchant}$`) }) });
           for (const merchant of ["odd", "even", "unchecked", "personal", "invalid", "duplicate"]) {
             const item = row(merchant); if (width < 700) await item.getByRole("button", { name: /の詳細を開く$/ }).click();
@@ -83,7 +83,7 @@ test("割合の単位は共通の3択で、CSV取込と定期支払いの保存�
           await unit("unchecked").selectOption("EQUAL");assert.equal(await checkbox.isChecked(), false);
           for (const merchant of ["personal", "invalid", "duplicate"]) assert.equal(await unit(merchant).isDisabled(), true);
           assert.equal(requests.length, 1);assert.deepEqual(await page.evaluate(() => window.importWorkspace.members.map(m => m.weight)), [6, 4]);
-          await page.getByRole("button", { name: "登録", exact: true }).click();
+          await page.getByRole("button", { name: "確認して登録", exact: true }).click();
           await page.waitForFunction(() => document.querySelector(".sticky-actions .primary")?.textContent === "登録中…");
           for (const merchant of ["odd", "even", "unchecked"]) assert.equal(await unit(merchant).isDisabled(), true);
           assert.equal(requests.length, 2);assert.ok(releaseSave);const payload = requests[1].payload;

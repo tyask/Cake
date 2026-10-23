@@ -1,4 +1,29 @@
-.bulkBar { flex-wrap: wrap; }
+.bulkBar { flex-wrap: wrap; align-items: stretch; gap: .65rem; }
+.categoryGroup,.selectionGroup { display: flex; flex-direction: column; gap: .35rem; min-width: 0; max-width: 100%; padding: .5rem .6rem; border: 1px solid var(--line-strong); border-radius: .6rem; background: var(--paper); }
+.groupHeading { color: var(--accent); font-size: .65rem; font-weight: 800; }
+.categoryControls,.selectionControls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .categoryBulk { display: flex; align-items: center; gap: .5rem; max-width: 100%; }
 .categoryChoice { width: 10rem; min-width: 0; flex-shrink: 1; }
 .categoryBulk > button { flex-shrink: 0; }
+.categorySuggestion { position: relative; display: inline-flex; align-items: center; gap: .15rem; padding-left: .5rem; border-left: 1px solid var(--line); }
+.categorySuggestion .categorySuggestionInfo { display: none; }
+.categorySuggestionTooltip { position: absolute; z-index: 5; top: calc(100% + .4rem); right: 0; width: max-content; max-width: min(20rem, calc(100vw - 4rem)); padding: .65rem .8rem; border-radius: .5rem; background: var(--ink); color: #fff; font-size: .75rem; line-height: 1.6; box-shadow: 0 .25rem .8rem #0002; }
+.categorySuggestionTooltip::before { content: ""; position: absolute; bottom: 100%; left: 0; right: 0; height: .4rem; }
+.selectionHeading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .35rem .7rem; }
+.selectedCount { color: var(--muted); font-size: .62rem; }
+.restart { align-self: center; margin-left: auto; }
+.suggestionStatus { margin: .6rem 1rem; color: var(--muted); font-size: .75rem; }
+.confirmActions { align-items: center; flex-wrap: wrap; }
+.confirmation { margin-right: auto; color: var(--muted); font-size: .7rem; }
+@media (max-width: 48rem) {
+  .bulkBar.bulkBar,.confirmActions.confirmActions { position: static; top: auto; bottom: auto; }
+  .categoryGroup,.selectionGroup { flex-basis: 100%; }
+  .categoryControls { position: relative; gap: .4rem .5rem; }
+  .categoryBulk { flex: 1 1 auto; }
+  .categoryChoice { flex-grow: 1; }
+  .categorySuggestion { position: static; padding-left: 0; border-left: 0; }
+  .bulkBar .categorySuggestion .categorySuggestionInfo { display: inline-grid; place-items: center; min-width: 1.5rem; min-height: 1.5rem; padding: 0; border: 0; border-radius: .2rem; background: transparent; color: var(--muted); font-size: .85rem; line-height: 1; }
+  .categorySuggestionInfo:hover { color: var(--accent); }
+  .categorySuggestionTooltip { left: 0; right: auto; }
+  .confirmation { flex-basis: 100%; }
+}
