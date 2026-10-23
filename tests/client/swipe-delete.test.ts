@@ -127,9 +127,9 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
           page.once("dialog", dialog => { assert.equal(dialog.message(), "「first」を取込一覧から削除しますか？");void dialog.dismiss(); });
           await action.click();assert.equal(await row.count(), 1);assert.equal(writes.length, 0);
           assert.equal(await card.getByLabel("Aの支払い割合", { exact: true }).inputValue(), "70");
-          assert.equal(await page.getByRole("button", { name: "登録", exact: true }).count(), 1);
+          assert.equal(await page.getByRole("button", { name: "確認して登録", exact: true }).count(), 1);
           page.once("dialog", dialog => dialog.accept());await action.click();await reveal.waitFor({ state: "hidden" });
-          assert.equal(writes.length, 0);hold = true;await page.getByRole("button", { name: "登録", exact: true }).click();
+          assert.equal(writes.length, 0);hold = true;await page.getByRole("button", { name: "確認して登録", exact: true }).click();
           await page.getByRole("button", { name: "登録中…", exact: true }).waitFor();
           assert.equal(await other.isDisabled(), true);
           await swipe(page, page.locator("[data-import-key]").locator('[class*="body"]'));assert.equal(await page.locator('[data-swipe-open="true"]').count(), 0);
@@ -185,7 +185,7 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
         await page.goto(origin + "/?view=import");
         async function loadAndScroll() {
           await page.locator('input[type="file"]').setInputFiles({ name: "sticky.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
-          await page.getByRole("button", { name: "登録", exact: true }).waitFor();
+          await page.getByRole("button", { name: "確認して登録", exact: true }).waitFor();
           const card = page.locator("[data-import-key]").nth(7);
           await card.getByRole("button", { name: "sticky7の削除操作", exact: true }).focus();await page.keyboard.press("Enter");
           const footer = page.locator(".sticky-actions"), bar = (await footer.boundingBox())!, row = (await card.boundingBox())!;
@@ -193,7 +193,7 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
           await page.evaluate(top => window.scrollTo(0, top), row.y + scroll - (bar.y - 20));await settleScroll(page);
           const currentRow = (await card.boundingBox())!, currentBar = (await footer.boundingBox())!;
           assert.ok(currentRow.y < currentBar.y + currentBar.height && currentRow.y + currentRow.height > currentBar.y, "明細と操作欄を実際に重ねる");
-          for (const name of ["キャンセル", "登録"]) {
+          for (const name of ["キャンセル", "確認して登録"]) {
             const button = page.getByRole("button", { name, exact: true });
             assert.equal(await button.evaluate(element => {
               const rect = element.getBoundingClientRect(), top = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
@@ -204,7 +204,7 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
         }
         await loadAndScroll();await page.getByRole("button", { name: "キャンセル", exact: true }).click();
         await page.getByRole("button", { name: "ファイルを選択", exact: true }).waitFor();assert.equal(writes.length, 0);
-        await loadAndScroll();await page.getByRole("button", { name: "登録", exact: true }).click();
+        await loadAndScroll();await page.getByRole("button", { name: "確認して登録", exact: true }).click();
         await page.getByRole("button", { name: "ファイルを選択", exact: true }).waitFor();assert.equal(writes.length, 1);
         assert.equal(writes[0].action, "bulkImport");assert.equal((writes[0].items as unknown[]).length, 30);
       } finally { await context.close(); }
