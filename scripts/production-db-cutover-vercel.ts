@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { developmentToken } from './preview-browser';
-import { assertProductionProjectEnvironment, ProductionEnvironmentError, validateProductionEnvironment, type EnvironmentFailureCode } from './production-db-cutover-environment';
-import { config, type Binding, type Environment } from './production-db-migration-provider';
+import { assertProductionProjectEnvironment, assertProviderProductionEnvironment, ProductionEnvironmentError, type EnvironmentFailureCode } from './production-db-cutover-environment';
+import { config, type Api, type Binding, type Environment } from './production-db-migration-provider';
 
 export const productionSourceStore = 'store_MbDEtSbG9jVS4pDq';
 export const productionAliases = ['cake-omega-gilt.vercel.app', 'cake-git-main-fumin1.vercel.app', 'cake-fumin1.vercel.app'] as const;
@@ -105,18 +105,19 @@ export async function runProductionSwitch(context: ProductionSwitchContext, opti
     if (expectedProduction !== undefined && value.targets != null && object(object(value.targets).production).id !== expectedProduction) return fail('DEPLOYMENT_BINDING');
     return value;
   }
+  const environmentApi: Api = async (provider, path) => {
+    if (provider !== 'vercel') return fail('BINDING');
+    return api(path);
+  };
   async function projectEnvironment(expected: Binding) {
-    await assertProductionProjectEnvironment(async (provider, path) => {
-      if (provider !== 'vercel') return fail('BINDING');
-      return api(path);
-    }, expected);
+    await assertProductionProjectEnvironment(environmentApi, expected);
   }
   async function candidateEnvironment(id: string) {
     const value = object(await api(`/v3/env/pull/${id}`));
     // CLI env pull --id uses buildEnv: env may contain only runtime decryption keys for large envs.
-    // This proves the deployment's resolved snapshot; any exposed runtime DATABASE_URL must agree too.
-    validateProductionEnvironment(value.buildEnv, config.target, 'BUILD');
-    if (value.env !== undefined) validateProductionEnvironment(value.env, config.target, 'RUNTIME', false);
+    // Readable snapshot URLs must agree; hidden Secrets use metadata and the separately checked Native binding.
+    await assertProviderProductionEnvironment(environmentApi, value.buildEnv, config.target, 'BUILD');
+    if (value.env !== undefined) await assertProviderProductionEnvironment(environmentApi, value.env, config.target, 'RUNTIME', false);
   }
   async function routing(): Promise<Routing> {
     const aliases = (await list(`/v4/aliases?projectId=${config.vercelProjectId}`, 'aliases')).map(row => {
