@@ -32,8 +32,8 @@ const description = "未分類の明細について、最近の登録履歴に�
 type Request = { path: string; payload: Record<string, unknown> };
 type ImportedItem = { merchant: string; categoryId: string | null; actorUserId: string; expenseClass: string; splitWeights: Record<string, number> };
 
-async function openFixture(browser: Browser, origin: string, width: number, api: (route: Route, request: Request) => Promise<void>, source = csv()) {
-  const context = await browser.newContext({ viewport: { width, height: 1000 }, hasTouch: width < 700, serviceWorkers: "block" });
+async function openFixture(browser: Browser, origin: string, width: number, api: (route: Route, request: Request) => Promise<void>, source = csv(), shell = false) {
+  const context = await browser.newContext({ viewport: { width, height: width < 700 ? 844 : 1000 }, isMobile: width < 700, hasTouch: width < 700, serviceWorkers: "block" });
   const page = await context.newPage(), requests: Request[] = [], errors: string[] = [];
   page.setDefaultTimeout(15000);
   page.on("pageerror", error => errors.push(error.message));
@@ -51,7 +51,7 @@ async function openFixture(browser: Browser, origin: string, width: number, api:
     } else await api(route, request);
   });
   await page.addInitScript(selected => { window.importSuggestionWorkspace = selected; }, workspace());
-  await page.goto(origin);
+  await page.goto(shell ? `${origin}/?shell=1` : origin);
   const upload = async (text: string) => {
     await page.locator("input[type=file]").setInputFiles({ name: "suggestions.csv", mimeType: "text/csv", buffer: Buffer.from(text) });
     await page.getByRole("button", { name: "確認して登録", exact: true }).waitFor();
@@ -169,6 +169,33 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
         } finally { await context.close(); }
       });
     }
+
+    await t.test("mobile: 即時応答後も補完ボタンのタップでは説明を開かない", async () => {
+      const { context, page, errors, requests, row } = await openFixture(browser, origin, 390, async (route, request) => {
+        assert.equal(request.path, "/api/import/category-suggestions");
+        await route.fulfill({ json: { suggestions: (request.payload.merchants as string[]).map(merchant => ({ merchant, categoryId: merchant === "none" ? null : "food" })) } });
+      }, csv(["unchecked", "unchecked", "none", "classified", "invalid"]), true);
+      try {
+        await row("classified").getByLabel("カテゴリ", { exact: true }).selectOption("transport");
+        await row("none").getByRole("checkbox").check();
+        const info = page.getByRole("button", { name: "カテゴリ自動補完の説明", exact: true });
+        await info.tap();
+        assert.equal(await page.getByRole("tooltip").innerText(), description);
+        await page.screenshot();
+        await page.getByRole("heading", { name: "明細を取込", exact: true }).tap();
+        await page.getByRole("tooltip").waitFor({ state: "hidden" });
+        await page.getByRole("button", { name: "カテゴリ自動補完", exact: true }).tap();
+        await page.getByRole("status").filter({ hasText: "2件のカテゴリを補完しました。" }).waitFor();
+        assert.equal(await page.getByRole("tooltip").count(), 0);
+        await info.tap();
+        assert.equal(await page.getByRole("tooltip").innerText(), description);
+        await page.getByRole("button", { name: "カテゴリ自動補完", exact: true }).tap();
+        await page.getByRole("status").filter({ hasText: "補完できるカテゴリがありませんでした。" }).waitFor();
+        assert.equal(await page.getByRole("tooltip").count(), 0, "説明を開いていても補完実行時に閉じる");
+        assert.equal(requests.filter(request => request.path === "/api/import/category-suggestions").length, 2, "各タップにつき一度だけ補完する");
+        assert.deepEqual(errors, []);
+      } finally { await context.close(); }
+    });
 
     await t.test("複数batchの失敗で一部を反映せず、入力を保持して再試行できる", async () => {
       const names = Array.from({ length: MAX_IMPORT_CATEGORY_SUGGESTION_MERCHANTS + 1 }, (_, index) => `shop${index}`);

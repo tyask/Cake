@@ -50,7 +50,7 @@ function CategorySuggestionButton({ disabled, working, onClick }: { disabled: bo
       if (event.pointerType === "mouse" && !event.currentTarget.contains(document.activeElement)) setOpen(false);
     }}
     onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
-    <button type="button" disabled={disabled} onClick={onClick} onFocus={event => { if (event.currentTarget.matches(":focus-visible")) setOpen(true); }}
+    <button type="button" disabled={disabled} onClick={() => { setOpen(false); onClick(); }} onFocus={event => { if (event.currentTarget.matches(":focus-visible")) setOpen(true); }}
       aria-describedby={open ? descriptionId : undefined}>{working ? "カテゴリ補完中…" : "カテゴリ自動補完"}</button>
     <button type="button" className={styles.categorySuggestionInfo} aria-label="カテゴリ自動補完の説明"
       aria-expanded={open} aria-controls={open ? descriptionId : undefined} aria-describedby={open ? descriptionId : undefined}
