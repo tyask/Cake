@@ -30,7 +30,10 @@
     "test:client": "node --import tsx --test --test-concurrency=2 \"tests/client/**/*.test.ts\"",
     "test:server": "node --import tsx --test --test-concurrency=2 \"tests/server/**/*.test.ts\"",
     "test:tooling": "node --import tsx --test --test-concurrency=2 \"tests/tooling/**/*.test.ts\"",
-    "check:fast": "npm run check:node && npm run lint && npm run typecheck && npm run test:architecture && npm run check:docs"
+    "check:fast": "npm run check:node && npm run lint && npm run typecheck && npm run test:architecture && npm run check:docs",
+    "setup:cloud": "node scripts/cloud/setup-cloud.mjs",
+    "dev:cloud": "node --import tsx scripts/cloud/dev-cloud.ts",
+    "qa:cloud": "node --import tsx scripts/cloud/verify-cloud.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -2,9 +2,11 @@
 
 ## 開始と実行環境
 
-開発・PR操作・QAの前に[開発・QA運用手順](docs/development-workflow.md)を読む。ローカルとActionsのNode版は [.node-version](.node-version) を正本とし、`npm run check:node` で一致を確認する。WSL2ではLinux版Node.js・npm・Git・gh・Playwright Chromiumを使う。[WSL手順](docs/wsl-development.md)で実行環境と認証を確認する。Windowsネイティブでも開発でき、PowerShellでは `npm.cmd` / `npx.cmd` を使う。
+開発・PR操作・QAの前に[開発・QA運用手順](docs/development-workflow.md)を読む。ローカルとActionsのNode版は [.node-version](.node-version) を正本とし、`npm run check:node` で一致を確認する。WSL2ではLinux版Node.js・npm・Git・gh・Playwright Chromiumを使う。[WSL手順](docs/wsl-development.md)で実行環境と認証を確認する。Codex Cloudは[Cloud手順](docs/cloud-development.md)でsetup・オンメモリDB付きCake・ブラウザQAを行う。Windowsネイティブでも開発でき、PowerShellでは `npm.cmd` / `npx.cmd` を使う。
 
 最新 `origin/main` から `npm run task:start -- <task-name>` で `codex/<task-name>` と専用worktreeを作る。既存の未コミット変更を保持し、worktreeごとに `node_modules`・`.next`・`.cake`・環境ファイルを分離する。WindowsとWSLで作業ディレクトリや資格情報を共有・コピーしない。npm/Playwrightのキャッシュは同じ実行環境内で共有できる。
+
+Cloudの `setup:cloud` は依存・公式Chromiumの準備、`dev:cloud` はNode + PGliteによる外部DB不要のCake起動、`qa:cloud` はPC/mobile × 非管理者A/Bと取引CRUDのローカル検証に使う。同じCloud環境の並列タスクはworktreeとポートを分ける。外部DB・Google・Vercelの秘密値や他環境の資格情報を持ち込まない。Cloudの結果は `.cake/cloud/` に保存し、正式Preview証拠とReady条件は既存のものを維持する。
 
 機能・UI・API・DBを変更する際は[基本設計](docs/design.html)と[詳細設計](docs/detail-design.html)を確認し、仕様・運用の変更を関連文書へ反映する。文書には現在の仕様・手順だけを残す。個別PRの経緯、日時付き受入記録、廃止済み方式の説明はPR本文・検証結果に記録する。
 
@@ -42,7 +44,7 @@ PR作成・更新前に、対象と自動資源操作の影響が依頼の承認
 
 ## ブラウザと資格情報
 
-WSLでは[WSL手順](docs/wsl-development.md)、Windowsでは[Windows QA資格情報・実行手順](docs/windows-qa-credentials.md)を使う。既存本人認証を使い、未認証・失効時のログインは本人に依頼する。provider token・OIDC・Cookieをチャット・ログ・コマンド引数・Git・環境ファイル・検証artifactへ出さない。Vercel資格情報はQA処理のメモリ内で扱い、Git/gh子プロセスには渡さない。
+WSLでは[WSL手順](docs/wsl-development.md)、Cloudでは[Cloud手順](docs/cloud-development.md)、Windowsでは[Windows QA資格情報・実行手順](docs/windows-qa-credentials.md)を使う。CloudのPR/Actions操作はCloudに連携されたGitHub権限を使う。既存本人認証を使い、未認証・失効時のログインは本人に依頼する。provider token・OIDC・Cookieをチャット・ログ・コマンド引数・Git・環境ファイル・検証artifactへ出さない。Vercel資格情報はQA処理のメモリ内で扱い、Git/gh子プロセスには渡さない。
 
 OIDCは同一project/team・development・有効期限を確認し、redirectを含めて対象originだけへ付ける。TLS検証と保護設定を維持し、CA・proxy・権限・global PATH/Git設定は変更しない。WSLからWindowsの `qa:windows` やtoken受渡しexeを使わない。
 
