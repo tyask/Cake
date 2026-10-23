@@ -35,7 +35,22 @@
 
 `.github/workflows/production-db-migration.yml` は `production-migration.config.json` に固定したsourceと未接続targetだけを扱う。レビュー済みmainへ導入後、`workflow_dispatch` の `action` に `inventory` または `rehearsal`、`controlSha` に現在mainの完全SHA、`operation` に新しいUUIDを指定する。任意のSQL・project・branch・接続文字列は入力しない。通常のPreview管理workflowへ本番IDを渡さない。
 
-既存のActions Secret `NEON_API_KEY` と `VERCEL_TOKEN` を使い、最初に `inventory` で両projectへの権限と実対象を確認する。Secretの存在だけをアクセス成功とは扱わない。`rehearsal` は空の候補へ一度コピーする操作であり、既存データへの上書き、migration、seed、本番の停止・接続先切替・削除は行わない。`rehearsal` のActions rerunは拒否する。
+移行専用のActions Secret `PRODUCTION_DB_SOURCE_NEON_API_KEY` と `PRODUCTION_DB_TARGET_NEON_API_KEY`、既存の `VERCEL_TOKEN` を使う。Neonの各キーはsource/targetそれぞれのproject-scopedキーとし、workflowは実行stepだけへ `NEON_SOURCE_API_KEY` / `NEON_TARGET_API_KEY` として渡す。固定projectと許可されたAPI経路に応じて対応するキーを選び、不明なproject/経路や正規化で対象が変わるpathは呼出し前に拒否する。キー不足・改行・同一値の重複設定もprovider呼出し前に停止する。Preview用 `NEON_API_KEY` は移行に渡さず、fallbackにも使わない。
+
+最初に `inventory` で両projectへのアクセスと実対象を確認する。Secretの存在や値の違いだけをscope・アクセス成功の証明とは扱わない。`rehearsal` は空の候補へ一度コピーする操作であり、既存データへの上書き、migration、seed、本番の停止・接続先切替・削除は行わない。`rehearsal` のActions rerunは拒否する。
+
+#### 移行専用キーの登録
+
+既存キーとの対応が不明な場合も、現在のPreview用Secretを変更せず、移行専用の対応を記録する。[Neon公式のAPIキー手順](https://neon.com/docs/manage/api-keys)に従い、対象Organizationの **Settings > API keys > Create new > Project-scoped** でそれぞれ作成する。project-scopedキーの作成にはOrganizationのAdmin権限が必要である。
+
+| 用途 | Scopeに選ぶproject | Neonキー名の例 | GitHub Actionsのrepository Secret名 |
+| --- | --- | --- | --- |
+| 元本番 | `cake` / `shy-wave-07435387` | `cake-production-migration-source` | `PRODUCTION_DB_SOURCE_NEON_API_KEY` |
+| PG18候補 | `cake-production-pg18` / `noisy-wind-66979379` | `cake-production-migration-target` | `PRODUCTION_DB_TARGET_NEON_API_KEY` |
+
+対象IDの正本は `production-migration.config.json` とし、Consoleの名前だけで選ばない。GitHubの対象repositoryで **Settings > Secrets and variables > Actions > New repository secret** を開き、表示された新しいキー値を対応するSecretへ直接登録する。キー値は作成時だけ表示されるため、その場で本人が登録し、チャット・コマンド引数・WSL・環境ファイル・artifactへ渡さない。キーID/名前・project ID・Secret名の非秘密の対応を記録する。操作ができない場合は対象Organization/repositoryの権限を確認する。
+
+キーのscopeはConsoleでの対象指定を確認し、Actionsでのアクセス成功はレビュー済みmainの `inventory` で別に確認する。新規キーの作成・Secret登録だけでコピーを開始せず、正式receiptの成功を確認してから `rehearsal` へ進む。移行完了後の専用キー失効・Secret削除は、依存する実行がなくなったことを確認して別に判断する。
 
 sourceでは一貫したread-only snapshotを維持し、dumpと照合値を同じsnapshotから取得する。targetは復元直前にも未接続・空状態とprovider所属を確認する。PG18クライアントと証明書検証を使い、資格情報はrunnerのメモリと限定した子プロセス環境、一時dump/復元SQLは非公開の一時ファイルだけで扱う。raw SQL・業務行・接続文字列をログやartifactへ保存しない。
 

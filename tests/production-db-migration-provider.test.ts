@@ -73,7 +73,12 @@ test('connection requests the explicit branch, endpoint, role, database and unpo
   assert.equal(calls, 1);
 });
 
-const environment = { NEON_API_KEY: 'fixture-neon-token', VERCEL_TOKEN: 'fixture-vercel-token', GH_TOKEN: 'fixture-github-token' };
+const sourceBase = `/projects/${config.source.projectId}`;
+const targetBase = `/projects/${config.target.projectId}`;
+const environment = {
+  NEON_SOURCE_API_KEY: 'fixture-neon-source-token', NEON_TARGET_API_KEY: 'fixture-neon-target-token',
+  NEON_API_KEY: 'fixture-shared-preview-token', VERCEL_TOKEN: 'fixture-vercel-token', GH_TOKEN: 'fixture-github-token',
+};
 test('productionApi routes all providers with GET, redirect refusal and separate credentials', async () => {
   const calls: { url: URL; init?: RequestInit }[] = [];
   const request: typeof fetch = async (input, init) => {
@@ -81,16 +86,18 @@ test('productionApi routes all providers with GET, redirect refusal and separate
     return Response.json({ found: true });
   };
   const api = productionApi(environment, request);
-  assert.deepEqual(await api('neon', `${base}?limit=1`), { found: true });
+  assert.deepEqual(await api('neon', `${sourceBase}?limit=1`), { found: true });
+  assert.deepEqual(await api('neon', targetBase), { found: true });
   assert.deepEqual(await api('vercel', '/v13/deployments/dpl_fixture?teamId=other&limit=1'), { found: true });
   assert.deepEqual(await api('github', '/repos/fixture/cake/commits/main'), { found: true });
-  assert.equal(calls[0].url.href, `https://console.neon.tech/api/v2${base}?limit=1`);
-  assert.equal(calls[1].url.origin, 'https://api.vercel.com');
-  assert.equal(calls[1].url.pathname, '/v13/deployments/dpl_fixture');
-  assert.equal(calls[1].url.searchParams.get('teamId'), config.vercelTeamId);
-  assert.equal(calls[1].url.searchParams.getAll('teamId').length, 1);
-  assert.equal(calls[1].url.searchParams.get('limit'), '1');
-  assert.equal(calls[2].url.href, 'https://api.github.com/repos/fixture/cake/commits/main');
+  assert.equal(calls[0].url.href, `https://console.neon.tech/api/v2${sourceBase}?limit=1`);
+  assert.equal(calls[1].url.href, `https://console.neon.tech/api/v2${targetBase}`);
+  assert.equal(calls[2].url.origin, 'https://api.vercel.com');
+  assert.equal(calls[2].url.pathname, '/v13/deployments/dpl_fixture');
+  assert.equal(calls[2].url.searchParams.get('teamId'), config.vercelTeamId);
+  assert.equal(calls[2].url.searchParams.getAll('teamId').length, 1);
+  assert.equal(calls[2].url.searchParams.get('limit'), '1');
+  assert.equal(calls[3].url.href, 'https://api.github.com/repos/fixture/cake/commits/main');
   for (const [index, { init }] of calls.entries()) {
     assert.equal(init?.method, 'GET');
     assert.equal(init?.redirect, 'error');
@@ -98,7 +105,29 @@ test('productionApi routes all providers with GET, redirect refusal and separate
     assert.ok(init?.signal instanceof AbortSignal);
     const headers = new Headers(init?.headers);
     assert.equal(headers.get('accept'), 'application/json');
-    assert.equal(headers.get('authorization'), `Bearer ${[environment.NEON_API_KEY, environment.VERCEL_TOKEN, environment.GH_TOKEN][index]}`);
+    assert.equal(headers.get('authorization'), `Bearer ${[environment.NEON_SOURCE_API_KEY, environment.NEON_TARGET_API_KEY,
+      environment.VERCEL_TOKEN, environment.GH_TOKEN][index]}`);
+  }
+});
+
+test('productionApi allows only the fixed migration resources for each Neon project and preserves encoded query cursors', async () => {
+  const calls: { path: string; token: string | null }[] = [];
+  const api = productionApi(environment, async (input, init) => {
+    const url = new URL(String(input));
+    calls.push({ path: url.pathname + url.search, token: new Headers(init?.headers).get('authorization') });
+    return Response.json({});
+  });
+  for (const [binding, token] of [[config.source, environment.NEON_SOURCE_API_KEY],
+    [config.target, environment.NEON_TARGET_API_KEY]] as const) {
+    const project = `/projects/${binding.projectId}`;
+    const paths = [project, `${project}/branches?limit=100&cursor=${encodeURIComponent('page/next+value?=')}`,
+      `${project}/branches/${binding.branchId}`, `${project}/endpoints`, `${project}/endpoints/${binding.endpointId}`,
+      `${project}/branches/${binding.branchId}/databases/${binding.database}`,
+      `${project}/branches/${binding.branchId}/roles/${binding.role}`,
+      `${project}/connection_uri?branch_id=${binding.branchId}&endpoint_id=${binding.endpointId}&database_name=${binding.database}&role_name=${binding.role}&pooled=false`];
+    for (const path of paths) await api('neon', path);
+    const expectedPaths = paths.map(path => `/api/v2${path}`);
+    assert.deepEqual(calls.splice(0), expectedPaths.map(path => ({ path, token: `Bearer ${token}` })));
   }
 });
 
@@ -109,19 +138,39 @@ test('productionApi rejects alternate origins and malformed routing before makin
     '/projects/fixture#fragment', '/projects/fixture\\other', '/projects/fixture\r\nheader']) {
     await assert.rejects(api('neon', path), { message: 'PRODUCTION_MIGRATION_INVALID_REQUEST' });
   }
-  await assert.rejects(api('private-unrecognized-provider' as Parameters<Api>[0], base), {
+  await assert.rejects(api('private-unrecognized-provider' as Parameters<Api>[0], sourceBase), {
     message: 'PRODUCTION_MIGRATION_INVALID_REQUEST',
   });
+  assert.equal(calls, 0);
+});
+
+test('productionApi refuses unknown, normalized and encoded Neon routes before selecting or sending credentials', async () => {
+  let calls = 0;
+  const api = productionApi(environment, async () => { calls++; return Response.json({}); });
+  const paths = ['/projects', '/projects/unknown-project', `${sourceBase}-suffix`, '/api/v2' + sourceBase,
+    `${sourceBase}/`, `${sourceBase}/unknown`, `${sourceBase}//branches`, `${sourceBase}/branches/unknown-branch`,
+    `${sourceBase}/endpoints/unknown-endpoint`, `${sourceBase}/branches/${config.source.branchId}/databases/unknown-db`,
+    `${sourceBase}/branches/${config.source.branchId}/roles/unknown-role`,
+    `/projects/unknown-project/../${config.source.projectId}`, `${sourceBase}/../${config.target.projectId}`,
+    `${targetBase}/../${config.source.projectId}`, `${sourceBase}/./branches`, `${sourceBase}/\tbranches`,
+    `${sourceBase}/%2e%2e/${config.target.projectId}`, `${sourceBase}/%2E./${config.target.projectId}`,
+    `${sourceBase}/%252e%252e/${config.target.projectId}`, `${sourceBase}%2f..%2f${config.target.projectId}`,
+    `/projects/%${config.source.projectId.charCodeAt(0).toString(16)}${config.source.projectId.slice(1)}`,
+    `${sourceBase}/%62ranches`, `${sourceBase}/branches%2f${config.source.branchId}`];
+  for (const path of paths) {
+    await assert.rejects(api('neon', `${path}?access_token=private-query-token`), error => safeProviderFailure(error, 'INVALID_REQUEST'));
+  }
   assert.equal(calls, 0);
 });
 
 test('productionApi rejects missing or multiline credentials before making a request', async () => {
   let calls = 0;
   const request: typeof fetch = async () => { calls++; return Response.json({}); };
-  for (const token of [undefined, '', ' ', 'private\nvalue', 'private\rvalue']) {
-    await assert.rejects(productionApi({ NEON_API_KEY: token }, request)('neon', base), {
-      message: 'PRODUCTION_MIGRATION_CREDENTIALS_MISSING',
-    });
+  for (const [key, path] of [['NEON_SOURCE_API_KEY', sourceBase], ['NEON_TARGET_API_KEY', targetBase]] as const) {
+    for (const token of [undefined, '', ' ', 'private\nvalue', 'private\rvalue']) {
+      await assert.rejects(productionApi({ ...environment, [key]: token }, request)('neon', path), error =>
+        safeProviderFailure(error, 'CREDENTIALS_MISSING'));
+    }
   }
   await assert.rejects(productionApi({ NEON_API_KEY: environment.NEON_API_KEY }, request)('vercel', '/v9/projects'), {
     message: 'PRODUCTION_MIGRATION_CREDENTIALS_MISSING',
@@ -129,8 +178,20 @@ test('productionApi rejects missing or multiline credentials before making a req
   assert.equal(calls, 0);
 });
 
+test('productionApi never falls back to the shared Preview Neon key or the other project key', async () => {
+  let calls = 0;
+  const request: typeof fetch = async () => { calls++; return Response.json({}); };
+  for (const [key, path] of [['NEON_SOURCE_API_KEY', sourceBase], ['NEON_TARGET_API_KEY', targetBase]] as const) {
+    for (const credentials of [{ NEON_API_KEY: environment.NEON_API_KEY }, { ...environment, [key]: undefined }]) {
+      await assert.rejects(productionApi(credentials, request)('neon', path), error =>
+        safeProviderFailure(error, 'CREDENTIALS_MISSING'));
+    }
+  }
+  assert.equal(calls, 0);
+});
+
 const privateDetail = `private-provider-detail:${uri()}`;
-const privatePath = '/private-request-path?access_token=private-query-token';
+const privatePath = `${sourceBase}?access_token=private-query-token`;
 function safeProviderFailure(error: unknown, code: string): boolean {
   assert.ok(error instanceof MigrationError);
   assert.equal(error.message, `PRODUCTION_MIGRATION_${code}`);
@@ -159,7 +220,7 @@ for (const provider of ['neon', 'vercel', 'github'] as const) {
 
   test(`productionApi distinguishes ${provider} transport failures from invalid JSON without exposing details`, async () => {
     const failures: [string, typeof fetch][] = [
-      ['TRANSPORT', async () => { throw new Error(privateDetail, { cause: environment.NEON_API_KEY }); }],
+      ['TRANSPORT', async () => { throw new Error(privateDetail, { cause: environment.NEON_SOURCE_API_KEY }); }],
       ['JSON', async () => new Response(privateDetail, { status: 200 })],
     ];
     for (const [kind, request] of failures) {

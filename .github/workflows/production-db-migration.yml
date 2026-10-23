@@ -65,7 +65,8 @@ jobs:
           echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
       - name: Inventory or copy the fixed isolated Production candidate
         env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_SOURCE_API_KEY: ${{ secrets.PRODUCTION_DB_SOURCE_NEON_API_KEY }}
+          NEON_TARGET_API_KEY: ${{ secrets.PRODUCTION_DB_TARGET_NEON_API_KEY }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           GH_TOKEN: ${{ github.token }}
         run: node --import tsx scripts/production-db-migration.ts
