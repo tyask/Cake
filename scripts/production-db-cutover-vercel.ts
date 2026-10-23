@@ -249,10 +249,11 @@ export async function runProductionSwitch(context: ProductionSwitchContext, opti
       || typeof context.beforeWrite !== 'function') return fail('INVALID_INPUT');
     if (!token?.trim() || /[\r\n]/.test(token) || environment.NODE_TLS_REJECT_UNAUTHORIZED === '0') return fail('CREDENTIALS');
     const initialRouting = await routing(); report.before = summary(initialRouting);
-    const initialProject = await project();
+    await project();
     const canonical = initialRouting.aliases.find(row => row.alias === productionAliases[0])!.deploymentId;
     const current = validateDeployment(await api(`/v13/deployments/${canonical}?withGitRepoInfo=true`), canonical, false);
-    if (current.state !== 'READY' || initialProject.targets != null && object(object(initialProject.targets).production).id !== canonical) return fail('DEPLOYMENT_BINDING');
+    // targets.production may refer to a failed latest deploy; aliases identify the live deployment.
+    if (current.state !== 'READY') return fail('DEPLOYMENT_BINDING');
     const before = await stores(), matches = before.source.filter(row => row.projectId === config.vercelProjectId && row.environments.includes('production'));
     if (before.target.length !== 0 || matches.length !== 1) return fail('NATIVE_CONNECTION');
     const source = matches[0], remaining = source.environments.filter(value => value !== 'production');
