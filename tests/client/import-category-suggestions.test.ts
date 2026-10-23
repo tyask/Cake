@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { mkdir } from "node:fs/promises";
 import { build } from "esbuild";
 import { chromium, type Browser, type Route } from "playwright";
 import type { Category, WorkspaceData } from "../../lib/shared/types";
@@ -33,7 +34,7 @@ type Request = { path: string; payload: Record<string, unknown> };
 type ImportedItem = { merchant: string; categoryId: string | null; actorUserId: string; expenseClass: string; splitWeights: Record<string, number> };
 
 async function openFixture(browser: Browser, origin: string, width: number, api: (route: Route, request: Request) => Promise<void>, source = csv(), shell = false) {
-  const context = await browser.newContext({ viewport: { width, height: width < 700 ? 844 : 1000 }, isMobile: width < 700, hasTouch: width < 700, serviceWorkers: "block" });
+  const context = await browser.newContext({ viewport: { width, height: width <= 768 ? 844 : 1000 }, isMobile: width <= 768, hasTouch: width <= 768, serviceWorkers: "block" });
   const page = await context.newPage(), requests: Request[] = [], errors: string[] = [];
   page.setDefaultTimeout(15000);
   page.on("pageerror", error => errors.push(error.message));
@@ -58,9 +59,9 @@ async function openFixture(browser: Browser, origin: string, width: number, api:
   };
   await upload(source);
   const row = (merchant: string) => page.locator("[data-import-key]").filter({ has: page.locator('td[data-label="取引先"] b', { hasText: new RegExp(`^${merchant}$`) }) });
-  if (width < 700) for (const merchant of [...new Set(merchants)]) {
+  if (width <= 768) for (const merchant of [...new Set(merchants)]) {
     const rows = row(merchant);
-    for (let index = 0; index < await rows.count(); index++) await rows.nth(index).getByRole("button", { name: `${merchant}の詳細を開く`, exact: true }).click();
+    for (let index = 0; index < await rows.count(); index++) await rows.nth(index).getByRole("button", { name: `${merchant}の詳細を開く`, exact: true }).tap();
   }
   return { context, page, requests, errors, row, upload };
 }
@@ -78,6 +79,7 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(done => server.close(() => done())); throw error; });
   try {
+    if (process.env.CAKE_IMPORT_SCREENSHOTS) await mkdir(".cake/output/playwright", { recursive: true });
     for (const [name, width] of [["PC", 1440], ["mobile", 390]] as const) {
       await t.test(`${name}: 短い説明・操作中無効化・選択状態と入力の保持・再試行・保存payload`, async () => {
         let releaseSuggestion: (() => Promise<void>) | undefined, saveAttempts = 0;
@@ -96,8 +98,19 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
         try {
           assert.equal(requests.length, 1, "CSV読込だけではカテゴリAPIを呼ばない");
           assert.equal(await page.getByRole("tooltip").count(), 0);
+          const categoryGroup = page.getByRole("group", { name: "カテゴリ", exact: true });
+          const selectionGroup = page.getByRole("group", { name: "選択行の操作", exact: true });
+          assert.equal(await categoryGroup.getByLabel("選択行のカテゴリ", { exact: true }).count(), 1);
+          assert.equal(await categoryGroup.getByRole("button", { name: "カテゴリを設定", exact: true }).count(), 1);
+          assert.equal(await categoryGroup.getByRole("button", { name: "カテゴリ自動補完", exact: true }).count(), 1);
+          assert.equal(await selectionGroup.getByRole("button", { name: "個人費に変更", exact: true }).count(), 1);
+          assert.equal(await selectionGroup.getByRole("button", { name: "削除", exact: true }).count(), 1);
+          const categoryBounds = (await categoryGroup.boundingBox())!, selectionBounds = (await selectionGroup.boundingBox())!;
+          if (width > 768) assert.ok(categoryBounds.x < selectionBounds.x && categoryBounds.x + categoryBounds.width <= selectionBounds.x + 1, "カテゴリ操作を他の選択行操作より左にまとめる");
+          else assert.ok(categoryBounds.y + categoryBounds.height <= selectionBounds.y + 1, "狭い画面でもカテゴリ操作を先にまとめる");
           const info = page.getByRole("button", { name: "カテゴリ自動補完の説明", exact: true });
-          if (width >= 700) {
+          if (width > 768) {
+            assert.equal(await info.count(), 0, "PCは説明用のⓘを表示もフォーカス対象にもしない");
             await auto().hover();
             assert.equal(await page.getByRole("tooltip").innerText(), description);
             await page.getByRole("tooltip").hover();
@@ -108,27 +121,41 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
             assert.equal(await page.getByRole("tooltip").innerText(), description);
             await page.keyboard.press("Escape");
             assert.equal(await page.getByRole("tooltip").count(), 0);
+            await auto().blur();
+            await auto().focus();
+          } else {
+            const infoBounds = (await info.boundingBox())!, autoBounds = (await auto().boundingBox())!;
+            assert.ok(infoBounds.width <= 28 && infoBounds.height <= 28 && infoBounds.height < autoBounds.height, "スマホのⓘは主ボタンより小さいテキスト状の操作にする");
+            const appearance = await info.evaluate(element => {
+              const style = getComputedStyle(element);
+              return { background: style.backgroundColor, border: style.borderStyle };
+            });
+            assert.equal(appearance.background, "rgba(0, 0, 0, 0)");
+            assert.equal(appearance.border, "none");
             await info.focus();
+            assert.equal(await info.evaluate(element => element === document.activeElement), true);
             await page.keyboard.press("Enter");
-          } else await info.tap();
+          }
           assert.equal(await page.getByRole("tooltip").innerText(), description);
           const bounds = await page.getByRole("tooltip").boundingBox();
           assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width, "説明が画面内に収まる");
-          if (width < 700) {
+          if (process.env.CAKE_IMPORT_SCREENSHOTS) await page.screenshot({ animations: "disabled", path: `.cake/output/playwright/toolbar-${width}-tooltip.png` });
+          if (width <= 768) {
             await info.tap(); assert.equal(await page.getByRole("tooltip").count(), 0);
             await info.tap();
             await page.getByRole("heading", { name: "明細を取込", exact: true }).tap();
           } else await page.getByRole("heading", { name: "明細を取込", exact: true }).click();
           assert.equal(await page.getByRole("tooltip").count(), 0);
           assert.equal(requests.length, 1, "説明の表示は補完を実行しない");
+          if (process.env.CAKE_IMPORT_SCREENSHOTS) await page.screenshot({ animations: "disabled", path: `.cake/output/playwright/toolbar-${width}-layout.png` });
 
           await category("classified").selectOption("transport");
           await row("selected").getByRole("checkbox", { name: "selectedを選択", exact: true }).check();
           await row("unchecked").first().getByLabel("Aの支払い割合", { exact: true }).fill("70");
           await page.locator(".import-summary select").selectOption("b");
-          if (width < 700) await auto().tap(); else await auto().click();
+          if (width <= 768) await auto().tap(); else await auto().click();
           await page.getByRole("button", { name: "カテゴリ補完中…", exact: true }).waitFor();
-          if (width < 700) assert.equal(await page.getByRole("tooltip").count(), 0, "補完ボタンのタップでは説明を開かない");
+          if (width <= 768) assert.equal(await page.getByRole("tooltip").count(), 0, "補完ボタンのタップでは説明を開かない");
           const pendingButton = page.getByRole("button", { name: "カテゴリ補完中…", exact: true });
           assert.equal(await pendingButton.isDisabled(), true);
           for (const label of ["確認して登録", "やり直す", "キャンセル", "個人費に変更", "共通費に変更", "削除", "カテゴリを設定"]) {
@@ -170,6 +197,26 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
       });
     }
 
+    await t.test("48remの境界で説明操作を切り替え、説明を画面内に表示する", async () => {
+      for (const width of [768, 769]) {
+        const { context, page, errors, requests } = await openFixture(browser, origin, width, async () => { assert.fail("説明操作はAPIを呼ばない"); }, csv(["unchecked"]), true);
+        try {
+          const info = page.getByRole("button", { name: "カテゴリ自動補完の説明", exact: true });
+          assert.equal(await info.count(), width === 768 ? 1 : 0);
+          if (width === 768) await info.tap();
+          else await page.getByRole("button", { name: "カテゴリ自動補完", exact: true }).focus();
+          assert.equal(await page.getByRole("tooltip").innerText(), description);
+          const bounds = (await page.getByRole("tooltip").boundingBox())!;
+          assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, "説明が画面内に収まる");
+          if (process.env.CAKE_IMPORT_SCREENSHOTS) await page.screenshot({ animations: "disabled", path: `.cake/output/playwright/toolbar-${width}-tooltip.png` });
+          await page.keyboard.press("Escape");
+          assert.equal(await page.getByRole("tooltip").count(), 0);
+          assert.equal(requests.length, 1);
+          assert.deepEqual(errors, []);
+        } finally { await context.close(); }
+      }
+    });
+
     await t.test("mobile: 即時応答後も補完ボタンのタップでは説明を開かない", async () => {
       const { context, page, errors, requests, row } = await openFixture(browser, origin, 390, async (route, request) => {
         assert.equal(request.path, "/api/import/category-suggestions");
@@ -177,7 +224,8 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
       }, csv(["unchecked", "unchecked", "none", "classified", "invalid"]), true);
       try {
         await row("classified").getByLabel("カテゴリ", { exact: true }).selectOption("transport");
-        await row("none").getByRole("checkbox").check();
+        await row("none").getByRole("checkbox").tap();
+        assert.equal(await row("none").getByRole("checkbox").isChecked(), true);
         const info = page.getByRole("button", { name: "カテゴリ自動補完の説明", exact: true });
         await info.tap();
         assert.equal(await page.getByRole("tooltip").innerText(), description);

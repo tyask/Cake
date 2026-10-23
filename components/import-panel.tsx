@@ -277,16 +277,26 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
         <div><span>取込先の家計</span><b>{selected.workspace.name}</b></div><div><span>取込元</span><b>{fileName}</b></div><div><span>取込対象</span><b>{importableRows.length} / {rows.length}件</b></div>
         <label>支払者<select disabled={busy} value={actorId} onChange={(event) => changeActor(event.target.value)}>{selected.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
       </div>
-      <div className={`bulk-bar ${styles.bulkBar}`}><span>{selectedCount}件を選択中</span>
-        <button disabled={busy || selectedCount === 0} onClick={() => bulk("PERSONAL")}>個人費に変更</button><button disabled={busy || selectedCount === 0} onClick={() => bulk("SHARED")}>共通費に変更</button>
-        <button disabled={busy || selectedCount === 0} onClick={removeSelectedPreviewRows}>削除</button>
-        <div className={styles.categoryBulk}>
-          <div className={styles.categoryChoice}><CategorySelect choices={categoryChoices} value={bulkCategoryId}
-            label="選択行のカテゴリ" disabled={busy || selectedCount === 0} onChange={setBulkCategoryId} /></div>
-          <button disabled={busy || selectedCount === 0} onClick={bulkCategory}>カテゴリを設定</button>
+      <div className={`bulk-bar ${styles.bulkBar}`}>
+        <div className={styles.categoryGroup} role="group" aria-label="カテゴリ">
+          <span className={styles.groupHeading}>カテゴリ</span>
+          <div className={styles.categoryControls}>
+            <div className={styles.categoryBulk}>
+              <div className={styles.categoryChoice}><CategorySelect choices={categoryChoices} value={bulkCategoryId}
+                label="選択行のカテゴリ" disabled={busy || selectedCount === 0} onChange={setBulkCategoryId} /></div>
+              <button disabled={busy || selectedCount === 0} onClick={bulkCategory}>カテゴリを設定</button>
+            </div>
+            <CategorySuggestionButton disabled={busy || unclassifiedCount === 0} working={suggesting} onClick={() => void suggestCategories()} />
+          </div>
         </div>
-        <CategorySuggestionButton disabled={busy || unclassifiedCount === 0} working={suggesting} onClick={() => void suggestCategories()} />
-        <button disabled={busy} className="text-button" onClick={() => { setRows([]); setFileName(""); setSuggestionStatus(null); }}>やり直す</button>
+        <div className={styles.selectionGroup} role="group" aria-label="選択行の操作">
+          <div className={styles.selectionHeading}><span className={styles.groupHeading}>選択行の操作</span><span className={styles.selectedCount}>{selectedCount}件を選択中</span></div>
+          <div className={styles.selectionControls}>
+            <button disabled={busy || selectedCount === 0} onClick={() => bulk("PERSONAL")}>個人費に変更</button><button disabled={busy || selectedCount === 0} onClick={() => bulk("SHARED")}>共通費に変更</button>
+            <button disabled={busy || selectedCount === 0} onClick={removeSelectedPreviewRows}>削除</button>
+          </div>
+        </div>
+        <button disabled={busy} className={`text-button ${styles.restart}`} onClick={() => { setRows([]); setFileName(""); setSuggestionStatus(null); }}>やり直す</button>
       </div>
       {suggesting && <p className={styles.suggestionStatus} role="status">カテゴリを補完しています…</p>}
       {suggestionStatus && <p className={styles.suggestionStatus} role="status">{suggestionStatus}</p>}
