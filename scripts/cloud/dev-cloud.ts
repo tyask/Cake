@@ -114,7 +114,8 @@ export async function startCloudServer({ port: requestedPort, hostname = "0.0.0.
   } catch (error) {
     throw new CloudStartupError(error instanceof Error ? error.message : "Cake Cloudの起動条件を確認できませんでした。", true);
   }
-  const url = `http://127.0.0.1:${port}`;
+  // NextRequest canonicalizes loopback IPs to localhost during Auth.js redirects.
+  const url = `http://localhost:${port}`;
   let databasePromise: Promise<MemoryDatabase> | undefined;
   let child: ChildProcess | undefined;
   let childExited = false, closing = false;

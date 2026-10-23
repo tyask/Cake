@@ -52,7 +52,7 @@ npm run dev:cloud -- --port 3001
 
 このコマンドはNext.js devを`0.0.0.0`で待ち受け、別のNodeプロセスが持つPGliteのオンメモリDBへアプリのSQLを送る。DB初期化時に全migrationを適用し、既存local test profileの固定A/B、参加済みの共有workspace、架空のカテゴリ・明細サンプルを登録する。A/Bは両方とも非管理者で、Googleや実メールを使わず、ログイン画面のテストユーザーボタンから通常のAuth.jsセッションを発行する。
 
-Cloud環境のブラウザ／ポート転送機能で対象ポートを開き、A/Bを別ブラウザcontextで操作する。認証の戻り先は現在のrequest originに従い、転送先からのログインも同じoriginへ戻る。ホーム・取引明細・設定の表示、明細追加・編集・削除など、変更した機能を確認する。Next.jsのHMRやworkerが切り替わっても同じsidecar DBを使う。`Ctrl+C`で停止するとDBを破棄し、次回起動時は初期データへ戻る。Previewのデータや編集内容とは同期しない。
+CodexがCloud内のブラウザから`http://localhost:3000`（ポート指定時はそのポート）を開き、A/Bを別ブラウザcontextで操作する。Next.jsのログイン時の正規化に合わせ、アプリの接続先は`localhost`へ揃える。ホーム・取引明細・設定の表示、明細追加・編集・削除など、変更した機能を確認する。Next.jsのHMRやworkerが切り替わっても同じsidecar DBを使う。`Ctrl+C`で停止するとDBを破棄し、次回起動時は初期データへ戻る。Previewのデータや編集内容とは同期しない。
 
 Cloud専用worktreeには`.env`・`.env.local`・`.env.development`・`.env.development.local`を置かない。Next.jsによる外部接続設定の自動読込を防ぐため、これらがある場合は起動前に停止する。WSL側の環境ファイルを削除・コピーせず、環境ファイルのない専用worktreeを使う。外部DB接続文字列、Google/Vercel等の秘密値を設定した`.env.local`は不要。Cloud runnerは外部接続・provider認証の値を子プロセスへ渡さず、Cloud用DBとテスト認証を使う。Vercel上でCloudモードを実行することは拒否する。通常の`dev`、外部DBを使う既存手順、Production/Previewの接続・認証の規則は各環境の手順に従う。
 

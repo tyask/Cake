@@ -145,7 +145,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
     server = await startCloudServer({ port, hostname: '127.0.0.1', quiet: true });
     proof.resources.servers = 1; proof.resources.databases = 1;
     const origin = new URL(server.url).origin;
-    requireCondition(new URL(origin).hostname === '127.0.0.1' && new URL(origin).protocol === 'http:' && !interrupted);
+    requireCondition(new URL(origin).hostname === 'localhost' && new URL(origin).protocol === 'http:' && !interrupted);
     stage = 'launch'; browser = await chromium.launch(browserOptions());
     proof.resources.browsers = 1; proof.environment.chromium = browser.version();
     for (const item of proof.cases) {
