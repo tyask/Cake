@@ -1,6 +1,6 @@
 "use client";
 
-import type { AppActionInput } from "@/lib/app-input";
+import type { AppActionInput } from "@/lib/shared/schemas/app-input";
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { TestLoginButtons } from "./test-login-buttons";

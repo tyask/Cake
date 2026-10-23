@@ -1,17 +1,17 @@
 "use client";
 
-import { formatYen } from "@/lib/display-formatters";
+import { formatYen } from "@/lib/shared/display-formatters";
 
-import { commonExpenseClassLabels, expenseClasses, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/domain-values";
+import { commonExpenseClassLabels, expenseClasses, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/shared/domain-values";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { validateSplitWeights, defaultSplitWeights, personalSplitWeights, prepareDefaultRuleMatcher } from "@/lib/expense-splits";
-import { splitAmounts } from "@/lib/split-allocations";
-import { recurringFormConfig, recurringFormDefaults, recurringFormPreview } from "@/lib/recurring-payment-form";
-import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/transaction-memo";
-import { blockedReasonLabel, recurringPaymentStateLabel, type RecurringServiceErrorCode } from "@/lib/recurring-payment-types";
-import type { RecurringPaymentMutation, RecurringPaymentMutationDraft, RecurringPayment, RecurringPaymentConfig, RecurringPaymentMutationResult, RecurringPaymentsResponse } from "@/lib/recurring-payment-types";
-import type { ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/types";
+import { validateSplitWeights, defaultSplitWeights, personalSplitWeights, prepareDefaultRuleMatcher } from "@/lib/shared/expense-splits";
+import { splitAmounts } from "@/lib/shared/split-allocations";
+import { recurringFormConfig, recurringFormDefaults, recurringFormPreview } from "@/lib/client/recurring-payment-form";
+import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/shared/schemas/transaction-memo";
+import { blockedReasonLabel, recurringPaymentStateLabel, type RecurringServiceErrorCode } from "@/lib/shared/recurring-payment-types";
+import type { RecurringPaymentMutation, RecurringPaymentMutationDraft, RecurringPayment, RecurringPaymentConfig, RecurringPaymentMutationResult, RecurringPaymentsResponse } from "@/lib/shared/recurring-payment-types";
+import type { ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/shared/types";
 import { SwipeDelete } from "./swipe-delete";
 import { RefreshButton } from "./refresh-button";
 import { SplitEditor } from "./split-editor";

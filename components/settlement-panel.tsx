@@ -1,8 +1,8 @@
 "use client";
 
-import { formatYen, formatJstDateTime } from "@/lib/display-formatters";
-import type { RunAppAction } from "@/lib/app-input";
-import type { WorkspaceData } from "@/lib/types";
+import { formatYen, formatJstDateTime } from "@/lib/shared/display-formatters";
+import type { RunAppAction } from "@/lib/shared/schemas/app-input";
+import type { WorkspaceData } from "@/lib/shared/types";
 import { PageHeading, Empty } from "./dashboard-ui";
 
 export function SettlementPanel({ selected, run, refreshAction, refreshing }: { selected: WorkspaceData; run: RunAppAction; refreshAction: React.ReactNode; refreshing: boolean }) {

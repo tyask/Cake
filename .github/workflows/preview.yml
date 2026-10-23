@@ -64,7 +64,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-        run: node --import tsx scripts/preview-workflow.ts
+        run: node --import tsx scripts/preview/preview-workflow.ts
       - name: Publish public operation receipt notice
         if: success() || (always() && github.event_name == 'workflow_dispatch' && inputs.action == 'verify')
-        run: node --import tsx scripts/preview-workflow.ts --notice
+        run: node --import tsx scripts/preview/preview-workflow.ts --notice

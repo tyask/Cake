@@ -79,7 +79,7 @@ npm.cmd run task:pr -- --title '変更内容' --changes-file '.cake\changes.md' 
 
 ## 再構築とダミー試験
 
-エントリーポイントは [scripts/windows-qa.ts](../scripts/windows-qa.ts)、C#ソースは `scripts/windows-token-helper/*.cs`。各実行時にWindows既存の.NET Framework `csc.exe` と実行中Nodeの場所を解決し、`.cake/windows-tools/run-<一意ID>/` へ新規構築する。日付付き絶対path、利用者名、SID、特定PR/SHAやブラウザキャッシュをソースへ固定しない。既存の暗号化tokenは変更せず、自動再構築に新ソフト・拡張機能・実行ポリシー変更は要らない。
+エントリーポイントは [scripts/qa/windows/windows-qa.ts](../scripts/qa/windows/windows-qa.ts)、C#ソースは `scripts/qa/windows/windows-token-helper/*.cs`。各実行時にWindows既存の.NET Framework `csc.exe` と実行中Nodeの場所を解決し、`.cake/windows-tools/run-<一意ID>/` へ新規構築する。日付付き絶対path、利用者名、SID、特定PR/SHAやブラウザキャッシュをソースへ固定しない。既存の暗号化tokenは変更せず、自動再構築に新ソフト・拡張機能・実行ポリシー変更は要らない。
 
 ```powershell
 npm.cmd run qa:windows -- self-test

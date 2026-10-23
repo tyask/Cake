@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { getCurrentUser } from "@/lib/current-user";
-import { disableUser, listRegisteredUsers, normalizeEmail, registerUser, requireAdministrator, UserAccessError } from "@/lib/user-access";
-import type { AppUser } from "@/lib/types";
+import { getCurrentUser } from "@/lib/server/auth/current-user";
+import { disableUser, listRegisteredUsers, normalizeEmail, registerUser, requireAdministrator, UserAccessError } from "@/lib/server/auth/user-access";
+import type { AppUser } from "@/lib/shared/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

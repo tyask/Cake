@@ -1,11 +1,11 @@
 import { LoginScreen } from "@/components/login-screen";
 import { Dashboard } from "@/components/dashboard";
 import { CakeIcon } from "@/components/cake-icon";
-import { getCurrentUser } from "@/lib/current-user";
-import { isTestAuthEnabled } from "@/lib/auth-mode";
-import { getBootstrap } from "@/lib/repository";
-import { databaseVariable } from "@/lib/database-environment";
-import { homeNavigation, type HomeSearchParams } from "@/lib/home-navigation";
+import { getCurrentUser } from "@/lib/server/auth/current-user";
+import { isTestAuthEnabled } from "@/lib/server/auth/auth-mode";
+import { getBootstrap } from "@/lib/server/stores/repository";
+import { databaseVariable } from "@/lib/server/database-environment";
+import { homeNavigation, type HomeSearchParams } from "@/lib/shared/home-navigation";
 
 export const dynamic = "force-dynamic";
 

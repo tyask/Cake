@@ -1,7 +1,7 @@
 "use client";
 
-import { flattenCategories } from "@/lib/categories";
-import type { Category } from "@/lib/types";
+import { flattenCategories } from "@/lib/shared/categories";
+import type { Category } from "@/lib/shared/types";
 import styles from "./category-select.module.css";
 
 type CategoryChoice = { id: string; label: string; rootLabel: string; colorHex: string; archived: boolean };

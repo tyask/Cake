@@ -523,6 +523,7 @@
             <div class="card"><h3>デプロイ</h3><p>Vercelへ配置し、Neonの接続文字列とGoogle OAuth情報を暗号化された環境変数として設定する。</p></div>
           </div>
           <p>アプリAPIはHTTP処理、用途別サービス（workspace/招待・明細・ルール・取込・清算）、DB storeの順に処理する。共通の入力schemaとDTO変換を使用し、業務条件をDBなしで検証できる。workspaceの削除は、清算済み明細と履歴の関連も含めて一括で完了し、制約違反時は全体を取り消す。</p>
+          <p>ライブラリはブラウザの取得・保存制御を<code>lib/client/</code>、認証・HTTP境界・サービス・DB処理を<code>lib/server/</code>、両側で使う型・入力schema・純粋な計算を<code>lib/shared/</code>へ配置する。Client Componentからサーバー処理への推移的な参照と、共有定義から画面・サーバー・運用処理への依存を自動テストで検査する。運用処理は<code>scripts/</code>の用途別ディレクトリ、回帰テストは<code>tests/</code>の対象領域別ディレクトリへまとめる。各境界と依存方向は<a href="detail-design.html#architecture">詳細設計</a>を参照する。</p>
           <div class="note">通常APIはセッションとDB上の利用可否を確認する。ワークスペースの参照・更新は所属、招待承認はトークン・宛先メール・期限、利用者管理は管理者権限を検証する。</div>
           <div class="warning">ローカル・Preview環境では <code>AUTH_MODE=test</code> により、固定IDを持つテストユーザーA/Bを選択して通常のAuth.jsセッションを発行できる。Vercel Productionではサーバー側で常に無効化し、Googleログインだけを提供する。</div>
           <p>割合計算の参加者とルールは用途別に取得する。ルール作成は参加者のみ、更新は参加者と対象ルールの区分・割合・有効状態のみを読む。通常明細の保存は、保存済みの区分・割合を継承した後、区分未指定または共有費の割合未指定の場合にルールを取得・判定する。個人費の割合生成と明示割合の検証は参加者情報で行う。省略値を補完する通常明細・CSV取込では部分一致と優先順によるルール判定を維持する。</p>

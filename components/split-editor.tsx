@@ -1,12 +1,12 @@
 "use client";
 
-import { formatYen } from "@/lib/display-formatters";
+import { formatYen } from "@/lib/shared/display-formatters";
 
-import { MAX_AMOUNT_YEN, MAX_SPLIT_WEIGHT } from "@/lib/domain-values";
+import { MAX_AMOUNT_YEN, MAX_SPLIT_WEIGHT } from "@/lib/shared/domain-values";
 
 import { useId, useState } from "react";
-import { changeSplitAmount, equalSplitWeights, splitAmounts } from "@/lib/split-allocations";
-import type { SplitWeights, WorkspaceMember } from "@/lib/types";
+import { changeSplitAmount, equalSplitWeights, splitAmounts } from "@/lib/shared/split-allocations";
+import type { SplitWeights, WorkspaceMember } from "@/lib/shared/types";
 
 export function SplitEditor({ members, value, onChange, onCommit, amountYen, disabled = false, compact = false, inline = false, label = "負担割合" }: {
   members: WorkspaceMember[];

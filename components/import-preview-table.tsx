@@ -1,12 +1,12 @@
 "use client";
 
-import { formatYen } from "@/lib/display-formatters";
+import { formatYen } from "@/lib/shared/display-formatters";
 
-import { expenseClassLabels, expenseClasses } from "@/lib/domain-values";
+import { expenseClassLabels, expenseClasses } from "@/lib/shared/domain-values";
 
 import { useState, type CSSProperties } from "react";
-import { isPayPayRowImportable, type PayPayPreviewRow } from "@/lib/paypay";
-import type { ExpenseClass, SplitWeights, WorkspaceMember } from "@/lib/types";
+import { isPayPayRowImportable, type PayPayPreviewRow } from "@/lib/shared/paypay";
+import type { ExpenseClass, SplitWeights, WorkspaceMember } from "@/lib/shared/types";
 import { SelectionCheckbox } from "./selection-checkbox";
 import { SplitEditor } from "./split-editor";
 import { CategorySelect, type CategoryChoices } from "./category-select";

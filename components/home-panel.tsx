@@ -1,10 +1,10 @@
 "use client";
 
-import { formatYen, formatJstDateTime } from "@/lib/display-formatters";
-import { commonExpenseClassLabels } from "@/lib/domain-values";
-import { currentMonthTransactions } from "@/lib/home-summary";
-import type { DashboardTab as Tab } from "@/lib/bootstrap";
-import type { WorkspaceData } from "@/lib/types";
+import { formatYen, formatJstDateTime } from "@/lib/shared/display-formatters";
+import { commonExpenseClassLabels } from "@/lib/shared/domain-values";
+import { currentMonthTransactions } from "@/lib/shared/home-summary";
+import type { DashboardTab as Tab } from "@/lib/shared/types";
+import type { WorkspaceData } from "@/lib/shared/types";
 import { Empty } from "./dashboard-ui";
 
 export function HomePanel({ selected, pending, setTab, add, refreshAction, refreshing }: { selected: WorkspaceData; pending: number; setTab: (tab: Tab) => void; add: () => void; refreshAction: React.ReactNode; refreshing: boolean }) {

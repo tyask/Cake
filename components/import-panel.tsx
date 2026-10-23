@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { RunAppAction } from "@/lib/app-input";
-import { defaultSplitWeights, personalSplitWeights, validateSplitWeights } from "@/lib/expense-splits";
-import { isPayPayRowImportable, parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/paypay";
-import { applyPayPayDuplicateChecks, MAX_DUPLICATE_CHECK_IDS, type ExistingPayPayTransaction } from "@/lib/import-duplicates";
-import type { ExpenseClass, WorkspaceData } from "@/lib/types";
+import type { RunAppAction } from "@/lib/shared/schemas/app-input";
+import { defaultSplitWeights, personalSplitWeights, validateSplitWeights } from "@/lib/shared/expense-splits";
+import { isPayPayRowImportable, parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/shared/paypay";
+import { applyPayPayDuplicateChecks, MAX_DUPLICATE_CHECK_IDS, type ExistingPayPayTransaction } from "@/lib/shared/import-duplicates";
+import type { ExpenseClass, WorkspaceData } from "@/lib/shared/types";
 import { ImportPreviewTable } from "./import-preview-table";
 import { PageHeading } from "./dashboard-ui";
 import { ImportHelpDialog } from "./import-help-dialog";

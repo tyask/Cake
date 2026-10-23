@@ -230,11 +230,11 @@
 
         <section id="architecture">
           <h2>2. 実装構成と依存方向</h2>
-          <div class="layers" role="img" aria-label="UI、HTTP境界、アプリケーション処理、データストアの依存方向">
-            <div class="layer"><strong>UI / Routes</strong><small><code>app/</code><br /><code>components/</code><br />RSC、Client Components、画面状態</small></div>
-            <div class="layer"><strong>HTTP / Auth</strong><small><code>app/api/</code><br /><code>auth.ts</code><br />セッション、Zod検証、アクション振分</small></div>
-            <div class="layer"><strong>Application / Domain</strong><small><code>lib/repository.ts</code><br /><code>lib/paypay.ts</code><br /><code>lib/settlement.ts</code></small></div>
-            <div class="layer"><strong>Infrastructure</strong><small><code>lib/db.ts</code><br />Neon PostgreSQL<br />Google OAuth</small></div>
+          <div class="layers" role="img" aria-label="ブラウザからHTTPを経由し、サーバーの業務処理とDB storeへ進むデータの流れ">
+            <div class="layer"><strong>UI / Client</strong><small><code>components/</code><br /><code>lib/client/</code><br />画面状態、取得・保存制御</small></div>
+            <div class="layer"><strong>HTTP / Auth</strong><small><code>app/api/</code>・<code>auth.ts</code><br /><code>lib/server/handlers/</code><br />認証、入力parse、応答変換</small></div>
+            <div class="layer"><strong>Application</strong><small><code>lib/server/services/</code><br />用途別の業務条件<br />注入したstoreの呼出し</small></div>
+            <div class="layer"><strong>Store / DB</strong><small><code>lib/server/stores/</code><br /><code>lib/server/db.ts</code><br />SQL・Transaction</small></div>
           </div>
           <h3>実行境界</h3>
           <div class="table-wrap"><table>
@@ -242,11 +242,40 @@
             <tbody>
               <tr><td>Server Component</td><td>Next.jsサーバー</td><td>セッション取得、初期データ取得、初期画面の分岐。</td><td>ブラウザAPIの使用。</td></tr>
               <tr><td>Client Component</td><td>ブラウザ</td><td>画面状態、入力、Fetch、CSV解析・プレビュー。</td><td>DB接続文字列や秘密情報の参照。</td></tr>
-              <tr><td>Route Handler</td><td>Node.js Runtime</td><td>認証、入力検証、認可、SQL更新、JSON応答。</td><td>クライアント入力の無検証利用。</td></tr>
+              <tr><td>Route Handler</td><td>Node.js Runtime</td><td>認証、入力検証、認可、サービス・storeの組立て、JSON応答。</td><td>クライアント入力の無検証利用、SQLの直接記述。</td></tr>
               <tr><td>Pure Domain Function</td><td>呼出元に従う</td><td>CSV変換、費用区分判定、清算計算。</td><td>DBや画面状態への副作用。</td></tr>
             </tbody>
           </table></div>
-          <div class="note"><code>lib/paypay.ts</code>はブラウザでCSVを解析する。純粋関数の<code>lib/settlement.ts</code>はRepositoryでの参照・清算処理に加え、ブラウザで保存済み明細の応答を反映するときにも呼び出す。</div>
+          <h3>ライブラリの配置と依存</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>配置</th><th>責務</th><th>実行時の依存方向</th></tr></thead>
+            <tbody>
+              <tr><td><code>lib/client/</code></td><td>Fetch、保存待ち・自動保存、応答採用・DTOの画面反映、localStorage。</td><td>clientとsharedを参照する。Client Componentの推移的な依存にもserverを含めない。</td></tr>
+              <tr><td><code>lib/shared/</code></td><td>型、有限値、<code>schemas/</code>の入力検証、CSV変換、割合・清算等の共通計算。</td><td>sharedとブラウザで利用可能な依存を参照する。client・server・UI・運用処理を参照しない。</td></tr>
+              <tr><td><code>lib/server/auth/</code></td><td>認証設定、現在利用者、利用可否・管理者権限の確認。</td><td>serverとsharedを参照し、clientを参照しない。</td></tr>
+              <tr><td><code>lib/server/handlers/</code></td><td>認証結果の受入れ、入力parse、エラー・HTTP応答変換。</td><td>処理は引数で受け取り、実行時の推移依存にDBを含めない。</td></tr>
+              <tr><td><code>lib/server/services/</code></td><td>workspace・招待・明細・ルール・取込・清算・カテゴリの業務条件。</td><td>storeの型と注入された操作を使い、推移的な実行時依存にもstore・DB実装を含めない。</td></tr>
+              <tr><td><code>lib/server/stores/</code>・server直下のDB基盤</td><td>用途別SQL、DTO構築、Transaction、DB接続・接続先検査、runtime proof。</td><td>serverとsharedを参照し、clientを参照しない。</td></tr>
+            </tbody>
+          </table></div>
+          <p>定期支払いは<code>lib/server/recurring-payments.ts</code>にサービスと既定DB storeを置き、共有schema・DTO・予定日計算をsharedへ分ける。<code>services/</code>のDB分離規則を全サーバーファイルへ一律に広げない。HTTPで扱う<code>UserAccessError</code>・<code>RecurringPaymentError</code>は<code>lib/server/errors.ts</code>に単一定義し、handlerから認証・DB実装への実行時依存を生まない。</p>
+          <p><code>lib/</code>のモジュールはclient・server・sharedのいずれかに配置する。<code>npm test</code>の<code>tests/architecture/</code>が<code>lib/client/</code>と<code>"use client"</code>からの推移依存、shared・serverの依存方向、handler・servicesからstore・DBへの到達、アプリからscripts・testsへの参照とlibの配置を検査する。ブラウザで使う外部依存は検査側の許可一覧で管理し、Node組込み・サーバーSDK・未知の外部依存を拒否する。</p>
+          <p>検査は相対path・<code>@/</code>のalias、拡張子省略・index、再export、文字列literalの<code>import()</code>・<code>require()</code>を追跡する。shared、client、handler、servicesの推移依存では、解決できないlocal参照や対象を静的に決められない動的参照を拒否する。<code>.d.ts</code>・<code>.d.mts</code>・<code>.d.cts</code>の型宣言ファイルと、<code>import type</code>・<code>export type</code>など明示された型だけの参照は実行時の依存から除き、通常のimport・再exportは型としてだけ使用していても実行時依存として扱う。</p>
+          <div class="note"><code>lib/shared/paypay.ts</code>はブラウザでCSVを解析する。純粋関数の<code>lib/shared/settlement.ts</code>はRepositoryでの参照・清算処理に加え、ブラウザで保存済み明細の応答を反映するときにも呼び出す。</div>
+          <h3>運用スクリプトとテストの配置</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>配置</th><th>対象</th></tr></thead>
+            <tbody>
+              <tr><td><code>scripts/task/</code></td><td>worktree作成、PR本文・Ready管理。</td></tr>
+              <tr><td><code>scripts/preview/</code></td><td>Preview・常設PreviewのActions要求、provider管理、receipt・status・正式ブラウザ検証。</td></tr>
+              <tr><td><code>scripts/build/</code></td><td>Vercel buildの実行順序と準備用静的配置。</td></tr>
+              <tr><td><code>scripts/db/</code></td><td>migration、テストユーザー・サンプルseed、初期fixture生成。</td></tr>
+              <tr><td><code>scripts/qa/db/</code>・<code>scripts/qa/windows/</code></td><td>実DBシナリオ・性能計測、Windows資格情報・QA子プロセスとC# helper。</td></tr>
+              <tr><td><code>tests/shared/</code>・<code>tests/client/</code>・<code>tests/server/</code></td><td>共通業務規則、UI・ブラウザ制御、HTTP・サービス・SQLの回帰。</td></tr>
+              <tr><td><code>tests/tooling/</code>・<code>tests/architecture/</code></td><td>運用スクリプト・Preview契約の回帰、ソースの依存境界検査。</td></tr>
+            </tbody>
+          </table></div>
+          <p>ブラウザ用fixtureは<code>tests/client/fixtures/</code>、業務規則の共通fixtureは<code>tests/shared/fixtures/</code>、Preview検査用fixtureは<code>tests/tooling/fixtures/</code>へ置く。正式なnpmコマンド・workflowを入口とし、資格情報、receipt、DB所有権・資源照合、停止条件は各運用契約に従う。</p>
         </section>
 
         <section id="data-flows">
@@ -349,10 +378,10 @@
             <thead><tr><th>ファイル</th><th>責務</th></tr></thead>
             <tbody>
               <tr><td>components/dashboard.tsx</td><td><code>Dashboard</code>。画面配置・ナビゲーション・ダイアログの開閉を担当する。</td></tr>
-              <tr><td>components/use-dashboard-controller.ts / lib/dashboard-requests.ts</td><td>取得・更新・通知のhookと、workspace世代・tab世代・revision・要求IDによる応答採用条件の純粋関数。</td></tr>
+              <tr><td>components/use-dashboard-controller.ts / lib/client/dashboard-requests.ts</td><td>取得・更新・通知のhookと、workspace世代・tab世代・revision・要求IDによる応答採用条件の純粋関数。</td></tr>
               <tr><td>components/home-panel.tsx / import-panel.tsx / settlement-panel.tsx / workspace-settings-panel.tsx</td><td>ホーム・CSV選択/重複照合/取込・清算・workspace設定の表示と各画面の入力状態を担当する。</td></tr>
               <tr><td>components/workspace-modal.tsx / new-transaction-modal.tsx / dashboard-ui.tsx</td><td>workspace/新規明細のフォームと共通の見出し・空表示・Modalを分離する。フォームの保存時期と再マウント用keyを保持する。</td></tr>
-              <tr><td>lib/app-client.ts</td><td><code>postAction()</code>でJSONのPOSTと非2xx応答の例外化を共用する。</td></tr>
+              <tr><td>lib/client/app-client.ts</td><td><code>postAction()</code>でJSONのPOSTと非2xx応答の例外化を共用する。</td></tr>
               <tr><td>components/transactions-panel.tsx / transaction-table.tsx</td><td>明細一覧のインライン編集、行ごとの保存状態、一括選択・削除・ルール適用。<code>TransactionTable</code>は明細/取込の共通表枠とモバイル要約。</td></tr>
               <tr><td>components/transaction-filter-dialog.tsx / use-transaction-filters.ts</td><td>列候補の選択、列内OR・列間AND条件、ユーザー/workspace別のブラウザ保存。</td></tr>
               <tr><td>components/transaction-memo-editor.tsx</td><td>清算済みを含むメモ専用の編集・保存・再試行。</td></tr>
@@ -369,20 +398,20 @@
           <div class="table-wrap"><table>
             <thead><tr><th>ファイル</th><th>主要処理</th></tr></thead>
             <tbody>
-              <tr><td>lib/db.ts / db-query-logging.ts / database-environment.ts</td><td><code>db()</code>でNeonクライアントを遅延生成・再利用。PreviewはテストDB接続を必須とし、本番接続へのfallbackを禁止。<code>instrumentDatabase()</code>で単発/Transactionの実行時間と安全な識別情報を記録。</td></tr>
-              <tr><td>lib/current-user.ts / auth-callbacks.ts / auth-mode.ts</td><td><code>getCurrentUser()</code>、<code>resolveSessionUser()</code>、<code>createAuthCallbacks()</code>、Productionでのテスト認証無効化。</td></tr>
-              <tr><td>lib/user-access.ts / user-profile.ts / test-users.ts</td><td>登録・有効状態・管理者権限のDB確認、表示名更新・入力schema、固定テストユーザー定義。</td></tr>
-              <tr><td>lib/app-handlers.ts / app-service.ts / app-services/ / app-store.ts / settlement-store.ts</td><td>HTTPの認証・入力/応答、actionの振分け、workspace/招待・明細・ルール・取込・清算の業務条件、SQL実行を分離する。サービスは差し替え可能なstoreを受け取る。</td></tr>
-              <tr><td>lib/repository.ts / bootstrap.ts</td><td><code>getBootstrap()</code>の集約SQL・DTO構築、<code>requireWorkspaceMember()</code>、タブ別scopeとmetadataの併合。</td></tr>
-              <tr><td>lib/expense-splits.ts / split-allocations.ts / settlement.ts</td><td>参加者別保存割合・デフォルトルール、整数円への配分・円入力からの割合、正確な分数集計による清算。</td></tr>
-              <tr><td>lib/paypay.ts / paypay-id.ts / import-duplicates.ts / paypay-import.ts</td><td>CSV解析、JST外部ID生成・正規化、既存/CSV内重複・衝突の検出、DB Transactionでの登録。</td></tr>
-              <tr><td>lib/display-formatters.ts</td><td>円とJST日時の表示を共通化し、Intl formatterをモジュール単位で再利用する。日時は秒付きと分までを使い分ける。入力日時の変換とCSVの不正値補正は含めない。</td></tr>
-              <tr><td>lib/transaction-editing.ts / transaction-record.ts / transaction-updates.ts</td><td>一覧入力検証・秒/ミリ秒付きJST変換、ミリ秒を保持する確定DB行のISO DTO化、応答の対象行への反映と清算再計算。</td></tr>
-              <tr><td>lib/transaction-memo.ts / transaction-filters.ts / transaction-filter-storage.ts / transaction-list.ts</td><td>メモ専用schema、列条件・候補集計、localStorage形式の検証・保存、表示行と選択件数の導出。</td></tr>
-              <tr><td>lib/rule-order.ts</td><td>取得済みルールと楽観的な順序IDから表示順を組み立てる純粋関数。</td></tr>
-              <tr><td>lib/domain-values.ts / domain-schemas.ts / app-input.ts</td><td>分類値一覧・派生型・表示ラベル・入力上限、共通フィールドschema、アプリAPIのaction判別unionとクライアント送信型。DB・認証には依存しない。</td></tr>
-              <tr><td>lib/recurring-payment-schemas.ts / recurring-payment-types.ts / recurring-payments.ts</td><td>定期支払いの共有入力schema・DTO・有限状態/コード/表示と、DB接続を扱うサービスを分離する。クライアントは共有定義だけを参照する。</td></tr>
-              <tr><td>lib/types.ts</td><td>UI、API、Repository、ドメイン関数間の共通データ契約。</td></tr>
+              <tr><td>lib/server/db.ts / db-query-logging.ts / database-environment.ts</td><td><code>db()</code>でNeonクライアントを遅延生成・再利用。PreviewはテストDB接続を必須とし、本番接続へのfallbackを禁止。<code>instrumentDatabase()</code>で単発/Transactionの実行時間と安全な識別情報を記録。</td></tr>
+              <tr><td>lib/server/auth/current-user.ts / auth-callbacks.ts / auth-mode.ts</td><td><code>getCurrentUser()</code>、<code>resolveSessionUser()</code>、<code>createAuthCallbacks()</code>、Productionでのテスト認証無効化。</td></tr>
+              <tr><td>lib/server/auth/user-access.ts<br />lib/shared/schemas/user-profile.ts<br />lib/shared/test-users.ts</td><td>登録・有効状態・管理者権限のDB確認、表示名更新・入力schema、固定テストユーザー定義。</td></tr>
+              <tr><td>lib/server/handlers/app-handlers.ts<br />lib/server/services/<br />lib/server/stores/app-store.ts / settlement-store.ts</td><td>HTTPの認証・入力/応答、actionの振分け、workspace/招待・明細・ルール・取込・清算の業務条件、SQL実行を分離する。サービスは差し替え可能なstoreを受け取る。</td></tr>
+              <tr><td>lib/server/stores/repository.ts<br />lib/client/bootstrap.ts</td><td><code>getBootstrap()</code>の集約SQL・DTO構築、<code>requireWorkspaceMember()</code>、タブ別scopeとmetadataの併合。</td></tr>
+              <tr><td>lib/shared/expense-splits.ts / split-allocations.ts / settlement.ts</td><td>参加者別保存割合・デフォルトルール、整数円への配分・円入力からの割合、正確な分数集計による清算。</td></tr>
+              <tr><td>lib/shared/paypay.ts / paypay-id.ts / import-duplicates.ts<br />lib/server/stores/import-duplicates-store.ts / paypay-import.ts</td><td>CSV解析、JST外部ID生成・正規化、既存/CSV内重複・衝突の検出、所属確認と既存明細の最小照合情報の取得、DB Transactionでの登録。</td></tr>
+              <tr><td>lib/shared/display-formatters.ts</td><td>円とJST日時の表示を共通化し、Intl formatterをモジュール単位で再利用する。日時は秒付きと分までを使い分ける。入力日時の変換とCSVの不正値補正は含めない。</td></tr>
+              <tr><td>lib/shared/transaction-editing.ts / transaction-record.ts<br />lib/client/transaction-updates.ts</td><td>一覧入力検証・秒/ミリ秒付きJST変換、ミリ秒を保持する確定DB行のISO DTO化、応答の対象行への反映と清算再計算。</td></tr>
+              <tr><td>lib/shared/schemas/transaction-memo.ts<br />lib/shared/transaction-filters.ts / transaction-list.ts<br />lib/client/transaction-filter-storage.ts</td><td>メモ専用schema、列条件・候補集計、localStorage形式の検証・保存、表示行と選択件数の導出。</td></tr>
+              <tr><td>lib/shared/rule-order.ts</td><td>取得済みルールと楽観的な順序IDから表示順を組み立てる純粋関数。</td></tr>
+              <tr><td>lib/shared/domain-values.ts<br />lib/shared/schemas/domain-schemas.ts / app-input.ts</td><td>分類値一覧・派生型・表示ラベル・入力上限、共通フィールドschema、アプリAPIのaction判別unionとクライアント送信型。DB・認証には依存しない。</td></tr>
+              <tr><td>lib/shared/schemas/recurring-payment-schemas.ts<br />lib/shared/recurring-payment-types.ts / recurring-payment-calendar.ts<br />lib/server/recurring-payments.ts</td><td>定期支払いの共有入力schema・DTO・有限状態/コード/表示・予定日計算と、DB接続を扱うサービスを分離する。クライアントは共有定義だけを参照する。</td></tr>
+              <tr><td>lib/shared/types.ts</td><td>UI、API、Repository、ドメイン関数間の共通データ契約。</td></tr>
             </tbody>
           </table></div>
         </section>
@@ -434,7 +463,7 @@
           <h3>共通仕様とGET</h3>
           <ul>
             <li>Runtimeは<code>nodejs</code>。UUID・32 byte招待トークン・SHA-256をNode Cryptoで生成。</li>
-            <li>POSTは<code>lib/app-input.ts</code>の<code>appActionInputSchema</code>でaction別の入力を一度検証し、判別可能なunionで各分岐へ渡す。未対応actionのエラー文言を維持し、最後のnever照合で追加actionの処理漏れを型検査する。SQLはNeon tagged templateで値をパラメータ化する。</li>
+            <li>POSTは<code>lib/shared/schemas/app-input.ts</code>の<code>appActionInputSchema</code>でaction別の入力を一度検証し、判別可能なunionで各分岐へ渡す。未対応actionのエラー文言を維持し、最後のnever照合で追加actionの処理漏れを型検査する。SQLはNeon tagged templateで値をパラメータ化する。</li>
             <li><code>AppActionInput</code>と<code>RunAppAction</code>をクライアント送信と共有する。workspaceを親で補完するルール操作や定期支払いでも、actionごとの必須フィールドを維持した型を使う。プロフィール・メモ専用保存と定期支払いはstrict、その他のアプリactionは余分な項目を除去する既存方針を維持する。</li>
             <li><code>domain-schemas.ts</code>でmerchant（trim後1〜240文字）、method（trim後1〜120文字）、amountYen（1〜2147483647の整数）、重み（0〜2147483647の整数）などを共有する。通常保存とCSV取込も金額上限を業務データのDB更新前に検証する。割合の全参加者一致・正の合計・個人費1:0は引き続きドメイン検証で確認する。</li>
             <li><code>/api/app</code>成功はHTTP 200。GET失敗は基本401、POST失敗は基本400。<code>UserAccessError</code>は固有statusを優先し、応答は<code>{ error }</code>。</li>
@@ -623,7 +652,7 @@
               <tr><td>絞り込み・選択・コピー・ログアウト</td><td>絞り込み・行選択はブラウザ内の表示State（列条件はlocalStorageにも保存）。招待リンクのコピーはClipboard API。ログアウトはAuth.jsのsignOut。これらはrunから業務DB更新へ流れない。</td></tr>
             </tbody>
           </table></div>
-          <p>対応する実装：<a href="../components/dashboard.tsx">Dashboard</a>、<a href="../components/use-dashboard-controller.ts">controller hook</a>、<a href="../lib/dashboard-requests.ts">応答採用条件</a>、<a href="../lib/transaction-refresh.ts">保存待ち更新</a>、<a href="../lib/app-handlers.ts">HTTP境界</a>、<a href="../lib/app-service.ts">action振分け</a>。</p>
+          <p>対応する実装：<a href="../components/dashboard.tsx">Dashboard</a>、<a href="../components/use-dashboard-controller.ts">controller hook</a>、<a href="../lib/client/dashboard-requests.ts">応答採用条件</a>、<a href="../lib/client/transaction-refresh.ts">保存待ち更新</a>、<a href="../lib/server/handlers/app-handlers.ts">HTTP境界</a>、<a href="../lib/server/services/app-service.ts">action振分け</a>。</p>
 
           <h3>設定枠の開閉</h3>
           <p>個人設定は「基本情報」、ワークスペース設定は「基本情報」「ワークスペースのデフォルト割合」「集計用カテゴリ」「定期支払い」「費用区分のデフォルトルール」「ワークスペースを削除」を縦に並べる。共通の<a href="../components/settings-section.tsx">SettingsSection</a>がnativeのdetails / summaryで各枠を初期状態では閉じ、見出し全体のクリック・タップ、Enter・Spaceで個別に開閉する。開閉マークは直径28pxの淡い丸背景に20pxのSVG矢印を置き、閉じているときは下、開いているときは上を向く。回転は短いアニメーションで示し、動きを減らす利用者設定ではアニメーションを行わない。マーク自体は装飾として読み上げとフォーカスの対象外とする。</p>
@@ -662,7 +691,7 @@
           <div class="table-wrap"><table>
             <thead><tr><th>タブ</th><th>参照・操作</th></tr></thead>
             <tbody>
-              <tr><td>ホーム</td><td>今月の支払い、未清算共通費、次の送金、最近6件、保留招待数、登録/取込/清算への導線。lib/home-summary.tsで日本時間の年・月が一致する明細を抽出する。</td></tr>
+              <tr><td>ホーム</td><td>今月の支払い、未清算共通費、次の送金、最近6件、保留招待数、登録/取込/清算への導線。lib/shared/home-summary.tsで日本時間の年・月が一致する明細を抽出する。</td></tr>
               <tr><td>取引明細</td><td>全明細の列フィルタ、未清算行のインライン保存、清算済みもメモ・カテゴリ保存、選択削除/ルール適用。</td></tr>
               <tr><td>CSV取込</td><td>ファイルまたは貼り付け本文を、metadataのルール・参加者で共通解析し、外部IDだけを専用APIで照合。選択行の費用区分・カテゴリを一括変更し、行ごとの割合・カテゴリを編集してbulkImport。</td></tr>
               <tr><td>清算</td><td>保存割合による清算内訳、対象明細、最新20件の履歴、清算完了。</td></tr>
@@ -711,7 +740,7 @@
           <h3>明細編集・一括操作</h3>
           <ul>
             <li>文字・日時・金額・割合は欄を離れるかEnterで保存。選択項目は変更時に保存。入力検証後、保存キューで順番に実行し、失敗時の下書きと再試行を保持する。</li>
-            <li>明細・ルールの保存は<code>lib/autosave.ts</code>で要求集約・値比較・確定値追従を共通化する。Enter直後のblurは進行中の要求に集約し、キュー実行時に最新下書きと確定値を比較して同値のPOSTを省略する。確定値と下書きの反映をキュー内で完了してから次を実行する。保存中の追加編集は保持し、失敗時は自動再送せず入力を残して再試行する。日時の未確定入力、メモの独立保存、明細のfreeze/flushは各エディタで管理する。遅れたReact反映の間だけ確定値を補い、反映完了後の外部更新を受け入れる。</li>
+            <li>明細・ルールの保存は<code>lib/client/autosave.ts</code>で要求集約・値比較・確定値追従を共通化する。Enter直後のblurは進行中の要求に集約し、キュー実行時に最新下書きと確定値を比較して同値のPOSTを省略する。確定値と下書きの反映をキュー内で完了してから次を実行する。保存中の追加編集は保持し、失敗時は自動再送せず入力を残して再試行する。日時の未確定入力、メモの独立保存、明細のfreeze/flushは各エディタで管理する。遅れたReact反映の間だけ確定値を補い、反映完了後の外部更新を受け入れる。</li>
             <li>取引の担当者を変更すると個人費の割合は新担当者1・ほか0に追従。共通費の保存済み割合は保持する。費用区分を新たに共通費へ変更すると現在のデフォルト割合を使う。</li>
             <li>割合は%と円入力を切替可能。円表示は最大剰余法で配分し同率時は参加者順、合計を整数円に一致させる。円入力は分担金額を重みとして保存する。</li>
             <li><code>SplitEditor</code>の単位プルダウンは共通部品で常に「%」「円」「1:1」の3択を表示し、呼出元ごとの表示可否フラグは持たない。明細追加・一覧・CSV取込・定期支払いの追加/編集で同じ選択肢を使う。二人参加中で編集可能な共通費に限り、選択すると二人の重みを1ずつに設定し、%表示の50%ずつへ戻す。新規明細では手動調整としてルールの自動適用を止め、一覧では変更した割合を即時保存キューへ送る。奇数円でも保存割合は1:1を保持する。個人費・清算済み・参加者一人では利用不可とし、CSV取込では対象行のプレビューだけを変更し、取込実行時にsplitWeightsとして送信する。未選択の登録可能行も編集でき、選択状態・他行・workspaceのデフォルト割合を変更しない。エラー行・重複行・保存中はfieldsetを無効化する。定期支払いではフォームのconfigと手動調整状態を更新し、追加/変更の保存時に専用APIへ送る。onChangeがない参照用と参加者一人では1:1のoptionを無効にする。workspaceのデフォルト割合入力は単位プルダウンを持たない。API・DBの変更は不要。</li>
@@ -726,7 +755,7 @@
           <h3>PC取引明細の折り返し</h3>
           <p><code>TransactionTable</code>の<code>wrap</code>を取引明細だけで有効にする。表のラッパーをinline-size containerとし、PC幅（48rem超）かつ表示領域84rem未満では明細行をflex-wrap、各セルを項目別の幅を基準に配置する。日時・割合・カテゴリ・メモの入力幅を確保し、既存の<code>data-label</code>を項目名として表示する。見出しのフィルタと全選択も折り返し、保存中表示・全幅のエラー行・カテゴリ色線を維持する。幅変更はCSSだけで切り替え、入力部品の再生成やデータ取得・保存は行わない。84rem以上の列別テーブル、48rem以下の要約と詳細展開、CSV取込と定期支払いの表示はそれぞれの既存レイアウトを使う。</p>
           <h3>取引明細のフィルタ保存</h3>
-          <p><code>TransactionsPanel</code>は<code>useTransactionFilters(userId, workspaceId)</code>で列ごとの条件を管理し、<code>lib/transaction-filter-storage.ts</code>を通して<code>localStorage</code>へ保存・復元する。API・DBへは保存しない。</p>
+          <p><code>TransactionsPanel</code>は<code>useTransactionFilters(userId, workspaceId)</code>で列ごとの条件を管理し、<code>lib/client/transaction-filter-storage.ts</code>を通して<code>localStorage</code>へ保存・復元する。API・DBへは保存しない。</p>
           <p>保存用の列条件は文字列配列のまま保持し、条件または参加者の変更時に<code>createTransactionFilterMatcher</code>が列ごとの検索用Setを準備する。同じ列はOR、列間はAND、空選択は0件とする。<code>transactionListView</code>は各明細の条件を一度だけ判定し、編集中・保存失敗・メモ編集中の条件外行を含む表示と条件外表示の印で結果を共用する。表示ID・未清算ID・選択IDの所属をSetで照合して非表示選択数と全選択状態を求め、削除済み・清算済みIDは一括操作対象から除く。絞り込みでは非表示の選択を保持する。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>項目</th><th>仕様</th></tr></thead>
@@ -976,7 +1005,7 @@ amountYen         = abs(payer.balance)</div>
             </tbody>
           </table></div>
           <p>019のSTORED生成列追加は<code>transactions</code>の<code>ACCESS EXCLUSIVE</code>ロックと全テーブル・Indexの書換えを伴い、適用中の明細参照・更新は待機する。現在のデータ規模では関数・生成列・Index・既存行の計算を単一の原子的なmigrationで確定する。アプリ側でUPDATEして補完する方式は使わず、既存の金額・カテゴリ・確認状態・revision・監査列を変更しない。旧版アプリも生成列を指定せずに保存できる。</p>
-          <p>017_preview_sample_seed.sqlはPreview所有権markerがあるDBだけにnullableのsamples_seeded_atを追加する。ユーザー登録のseeded_atとは独立し、厳密な001〜011の親fixtureを変更せず、後続migration後に業務サンプルを登録する。scripts/preview-sample-data.tsは親を先にカテゴリ10件をINSERTし、当月1〜8日12時（Asia/Tokyo）の明細8件を集合INSERTする。通常のカテゴリ・割合Triggerを通し、カテゴリ確認とrevisionも確定する。</p>
+          <p>017_preview_sample_seed.sqlはPreview所有権markerがあるDBだけにnullableのsamples_seeded_atを追加する。ユーザー登録のseeded_atとは独立し、厳密な001〜011の親fixtureを変更せず、後続migration後に業務サンプルを登録する。scripts/db/preview-sample-data.tsは親を先にカテゴリ10件をINSERTし、当月1〜8日12時（Asia/Tokyo）の明細8件を集合INSERTする。通常のカテゴリ・割合Triggerを通し、カテゴリ確認とrevisionも確定する。</p>
           <p>seedは所有権guardのadvisory lock下でユーザー初期化を済ませ、samples_seeded_atが未完了の場合だけ対象表をSHARE ROW EXCLUSIVEでlockする。固定ユーザー・workspace・membershipの初期状態と、対象workspaceの業務表が空であることを照合してサンプルを追加し、追加または省略の完了を同じTransactionで記録する。失敗時は全INSERTとmarkerをrollbackする。カテゴリ表がないbaseline検証ではサンプル経路を実行しない。完了後はユーザー停止・降格・名前変更や明細/カテゴリの編集・削除を保持し、復活させない。Productionと従来ローカルseedでは業務サンプルを作らない。</p>
           <div class="code-block" role="img" aria-label="Previewサンプル初期化の分岐">専用DBの所有権照合 → migration → ユーザーseed
   ├─ カテゴリ表なし（baseline検証） → サンプル処理なし
@@ -986,7 +1015,7 @@ amountYen         = abs(payer.balance)</div>
             ├─ 一致 → カテゴリ10件 → 明細8件 → 完了marker
             └─ 不一致 → 追加を省略 → 完了marker
 サンプル判定・登録・marker更新は同一Transaction。失敗は全体rollback。</div>
-          <p><code>scripts/setup-db.mjs</code>は環境に応じたDB接続（PreviewはCAKE_TEST_DATABASE_URL、それ以外はDATABASE_URL）を確認する。台帳初期化を1回実行し、<code>schema_migrations</code>の履歴を一度読みSetで照合して、未適用SQLの本文だけをファイル名順に読み込む。全適用済みの通常再実行は本文0読込・2往復、未適用がN件なら本文N読込・N+2往復となる。各SQLは共通advisory lock取得後に台帳を再確認し、SQLと履歴INSERTを同じDO文/Transactionで確定する。同時実行や失敗時にも二重適用・台帳だけの記録を防ぎ、既存データや適用日時を保持する。</p>
+          <p><code>scripts/db/setup-db.mjs</code>は環境に応じたDB接続（PreviewはCAKE_TEST_DATABASE_URL、それ以外はDATABASE_URL）を確認する。台帳初期化を1回実行し、<code>schema_migrations</code>の履歴を一度読みSetで照合して、未適用SQLの本文だけをファイル名順に読み込む。全適用済みの通常再実行は本文0読込・2往復、未適用がN件なら本文N読込・N+2往復となる。各SQLは共通advisory lock取得後に台帳を再確認し、SQLと履歴INSERTを同じDO文/Transactionで確定する。同時実行や失敗時にも二重適用・台帳だけの記録を防ぎ、既存データや適用日時を保持する。</p>
           <p>Previewでは接続前にendpoint等の環境情報とmigration名・番号順を検証する。既存markerの照合と台帳初期化を同じDO文へまとめ、所有権・世代不一致は停止する。marker欠落のSQLSTATE <code>P0001</code>と固定エラー文面が一致するときだけ、失敗したDO文の全体rollback後に初回処理へ進む。初回は全migrationの原文・承認済み001〜011のhash・002の本番bootstrap除去を確認してから、空DBまたは承認済みfixtureのDB照合・marker確保・台帳初期化を行う。この初回経路は追加の検査を要するため、通常再実行の2往復とは区別する。既存同一世代では適用履歴を使い、未適用分の原文だけを検証する。repository全体の承認済み原文照合は回帰テストでも維持する。</p>
           <p><code>006_paypay_external_ids.sql</code>は<code>source = PAYPAY</code>の既存外部IDを、保存済み<code>occurred_at AT TIME ZONE 'Asia/Tokyo'</code>から生成した<code>PayPay_YYYYMMDDHHMMSS_{取引番号}</code>へ移行する。すでに新形式の外部IDと手動明細は変更しない。UUID主キーと参照関係は保持し、キー衝突時は一意制約で移行全体を失敗させる。移行前に日時を編集していた明細は元のCSV日時を復元できないため、再取込時の重複判定が一致しない場合がある。</p>
           <p>移行中は<code>transactions</code>への書込みをロックして、既存データの変換と登録時トリガーの作成を一体で適用する。<code>cake_normalize_paypay_external_id</code>を呼ぶ<code>BEFORE INSERT</code>トリガーは、更新切替中に旧サーバーが送るPayPayの取引番号だけの外部IDも新形式へ変換する。手動明細と新形式は保持し、<code>UPDATE</code>時には実行しないため日時編集後も元の外部IDが残る。</p>
@@ -1067,48 +1096,50 @@ BootstrapData extends BootstrapMetadata
           <div class="table-wrap"><table>
             <thead><tr><th>テストファイル群</th><th>主な検証</th></tr></thead>
             <tbody>
-              <tr><td>paypay.test.ts / paypay-id.test.ts / import-duplicates.test.ts / paypay-import.test.ts</td><td>支払い抽出、JST日時・外部ID・先頭ゼロ、旧ID正規化、行/既存重複・内容衝突、保存順、Transactionと実挿入件数。</td></tr>
-              <tr><td>import-paste.test.ts</td><td>PC/mobileの実ImportPanelで初期チェックOFF・チェックによらない全登録・選択行の削除と取消・元のtotalRows保持・対象0件/登録中の無効化・登録済み行のグレー表示、見出し・ボタン・Safari注記、ヘルプの内容・安全なURL・明示コピーと拒否時案内・開閉時の通信/読取なし・閉じ方とfocus復帰・モバイルスクロール、CSV本文・手動入力UIの不在、タップ時だけのclipboard読取とファイル選択の共通処理、拒否・非対応・空/不正CSV・照会失敗からの再コピー/再選択と再試行、原本不送信、本人・ルール・重複、登録失敗時の確認表保持と成功時解除、読み込み中の入口抑止、workspace切替後の遅延読取・照会結果破棄を検証する。</td></tr>
-              <tr><td>home-navigation.test.ts</td><td>取込直リンクとworkspace指定の安全な内部URL化、未知・複数tabのhomeへのフォールバック、Google/テストログイン双方への復帰先引き渡しを確認する。実認証後の復帰はPreviewで別途確認する。</td></tr>
-              <tr><td>settlement.test.ts / expense-splits.test.ts / split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、受け取り、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>
-              <tr><td>transaction-editing.test.ts / transaction-updates.test.ts / transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>
-              <tr><td>transaction-filters.test.ts / transaction-filter-storage.test.ts / transaction-list.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗、多数候補・非表示選択・条件外行の保持。</td></tr>
-              <tr><td>setup-db.test.ts / scripts/migration-scenarios.ts</td><td>新規/一部適用/全適用時の本文読込・SQL往復数、初回Previewの原文照合と同一世代再実行、SQL/履歴のrollback、後続の不正ファイルによる適用停止。隔離PostgreSQLの独立sessionで同じ未適用一覧を取得し、advisory lock待機後の台帳再確認で二重適用を防ぐことを確認する。</td></tr>
-              <tr><td>merchant-normalization.test.ts / scripts/merchant-normalization-scenarios.ts</td><td>固定fixtureによるNFKC・小文字化・空白集合・保持文字の照合、生成列とIndex、既存行の計算と他列の保持、保存・編集・CSV・定期生成・旧版・直接SQLの共通規則を確認する。実DBのmigration・ロック待機・rollbackは隔離環境の検証と区別する。</td></tr>
-              <tr><td>bulk-rule-sql.test.ts / scripts/bulk-rule-*.ts</td><td>共通fixtureのTS/実SQL一致、無効/未一致/同順位/部分一致/新参加者0、最大5000件、不正割合・清算済み/対象不足の全件中止、集合UPDATE中の失敗とrollback。隔離PostgreSQLの独立sessionで編集/清算との実ロック待機を確認し、旧004と同じデータでDB実行時間とpg_stat_statementsの内部回数を比較する。アプリのNeon通信は一回の関数SELECTのまま。互換Triggerの明細ごとの処理は別計数で維持する。</td></tr>
-              <tr><td>rule-deletion.test.ts / scripts/rule-deletion-scenarios.ts</td><td>共通削除の実SQL、単件/複数/全件・不存在・他workspace・重複UUID・認可・残存順序・旧版互換と全体rollback。一時PostgreSQLと専用Preview DBで同じシナリオを使い、独立した二つの実DB sessionで同時削除/並べ替え/所属解除のロック待機と確定結果を確認する。</td></tr>
-              <tr><td>rule-order.test.ts</td><td>楽観順序の組み立てと解除、多数ルール、外部追加・削除、未知・重複ID、入力配列の維持。</td></tr>
-              <tr><td>domain-schemas.test.ts / app-input.typecheck.ts</td><td>入口間の金額・文字数・割合境界、全actionの入力、既存の省略・strict/strip契約、共有入力の実行時依存境界。型検査では不一致payload・未知action・有限ログ値の拒否を確認する。</td></tr>
-              <tr><td>user-access.test.ts / user-profile.test.ts</td><td>確認済みGoogleメールと事前登録、内部ID、有効状態・権限再確認、テストモード、表示名保持・本人更新schema。</td></tr>
-              <tr><td>settlement-store.test.ts / scripts/settlement-scenarios.ts</td><td>専用取得の認可と最小項目、既存計算との一致、支払い/受け取り・保存割合・丸め・ゼロ円、取得後の変更・削除・追加・所属解除・先行/並列清算と全体rollback、多数明細の固定4 SQL、取得JSON量とEXPLAINによる比較。メモリPostgreSQLと専用Preview DBで同じシナリオを使う。</td></tr>
-              <tr><td>workspace-deletion.test.ts</td><td>一時PostgreSQLで清算済みworkspaceと関連データの削除、他workspace保持、制約エラー時の全体rollback、所属確認と削除の2往復を確認する。</td></tr>
-              <tr><td>app-handlers.test.ts / app-services.test.ts / app-store.test.ts</td><td>HTTP応答・入力・未認証・所属拒否・DB失敗、割合継承・招待・清算Snapshot、全19操作のSQL往復とTransaction境界、通常bootstrapの2 SQL。</td></tr>
-              <tr><td>bootstrap.test.ts / bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・ミリ秒保持、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
-              <tr><td>db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
-              <tr><td>transaction-layout.test.ts</td><td>PCの表示領域7パターン（84rem境界前後を含む）と参加者名120文字の4条件で横溢れ・項目の折り返し・カテゴリ色線・全選択・フィルタを確認。幅変更による入力とフォーカスの保持・追加送信なし・メモ保存失敗時の入力保持と、スマートフォンの要約/展開をローカルChromiumで検証する。</td></tr>
-              <tr><td>import-categories.test.ts</td><td>PC/mobileで3階層・使用停止カテゴリ・カテゴリ0件、未分類初期値、未選択行の個別編集、選択行だけの一括設定と解除、区分・担当者・割合変更でのカテゴリ保持、操作中の通信なし、保存payload、失敗後の入力・選択保持、保存中・不正・重複行の無効化、色線と全経路表示をChromiumで確認する。</td></tr>
-              <tr><td>import-equal-split.test.ts</td><td>実ImportPanelと定期支払いの追加/編集をPC/mobileのChromiumで操作し、常に3択であること、割合/円から1:1、奇数円と手動再編集、対象行・未選択状態・デフォルト割合の保持、個人費/エラー/重複/保存中/一人参加時の制限を確認。選択時の追加POSTなしと、bulkImportの保存重み1:1を検証する。</td></tr>
-              <tr><td>dashboard-controller.test.ts / transaction-refresh.test.ts / bootstrap-updates.test.ts</td><td>esbuildで実hookをbundleし、ローカルChromium/Reactで要求逆順、workspace/tab往復、保存前GET、手動更新の保存待ち・二重実行・失敗・古い応答破棄、metadata/fullの使い分け・同一家計の保持、通知2秒を検証する。実Preview/DB検証とは区別する。</td></tr>
-              <tr><td>recurring-payment-calendar.test.ts / recurring-payment-form.test.ts / recurring-payments.test.ts / recurring-payment-handlers.test.ts</td><td>日本時間09:00の直前/境界、未来日・過去日・月末、追加履歴を参照しない予定計算、保存・再開・認可・入力検証、当日処理・処理開始日時・実行APIの環境制限。</td></tr>
-              <tr><td>start-task.test.ts</td><td>最新origin/mainからの専用ブランチ・worktree作成、元のdirty状態の保持、既存作業の上書き拒否、作成先指定とnpm ci失敗時の保持。</td></tr>
-              <tr><td>preview-service.test.ts / preview-command.test.ts</td><td>専用ブランチ、HEADとPreviewの完全一致、Native照合・応答不明・DB消失時の停止、closed cleanupと検証証拠の一致。mainのtransport未導入はdispatch前に停止する。</td></tr>
-              <tr><td>preview-receipt.test.ts / preview-checks.test.ts</td><td>4,096 UTF-8 bytes上限、公開項目とrunAttempt、notice escape、厳密JSON、workflow/run/attempt/job/check/suite/repositoryの結合、全件取得、欠落・重複・古い値・マスク・metadata変化の拒否。</td></tr>
+              <tr><td>tests/architecture/</td><td>実ソースの配置・依存方向・推移的なDB到達を検査し、境界違反のfixtureで検出規則を確認する。</td></tr>
+              <tr><td>tests/shared/paypay.test.ts / tests/shared/paypay-id.test.ts / tests/shared/import-duplicates.test.ts / tests/server/paypay-import.test.ts</td><td>支払い抽出、JST日時・外部ID・先頭ゼロ、旧ID正規化、行/既存重複・内容衝突、保存順、Transactionと実挿入件数。</td></tr>
+              <tr><td>tests/server/import-duplicates-store.test.ts</td><td>所属確認後に指定外部IDだけを照会し、既存明細の最小照合情報を返すことを確認する。</td></tr>
+              <tr><td>tests/client/import-paste.test.ts</td><td>PC/mobileの実ImportPanelで初期チェックOFF・チェックによらない全登録・選択行の削除と取消・元のtotalRows保持・対象0件/登録中の無効化・登録済み行のグレー表示、見出し・ボタン・Safari注記、ヘルプの内容・安全なURL・明示コピーと拒否時案内・開閉時の通信/読取なし・閉じ方とfocus復帰・モバイルスクロール、CSV本文・手動入力UIの不在、タップ時だけのclipboard読取とファイル選択の共通処理、拒否・非対応・空/不正CSV・照会失敗からの再コピー/再選択と再試行、原本不送信、本人・ルール・重複、登録失敗時の確認表保持と成功時解除、読み込み中の入口抑止、workspace切替後の遅延読取・照会結果破棄を検証する。</td></tr>
+              <tr><td>tests/client/home-navigation.test.ts</td><td>取込直リンクとworkspace指定の安全な内部URL化、未知・複数tabのhomeへのフォールバック、Google/テストログイン双方への復帰先引き渡しを確認する。実認証後の復帰はPreviewで別途確認する。</td></tr>
+              <tr><td>tests/shared/settlement.test.ts / tests/shared/expense-splits.test.ts / tests/shared/split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、受け取り、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>
+              <tr><td>tests/shared/transaction-editing.test.ts / tests/client/transaction-updates.test.ts / tests/shared/transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>
+              <tr><td>tests/shared/transaction-filters.test.ts / tests/client/transaction-filter-storage.test.ts / tests/shared/transaction-list.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗、多数候補・非表示選択・条件外行の保持。</td></tr>
+              <tr><td>tests/tooling/setup-db.test.ts / scripts/qa/db/migration-scenarios.ts</td><td>新規/一部適用/全適用時の本文読込・SQL往復数、初回Previewの原文照合と同一世代再実行、SQL/履歴のrollback、後続の不正ファイルによる適用停止。隔離PostgreSQLの独立sessionで同じ未適用一覧を取得し、advisory lock待機後の台帳再確認で二重適用を防ぐことを確認する。</td></tr>
+              <tr><td>tests/server/merchant-normalization.test.ts / scripts/qa/db/merchant-normalization-scenarios.ts</td><td>固定fixtureによるNFKC・小文字化・空白集合・保持文字の照合、生成列とIndex、既存行の計算と他列の保持、保存・編集・CSV・定期生成・旧版・直接SQLの共通規則を確認する。実DBのmigration・ロック待機・rollbackは隔離環境の検証と区別する。</td></tr>
+              <tr><td>tests/server/bulk-rule-sql.test.ts / scripts/qa/db/bulk-rule-*.ts</td><td>共通fixtureのTS/実SQL一致、無効/未一致/同順位/部分一致/新参加者0、最大5000件、不正割合・清算済み/対象不足の全件中止、集合UPDATE中の失敗とrollback。隔離PostgreSQLの独立sessionで編集/清算との実ロック待機を確認し、旧004と同じデータでDB実行時間とpg_stat_statementsの内部回数を比較する。アプリのNeon通信は一回の関数SELECTのまま。互換Triggerの明細ごとの処理は別計数で維持する。</td></tr>
+              <tr><td>tests/server/rule-deletion.test.ts / scripts/qa/db/rule-deletion-scenarios.ts</td><td>共通削除の実SQL、単件/複数/全件・不存在・他workspace・重複UUID・認可・残存順序・旧版互換と全体rollback。一時PostgreSQLと専用Preview DBで同じシナリオを使い、独立した二つの実DB sessionで同時削除/並べ替え/所属解除のロック待機と確定結果を確認する。</td></tr>
+              <tr><td>tests/shared/rule-order.test.ts</td><td>楽観順序の組み立てと解除、多数ルール、外部追加・削除、未知・重複ID、入力配列の維持。</td></tr>
+              <tr><td>tests/shared/domain-schemas.test.ts / tests/shared/app-input.typecheck.ts</td><td>入口間の金額・文字数・割合境界、全actionの入力、既存の省略・strict/strip契約、共有入力の実行時依存境界。型検査では不一致payload・未知action・有限ログ値の拒否を確認する。</td></tr>
+              <tr><td>tests/server/user-access.test.ts / tests/server/user-profile.test.ts</td><td>確認済みGoogleメールと事前登録、内部ID、有効状態・権限再確認、テストモード、表示名保持・本人更新schema。</td></tr>
+              <tr><td>tests/server/settlement-store.test.ts / scripts/qa/db/settlement-scenarios.ts</td><td>専用取得の認可と最小項目、既存計算との一致、支払い/受け取り・保存割合・丸め・ゼロ円、取得後の変更・削除・追加・所属解除・先行/並列清算と全体rollback、多数明細の固定4 SQL、取得JSON量とEXPLAINによる比較。メモリPostgreSQLと専用Preview DBで同じシナリオを使う。</td></tr>
+              <tr><td>tests/server/workspace-deletion.test.ts</td><td>一時PostgreSQLで清算済みworkspaceと関連データの削除、他workspace保持、制約エラー時の全体rollback、所属確認と削除の2往復を確認する。</td></tr>
+              <tr><td>tests/server/app-handlers.test.ts / tests/server/app-services.test.ts / tests/server/app-store.test.ts</td><td>HTTP応答・入力・未認証・所属拒否・DB失敗、割合継承・招待・清算Snapshot、全19操作のSQL往復とTransaction境界、通常bootstrapの2 SQL。</td></tr>
+              <tr><td>tests/server/bootstrap.test.ts / tests/client/bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・ミリ秒保持、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
+              <tr><td>tests/server/db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
+              <tr><td>tests/client/transaction-layout.test.ts</td><td>PCの表示領域7パターン（84rem境界前後を含む）と参加者名120文字の4条件で横溢れ・項目の折り返し・カテゴリ色線・全選択・フィルタを確認。幅変更による入力とフォーカスの保持・追加送信なし・メモ保存失敗時の入力保持と、スマートフォンの要約/展開をローカルChromiumで検証する。</td></tr>
+              <tr><td>tests/client/import-categories.test.ts</td><td>PC/mobileで3階層・使用停止カテゴリ・カテゴリ0件、未分類初期値、未選択行の個別編集、選択行だけの一括設定と解除、区分・担当者・割合変更でのカテゴリ保持、操作中の通信なし、保存payload、失敗後の入力・選択保持、保存中・不正・重複行の無効化、色線と全経路表示をChromiumで確認する。</td></tr>
+              <tr><td>tests/client/import-equal-split.test.ts</td><td>実ImportPanelと定期支払いの追加/編集をPC/mobileのChromiumで操作し、常に3択であること、割合/円から1:1、奇数円と手動再編集、対象行・未選択状態・デフォルト割合の保持、個人費/エラー/重複/保存中/一人参加時の制限を確認。選択時の追加POSTなしと、bulkImportの保存重み1:1を検証する。</td></tr>
+              <tr><td>tests/client/dashboard-controller.test.ts / tests/client/transaction-refresh.test.ts / tests/client/bootstrap-updates.test.ts</td><td>esbuildで実hookをbundleし、ローカルChromium/Reactで要求逆順、workspace/tab往復、保存前GET、手動更新の保存待ち・二重実行・失敗・古い応答破棄、metadata/fullの使い分け・同一家計の保持、通知2秒を検証する。実Preview/DB検証とは区別する。</td></tr>
+              <tr><td>tests/shared/recurring-payment-calendar.test.ts / tests/client/recurring-payment-form.test.ts / tests/server/recurring-payments.test.ts / tests/server/recurring-payment-handlers.test.ts</td><td>日本時間09:00の直前/境界、未来日・過去日・月末、追加履歴を参照しない予定計算、保存・再開・認可・入力検証、当日処理・処理開始日時・実行APIの環境制限。</td></tr>
+              <tr><td>tests/tooling/start-task.test.ts</td><td>最新origin/mainからの専用ブランチ・worktree作成、元のdirty状態の保持、既存作業の上書き拒否、作成先指定とnpm ci失敗時の保持。</td></tr>
+              <tr><td>tests/tooling/preview-service.test.ts / tests/tooling/preview-command.test.ts</td><td>専用ブランチ、HEADとPreviewの完全一致、Native照合・応答不明・DB消失時の停止、closed cleanupと検証証拠の一致。mainのtransport未導入はdispatch前に停止する。</td></tr>
+              <tr><td>tests/tooling/preview-receipt.test.ts / tests/tooling/preview-checks.test.ts</td><td>4,096 UTF-8 bytes上限、公開項目とrunAttempt、notice escape、厳密JSON、workflow/run/attempt/job/check/suite/repositoryの結合、全件取得、欠落・重複・古い値・マスク・metadata変化の拒否。</td></tr>
               <tr><td>Actions verify関連テスト</td><td>独立capabilityと最新main control checkout、PR/完全SHA/Deployment一致、provider非GET拒否、status前後のDB保持照合、成功/失敗receiptの来歴と4,096 bytes上限、remote proof再照合。実Actionsのブラウザ/OIDC成功はスタブ検証と分ける。</td></tr>
-              <tr><td>database-environment.test.ts / vercel-build.test.ts</td><td>Preview専用接続の必須化、本番接続へのfallback禁止、PreviewのDB更新・seed、現在commitの独立行markerによるCSV実DB検証の実行条件・順序・子プロセス環境の限定、Productionのビルド後DB更新、失敗時の公開停止。</td></tr>
-              <tr><td>preview-sample-seed.test.ts / seed-startup.test.ts / seed-error.test.ts</td><td>Previewサンプルの初回登録、継承fixture、既存データ保持、失敗rollback、@next/env実起動、環境変数のロード、DB登録失敗の段階・原因を秘密情報なしで整形。</td></tr>
+              <tr><td>tests/server/database-environment.test.ts / tests/tooling/vercel-build.test.ts</td><td>Preview専用接続の必須化、本番接続へのfallback禁止、PreviewのDB更新・seed、現在commitの独立行markerによるCSV実DB検証の実行条件・順序・子プロセス環境の限定、Productionのビルド後DB更新、失敗時の公開停止。</td></tr>
+              <tr><td>tests/tooling/preview-sample-seed.test.ts / tests/tooling/seed-startup.test.ts / tests/tooling/seed-error.test.ts</td><td>Previewサンプルの初回登録、継承fixture、既存データ保持、失敗rollback、@next/env実起動、環境変数のロード、DB登録失敗の段階・原因を秘密情報なしで整形。</td></tr>
             </tbody>
           </table></div>
-          <p>全テストは<code>tests/</code>配下。純粋関数、SQL/外部コマンドのスタブ、スクリプト起動を検証する。実DBの制約・同時操作とブラウザ操作は別途実環境で確認する。</p>
-          <p>定期支払いの実DB回帰は、承認された対象タスクの<code>CAKE_TEST_DATABASE_URL</code>を設定し、<code>npx tsx scripts/verify-recurring-payments.ts</code>で実行する。09:00境界・月末・即時変更/再開・設定日変更後の月内複数登録・同時実行・失敗時rollbackを検証し、新規検証データだけを作成・削除する。環境ファイルや本番の<code>DATABASE_URL</code>は読み込まない。日付比較はNeonが直接SELECTで返すDateとJSONB内のYYYY-MM-DD文字列を同じ暦日へ整形し、日時比較はミリ秒を保持する。通常の<code>npm test</code>でもUTC・Asia/Tokyo・America/Los_Angelesでドライバーの返却型を使う回帰を実行するが、こちらはDBへ接続せず、実DB回帰とは別の検証である。</p>
-          <p>CSVカテゴリの実DB並行検証は、承認されたPRの現在commitに独立行<code>[cake-db-qa:csv-categories]</code>がある場合だけ、Native専用接続を持つPreview/test/application build内で<code>scripts/verify-csv-category-concurrency.ts</code>を実行する。行の前後空白だけを除いて比較し、文中・未知のmarkerは無視する。Production・準備用・常設Preview・Development・ローカルでは実行しない。子プロセスへ渡す環境は専用接続、完全SHA・branch・Deployment・DB世代等のidentity、Node/TLSの明示allowlistに限定し、provider token・認証secret・共通DATABASE_URLを継承しない。接続前と各sessionで本番分離・既存DB markerを確認し、独立した二つの実DB sessionと監視sessionでロック待機・確定結果・rollbackを検証する。新規fixtureだけを削除し、既存データ保持と残存0件を確認する。公開結果<code>cake-csv-category-db-qa/v1</code>をbuildログへ記録し、通常migration・初回seedの更新は検証fixtureとは別に報告する。秘密値・業務DTO・生例外は保存しない。実行方法と前後statusの照合は<a href="development-workflow.md#pr-preview-build内の実db並行検証">開発・QA運用手順</a>を参照する。</p>
+          <p>テストは対象領域別の<code>tests/</code>配下に置く。<code>*.test.ts</code>は<code>npm test</code>で再帰的に実行し、<code>*.typecheck.ts</code>はTypeScriptの型検査で確認する。純粋関数、PGliteのSQL、外部コマンドのスタブ、スクリプト起動、ローカルChromiumのUIを検証する。隔離実DBの制約・同時操作と実Previewのブラウザ操作は別途確認する。</p>
+          <p>定期支払いの実DB回帰は、承認された対象タスクの<code>CAKE_TEST_DATABASE_URL</code>を設定し、<code>npx tsx scripts/qa/db/verify-recurring-payments.ts</code>で実行する。09:00境界・月末・即時変更/再開・設定日変更後の月内複数登録・同時実行・失敗時rollbackを検証し、新規検証データだけを作成・削除する。環境ファイルや本番の<code>DATABASE_URL</code>は読み込まない。日付比較はNeonが直接SELECTで返すDateとJSONB内のYYYY-MM-DD文字列を同じ暦日へ整形し、日時比較はミリ秒を保持する。通常の<code>npm test</code>でもUTC・Asia/Tokyo・America/Los_Angelesでドライバーの返却型を使う回帰を実行するが、こちらはDBへ接続せず、実DB回帰とは別の検証である。</p>
+          <p>CSVカテゴリの実DB並行検証は、承認されたPRの現在commitに独立行<code>[cake-db-qa:csv-categories]</code>がある場合だけ、Native専用接続を持つPreview/test/application build内で<code>scripts/qa/db/verify-csv-category-concurrency.ts</code>を実行する。行の前後空白だけを除いて比較し、文中・未知のmarkerは無視する。Production・準備用・常設Preview・Development・ローカルでは実行しない。子プロセスへ渡す環境は専用接続、完全SHA・branch・Deployment・DB世代等のidentity、Node/TLSの明示allowlistに限定し、provider token・認証secret・共通DATABASE_URLを継承しない。接続前と各sessionで本番分離・既存DB markerを確認し、独立した二つの実DB sessionと監視sessionでロック待機・確定結果・rollbackを検証する。新規fixtureだけを削除し、既存データ保持と残存0件を確認する。公開結果<code>cake-csv-category-db-qa/v1</code>をbuildログへ記録し、通常migration・初回seedの更新は検証fixtureとは別に報告する。秘密値・業務DTO・生例外は保存しない。実行方法と前後statusの照合は<a href="development-workflow.md#pr-preview-build内の実db並行検証">開発・QA運用手順</a>を参照する。</p>
           <h3>コマンドとデプロイ</h3>
           <p>WindowsのPowerShellではnpm.cmd/npx.cmdと既存gh認証を使い、PATHの補完は当該プロセスに限定する。専用worktreeごとに依存・build・証拠・環境ファイルを分離し、追跡テキストはLFで保持する。同じ開発commitで検証してからdraft PRを作成し、必要なPreviewをWindowsで検証する。Readyは変更に必要な検証・現在HEADのCI・差分レビューを確認したCodexが追加確認を待たず実施し、このチャットで日本語で通知する。文書のみの変更の検証範囲は開発手順に従う。Actions管理契約は維持する。詳細は<a href="development-workflow.md">開発・QA運用手順</a>を参照する。</p>
-          <p>共通の<code>qa:windows</code>は<code>scripts/windows-qa.ts</code>と<code>scripts/windows-token-helper/*.cs</code>から操作ごとに<code>.cake/windows-tools/run-&lt;一意ID&gt;</code>へ構築する。保存先はGit外の<code>%LOCALAPPDATA%\CakeQa\vercel-token.dpapi.json</code>とし、本人ACL・DPAPI CurrentUserの検査、既存ファイル上書き拒否、公開結果の秘密排除、専用子プロセスへの限定供給を行う。Git/ghにVercel tokenを渡さない。対象worktree（既定は実行worktree）のPR/完全SHA・Deployment・Native DB・generationを前後照合し、実装とruntimeのSHAを別々に記録する。特定PC・日付付きpath・PR・ブラウザキャッシュは固定しない。人による入力・再設定と同一Windowsユーザーによる復号可能性は<a href="windows-qa-credentials.md">資格情報手順</a>を参照する。</p>
+          <p>共通の<code>qa:windows</code>は<code>scripts/qa/windows/windows-qa.ts</code>と<code>scripts/qa/windows/windows-token-helper/*.cs</code>から操作ごとに<code>.cake/windows-tools/run-&lt;一意ID&gt;</code>へ構築する。保存先はGit外の<code>%LOCALAPPDATA%\CakeQa\vercel-token.dpapi.json</code>とし、本人ACL・DPAPI CurrentUserの検査、既存ファイル上書き拒否、公開結果の秘密排除、専用子プロセスへの限定供給を行う。Git/ghにVercel tokenを渡さない。対象worktree（既定は実行worktree）のPR/完全SHA・Deployment・Native DB・generationを前後照合し、実装とruntimeのSHAを別々に記録する。特定PC・日付付きpath・PR・ブラウザキャッシュは固定しない。人による入力・再設定と同一Windowsユーザーによる復号可能性は<a href="windows-qa-credentials.md">資格情報手順</a>を参照する。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>コマンド</th><th>目的</th></tr></thead>
             <tbody>
               <tr><td><code>npm run task:start -- &lt;タスク名&gt;</code></td><td>originを取得し、main-only Git設定を導入した最新origin/mainからcodex/ブランチと専用worktreeを作成してnpm ci。元の未コミット変更・環境設定を保持。</td></tr>
-              <tr><td><code>npm test</code></td><td><code>node --import tsx --test tests/*.test.ts</code>。</td></tr>
+              <tr><td><code>npm test</code></td><td><code>node --import tsx --test --test-concurrency=2 "tests/**/*.test.ts"</code>。対象領域別の回帰と依存境界検査を再帰的に実行する。</td></tr>
               <tr><td><code>npm run lint</code> / <code>npm run build</code></td><td>ESLintとNext.js Production build・型/ルート検証。</td></tr>
               <tr><td><code>npm run db:setup</code></td><td>未適用番号付きSQLと適用履歴をatomicに追加。</td></tr>
               <tr><td><code>npm run db:seed:test</code></td><td>従来ローカルはA/Bを非管理者として登録する。新QAはdummyのAをサイト管理者・共有OWNER、Bを一般・MEMBERとする固定二人だけを使用する。空DBでは初回だけ登録し、厳密一致する継承fixtureではseed済みidentityを使用する。Previewでは独立したsamples_seeded_atにより未使用の共有workspaceへカテゴリ10件・明細8件を一度だけ登録する。同PRのデータ・名前・権限・停止状態を維持し、自動修復しない。</td></tr>
@@ -1133,7 +1164,7 @@ BootstrapData extends BootstrapMetadata
           <h3>WSLと報告</h3>
           <p>WSLはLinux版Node.js/npm/gh/Playwrightを使用し、Windowsと依存・成果物・資格情報を分離する。本人のVercel認証からdevelopment OIDCをメモリ内だけで取得して既存browser helperへ明示的に渡し、Git/ghにはprovider tokenを渡さない。実行例は<a href="wsl-development.md">WSL手順</a>を参照する。標準の画面移動検証と業務更新テストを分け、明細の追加・編集・再読込・他ユーザー参照・作成済みIDだけの削除を確認する。PRのタイトル・本文・コメント・レビュー・検証報告は日本語にする。</p>
           <h3>資源とブラウザの共通照合</h3>
-          <p><code>lib/production-database-hosts.mjs</code>が設定の<code>productionHostDigest</code>（現用値）と<code>productionHostDigests</code>（現用PG18・保持旧PG17のPreview禁止集合）を検証する。集合は現用値を含む非空・重複なしの64桁hexとし、省略時だけ現用1件に補完する。接続前guard、provider、Deployment metadata、通常/verify receiptは同じ集合全件を拒否する。runtimeは従来の環境側本番digestと<code>DATABASE_URL</code>のendpoint一致拒否も維持する。準備用buildと実DBQAの注入本番digestは、対象コードの集合への厳密な所属を要求する。現用値をPG18へ更新した後も保持旧PG17のdigestを集合へ残し、どちらのDBもPreviewとして受け入れない。禁止集合は対象コードから読み、環境側の値だけを正本にしない。</p>
+          <p><code>lib/server/production-database-hosts.mjs</code>が設定の<code>productionHostDigest</code>（現用値）と<code>productionHostDigests</code>（現用PG18・保持旧PG17のPreview禁止集合）を検証する。集合は現用値を含む非空・重複なしの64桁hexとし、省略時だけ現用1件に補完する。接続前guard、provider、Deployment metadata、通常/verify receiptは同じ集合全件を拒否する。runtimeは従来の環境側本番digestと<code>DATABASE_URL</code>のendpoint一致拒否も維持する。準備用buildと実DBQAの注入本番digestは、対象コードの集合への厳密な所属を要求する。現用値をPG18へ更新した後も保持旧PG17のdigestを集合へ残し、どちらのDBもPreviewとして受け入れない。禁止集合は対象コードから読み、環境側の値だけを正本にしない。</p>
           <p>現用本番はNeon PostgreSQL 18・UTF8の専用projectを使い、Vercel NativeのProduction接続から供給される<code>DATABASE_URL</code>を使用する。旧PG17 DBと既存の復旧用branchは保持する。Productionの<code>build:vercel</code>はNext build後に通常の<code>db:setup</code>を行い、各migrationと台帳の記録を同じTransactionで確定してから公開する。テストseedは実行しない。019の取引先正規化と、専用Previewでの通常の実DBQAは継続する。</p>
           <p>本番DBの版更新・復旧では、対象とバックアップ、最新データの同期方法、ProductionのNative接続先を確認する。接続変更後は新しいProduction Deploymentを作成し、公開先・完全SHA・接続先と本人Googleログイン・既存データ表示を確認する。書込み開始後の復旧では追加データの保持と同期も確認する。現用本番・保持旧DB・復旧用branchの識別情報と手順は<a href="production-database-upgrade.md">本番DB運用手順</a>を参照する。</p>
           <p>Deployment metadataのprotocol・repository・PR・generation・operation・phaseとGitSourceの完全SHA・branchを全ページ一覧と直接GETで照合する。初回provisioningはDBに接続せず、対象PR・branch/SHA・世代・本番host digestと空の専用DB識別子を検査した後、Build Output API v3の静的準備中ページを.next/outputへ生成する。既存のNext.js builderで正常終了させ、API・ログイン・POSTは404とし、アプリのFunctionや環境値を成果物に含めない。通常アプリのbuild前には.next/outputと.vercel/outputを除去し、準備成果物の混入を防ぐ。準備用のREADYだけではstatusのapplicationと扱わず、新たな準備用のERROR/CANCELEDは管理処理を停止する。Native子branchの親・作成時刻・所属・非保護・read-write endpointを確認後、IDとhost digestをapplication deploymentへ渡す。初回の作成時刻下限はsource作成時刻と最古Deploymentの要求時刻（時計差60秒）から求める。単一世代の既存applicationがDB branch・endpoint・host digestを保持する更新では、source作成時刻だけを下限とし、現在残るDeploymentの作成時刻で継続DBを拒否しない。既知DBも親・所属・保護・単一endpoint・本番分離と一覧／直接GETの一致を再確認する。接続文字列はNativeが供給する。</p>

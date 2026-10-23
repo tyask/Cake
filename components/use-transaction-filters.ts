@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useSyncExternalStore } from "react";
-import type { TransactionFilters } from "@/lib/transaction-filters";
-import { readStoredTransactionFilters, transactionFiltersStorageKey, writeStoredTransactionFilters } from "@/lib/transaction-filter-storage";
+import type { TransactionFilters } from "@/lib/shared/transaction-filters";
+import { readStoredTransactionFilters, transactionFiltersStorageKey, writeStoredTransactionFilters } from "@/lib/client/transaction-filter-storage";
 
 const emptyFilters: TransactionFilters = {};
 const serverSnapshot = () => emptyFilters;

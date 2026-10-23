@@ -3,8 +3,8 @@
 import Image from "next/image";
 import { useState } from "react";
 import { signOut } from "next-auth/react";
-import type { BootstrapData } from "@/lib/types";
-import type { DashboardTab as Tab } from "@/lib/bootstrap";
+import type { BootstrapData } from "@/lib/shared/types";
+import type { DashboardTab as Tab } from "@/lib/shared/types";
 import { useDashboardController } from "./use-dashboard-controller";
 import { HomePanel } from "./home-panel";
 import { ImportPanel } from "./import-panel";
