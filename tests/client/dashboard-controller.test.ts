@@ -96,6 +96,30 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.reply(await f.take(), { error: "切替に失敗しました。" }, 500);
       await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "a", loading: false });
     });
+    for (const olderFails of [false, true]) await scenario(`workspace切替の元要求が${olderFails ? "失敗" : "成功"}しても、後発の集計タブ取得が採用されるまで旧家計を隠す`, async f => {
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
+      const older = await f.take();
+      await f.page.evaluate(() => window.controller.openTab("analytics"));
+      const lightweight = await f.take();
+      await f.reply(older, olderFails ? { error: "古い要求の失敗" } : data("b"), olderFails ? 500 : 200);
+      await expectState(f.page, { tab: "analytics", workspaceSwitching: true, "selected.workspace.id": "a" });
+      await f.reply(lightweight, metadata("b"));
+      const full = await f.take();
+      await expectState(f.page, { workspaceSwitching: true, "selected.workspace.id": "a" });
+      await f.reply(full, data("b"));
+      await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "b", loading: false });
+    });
+    await scenario("切替中の集計タブ取得が失敗したら元の家計へ戻り、遅い切替応答も破棄する", async f => {
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
+      const older = await f.take();
+      await f.page.evaluate(() => window.controller.openTab("analytics"));
+      await f.reply(await f.take(), metadata("b"));
+      const latest = await f.take();
+      await f.reply(latest, { error: "切替先を取得できませんでした。" }, 500);
+      await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "a", notice: "切替先を取得できませんでした。" });
+      await f.reply(older, data("b"));
+      await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "a", loading: false });
+    });
     await scenario("取込から開始すると初回描画からimportを選び、更新はmetadata、homeへの移動はfullを要求する", async f => {
       await expectState(f.page, { tab: "import", loading: false }); assert.equal(f.requests.length, 0);
       await f.page.evaluate(() => { window.operation = window.controller.refresh(); });

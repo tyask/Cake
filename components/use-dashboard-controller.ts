@@ -84,48 +84,62 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
     if (workspaceId) params.set("workspaceId", workspaceId);
     if (scope === "metadata") params.set("scope", scope);
     const query = params.toString();
-    const response = await fetch(`/api/app${query ? `?${query}` : ""}`, { cache: "no-store" });
-    const next = await response.json();
-    if (!response.ok) throw new Error(next.error ?? "更新に失敗しました。");
-    // An autosave for a previous workspace must not replace the newly selected view.
-    if (!canApplyBootstrapResponse(
-      { workspaceId: desiredWorkspaceId, generation, revision, requestId },
-      { ...workspaceView.current, revision: dataRevision.current, requestId: refreshRequest.current },
-    )) return false;
-    const nextData = scope === "metadata" ? mergeBootstrapMetadata(currentData.current, next as BootstrapMetadata) : next as BootstrapData;
-    // A new or externally deleted workspace needs its own transaction data.
-    if (!nextData) return refresh(next.selected?.workspace.id, generation, "full");
-    if (scope === "metadata" && nextData.selected) {
-      const categoryIds = new Set(nextData.selected.categories.map(category => category.id));
-      // A different browser may have deleted categories and detached retained
-      // or not-yet-visible transactions. Fetch real revisions before adoption.
-      const previous = currentData.current.selected;
-      const categoryDisappeared = previous?.workspace.id === nextData.selected.workspace.id
-        && previous.categories.some(category => !categoryIds.has(category.id));
-      if (categoryDisappeared || nextData.selected.transactions.some(transaction => transaction.categoryId && !categoryIds.has(transaction.categoryId))) {
-        return refresh(nextData.selected.workspace.id, generation, "full");
+    try {
+      const response = await fetch(`/api/app${query ? `?${query}` : ""}`, { cache: "no-store" });
+      const next = await response.json();
+      if (!response.ok) throw new Error(next.error ?? "更新に失敗しました。");
+      // An autosave for a previous workspace must not replace the newly selected view.
+      if (!canApplyBootstrapResponse(
+        { workspaceId: desiredWorkspaceId, generation, revision, requestId },
+        { ...workspaceView.current, revision: dataRevision.current, requestId: refreshRequest.current },
+      )) return false;
+      const nextData = scope === "metadata" ? mergeBootstrapMetadata(currentData.current, next as BootstrapMetadata) : next as BootstrapData;
+      // A new or externally deleted workspace needs its own transaction data.
+      if (!nextData) return refresh(next.selected?.workspace.id, generation, "full");
+      if (scope === "metadata" && nextData.selected) {
+        const categoryIds = new Set(nextData.selected.categories.map(category => category.id));
+        // A different browser may have deleted categories and detached retained
+        // or not-yet-visible transactions. Fetch real revisions before adoption.
+        const previous = currentData.current.selected;
+        const categoryDisappeared = previous?.workspace.id === nextData.selected.workspace.id
+          && previous.categories.some(category => !categoryIds.has(category.id));
+        if (categoryDisappeared || nextData.selected.transactions.some(transaction => transaction.categoryId && !categoryIds.has(transaction.categoryId))) {
+          return refresh(nextData.selected.workspace.id, generation, "full");
+        }
       }
+      if (nextData.selected) {
+        const categoryIds = new Set(nextData.selected.categories.map(category => category.id));
+        const previous = currentData.current.selected;
+        const deletedCategoryIds = previous?.workspace.id === nextData.selected.workspace.id
+          ? previous.categories.filter(category => !categoryIds.has(category.id)).map(category => category.id) : [];
+        const deletionKnown = deletedCategoryIds.length > 0 || (categoryDeletions.current.get(nextData.selected.workspace.id)?.deletedCategoryIds.length ?? 0) > 0;
+        // Both scopes return all categories. Every adopted response advances the
+        // snapshot, including unchanged/empty lists without a known deletion.
+        // Only a full response can acknowledge real transaction null revisions.
+        rememberCategoryDeletion(nextData.selected.workspace.id, {
+          deletedCategoryIds,
+          detachedTransactions: scope === "full" && deletionKnown ? nextData.selected.transactions.filter(transaction => transaction.categoryId === null)
+            .map(transaction => ({ transactionId: transaction.id, categoryId: null, categoryConfirmed: false, categoryRevision: transaction.categoryRevision })) : [],
+        }, { ids: categoryIds,
+          generation: (categoryDeletions.current.get(nextData.selected.workspace.id)?.categorySnapshot?.generation ?? 0) + 1,
+        });
+      }
+      workspaceView.current.workspaceId = nextData.selected?.workspace.id;
+      updateData(nextData);
+      setWorkspaceSwitching(false);
+      return true;
+    } catch (error) {
+      // A superseded workspace request cannot end a newer pending switch.
+      if (requestId === refreshRequest.current && generation === workspaceView.current.generation) {
+        const previousWorkspaceId = currentData.current.selected?.workspace.id;
+        if (workspaceView.current.workspaceId !== previousWorkspaceId) {
+          workspaceView.current = { workspaceId: previousWorkspaceId, generation: generation + 1 };
+          setNotice(error instanceof Error ? error.message : "読込に失敗しました。");
+        }
+        setWorkspaceSwitching(false);
+      }
+      throw error;
     }
-    if (nextData.selected) {
-      const categoryIds = new Set(nextData.selected.categories.map(category => category.id));
-      const previous = currentData.current.selected;
-      const deletedCategoryIds = previous?.workspace.id === nextData.selected.workspace.id
-        ? previous.categories.filter(category => !categoryIds.has(category.id)).map(category => category.id) : [];
-      const deletionKnown = deletedCategoryIds.length > 0 || (categoryDeletions.current.get(nextData.selected.workspace.id)?.deletedCategoryIds.length ?? 0) > 0;
-      // Both scopes return all categories. Every adopted response advances the
-      // snapshot, including unchanged/empty lists without a known deletion.
-      // Only a full response can acknowledge real transaction null revisions.
-      rememberCategoryDeletion(nextData.selected.workspace.id, {
-        deletedCategoryIds,
-        detachedTransactions: scope === "full" && deletionKnown ? nextData.selected.transactions.filter(transaction => transaction.categoryId === null)
-          .map(transaction => ({ transactionId: transaction.id, categoryId: null, categoryConfirmed: false, categoryRevision: transaction.categoryRevision })) : [],
-      }, { ids: categoryIds,
-        generation: (categoryDeletions.current.get(nextData.selected.workspace.id)?.categorySnapshot?.generation ?? 0) + 1,
-      });
-    }
-    workspaceView.current.workspaceId = nextData.selected?.workspace.id;
-    updateData(nextData);
-    return true;
   }
 
   async function refreshCurrentView(prepare?: () => Promise<void>) {
@@ -264,14 +278,9 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
     try { await refresh(workspaceId, generation, "full"); }
     catch (error) {
       if (generation === workspaceView.current.generation) {
-        workspaceView.current = { workspaceId: selected?.workspace.id, generation: generation + 1 };
-        setWorkspaceSwitching(false);
         setNotice(error instanceof Error ? error.message : "読込に失敗しました。");
       }
-    } finally {
-      if (generation === workspaceView.current.generation) setWorkspaceSwitching(false);
-      finishLoading();
-    }
+    } finally { finishLoading(); }
   }
 
   function openTab(next: Tab) {
