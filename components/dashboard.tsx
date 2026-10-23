@@ -67,7 +67,7 @@ export function Dashboard({ initialData, initialTab = "home", testAuth = false }
         {selected && tab === "home" && <HomePanel selected={selected} pending={data.pendingInvitations.length} setTab={openTab} add={() => setTransactionModal(true)} refreshAction={<RefreshButton refreshing={refreshing} disabled={loading} onClick={() => { void refreshCurrentView(); }} />} refreshing={refreshing} />}
         {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} userId={data.user.id} add={() => setTransactionModal(true)} run={run} onRefresh={refreshCurrentView} refreshing={refreshing} />}
         {selected && tab === "import" && <ImportPanel key={selected.workspace.id} selected={selected} currentUserId={data.user.id} run={run} />}
-        {selected && <AnalyticsPanel key={selected.workspace.id} workspaceId={selected.workspace.id} revision={analyticsRevision} active={tab === "analytics" && !workspaceSwitching} />}
+        {selected && <AnalyticsPanel key={`analytics:${selected.workspace.id}`} workspaceId={selected.workspace.id} revision={analyticsRevision} active={tab === "analytics" && !workspaceSwitching} />}
         {selected && tab === "settlement" && <SettlementPanel key={selected.workspace.id} selected={selected} run={run} refreshAction={<RefreshButton refreshing={refreshing} disabled={loading} onClick={() => { void refreshCurrentView(); }} />} refreshing={refreshing} />}
         {tab === "settings" && <>
           <PageHeading title="設定" />

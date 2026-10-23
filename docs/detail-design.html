@@ -988,7 +988,7 @@ amountYen         = abs(payer.balance)</div>
           <p>中央合計も実際の内円へ収め、文字サイズと桁区切りの改行を調整する。12px以上で全桁を表示できない場合は中央の金額を省略し、画面上部の負担額で全桁を確認できる。円のコンテナは中間幅のgrid配置でも幅を確保する。対象者の説明は開く時とリサイズ時に左右の画面端へ収まるよう補正する。</p>
           <p>加算・差額・率計算はBigIntを使う。構成比・増減率は小数1桁で表示し、比較元0円は0÷0も含め率を算出しない。Rechartsへ渡すNumberは座標用だけとし、金額はグラフ内のラベルも含め元の整数値をformatYenで表示する。ラベルが省略されても一覧・表とツールチップで全額を確認できる。複数人の個別件数を足した取引件数は表示しない。</p>
           <h3>取得・保存・遅延応答</h3>
-          <p>集計panelは同じworkspace内のタブ切替でStateを保持し、初回表示・再入場・期間変更・明示更新・保存後の無効化で取得する。未選択でも期間取得は行い、その後ONへ戻して追加通信しない。取得中にcheckboxを変えても応答は保持し、最新の表示条件で描画する。workspace・期間・保存後世代・要求順が古い応答は破棄する。workspace切替中は旧グラフを非表示とし、切替先で条件を初期化する。切替後の別タブ取得により元の要求を破棄しても切替中を保持し、最新の取得が採用されたときだけ解除する。最新の取得が失敗した場合は以前のworkspaceへ戻して解除し、遅い旧応答を採用しない。</p>
+          <p>集計panelは同じworkspace内のタブ切替でStateを保持する。同階層の条件付きpanelと識別子が衝突しないよう、Reactのkeyには画面種別とworkspace IDを組み合わせる。初回表示・再入場・期間変更・明示更新・保存後の無効化で取得する。未選択でも期間取得は行い、その後ONへ戻して追加通信しない。取得中にcheckboxを変えても応答は保持し、最新の表示条件で描画する。workspace・期間・保存後世代・要求順が古い応答は破棄する。workspace切替中は旧グラフを非表示とし、切替先で条件を初期化する。切替後の別タブ取得により元の要求を破棄しても切替中を保持し、最新の取得が採用されたときだけ解除する。最新の取得が失敗した場合は以前のworkspaceへ戻して解除し、遅い旧応答を採用しない。</p>
           <p>期間変更中は読込表示とし、旧期間のグラフを新条件の結果として見せない。取得失敗は選択を保持して再試行を表示し、0円の成功へ置き換えない。明細の未保存入力は含めず、保存成功後に世代を進める。グラフは遅延importし、未訪問タブでRechartsを読み込まない。PCホバー・キーボード、mobileタップと対象者の小さいⓘ、全カテゴリの表を用意する。</p>
         </section>
 
@@ -1197,6 +1197,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>tests/client/swipe-delete.test.ts</td><td>スマートフォンの取引明細・CSV取込・定期支払い・ルールでスワイプ削除とキーボード補助操作、確認・取消・失敗を確認する。CSVでは上部一括操作欄・下部登録操作欄がスクロールして中間の行を覆わないことと、PCの登録操作欄が手前に固定され操作できることをローカルChromiumで確認する。</td></tr>
               <tr><td>tests/client/import-equal-split.test.ts</td><td>実ImportPanelと定期支払いの追加/編集をPC/mobileのChromiumで操作し、常に3択であること、割合/円から1:1、奇数円と手動再編集、対象行・未選択状態・デフォルト割合の保持、個人費/エラー/重複/保存中/一人参加時の制限を確認。選択時の追加POSTなしと、bulkImportの保存重み1:1を検証する。</td></tr>
               <tr><td>tests/client/dashboard-controller.test.ts / tests/client/transaction-refresh.test.ts / tests/client/bootstrap-updates.test.ts</td><td>esbuildで実hookをbundleし、ローカルChromium/Reactで要求逆順、workspace/tab往復、保存前GET、手動更新の保存待ち・二重実行・失敗・古い応答破棄、metadata/fullの使い分け・同一家計の保持、通知2秒を検証する。実Preview/DB検証とは区別する。</td></tr>
+              <tr><td>tests/client/dashboard-navigation.test.ts</td><td>実Dashboard全体をローカルChromiumのPC/mobileで操作し、読み込み完了と全タブの往復後に見出し・明細一覧・取込・設定が重複または残留しないことと、集計panelの状態保持・再入場時の取得を確認する。実Preview/DB検証とは区別する。</td></tr>
               <tr><td>tests/shared/recurring-payment-calendar.test.ts / tests/client/recurring-payment-form.test.ts / tests/server/recurring-payments.test.ts / tests/server/recurring-payment-handlers.test.ts</td><td>日本時間09:00の直前/境界、未来日・過去日・月末、追加履歴を参照しない予定計算、保存・再開・認可・入力検証、当日処理・処理開始日時・実行APIの環境制限。</td></tr>
               <tr><td>tests/tooling/start-task.test.ts</td><td>最新origin/mainからの専用ブランチ・worktree作成、元のdirty状態の保持、既存作業の上書き拒否、作成先指定とnpm ci失敗時の保持。</td></tr>
               <tr><td>tests/tooling/preview-service.test.ts / tests/tooling/preview-command.test.ts</td><td>専用ブランチ、HEADとPreviewの完全一致、Native照合・応答不明・DB消失時の停止、closed cleanupと検証証拠の一致。mainのtransport未導入はdispatch前に停止する。</td></tr>
