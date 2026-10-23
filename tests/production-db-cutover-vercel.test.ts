@@ -184,7 +184,7 @@ test('本番URLのendpoint、DB、role、SSL、接続optionとProduction guard�
   ];
   for (const env of invalid) {
     const f = fixture({ after: (call, _state, response) => call.url.pathname === productionEnvPath ? json({ env }) : response });
-    const report = await f.run(); assert.equal(report.code, 'ENVIRONMENT'); assert.equal(report.success, false);
+    const report = await f.run(); assert.match(report.code, /^ENVIRONMENT_(DEFAULT|MAIN|BUILD|RUNTIME)_/); assert.equal(report.success, false);
     assert.equal(mutations(f.state).length, 0); assert.equal(report.writes.source, 'not-started'); sanitized(report);
   }
   const direct = fixture({ after: (call, state, response) => call.url.pathname.startsWith(productionEnvPath)
@@ -196,7 +196,7 @@ test('本番URLのendpoint、DB、role、SSL、接続optionとProduction guard�
 test('mainだけのDB overrideもNative変更前に拒否する', async () => {
   const f = fixture({ after: (call, _state, response) => call.url.pathname === `${productionEnvPath}/main`
     ? json({ env: productionEnvironment('target') }) : response });
-  const report = await f.run(); assert.equal(report.code, 'ENVIRONMENT'); assert.equal(mutations(f.state).length, 0); sanitized(report);
+  const report = await f.run(); assert.match(report.code, /^ENVIRONMENT_(DEFAULT|MAIN|BUILD|RUNTIME)_/); assert.equal(mutations(f.state).length, 0); sanitized(report);
 });
 
 test('Native変更後、候補作成直前、公開直前、完了時の実効URL driftでは後続書込みを止める', async () => {
@@ -207,7 +207,7 @@ test('Native変更後、候補作成直前、公開直前、完了時の実効UR
         : phase === 'promote' ? state.callbacks === 4 && !state.promoted : state.promoted;
       return drift ? json({ env: productionEnvironment('source') }) : response;
     } });
-    const report = await f.run(); assert.equal(report.code, 'ENVIRONMENT'); assert.equal(report.success, false);
+    const report = await f.run(); assert.match(report.code, /^ENVIRONMENT_(DEFAULT|MAIN|BUILD|RUNTIME)_/); assert.equal(report.success, false);
     assert.equal(mutations(f.state).length, phase === 'native' || phase === 'create' ? 2 : phase === 'promote' ? 3 : 4);
     assert.equal(report.promoted, phase === 'final'); sanitized(report);
   }
@@ -218,7 +218,7 @@ test('候補buildEnvは必須とし、欠落・伏せ字・旧DB・テスト認�
     { ...productionEnvironment('target'), AUTH_MODE: 'test' }, { ...productionEnvironment('target'), CAKE_PREVIEW_KIND: 'main' }]) {
     const f = fixture({ after: (call, _state, response) => call.url.pathname === candidateEnvPath
       ? json({ env: productionEnvironment('target'), buildEnv }) : response });
-    const report = await f.run(); assert.equal(report.code, 'ENVIRONMENT'); assert.equal(report.ready, true); assert.equal(report.promoted, false);
+    const report = await f.run(); assert.match(report.code, /^ENVIRONMENT_(DEFAULT|MAIN|BUILD|RUNTIME)_/); assert.equal(report.ready, true); assert.equal(report.promoted, false);
     assert.equal(mutations(f.state).length, 3); sanitized(report);
   }
 });
@@ -233,7 +233,7 @@ test('候補runtime envが無し・暗号鍵のみでもbuildEnvを検証し、�
     { AUTH_MODE: 'test' }, { CAKE_PREVIEW_PHASE: 'application' }]) {
     const f = fixture({ after: (call, _state, response) => call.url.pathname === candidateEnvPath
       ? json({ env, buildEnv: productionEnvironment('target') }) : response });
-    const report = await f.run(); assert.equal(report.code, 'ENVIRONMENT'); assert.equal(report.promoted, false);
+    const report = await f.run(); assert.match(report.code, /^ENVIRONMENT_(DEFAULT|MAIN|BUILD|RUNTIME)_/); assert.equal(report.promoted, false);
     assert.equal(mutations(f.state).length, 3); sanitized(report);
   }
 });
@@ -243,7 +243,7 @@ test('候補snapshotの公開直前と完了時の再照合も省略しない', 
     const f = fixture({ after: (call, state, response) => call.url.pathname === candidateEnvPath
       && (phase === 'final' ? state.promoted : state.callbacks === 4 && !state.promoted)
       ? json({ buildEnv: productionEnvironment('source') }) : response });
-    const report = await f.run(); assert.equal(report.code, 'ENVIRONMENT'); assert.equal(report.success, false);
+    const report = await f.run(); assert.match(report.code, /^ENVIRONMENT_(DEFAULT|MAIN|BUILD|RUNTIME)_/); assert.equal(report.success, false);
     assert.equal(report.promoted, phase === 'final'); assert.equal(mutations(f.state).length, phase === 'final' ? 4 : 3); sanitized(report);
   }
 });

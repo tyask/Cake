@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { accessAssumption, cutoverContext, cutoverProtocol, cutoverWorkflow, runCutover, serializeCutoverReceipt,
   type CutoverDependencies, type CutoverReceipt } from '../scripts/production-db-cutover';
 import { config, hash, MigrationError, type Connection, type Environment } from '../scripts/production-db-migration-provider';
+import { ProductionEnvironmentError } from '../scripts/production-db-cutover-environment';
 import { appTables } from '../scripts/production-db-migration-inventory';
 import type { FinalCopyReport } from '../scripts/production-db-final-copy';
 import { productionAliases, type ProductionSwitchReport } from '../scripts/production-db-cutover-vercel';
@@ -37,7 +38,7 @@ function switchReport(): ProductionSwitchReport {
     knownAliasesCurrent: true, ms: 5 };
 }
 type FixtureOptions = { env?: Environment; input?: unknown; head?: string; events?: string[];
-  connected?: boolean; bindingFailure?: unknown; copyFailure?: unknown; switchFailure?: unknown;
+  connected?: boolean; bindingFailure?: unknown; environmentFailure?: ProductionEnvironmentError; copyFailure?: unknown; switchFailure?: unknown;
   copyReport?: FinalCopyReport; switchReport?: ProductionSwitchReport; currentMain?: (events: readonly string[]) => string };
 async function fixture(options: FixtureOptions = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'cake-cutover-offline-'));
@@ -58,6 +59,10 @@ async function fixture(options: FixtureOptions = {}) {
         status: 'available', totalConnectedProjects: options.connected ? 1 : 0, projectsMetadata: [] } };
     },
     binding: async (_api, binding) => { events.push(`binding:${binding.projectId}`); if (options.bindingFailure) throw options.bindingFailure; },
+    checkEnvironment: async (_api, binding) => {
+      assert.equal(binding, config.source); events.push('environment:check');
+      if (options.environmentFailure) throw options.environmentFailure;
+    },
     resolveConnection: async (_api, binding): Promise<Connection> => {
       events.push(`connection:${binding.projectId}`);
       return { host: `${binding.endpointId}.ap-southeast-1.aws.neon.tech`, port: 5432, user: binding.role, database: binding.database, password: secret };
@@ -130,6 +135,17 @@ test('provider所属または候補Native未接続の照合失敗で接続解決
   }
 });
 
+test('Production環境の事前検査失敗は接続取得・コピー・Native更新より前に固定コードだけを記録する', async () => {
+  const failure = new ProductionEnvironmentError('DEFAULT', 'DATABASE_REDACTED');
+  const { result, events, raw } = await fixture({ environmentFailure: failure });
+  assert.equal(result.success, false); assert.equal(result.stage, 'environment');
+  assert.equal(result.code, 'PRODUCTION_CUTOVER_SWITCH_ENVIRONMENT_DEFAULT_DATABASE_REDACTED');
+  assert.equal(result.copy, undefined); assert.equal(result.deployment, undefined);
+  assert.ok(events.includes('environment:check'));
+  assert.ok(!events.some(item => /^(connection|copy|switch):/.test(item)));
+  assert.ok(!raw.includes(secret));
+});
+
 test('コピーの検証失敗と例外はProduction切替を止め、公開可能なコピー状態を保持する', async () => {
   const failed: FinalCopyReport = { ...copyReport(), success: false, stage: 'source-verification',
     code: 'PRODUCTION_MIGRATION_FINAL_COPY_SOURCE_CHANGED', sourceUnchanged: false };
@@ -176,6 +192,7 @@ test('成功receiptは無アクセス前提・全段階・sourceの13表018台�
   assert.equal(published.copy?.snapshot?.counts[appTables.indexOf('schema_migrations')], 18);
   assert.equal(published.deployment?.success, true); assert.equal(published.deployment?.aliasVerified, true);
   assert.equal(published.deployment?.deployment?.sha, sha); assert.ok(events.includes('copy:write')); assert.ok(events.includes('switch:write'));
+  assert.ok(events.indexOf('environment:check') < events.indexOf('connection:' + config.source.projectId));
   assert.equal(serializeCutoverReceipt(result), raw);
 });
 

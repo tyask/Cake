@@ -104,7 +104,7 @@ public限定dumpはschema外の依存を自動では含めない。pgcryptoを�
 
 workflowの入力は `controlSha` と新しい `operation` UUIDの2項目だけとする。source/targetのproject・branch・endpoint・database・role、Nativeのproject/team/storeは固定設定で照合し、任意SQL・接続文字列・接続先を入力しない。mainの完全SHAとの一致と初回attemptを確認し、Actions rerunを受け付けない。初回の空候補への `rehearsal`、019未適用候補へのschema QAとは別の経路である。
 
-1. providerの直接GETと一覧でsourceとPG18候補の所属・候補の未接続状態を照合する。sourceがPG17・UTF8・001〜018の台帳、targetがPG18・UTF8・13表・019適用済みの既知の構造であることをread-only transactionで確認する。旧本番と既存の復旧用branch `br-withered-flower-a1hpafzu` を保持し、providerの新規branchや復旧snapshotは作成しない。既存の候補データを最終snapshotで上書きする範囲を、実行承認に含める。
+1. providerの直接GETと一覧でsourceとPG18候補の所属・候補の未接続状態を照合する。SQL接続文字列の取得・dump・候補上書きより前に、default Productionとmain branchの実効環境をGETだけで照合し、`DATABASE_URL`の固定source一致とProduction設定を確認する。欠落・空・伏せ字を一致とみなさず停止する。sourceがPG17・UTF8・001〜018の台帳、targetがPG18・UTF8・13表・019適用済みの既知の構造であることをread-only transactionで確認する。旧本番と既存の復旧用branch `br-withered-flower-a1hpafzu` を保持し、providerの新規branchや復旧snapshotは作成しない。既存の候補データを最終snapshotで上書きする範囲を、実行承認に含める。
 2. sourceのrepeatable-read/read-only transactionがexportした同一snapshotから、全既存列の件数/hash・catalog・owner/ACL・台帳と、PG18クライアントによるdumpを取得する。Authの利用表0件、既知の管理構造・権限とprovider既定ACLも照合する。dump・復元SQLはActions runner内の非公開一時ファイルだけに保持する。
 3. targetを再照合し、`psql --single-transaction` と `ON_ERROR_STOP` の下で最終snapshotへ置換する。既知の019生成列・関数だけを除去し、001〜018のpublicを `pg_restore --clean --if-exists` の出力から復元した後、原文の019と台帳を同じTransactionで適用する。`DROP SCHEMA`・`CASCADE`・branch resetは使わない。pgcrypto・public schema・`cloud_admin` の既定ACL・`neon_auth` は復元対象から除外して各project側のものを保持する。
 4. targetの全既存列projectionの件数/hash、catalog・owner/ACL、旧台帳の適用時刻をsource snapshotと照合する。019による生成列・関数・Index・台帳1行だけを追加差分として確認し、Auth・provider既定ACLの不変も確認する。sourceを新しいread-only snapshotでも取得し、コピー時との一致を確認する。更新があればNative接続切替へ進まない。
@@ -114,7 +114,7 @@ workflowの入力は `controlSha` と新しい `operation` UUIDの2項目だけ�
 
 接続文字列とprovider資格情報は信頼済みmainのActions実行stepでメモリ内だけに扱い、PG子プロセスの環境を限定する。既存の移行専用project-scoped Neonキー、`VERCEL_TOKEN`、読取用GitHub資格情報を使用し、WSL・ログ・Git・環境ファイル・artifactへ秘密値や業務行を出さない。正式PreviewのreceiptやA/Bブラウザ証拠を、本番移行の証拠へ流用しない。
 
-結果は専用protocol `cake-production-db-cutover/v1` の標準noticeで受け取る。run/初回attempt・control SHA・operation・固定対象・時刻・各段階の成否、コピー比較、Deployment・Native接続・alias、全SQL session終了と一時ファイル除去を照合し、run成功だけで切替成功としない。利用者の無アクセス前提は `accessAssumption: no-production-db-access` として記録し、DB停止の実証に置き換えない。receiptの欠落・重複・不一致、失敗・応答不明では、候補・旧DB・復旧用branchを保持して停止する。上書き後や接続変更後の状態を確認せず、再dispatch・rollback・reset・削除を繰り返さない。
+結果は専用protocol `cake-production-db-cutover/v1` の標準noticeで受け取る。環境照合の失敗は`ENVIRONMENT_<scope>_<reason>`の固定コードで記録し、default/main・候補build/runtimeと、欠落・空・伏せ字・接続identityやoptionの不一致などを区別する。変数の値・一覧・接続文字列・生例外は公開せず、環境検査が成功した後もNative更新・作成・公開の直前に再照合する。コピー前の`environment`段階で停止したreceiptにはコピー・接続切替の成功を記録しない。run/初回attempt・control SHA・operation・固定対象・時刻・各段階の成否、コピー比較、Deployment・Native接続・alias、全SQL session終了と一時ファイル除去を照合し、run成功だけで切替成功としない。利用者の無アクセス前提は `accessAssumption: no-production-db-access` として記録し、DB停止の実証に置き換えない。receiptの欠落・重複・不一致、失敗・応答不明では、候補・旧DB・復旧用branchを保持して停止する。上書き後や接続変更後の状態を確認せず、再dispatch・rollback・reset・削除を繰り返さない。
 
 終了後は同じ完全SHAのcleanなcontrol checkoutで次の読取専用CLIを実行する。dispatch・DB接続・provider変更を行わず、workflow/run/job/CheckRun/CheckSuite/repository/GitHub Actions appの来歴と標準noticeを前後照合し、`.cake/production-cutover-<run ID>-receipt.json` へ保存する。成功は終了code 0、出所を照合できた失敗receiptは2、証拠不備は1として区別する。
 

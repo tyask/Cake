@@ -6,6 +6,7 @@ import { assertBinding, assertProductionCredentials, config, connection, hash, M
   type Api, type Environment } from './production-db-migration-provider';
 import { assertCurrentMain, assertUnconnectedTarget, childEnvironment } from './production-db-migration';
 import { runFinalCopy, projectFinalCopyReport, isFinalCopyPublicCode, type FinalCopyReport } from './production-db-final-copy';
+import { assertProductionProjectEnvironment, environmentFailureCodes, ProductionEnvironmentError } from './production-db-cutover-environment';
 import { productionAliases, runProductionSwitch, type ProductionSwitchReport } from './production-db-cutover-vercel';
 
 export const cutoverProtocol = 'cake-production-db-cutover/v1';
@@ -19,13 +20,13 @@ type RoutingEvidence = { aliases: number; hash: string; domains: number; domainH
 type SwitchEvidence = Omit<ProductionSwitchReport, 'before' | 'after'> & {
   before: RoutingEvidence | null; after: RoutingEvidence | null;
 };
-const stages = ['credentials','bindings','connections','copy','switch','post-bindings','completed'] as const;
+const stages = ['credentials','bindings','environment','connections','copy','switch','post-bindings','completed'] as const;
 export type CutoverReceipt = Context & { protocol: typeof cutoverProtocol; configHash: string; accessAssumption: typeof accessAssumption;
   sourceProject: string; sourceBranch: string; sourceEndpoint: string; targetProject: string; targetBranch: string; targetEndpoint: string;
   startedAt: string; checkedAt: string; success: boolean; stage: typeof stages[number]; code: string;
   copy?: CopyEvidence; deployment?: SwitchEvidence };
 export type CutoverDependencies = { api: Api; head: () => string; now: () => string; receiptPath: string;
-  binding: typeof assertBinding; resolveConnection: typeof connection; copy: typeof runFinalCopy; switch: typeof runProductionSwitch };
+  binding: typeof assertBinding; checkEnvironment: typeof assertProductionProjectEnvironment; resolveConnection: typeof connection; copy: typeof runFinalCopy; switch: typeof runProductionSwitch };
 const resultPath = resolve('.cake/production-cutover-result.json');
 const fullSha = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 const decimal = (value: unknown): value is string => typeof value === 'string' && /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value));
@@ -71,7 +72,7 @@ function restoreCopy(value: CopyEvidence): CopyEvidence {
 }
 const switchStages = ['preflight','source-scope','target-connect','native-check','create','ready','aliases-before','oidc','probe','promote','aliases-after','final','complete'];
 const switchCodes = ['OK','INVALID_INPUT','CREDENTIALS','INVALID_RESPONSE','HTTP','RESPONSE_UNKNOWN','JSON','BINDING','INCOMPLETE_INVENTORY',
-  'NATIVE_CONNECTION','ENVIRONMENT','BEFORE_WRITE','DUPLICATE_DEPLOYMENT','DEPLOYMENT_BINDING','DEPLOYMENT_FAILED','DEPLOYMENT_TIMEOUT','ALIAS_CHANGED','ALIAS_TIMEOUT','OIDC','PROBE','UNEXPECTED'];
+  'NATIVE_CONNECTION','ENVIRONMENT',...environmentFailureCodes,'BEFORE_WRITE','DUPLICATE_DEPLOYMENT','DEPLOYMENT_BINDING','DEPLOYMENT_FAILED','DEPLOYMENT_TIMEOUT','ALIAS_CHANGED','ALIAS_TIMEOUT','OIDC','PROBE','UNEXPECTED'];
 const writeState = (value: unknown): 'not-started' | 'attempted' | 'acknowledged' =>
   value === 'not-started' || value === 'attempted' || value === 'acknowledged' ? value : invalid();
 function routingEvidence(value: RoutingEvidence | null): RoutingEvidence | null {
@@ -141,7 +142,7 @@ export async function runCutover(environment: Environment = process.env, overrid
   const dependencies: CutoverDependencies = { api: productionApi(environment),
     head: () => execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',env:childEnvironment(),stdio:['ignore','pipe','ignore']}).trim(),
     now: () => new Date().toISOString(), receiptPath: resultPath, binding: assertBinding,
-    resolveConnection: connection, copy: runFinalCopy, switch: runProductionSwitch, ...overrides };
+    checkEnvironment: assertProductionProjectEnvironment, resolveConnection: connection, copy: runFinalCopy, switch: runProductionSwitch, ...overrides };
   await mkdir(resolve(dependencies.receiptPath, '..'), { recursive: true, mode: 0o700 });
   await rm(dependencies.receiptPath, { force: true });
   if (!environment.GITHUB_EVENT_PATH) throw new Error('PRODUCTION_CUTOVER_UNTRUSTED_WORKFLOW');
@@ -158,6 +159,7 @@ export async function runCutover(environment: Environment = process.env, overrid
   try {
     assertProductionCredentials(environment);
     receipt.stage = 'bindings'; await isolated();
+    receipt.stage = 'environment'; await dependencies.checkEnvironment(dependencies.api,config.source);
     receipt.stage = 'connections';
     const source = await dependencies.resolveConnection(dependencies.api,config.source);
     const target = await dependencies.resolveConnection(dependencies.api,config.target);
@@ -175,8 +177,8 @@ export async function runCutover(environment: Environment = process.env, overrid
     }
   } catch (error) {
     receipt.success = false;
-    receipt.code = error instanceof MigrationError && publicCode(error.message)
-      ? error.message : 'PRODUCTION_CUTOVER_FAILED';
+    receipt.code = error instanceof ProductionEnvironmentError ? 'PRODUCTION_CUTOVER_SWITCH_' + error.code
+      : error instanceof MigrationError && publicCode(error.message) ? error.message : 'PRODUCTION_CUTOVER_FAILED';
   }
   receipt.checkedAt = dependencies.now();
   await writeFile(dependencies.receiptPath,serializeCutoverReceipt(receipt),{mode:0o600});

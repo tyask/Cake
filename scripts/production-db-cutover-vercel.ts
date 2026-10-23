@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { databaseConnectionString, previewDatabaseIdentity } from '../lib/database-connection.mjs';
 import { developmentToken } from './preview-browser';
-import { config, parseConnection, type Binding, type Environment } from './production-db-migration-provider';
+import { assertProductionProjectEnvironment, ProductionEnvironmentError, validateProductionEnvironment, type EnvironmentFailureCode } from './production-db-cutover-environment';
+import { config, type Binding, type Environment } from './production-db-migration-provider';
 
 export const productionSourceStore = 'store_MbDEtSbG9jVS4pDq';
 export const productionAliases = ['cake-omega-gilt.vercel.app', 'cake-git-main-fumin1.vercel.app', 'cake-fumin1.vercel.app'] as const;
@@ -10,7 +10,7 @@ type Stage = 'preflight' | 'source-scope' | 'target-connect' | 'native-check' | 
 type Code = 'OK' | 'INVALID_INPUT' | 'CREDENTIALS' | 'INVALID_RESPONSE' | 'HTTP' | 'RESPONSE_UNKNOWN' | 'JSON'
   | 'BINDING' | 'INCOMPLETE_INVENTORY' | 'NATIVE_CONNECTION' | 'BEFORE_WRITE' | 'DUPLICATE_DEPLOYMENT'
   | 'DEPLOYMENT_BINDING' | 'DEPLOYMENT_FAILED' | 'DEPLOYMENT_TIMEOUT' | 'ALIAS_CHANGED' | 'ALIAS_TIMEOUT'
-  | 'ENVIRONMENT' | 'OIDC' | 'PROBE' | 'UNEXPECTED';
+  | 'ENVIRONMENT' | EnvironmentFailureCode | 'OIDC' | 'PROBE' | 'UNEXPECTED';
 type Write = 'source' | 'target' | 'deployment' | 'promote';
 type WriteState = 'not-started' | 'attempted' | 'acknowledged';
 type Alias = { alias: string; deploymentId: string; projectId: string };
@@ -105,36 +105,18 @@ export async function runProductionSwitch(context: ProductionSwitchContext, opti
     if (expectedProduction !== undefined && value.targets != null && object(object(value.targets).production).id !== expectedProduction) return fail('DEPLOYMENT_BINDING');
     return value;
   }
-  function validateEnvironment(value: unknown, expected: Binding, requireDatabase = true) {
-    try {
-      const variables = object(value);
-      if (Object.values(variables).some(item => typeof item !== 'string')
-        || variables.VERCEL_ENV !== undefined && variables.VERCEL_ENV !== 'production'
-        || variables.AUTH_MODE === 'test' || variables.NODE_TLS_REJECT_UNAUTHORIZED === '0'
-        || Object.keys(variables).some(key => key.startsWith('CAKE_PREVIEW'))) throw new Error();
-      const env = { ...variables, VERCEL_ENV: 'production' } as Record<string, string>;
-      previewDatabaseIdentity(env);
-      if (requireDatabase || Object.hasOwn(variables, 'DATABASE_URL')) {
-        const url = new URL(databaseConnectionString(env));
-        // Native supplies pooled URLs; all remaining binding and URL options use the shared strict parser.
-        url.hostname = url.hostname.replace(/-pooler(?=\.)/, '');
-        parseConnection(url.href, expected);
-      }
-    } catch { return fail('ENVIRONMENT'); }
-  }
   async function projectEnvironment(expected: Binding) {
-    // The CLI encodes the branch in the path. Check both the default and main's resolved overrides.
-    for (const suffix of ['', '/main']) {
-      const value = object(await api(`/v3/env/pull/${config.vercelProjectId}/production${suffix}`));
-      validateEnvironment(value.env, expected);
-    }
+    await assertProductionProjectEnvironment(async (provider, path) => {
+      if (provider !== 'vercel') return fail('BINDING');
+      return api(path);
+    }, expected);
   }
   async function candidateEnvironment(id: string) {
     const value = object(await api(`/v3/env/pull/${id}`));
     // CLI env pull --id uses buildEnv: env may contain only runtime decryption keys for large envs.
     // This proves the deployment's resolved snapshot; any exposed runtime DATABASE_URL must agree too.
-    validateEnvironment(value.buildEnv, config.target);
-    if (value.env !== undefined) validateEnvironment(value.env, config.target, false);
+    validateProductionEnvironment(value.buildEnv, config.target, 'BUILD');
+    if (value.env !== undefined) validateProductionEnvironment(value.env, config.target, 'RUNTIME', false);
   }
   async function routing(): Promise<Routing> {
     const aliases = (await list(`/v4/aliases?projectId=${config.vercelProjectId}`, 'aliases')).map(row => {
@@ -333,7 +315,8 @@ export async function runProductionSwitch(context: ProductionSwitchContext, opti
     report.knownAliasesCurrent = productionAliases.every(name => finalRouting!.aliases.some(row => row.alias === name && row.deploymentId === id));
     report.stage = 'complete'; report.code = 'OK'; report.success = true;
   } catch (error) {
-    const failure = error instanceof SwitchFailure ? error : new SwitchFailure('UNEXPECTED');
+    const failure = error instanceof SwitchFailure ? error
+      : new SwitchFailure(error instanceof ProductionEnvironmentError ? error.code : 'UNEXPECTED');
     report.code = failure.code; report.httpStatus = failure.status; report.responseUnknown = failure.unknown;
   }
   report.ms = Math.max(0, Math.round(now() - started)); return report;
