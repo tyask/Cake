@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { databaseConnectionString, databaseVariable } from "../../lib/server/database-environment";
+import { databaseConnectionString, databaseVariable } from "../../lib/server/database/database-environment";
 import { clearProvisioningOutput, provisioningBuild, writeProvisioningOutput } from './preview-provisioning';
 
 export type BuildStep = "provision" | "db:setup" | "db:seed:test" | "qa:db:csv-categories" | "qa:db:merchant-normalization" | "build";

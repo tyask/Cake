@@ -2,7 +2,7 @@
 
 ## Linux環境とツール
 
-WSL2内のLinux版Node.js 24・npm・Git・ghを使う。Windows側のNode/npm、 `qa:windows` 、token受渡しexeは使わない。作業先はWSLのLinuxファイルシステム内を推奨する。 `/tmp` のツールやcheckoutは再起動などで消える一時配置なので、継続利用する配置とは区別する。
+WSL2内で [.node-version](../.node-version) と同じ完全版のLinux版Node.js・npm・Git・ghを使う。Windows側のNode/npm、 `qa:windows` 、token受渡しexeは使わない。作業先はWSLのLinuxファイルシステム内を推奨する。 `/tmp` のツールやcheckoutは再起動などで消える一時配置なので、継続利用する配置とは区別する。
 
 ```bash
 uname -r
@@ -14,7 +14,7 @@ gh --version
 gh auth status --hostname github.com
 ```
 
-カーネルがWSL2で、Nodeのplatformが `linux` であることを確認する。npmがWindows側を参照する場合はそのまま続けない。ツールがなければLinux公式配布を確認し、承認された作業用の場所へ導入する。PATHの補完はそのターミナル/プロセスだけに限定する。
+カーネルがWSL2で、Nodeのplatformが `linux` であることを確認し、`npm run check:node` で版の一致を確認する。npmがWindows側を参照する場合はそのまま続けない。ツールがなければLinux公式配布を確認し、承認された作業用の場所へ導入する。PATHの補完はそのターミナル/プロセスだけに限定する。
 
 DNS失敗やlocalhost待受のEPERMは、WSLの設定と実行環境の制限を切り分ける。制限が原因なら、許可された実行経路で同じ操作を行う。DNS・CA・proxy・権限を勝手に変更して回避しない。通常実行と承認された実行で結果が異なった場合も報告する。
 
@@ -27,15 +27,17 @@ npx --no-install playwright install chromium
 set -e
 [ -z "$(git status --porcelain)" ]
 TESTED_SHA=$(git rev-parse HEAD)
+time npm run check:node
 time npm run lint
-time npx --no-install tsc --noEmit
+time npm run typecheck
+time npm run check:docs
 time npm test
 time npm run build
 [ "$(git rev-parse HEAD)" = "$TESTED_SHA" ]
 [ -z "$(git status --porcelain)" ]
 ```
 
-成否と時間はコマンドごとに記録する。失敗後に原因を直した場合は、最終SHAで必要な検証を揃える。 `npm test` のChromiumはローカルfixtureであり、実Cakeの業務操作を検証したとは扱わない。
+編集中は `npm run check:fast` または `npm run test:architecture` 等の領域別コマンドで確認できる。最終検証では上記をすべて実行し、成否と時間はコマンドごとに記録する。失敗後に原因を直した場合は、最終SHAで必要な検証を揃える。 `npm test` のChromiumはローカルfixtureであり、実Cakeの業務操作を検証したとは扱わない。
 
 未ログインのローカルCake表示はDBなしでも確認できる。認証設定が不足した場合の `MissingSecret` などは別に報告し、ログイン後の動作まで成功したとしない。localhostでのログイン後E2Eには、承認された隔離DB・認証・migration/seedが必要。
 

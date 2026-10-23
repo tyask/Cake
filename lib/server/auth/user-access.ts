@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { db } from "../db";
+import { db } from "../database/db";
 import { isTestAuthEnabled } from "./auth-mode";
 import { QA_TEST_USERS } from "../../shared/test-users";
 import { activeTestUsers, canUseAdministratorRole, isKnownTestIdentity } from "./test-fixture-context";

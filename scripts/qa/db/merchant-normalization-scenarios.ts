@@ -72,7 +72,7 @@ async function createManualCapture() {
       } finally { neonConfig.fetchFunction = previous; }
     }` }, bundle: true, write: false, platform: "node", format: "cjs", target: "node24", logLevel: "silent",
     plugins: [{ name: "offline-manual-db", setup(plugin) {
-      plugin.onResolve({ filter: /^\.\.\/db$/ }, args => args.importer.startsWith(resolve(root, "lib/server") + "/")
+      plugin.onResolve({ filter: /^\.\.\/database\/db$/ }, args => args.importer.startsWith(resolve(root, "lib/server") + "/")
         ? { path: "offline-db", namespace: "offline-db" } : undefined);
       plugin.onLoad({ filter: /.*/, namespace: "offline-db" }, () => ({ loader: "js", resolveDir: root,
         contents: `import { neon } from "@neondatabase/serverless"; const sql = neon("postgresql://qa:qa@ep-capture.neon.tech/offline"); export function db() { return sql; }` }));

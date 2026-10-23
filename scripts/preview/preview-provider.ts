@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { isProductionDatabaseHostDigest } from '../../lib/server/production-database-hosts.mjs';
+import { isProductionDatabaseHostDigest } from '../../lib/server/database/production-database-hosts.mjs';
 import { array, config, deployment, hostDigest, object, sameDatabase, source, text, type Database, type Deployment, type Source } from './preview-model';
 export type Provider = 'github' | 'vercel' | 'neon';
 export type Transport = (provider: Provider, path: string, method?: string, body?: unknown, missing?: boolean) => Promise<unknown>;

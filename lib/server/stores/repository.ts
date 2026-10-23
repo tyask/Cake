@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db } from "../database/db";
 import { calculateSettlement } from "../../shared/settlement";
 import { defaultRuleRecord } from "../../shared/default-rule-record";
 import { transactionRecord } from "../../shared/transaction-record";

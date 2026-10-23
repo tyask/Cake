@@ -1,4 +1,4 @@
-import { previewDatabaseIdentity } from "../database-environment";
+import { previewDatabaseIdentity } from "../database/database-environment";
 import { QA_TEST_USERS, TEST_USERS } from "../../shared/test-users";
 import type { RegisteredUser } from "../../shared/types";
 

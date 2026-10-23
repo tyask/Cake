@@ -4,13 +4,13 @@ import { RecurringPaymentError } from "../errors";
 import { recurringPaymentMutationSchema } from "../../shared/schemas/recurring-payment-schemas";
 import { workspaceIdSchema } from "../../shared/schemas/domain-schemas";
 import type { AppUser } from "../../shared/types";
-import type { listRecurringPayments, mutateRecurringPayment, runRecurringPayments } from "../recurring-payments";
+import type { RecurringPaymentService } from "../services/recurring-payments";
 
 type Dependencies = {
   currentUser: () => Promise<AppUser | null>;
-  list: typeof listRecurringPayments;
-  mutate: typeof mutateRecurringPayment;
-  run: typeof runRecurringPayments;
+  list: RecurringPaymentService["listRecurringPayments"];
+  mutate: RecurringPaymentService["mutateRecurringPayment"];
+  run: RecurringPaymentService["runRecurringPayments"];
   environment: () => Readonly<Record<string, string | undefined>>;
 };
 

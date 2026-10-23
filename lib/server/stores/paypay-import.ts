@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { db } from "../db";
+import { db } from "../database/db";
 import { normalizePayPayExternalId } from "../../shared/paypay-id";
 import type { ExpenseClass, SplitWeights } from "../../shared/types";
 

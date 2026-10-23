@@ -5,8 +5,8 @@ import { dirname, resolve } from "node:path";
 import nextEnv from "@next/env";
 import { neon } from "@neondatabase/serverless";
 
-import { databaseConnectionString, previewDatabaseIdentity, previewDatabaseGuardSql } from "../../lib/server/database-connection.mjs";
-import { assertPreviewFixtureMigrationNames, assertPreviewFixtureMigrationSource } from "../../lib/server/preview-fixture-base.mjs";
+import { databaseConnectionString, previewDatabaseIdentity, previewDatabaseGuardSql } from "../../lib/server/database/database-connection.mjs";
+import { assertPreviewFixtureMigrationNames, assertPreviewFixtureMigrationSource } from "../../lib/server/database/preview-fixture-base.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationDirectory = resolve(here, "../../db/migrations");

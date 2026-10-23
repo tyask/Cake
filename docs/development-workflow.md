@@ -4,7 +4,7 @@ CakeはPRごとのVercel Preview固有URLと専用Neon Native DBで検証する�
 
 ## 1. 環境と作業ディレクトリ
 
-Node.js 24・npm・Git・既存本人認証済みgh・公式Playwright Chromiumを使う。CIのNode版は `.github/workflows/ci.yml` を参照し、ローカルの実行版も記録する。
+[.node-version](../.node-version) のNode.js・npm・Git・既存本人認証済みgh・公式Playwright Chromiumを使う。ローカルと全Actionsがこの完全版を共用する。`npm run check:node` は依存導入前でも版を確認でき、`task:start` と高速確認の冒頭でも実行する。ローカルの実行版を検証報告へ記録する。Vercelは `engines.node` の24系を選び、minor/patchを自動更新するため、ローカル/Actionsの完全版確認をbuild時には適用しない。
 
 - WSL2はLinux版ツールを使う。[WSL開発・ブラウザ検証](wsl-development.md)で環境・認証・実行方法を確認する。
 - WindowsはPowerShellで `npm.cmd` / `npx.cmd` を使い、[Windows QA手順](windows-qa-credentials.md)で保存済み資格情報を扱う。
@@ -27,6 +27,23 @@ npm run task:start -- feature-name
 
 開発は、実装・関連テスト・自己レビュー → commit → 別Agentレビュー → 指摘への対応・必要な再レビュー → 最終SHAでのローカル検証 → draft PR → 現在HEADのCI・自動Preview・変更に必要な検証 → Readyの順に進める。文書のみの変更にも別Agentレビューを適用する。
 
+### 日常の高速確認と文書参照チェック
+
+依存導入後、編集中は次を使う。`check:fast` はNode版・lint・型・依存境界・文書参照を順番に確認し、失敗した段階で停止する。Chromiumや実DBを使わない。CIもこの確認を先に行い、その後に全自動テストとbuildを実行する。
+
+```bash
+npm run check:fast
+npm run test:architecture
+npm run test:shared
+npm run test:client
+npm run test:server
+npm run test:tooling
+```
+
+領域別コマンドは対応する `tests/` 配下を再帰検出し、全体実行と同じプロセス分離・同時実行数2を維持する。変更箇所の確認に使い、最終SHAの `npm test` とbuildは省略しない。`npm run typecheck` は単独の型チェック、`npm run check:docs` は単独の文書参照チェックである。
+
+`check:docs` は `AGENTS.md`・`README.md`・`docs/` 内のMarkdown/HTMLを読み、ローカルリンク・HTMLのhref/src・参照先の見出し/HTML anchor・コード中の明示的なリポジトリpathを確認する。不正な参照は文書名と行番号を表示し、終了コード1を返す。外部URLへの通信、記載されたコマンドの実行、一般的な文章の意味解析は行わない。コード内の生成物・OSの絶対path・glob・説明用プレースホルダは参照検査から除き、アプリ内の絶対URLは文書リンクとして巡回しない。詳細な認識規則は `scripts/tooling/check-docs.ts` と対応fixtureを正本とし、新しい書式を使う場合は必要な検出回帰とともに更新する。
+
 ### 別Agentレビュー
 
 1. 親Agentは実装・関連テスト・自己レビューを終えてcommitし、cleanなworktree・完全HEAD SHAと比較元のSHAを記録する。通常の比較元は `origin/main` とのmerge-baseとし、差分全体を確認できるようにする。
@@ -40,8 +57,10 @@ npm run task:start -- feature-name
 機能変更は関連テストと同じbranchへcommitし、別Agentレビューと指摘への対応を終えた最終commitで以下を実行する。WSL用の前後SHA・clean確認を含む例は[WSL手順](wsl-development.md#基本検証)を参照する。
 
 ```bash
+npm run check:node
 npm run lint
-npx --no-install tsc --noEmit
+npm run typecheck
+npm run check:docs
 npm test
 npm run build
 ```

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { recurringPaymentHandlers } from "../../lib/server/handlers/recurring-payment-handlers";
-import { RecurringPaymentError } from "../../lib/server/recurring-payments";
+import { RecurringPaymentError } from "../../lib/server/services/recurring-payments";
 import type { RecurringPayment } from "../../lib/shared/recurring-payment-types";
 
 const workspaceId = "00000000-0000-4000-8000-000000000001";

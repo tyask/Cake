@@ -80,7 +80,7 @@ export async function createCsvCategoryImportCapture(): Promise<(input: PayPayIm
     ` },
     bundle: true, write: false, platform: "node", format: "cjs", target: "node24",
     plugins: [{ name: "offline-import-capture", setup(plugin) {
-      plugin.onResolve({ filter: /^\.\.\/db$/ }, args => args.importer === resolve(root, "lib/server/stores/paypay-import.ts")
+      plugin.onResolve({ filter: /^\.\.\/database\/db$/ }, args => args.importer === resolve(root, "lib/server/stores/paypay-import.ts")
         ? { path: "offline-db", namespace: "offline-db" } : undefined);
       plugin.onLoad({ filter: /.*/, namespace: "offline-db" }, () => ({ loader: "js", resolveDir: root,
         contents: `import { neon } from "@neondatabase/serverless"; const client = neon("postgresql://qa:qa@ep-capture.neon.tech/offline"); export function db() { return client; }` }));

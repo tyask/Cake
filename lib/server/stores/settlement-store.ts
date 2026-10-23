@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db } from "../database/db";
 import type { AppUser, SettlementResult, SplitWeights } from "../../shared/types";
 import type { SettlementContext } from "../../shared/settlement";
 import type { Action, SettlementTransaction } from "../services/types";

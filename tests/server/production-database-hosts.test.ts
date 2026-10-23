@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { isProductionDatabaseHostDigest, productionDatabaseHostDigests } from '../../lib/server/production-database-hosts.mjs';
+import { isProductionDatabaseHostDigest, productionDatabaseHostDigests } from '../../lib/server/database/production-database-hosts.mjs';
 
 const retainedProductionDigest = '600033d07eb267fe31096a1bb98d0c1809be7a0ef7a895ad3bcbc6daabbbf0f6';
 const currentProductionDigest = '68939cf43ff8b955c8fd656808b1c252efe2ed5e4888e0f7a03f73c397f10f78';
@@ -62,9 +62,9 @@ test('source設定は現用・保持旧本番hashを保護しNative Previewを�
 });
 
 const fixtureSources = [
-  'lib/server/production-database-hosts.mjs', 'lib/server/database-connection.mjs', 'lib/server/database-environment.ts',
+  'lib/server/database/production-database-hosts.mjs', 'lib/server/database/database-connection.mjs', 'lib/server/database/database-environment.ts',
   'lib/shared/transaction-record.ts', 'lib/shared/domain-values.ts',
-  'lib/server/preview-fixture-base.mjs', 'lib/server/preview-fixture-reference.mjs',
+  'lib/server/database/preview-fixture-base.mjs', 'lib/server/database/preview-fixture-reference.mjs',
   'scripts/preview/preview-model.ts', 'scripts/preview/preview-provider.ts', 'scripts/build/preview-provisioning.ts',
   'scripts/preview/preview-receipt.ts', 'scripts/preview/preview-verify-receipt.ts', 'scripts/task/task-workflow.ts',
   'scripts/qa/db/verify-csv-category-concurrency.ts', 'scripts/qa/db/csv-category-concurrency-scenarios.ts',
@@ -100,8 +100,8 @@ function runWithSourceConfiguration(configuration: Record<string, unknown>, body
 const fixturePrelude = `
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { databaseConnectionString } from './lib/server/database-connection.mjs';
-import { isProductionDatabaseHostDigest } from './lib/server/production-database-hosts.mjs';
+import { databaseConnectionString } from './lib/server/database/database-connection.mjs';
+import { isProductionDatabaseHostDigest } from './lib/server/database/production-database-hosts.mjs';
 import { config, deployment, protocol } from './scripts/preview/preview-model.ts';
 import { PreviewProvider } from './scripts/preview/preview-provider.ts';
 import { provisioningBuild } from './scripts/build/preview-provisioning.ts';
@@ -161,7 +161,7 @@ test('sourceの旧・新hostは注入された本番hashを偽装してもruntim
 test('不正なsource設定ではmodule読込時に停止する', () => {
   runWithSourceConfiguration({ productionHostDigest: newDigest, productionHostDigests: [oldDigest] }, `
     import assert from 'node:assert/strict';
-    await assert.rejects(import('./lib/server/production-database-hosts.mjs'), { message: 'PRODUCTION_DATABASE_HOSTS_INVALID' });
+    await assert.rejects(import('./lib/server/database/production-database-hosts.mjs'), { message: 'PRODUCTION_DATABASE_HOSTS_INVALID' });
   `);
 });
 

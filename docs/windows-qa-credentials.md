@@ -4,7 +4,7 @@ Windowsネイティブの独立したCodexタスクから、保存済みのCake�
 
 ## 実行前の条件
 
-- Node.js 24・npm・Git・既存認証済みghと、Windows付属.NET FrameworkのC# compilerが使えること。PowerShellでは `npm.cmd` / `npx.cmd` を使う。
+- [.node-version](../.node-version) と同じ完全版のNode.js・npm・Git・既存認証済みghと、Windows付属.NET FrameworkのC# compilerが使えること。PowerShellでは `npm.cmd` / `npx.cmd` を使い、`npm.cmd run check:node` で版の一致を確認する。
 - `status`・`input`・`preflight`・`verify`・`self-test` は、通常の本人Windowsセッションに紐づく実行コンテキストで行う。サンドボックスの仮想プロファイルでは実行しない。
 - 専用worktreeで `npm.cmd ci` を済ませ、`npx.cmd playwright install chromium` で公式Chromiumを用意する。必要な準備が許可されていない場合は不足項目を報告して止める。グローバル設定や実行ポリシーは変更しない。
 - 対象は同一repositoryのOPEN PRと、完全SHAが一致するcleanな専用worktree。既存のREADY application Deployment、Native DB branch、DB generationを事前に確認する。

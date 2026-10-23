@@ -17,10 +17,10 @@ test("下位build/outのソースを収集し、root生成物と実行されな�
   const root = await mkdtemp(join(tmpdir(), "cake-boundary-sources-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const files = {
-    "app/build/page.tsx": '"use client"; import "@/lib/server/db";',
-    "app/out/page.tsx": '"use client"; import "@/lib/server/db";',
+    "app/build/page.tsx": '"use client"; import "@/lib/server/database/db";',
+    "app/out/page.tsx": '"use client"; import "@/lib/server/database/db";',
     "scripts/build/vercel-build.ts": "export const build = true;",
-    "lib/server/db.ts": "export const database = true;",
+    "lib/server/database/db.ts": "export const database = true;",
     "build/generated.ts": "export const output = true;",
     "out/generated.ts": "export const output = true;",
     "node_modules/package/index.ts": "export const dependency = true;",
@@ -36,10 +36,10 @@ test("下位build/outのソースを収集し、root生成物と実行されな�
   }
   const sources = await readProjectSources(root);
   assert.deepEqual([...sources.keys()].sort(), [
-    "app/build/page.tsx", "app/out/page.tsx", "lib/server/db.ts", "scripts/build/vercel-build.ts",
+    "app/build/page.tsx", "app/out/page.tsx", "lib/server/database/db.ts", "scripts/build/vercel-build.ts",
   ]);
   assert.deepEqual(checkDependencyBoundaries(sources).filter(violation => violation.rule === "client").map(violation => violation.path), [
-    ["app/build/page.tsx", "lib/server/db.ts"], ["app/out/page.tsx", "lib/server/db.ts"],
+    ["app/build/page.tsx", "lib/server/database/db.ts"], ["app/out/page.tsx", "lib/server/database/db.ts"],
   ]);
 });
 
@@ -47,7 +47,7 @@ test("型専用import・再exportを除き、混在する実行時importは追�
   const sources = {
     "lib/shared/types.ts": `import type { Store } from "../server/stores/store";
       import { type Client } from "../client/controller";
-      export type * from "@/lib/server/db";
+      export type * from "@/lib/server/database/db";
       export { type User } from "@/lib/server/auth";
       export type Node = typeof import("node:fs");
       import { type Schema, value } from "./value"; export { type Schema, value } from "./value";`,
@@ -78,17 +78,17 @@ test("alias・index.tsx・再export・mjsを経由するclientからserverへの
 
 test("lib外のuse client入口からも文字列dynamic import・require・import equalsを追跡する", () => {
   for (const load of [
-    `import("@/lib/server/db")`, `import(\`@/lib/server/db\`)`, `require("@/lib/server/db")`,
-    `import db = require("@/lib/server/db");`,
+    `import("@/lib/server/database/db")`, `import(\`@/lib/server/database/db\`)`, `require("@/lib/server/database/db")`,
+    `import db = require("@/lib/server/database/db");`,
   ]) {
-    const violations = rules({ "components/entry.tsx": `"use strict"; "use client"; ${load}`, "lib/server/db.ts": "" }, "client");
+    const violations = rules({ "components/entry.tsx": `"use strict"; "use client"; ${load}`, "lib/server/database/db.ts": "" }, "client");
     assert.equal(violations.length, 1, load);
-    assert.deepEqual(violations[0].path, ["components/entry.tsx", "lib/server/db.ts"]);
+    assert.deepEqual(violations[0].path, ["components/entry.tsx", "lib/server/database/db.ts"]);
   }
 });
 
 test("sharedからclient・server・画面・運用・テストへの実行時参照を拒否する", () => {
-  for (const target of ["lib/client/controller.ts", "lib/server/db.ts", "components/view.tsx", "app/page.tsx", "scripts/task/run.mjs", "tests/shared/case.ts"]) {
+  for (const target of ["lib/client/controller.ts", "lib/server/database/db.ts", "components/view.tsx", "app/page.tsx", "scripts/task/run.mjs", "tests/shared/case.ts"]) {
     const violations = rules({ "lib/shared/input.ts": `export * from "@/${target}";`, [target]: "" }, "shared");
     assert.equal(violations.length, 1, target);
     assert.deepEqual(violations[0].path, ["lib/shared/input.ts", target]);
@@ -118,7 +118,9 @@ test("画面・API・root moduleからscripts/testsを製品へ取り込まな�
 
 test("用途別サービス・HTTP handlerから具体store・DB・repositoryへの推移参照を拒否する", () => {
   for (const [source, rule] of [["lib/server/services/operation.ts", "service-store"], ["lib/server/handlers/http.ts", "handler-db"]]) {
-    for (const target of ["lib/server/stores/app-store.ts", "lib/server/db.ts", "lib/server/repository.ts"]) {
+    for (const target of ["lib/server/stores/app-store.ts", "lib/server/stores/recurring-payment-store.ts", "lib/server/database/db.ts",
+      "lib/server/database/database-environment.ts", "lib/server/database/database-connection.mjs",
+      "lib/server/database/production-database-hosts.mjs", "lib/server/database/preview-fixture-base.mjs", "lib/server/repository.ts"]) {
       const violations = rules({
         [source]: `import "../bridge";`,
         "lib/server/bridge.ts": `export * from "@/${target}";`,
@@ -136,9 +138,9 @@ test("用途別サービス・HTTP handlerから具体store・DB・repositoryへ
 test("APIのcomposition rootはstoreを組み立て、サービスとhandlerは注入した型を使える", () => {
   assert.deepEqual(check({
     "app/api/app/route.ts": `import "@/lib/server/stores/store"; import "@/lib/server/services/service"; import "@/lib/server/handlers/http";`,
-    "lib/server/stores/store.ts": `import "../db";`,
-    "lib/server/db.ts": `import "@neondatabase/serverless";`,
-    "lib/server/services/service.ts": `import type { Store } from "../stores/store"; import { randomUUID } from "node:crypto";`,
+    "lib/server/stores/store.ts": `import "../database/db";`,
+    "lib/server/database/db.ts": `import "@neondatabase/serverless";`,
+    "lib/server/services/service.ts": `import type { Store } from "../stores/store"; import type { DatabaseQueryExecutor } from "../database/database-connection.mjs"; import { randomUUID } from "node:crypto";`,
     "lib/server/handlers/http.ts": `import { UserAccessError } from "../errors"; import type { Operation } from "../services/service";`,
     "lib/server/errors.ts": `export class UserAccessError extends Error {}`,
   }), []);

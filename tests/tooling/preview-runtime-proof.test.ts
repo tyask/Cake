@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { previewRuntimeProofHandler } from '../../lib/server/preview-runtime-proof';
+import { previewRuntimeProofHandler } from '../../lib/server/preview/preview-runtime-proof';
 const digest=createHash('sha256').update('ep-child.ap-southeast-1.aws.neon.tech').digest('hex');
 const env={VERCEL_ENV:'preview',AUTH_MODE:'test',CAKE_PREVIEW_PHASE:'application',CAKE_PREVIEW_REPOSITORY:'tyask/Cake',CAKE_PREVIEW_PR:'71',
   CAKE_PREVIEW_GENERATION:'10000000-0000-4000-8000-000000000001',CAKE_PREVIEW_SOURCE_BRANCH:'codex/test',CAKE_PREVIEW_SOURCE_SHA:'a'.repeat(40),

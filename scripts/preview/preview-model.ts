@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import config from '../../preview.config.json';
-import { isProductionDatabaseHostDigest } from '../../lib/server/production-database-hosts.mjs';
+import { isProductionDatabaseHostDigest } from '../../lib/server/database/production-database-hosts.mjs';
 import { fullSha, previewUrl, validTaskBranch } from '../task/task-workflow';
 export { config };
 export const protocol = 'cake-preview/v1';

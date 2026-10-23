@@ -22,7 +22,7 @@ iPhoneでのPayPay共有ショートカットとCSV貼り付けの確認方法�
 ## 技術構成
 
 - Next.js 16 / React 19 / TypeScript
-- Node.js 24 / npm
+- Node.js 24 / npm（ローカル・Actionsの検証版は [.node-version](.node-version)）
 - Auth.js（Google OAuth）
 - Neon PostgreSQL 18以上（UTF8）
 - Vercel
@@ -39,28 +39,30 @@ iPhoneでのPayPay共有ショートカットとCSV貼り付けの確認方法�
 | `lib/client/` | 取得・保存制御、応答反映、ブラウザ保存 |
 | `lib/server/` | 認証、HTTP境界、用途別サービス、DB store・接続 |
 | `lib/shared/` | 型、定数、`schemas/`、CSV変換・割合・清算などの共通計算 |
-| `scripts/` | `task/`・`preview/`・`build/`・`db/`・`qa/db/`・`qa/windows/` の運用処理 |
+| `scripts/` | `task/`・`preview/`・`build/`・`db/`・`tooling/`・`qa/db/`・`qa/windows/` の運用処理 |
 | `tests/` | `shared/`・`client/`・`server/`・`tooling/` の回帰と `architecture/` の依存境界検査 |
 
 ## ローカルセットアップ
 
 ### DB接続なしの開発・テスト
 
-WSL2/LinuxまたはWindowsネイティブで、Node.js 24・npm・Git・既存本人認証済みgh・公式Playwright Chromiumを使います。OSごとに独立したclone/worktreeを用意し、依存・build成果物・環境ファイル・資格情報を混ぜません。
+WSL2/LinuxまたはWindowsネイティブで、[.node-version](.node-version) に記載したNode.js・npm・Git・既存本人認証済みgh・公式Playwright Chromiumを使います。OSごとに独立したclone/worktreeを用意し、依存・build成果物・環境ファイル・資格情報を混ぜません。
 
 - WSLは[WSL開発・ブラウザ検証](docs/wsl-development.md)でLinux版ツール・認証・実行方法を確認してください。
 - WindowsのPowerShellは `npm.cmd` / `npx.cmd` を使います。QAの認証は[Windows QA手順](docs/windows-qa-credentials.md)を参照してください。
 
 ```bash
+npm run check:node
 npm ci
 npx --no-install playwright install chromium
-npm run lint
-npx --no-install tsc --noEmit
+npm run check:fast
 npm test
 npm run build
 ```
 
-`npm test` は `tests/` 配下のテストと依存境界検査を再帰的に実行します。ローカルfixture・PGlite・スタブ等を使い、実DBへ接続しません。Chromium fixtureも実Cake全体のE2Eとは別です。最終commitのSHA・clean状態・各コマンドの時間を記録します。文書だけの変更はリンク・コマンド・実装との整合性を確認し、必要な検証を選びます。CIのNode版は `.github/workflows/ci.yml` を参照してください。
+`npm test` は `tests/` 配下のテストと依存境界検査を再帰的に実行します。ローカルfixture・PGlite・スタブ等を使い、実DBへ接続しません。Chromium fixtureも実Cake全体のE2Eとは別です。最終commitのSHA・clean状態・各コマンドの時間を記録します。文書だけの変更はリンク・コマンド・実装との整合性を確認し、必要な検証を選びます。ローカルとActionsは `.node-version` の完全版を共用します。`npm run check:node` は依存の導入前にも使え、版が異なれば停止します。Vercelの実行環境は `engines.node` の24系を使い、minor/patchはproviderが管理します。
+
+日常の確認は `npm run check:fast`（Node版・lint・型・依存境界・文書参照）を使えます。対象領域だけの回帰は `test:shared`・`test:client`・`test:server`・`test:tooling`・`test:architecture` を使い、最終検証では `npm test` とbuildまで実行します。文書参照チェックの対象と除外は[開発手順](docs/development-workflow.md#日常の高速確認と文書参照チェック)を参照してください。
 
 以下はlocalhostでCake全体を起動する場合の追加準備です。ログイン後の操作には承認された隔離DB・認証設定・migration/seedが必要です。通常の回帰テストの前提ではなく、他環境から資格情報をコピーしません。既存Previewの検証は[開発手順](docs/development-workflow.md)に従ってください。
 

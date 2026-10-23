@@ -1,7 +1,7 @@
 import type { AppActionInput, WorkspaceActionDraft } from "../../lib/shared/schemas/app-input";
 import type { RecurringPaymentMutation, RecurringPaymentMutationDraft } from "../../lib/shared/schemas/recurring-payment-schemas";
 import type { RecurringPayment } from "../../lib/shared/recurring-payment-types";
-import type { RecurringPaymentLog } from "../../lib/server/recurring-payments";
+import type { RecurringPaymentLog } from "../../lib/server/services/recurring-payments";
 
 // Checked by tsc/build; never send these fixtures to an API.
 export function checkActionInputContracts(app: (input: AppActionInput) => void, recurring: (input: RecurringPaymentMutation) => void) {

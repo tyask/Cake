@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import {
   createRecurringPaymentService, isRecurringUserEligible, RecurringPaymentError,
   recurringPaymentConfigSchema, recurringPaymentMutationSchema, recurringPaymentRecord, recurringSplitWeights,
-} from "../../lib/server/recurring-payments";
-import type { RecurringPaymentLog, RecurringPaymentStore } from "../../lib/server/recurring-payments";
+} from "../../lib/server/services/recurring-payments";
+import type { RecurringPaymentLog, RecurringPaymentStore } from "../../lib/server/services/recurring-payments";
 import type { RecurringPaymentConfig } from "../../lib/shared/recurring-payment-types";
 import { blockedReasonLabel, isRecurringBlockedReason, recurringPaymentStateLabel } from "../../lib/shared/recurring-payment-types";
 

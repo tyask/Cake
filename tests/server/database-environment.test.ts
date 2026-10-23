@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { databaseConnectionString, previewDatabaseIdentity } from '../../lib/server/database-environment';
+import { databaseConnectionString, previewDatabaseIdentity } from '../../lib/server/database/database-environment';
 const hash = (h:string) => createHash('sha256').update(h).digest('hex');
 const preview = { VERCEL_ENV:'preview',AUTH_MODE:'test',CAKE_PREVIEW_PHASE:'application',CAKE_PREVIEW_REPOSITORY:'tyask/Cake',CAKE_PREVIEW_PR:'34',
   CAKE_PREVIEW_GENERATION:'00000000-0000-4000-8000-000000000001',CAKE_PREVIEW_DATABASE_BRANCH_ID:'br-preview',

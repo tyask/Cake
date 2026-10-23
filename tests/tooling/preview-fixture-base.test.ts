@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { assertPreviewFixtureMigrationSources, PREVIEW_FIXTURE_MIGRATIONS } from "../../lib/server/preview-fixture-base.mjs";
+import { assertPreviewFixtureMigrationSources, PREVIEW_FIXTURE_MIGRATIONS } from "../../lib/server/database/preview-fixture-base.mjs";
 import { prepareMigration } from "../../scripts/db/setup-db.mjs";
 
 const directory = new URL("../../db/migrations/", import.meta.url);

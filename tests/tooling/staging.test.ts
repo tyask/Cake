@@ -5,7 +5,7 @@ import { StagingProvider } from '../../scripts/preview/staging-service';
 import { config, type Source, type Deployment } from '../../scripts/preview/preview-model';
 import { PreviewService } from '../../scripts/preview/preview-service';
 import { type Transport } from '../../scripts/preview/preview-provider';
-import { databaseConnectionString, previewDatabaseIdentity } from '../../lib/server/database-environment';
+import { databaseConnectionString, previewDatabaseIdentity } from '../../lib/server/database/database-environment';
 import { activeTestUsers } from '../../lib/server/auth/test-fixture-context';
 import { QA_TEST_USERS } from '../../lib/shared/test-users';
 import { provisioningBuild } from '../../scripts/build/preview-provisioning';
