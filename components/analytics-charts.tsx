@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { barAmountPosition, CHART_AMOUNT_FONT_FAMILY, CHART_AMOUNT_FONT_SIZE, CHART_AMOUNT_FONT_WEIGHT, createChartAmountMeasurer, pieAmountPosition, type ChartAmountLabel, type ChartAmountPosition } from "@/lib/client/analytics-chart-labels";
 import { analyticsChangeRate, type AnalyticsDataset, type AnalyticsRow, type AnalyticsView } from "@/lib/shared/analytics";
 import { formatYen } from "@/lib/shared/display-formatters";
 import styles from "./analytics-panel.module.css";
@@ -21,6 +22,17 @@ function CategoryName({ row }: { row: AnalyticsRow }) {
   return <span className={styles.categoryName}><i style={{ backgroundColor: row.colorHex }} aria-hidden="true" /><span>{row.label}</span></span>;
 }
 
+function AmountLabel({ label, position, kind, categoryId, month }: {
+  label: ChartAmountLabel | null; position: ChartAmountPosition | null;
+  kind: "pie" | "trend" | "difference"; categoryId: string; month?: string;
+}) {
+  if (!label || !position) return null;
+  return <text x={position.x} y={position.y} textAnchor="middle" dominantBaseline="central"
+    transform={position.rotation ? `rotate(${position.rotation} ${position.x} ${position.y})` : undefined}
+    fill={label.color} fontSize={CHART_AMOUNT_FONT_SIZE} fontFamily={CHART_AMOUNT_FONT_FAMILY} fontWeight={CHART_AMOUNT_FONT_WEIGHT}
+    aria-hidden="true" pointerEvents="none" data-analytics-amount={kind} data-category-id={categoryId} data-month={month}>{label.text}</text>;
+}
+
 type TipItem = { name?: string | number; dataKey?: string | number; payload?: { row?: AnalyticsRow; monthIndex?: number } };
 function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: readonly TipItem[]; label?: string | number }) {
   if (!active || !payload?.length) return null;
@@ -36,7 +48,18 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 
 export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView; periods: AnalyticsDataset["periods"] }) {
   // Floating point values are graph coordinates only; every amount and ratio label uses bigint.
-  const composition = useMemo(() => view.chartRows.filter(row => row.currentYen > BigInt(0)).map(row => ({ row, value: Number(row.currentYen) })), [view]);
+  const labels = useMemo(() => {
+    const measure = createChartAmountMeasurer();
+    return new Map(view.chartRows.map(row => [row.id, {
+      current: measure(formatYen(row.currentYen), row.colorHex),
+      difference: measure(signed(row.currentYen - row.comparisonYen), row.colorHex),
+      months: row.monthlyYen.map(value => measure(formatYen(value), row.colorHex)),
+    }]));
+  }, [view]);
+  // Keep the shared ranking of the other charts and tables; only the pie follows current amounts.
+  const composition = useMemo(() => view.chartRows.filter(row => row.currentYen > BigInt(0))
+    .map(row => ({ row, value: Number(row.currentYen) }))
+    .sort((a, b) => a.row.currentYen === b.row.currentYen ? 0 : a.row.currentYen > b.row.currentYen ? -1 : 1), [view]);
   const trend = useMemo(() => view.months.map((month, monthIndex) => {
     const point: Record<string, string | number | AnalyticsRow> = { month, monthIndex };
     view.chartRows.forEach((row, index) => { point[`category${index}`] = Number(row.monthlyYen[monthIndex]); });
@@ -53,7 +76,15 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
         <div className={styles.compositionBody}>
           {view.totalYen > BigInt(0) ? <div className={styles.donutChart} role="group" aria-label="カテゴリ別の負担額。金額と割合は次の一覧でも確認できます。">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}><PieChart accessibilityLayer>
-              <Pie data={composition} dataKey="value" nameKey={entry => entry.row.label} innerRadius="64%" outerRadius="86%" paddingAngle={2} isAnimationActive={false} stroke="var(--paper)">
+              <Pie data={composition} dataKey="value" nameKey={entry => entry.row.label} innerRadius="50%" outerRadius="88%"
+                startAngle={90} endAngle={-270} paddingAngle={2} isAnimationActive={false} stroke="var(--paper)" labelLine={false}
+                label={geometry => {
+                  // Sector payload and geometry belong to the same Recharts snapshot.
+                  const row = geometry.payload?.row as AnalyticsRow | undefined;
+                  const label = row ? labels.get(row.id)?.current ?? null : null;
+                  if (!row || label?.text !== formatYen(row.currentYen)) return null;
+                  return <AmountLabel label={label} position={pieAmountPosition(geometry, label)} kind="pie" categoryId={row.id} />;
+                }}>
                 {composition.map(entry => <Cell key={entry.row.id} fill={entry.row.colorHex} />)}
               </Pie><Tooltip content={<ChartTooltip />} />
             </PieChart></ResponsiveContainer>
@@ -75,7 +106,15 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
               const monthIndex = (item.payload as { monthIndex: number }).monthIndex;
               return <p key={row.id}><span>{row.label}</span><strong>{formatYen(row.monthlyYen[monthIndex])}</strong></p>;
             })}</div> : null} />
-            {view.chartRows.map((row, index) => <Bar key={row.id} name={row.label} dataKey={`category${index}`} stackId="burden" fill={row.colorHex} maxBarSize={38} isAnimationActive={false} />)}
+            {view.chartRows.map((row, index) => <Bar key={row.id} name={row.label} dataKey={`category${index}`} stackId="burden" fill={row.colorHex} maxBarSize={38} isAnimationActive={false}>
+              <LabelList dataKey="month" content={geometry => {
+                // Recharts omits zero-size bars before numbering labels, so use the source month.
+                const monthIndex = view.months.indexOf(String(geometry.value));
+                if (!row.monthlyYen[monthIndex]) return null;
+                const label = labels.get(row.id)!.months[monthIndex] ?? null;
+                return <AmountLabel label={label} position={barAmountPosition(geometry.viewBox, label, true)} kind="trend" categoryId={row.id} month={view.months[monthIndex]} />;
+              }} />
+            </Bar>)}
           </BarChart></ResponsiveContainer>
         </div> : <p className={styles.chartEmpty}>この6か月の負担額はありません。</p>}
         <ul className={styles.legend} aria-label="グラフのカテゴリ">{view.chartRows.map(row => <li key={row.id}><CategoryName row={row} /></li>)}</ul>
@@ -95,7 +134,15 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
             <XAxis type="number" axisLine={false} tickLine={false} tick={chartStyle} tickFormatter={value => compactYen.format(Number(value))} />
             <YAxis dataKey="label" type="category" width={96} axisLine={false} tickLine={false} tick={chartStyle} tickFormatter={(value: string) => value.length > 9 ? `${value.slice(0, 8)}…` : value} />
             <ReferenceLine x={0} stroke="var(--muted)" /><Tooltip content={<ChartTooltip />} />
-            <Bar dataKey="difference" name="差額" isAnimationActive={false} maxBarSize={19}>{differences.map(entry => <Cell key={entry.row.id} fill={entry.row.colorHex} />)}</Bar>
+            <Bar dataKey="difference" name="差額" isAnimationActive={false} maxBarSize={19}>
+              {differences.map(entry => <Cell key={entry.row.id} fill={entry.row.colorHex} />)}
+              <LabelList dataKey="row.id" content={geometry => {
+                const row = differences.find(entry => entry.row.id === geometry.value)?.row;
+                if (!row || row.currentYen === row.comparisonYen) return null;
+                const label = labels.get(row.id)!.difference;
+                return <AmountLabel label={label} position={barAmountPosition(geometry.viewBox, label, false)} kind="difference" categoryId={row.id} />;
+              }} />
+            </Bar>
           </BarChart></ResponsiveContainer>
         </div> : <p className={styles.chartEmpty}>比較できる負担額はありません。</p>}
         <div className={styles.tableScroll} tabIndex={0} aria-label="カテゴリ別の増減の表（横スクロール可能）"><table className={styles.differenceTable}>

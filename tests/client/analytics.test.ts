@@ -6,6 +6,7 @@ import { mkdir } from "node:fs/promises";
 import { build } from "esbuild";
 import { chromium, type Route } from "playwright";
 import { resolveAnalyticsPeriods, type AnalyticsDataset, type AnalyticsQuery } from "../../lib/shared/analytics";
+import { formatYen } from "../../lib/shared/display-formatters";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const otherWorkspaceId = "22222222-2222-4222-8222-222222222222";
@@ -82,13 +83,17 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
     return { context, page, requests, urls, errors, take, reply, total, stable };
   }
   try {
-    for (const width of [1440, 390, 320]) await t.test(`${width}px: 対象者・費用区分・階層・表・説明を変えても再通信しない`, async () => {
+    for (const width of [1440, 1000, 390, 320]) await t.test(`${width}px: 対象者・費用区分・階層・表・説明を変えても再通信しない`, async () => {
       const f = await fixture(width);
       try {
         const request = await f.take();
         assert.deepEqual([...new URL(request.request().url()).searchParams.keys()].sort(), ["month", "period", "workspaceId"]);
         await f.reply(request); await f.total("￥150");
         await f.page.getByRole("heading", { name: "カテゴリ別の内訳" }).waitFor();
+        const pie = f.page.getByRole("group", { name: "カテゴリ別の負担額。金額と割合は次の一覧でも確認できます。", exact: true });
+        await pie.locator("path.recharts-sector").first().waitFor();
+        const pieBounds = (await pie.locator("svg").first().boundingBox())!;
+        assert.ok(pieBounds.width > 100 && pieBounds.height > 100, "中間幅でも円グラフが消えない");
         assert.equal(await f.page.getByRole("combobox", { name: "集計の基準" }).count(), 0);
         const info = f.page.getByRole("button", { name: "対象者の説明", exact: true });
         if (width > 768) {
@@ -152,6 +157,62 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
           await f.page.screenshot({ path: `.cake/output/playwright/analytics-${width}.png`, fullPage: true, animations: "disabled" });
         }
         assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
+    for (const width of [1440, 1000, 390, 320]) await t.test(`${width}px: 円は12時から時計回りの金額順で、収まる金額だけを図中に表示する`, async () => {
+      const f = await fixture(width);
+      try {
+        const response = await f.take(), data = dataset(queryFromRoute(response));
+        const amounts = [90, 80, 70, 57, 50, 40, 30, 20, 19, 18, 1];
+        data.categories = amounts.map((_, index) => ({ id: `c${index}`, parentId: null, name: `分類${index}`, colorHex: `#${(90000 + index * 20000).toString(16).padStart(6, "0")}`, sortOrder: index, revision: 1, archivedAt: null }));
+        data.buckets = [];
+        for (const [index, amount] of amounts.entries()) for (const scope of ["current", "comparison", "trend"] as const) {
+          data.buckets.push({ scope, month: scope === "comparison" ? "2026-09" : "2026-10", memberId: "a", expenseClass: "SHARED", categoryId: `c${index}`, burdenYen: String(scope === "comparison" ? index === 10 ? 500 : 0 : amount) });
+        }
+        for (const scope of ["current", "trend"] as const) data.buckets.push({ scope, month: "2026-10", memberId: "a", expenseClass: "SHARED", categoryId: null, burdenYen: "250" });
+        await f.reply(response, data);
+        const pie = f.page.getByRole("group", { name: "カテゴリ別の負担額。金額と割合は次の一覧でも確認できます。", exact: true });
+        const paths = pie.locator("path.recharts-sector");
+        await paths.nth(9).waitFor();
+        assert.deepEqual(await paths.evaluateAll(elements => elements.map(element => element.getAttribute("fill"))),
+          ["#94a3b8", ...data.categories.slice(0, 4).map(category => category.colorHex), "#cbd5e1", ...data.categories.slice(4, 7).map(category => category.colorHex), data.categories[10].colorHex], "その他・未分類を含め降順、同額は安定順");
+        assert.equal(await paths.first().evaluate(element => {
+          const path = element as SVGGeometryElement, svg = path.ownerSVGElement!;
+          const cx = svg.viewBox.baseVal.width / 2, cy = svg.viewBox.baseVal.height / 2;
+          const r = Math.min(cx, cy) * .75, angle = 8 * Math.PI / 180;
+          return path.isPointInFill(new DOMPoint(cx + Math.sin(angle) * r, cy - Math.cos(angle) * r))
+            && !path.isPointInFill(new DOMPoint(cx - Math.sin(angle) * r, cy - Math.cos(angle) * r));
+        }), true, "最大の領域は12時の右から時計回りに始まる");
+        await pie.locator('[data-analytics-amount="pie"]').first().waitFor();
+        assert.equal(await pie.locator('[data-analytics-amount="pie"][data-category-id="c10"]').count(), 0, "1円の小さい領域は非表示");
+        const expectedValues = new Set(["￥250", "￥57", ...amounts.slice(0, 7).map(formatYen)]);
+        const labels = await pie.locator('[data-analytics-amount="pie"]').allTextContents();
+        assert.ok(labels.length > 0 && labels.every(label => expectedValues.has(label)), "図内の金額は正確な円表記");
+        const trend = f.page.getByRole("group", { name: "月ごとのカテゴリ別負担額。下の表でも確認できます。", exact: true });
+        await trend.locator('[data-analytics-amount="trend"]').first().waitFor();
+        assert.equal(await trend.locator('[data-analytics-amount="trend"][data-category-id="c10"]').count(), 0);
+        const difference = f.page.getByRole("group", { name: "カテゴリ別の負担額の増減。正は増加、負は減少。全カテゴリの金額は次の表に表示します。", exact: true });
+        assert.equal(await difference.locator('[data-analytics-amount="difference"][data-category-id="c10"]').textContent(), "-￥499", "減少額の符号も表示する");
+        assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        if (process.env.CAKE_ANALYTICS_SCREENSHOTS) {
+          await mkdir(".cake/output/playwright", { recursive: true });
+          await f.page.screenshot({ path: `.cake/output/playwright/analytics-labels-${width}.png`, fullPage: true, animations: "disabled" });
+        }
+        assert.equal(f.urls.length, 1); assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
+    await t.test("グラフ内の金額は安全整数を超えても元の整数を表示する", async () => {
+      const f = await fixture();
+      try {
+        const request = await f.take(), data = dataset(queryFromRoute(request));
+        const exact = "9007199254740993";
+        data.buckets = ["current", "trend"].map(scope => ({ scope: scope as "current" | "trend", month: "2026-10", memberId: "a", expenseClass: "SHARED", categoryId: "grocery", burdenYen: exact }));
+        await f.reply(request, data); await f.total(formatYen(BigInt(exact)));
+        await f.page.locator('[data-analytics-amount="trend"]').first().waitFor();
+        assert.deepEqual(await f.page.locator('[data-analytics-amount="trend"]').allTextContents(), [formatYen(BigInt(exact))]);
+        assert.equal(f.urls.length, 1); assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
 

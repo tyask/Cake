@@ -14,7 +14,7 @@
 .helpLabel { border-bottom: 1px dotted var(--muted); cursor: help; }
 .helpLabel:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .helpInfo { display: none; }
-.helpTooltip { position: absolute; z-index: 7; top: calc(100% + .45rem); left: 0; width: max-content; max-width: min(20rem, calc(100vw - 4rem)); padding: .65rem .8rem; border-radius: .5rem; color: #fff; background: var(--ink); box-shadow: 0 .25rem .8rem #0002; font-size: .75rem; line-height: 1.6; }
+.helpTooltip { position: absolute; z-index: 7; top: calc(100% + .45rem); right: 0; width: max-content; max-width: min(20rem, calc(100vw - 4rem)); padding: .65rem .8rem; border-radius: .5rem; color: #fff; background: var(--ink); box-shadow: 0 .25rem .8rem #0002; font-size: .75rem; line-height: 1.6; }
 .helpTooltip::before { content: ""; position: absolute; right: 0; bottom: 100%; left: 0; height: .45rem; }
 .customDates { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: flex-end; gap: .65rem; padding-top: .9rem; border-top: 1px solid var(--line); }
 .customDates > span { padding-bottom: .75rem; color: var(--muted); font-size: .7rem; }
@@ -35,7 +35,7 @@
 .cardHeading h2 { margin: 0; font-size: 1rem; font-weight: 700; line-height: 1.6; }
 .cardHeading > span { flex: none; padding: .2rem .45rem; border: 1px solid var(--line); border-radius: .3rem; color: var(--muted); font-size: .6rem; }
 .cardSubtitle { margin: .35rem 0 0; color: var(--muted); font-size: .66rem; line-height: 1.8; }
-.donutChart { position: relative; height: 16.5rem; max-width: 21rem; margin: .1rem auto; }
+.donutChart { position: relative; width: 100%; height: 16.5rem; max-width: 21rem; margin: .1rem auto; }
 .donutCenter { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
 .donutCenter > span { color: var(--muted); font-size: .65rem; }
 .donutCenter strong { max-width: 60%; margin-top: .6rem; font-size: clamp(.95rem, 1.8vw, 1.5rem); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-align: center; }
@@ -89,7 +89,7 @@
   .memberHelp { position: static; }
   .helpLabel { border-bottom: 0; }
   .helpInfo { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: .2rem; background: transparent; color: var(--muted); font-size: .85rem; line-height: 1; }
-  .helpTooltip { top: 1.6rem; max-width: min(20rem, calc(100vw - 4rem)); }
+  .helpTooltip { top: 1.6rem; right: auto; left: 0; max-width: min(20rem, calc(100vw - 4rem)); }
   .checks { align-items: flex-start; gap: .2rem .7rem; }
   .checks label { font-size: .72rem; }
   .customDates { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: .5rem; }
