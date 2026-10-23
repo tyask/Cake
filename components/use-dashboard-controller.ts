@@ -22,6 +22,8 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
   const tabGeneration = useRef(0);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [workspaceSwitching, setWorkspaceSwitching] = useState(false);
+  const [analyticsRevision, setAnalyticsRevision] = useState(0);
   const [noticeState, setNoticeState] = useState<{ message: string } | null>(null);
   const notice = noticeState?.message ?? null;
   const selected = data.selected;
@@ -193,6 +195,7 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
       }
       if (isCurrentView()) {
         dataRevision.current += 1;
+        setAnalyticsRevision(revision => revision + 1);
         const metadataUpdate = (payload.action === "createCategory" || payload.action === "updateCategory") && result.category
           ? { category: result.category, ancestorCategories: result.ancestorCategories }
           : payload.action === "archiveCategory" && result.archivedCategories
@@ -256,14 +259,19 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
   async function switchWorkspace(workspaceId: string) {
     const generation = workspaceView.current.generation + 1;
     workspaceView.current = { workspaceId, generation };
+    setWorkspaceSwitching(true);
     startLoading(); setNotice(null);
     try { await refresh(workspaceId, generation, "full"); }
     catch (error) {
       if (generation === workspaceView.current.generation) {
         workspaceView.current = { workspaceId: selected?.workspace.id, generation: generation + 1 };
+        setWorkspaceSwitching(false);
         setNotice(error instanceof Error ? error.message : "読込に失敗しました。");
       }
-    } finally { finishLoading(); }
+    } finally {
+      if (generation === workspaceView.current.generation) setWorkspaceSwitching(false);
+      finishLoading();
+    }
   }
 
   function openTab(next: Tab) {
@@ -278,5 +286,5 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
     }).finally(finishLoading);
   }
 
-  return { data, selected, tab, loading, refreshing, notice, setNotice, refresh, refreshCurrentView, run, switchWorkspace, openTab };
+  return { data, selected, tab, loading, refreshing, workspaceSwitching, analyticsRevision, notice, setNotice, refresh, refreshCurrentView, run, switchWorkspace, openTab };
 }

@@ -9,7 +9,7 @@ const dateTimeOptions: Intl.DateTimeFormatOptions = {
 const minuteFormatter = new Intl.DateTimeFormat("ja-JP", dateTimeOptions);
 const secondFormatter = new Intl.DateTimeFormat("ja-JP", { ...dateTimeOptions, second: "2-digit" });
 
-export function formatYen(value: number): string {
+export function formatYen(value: number | bigint): string {
   return yenFormatter.format(value);
 }
 

@@ -17,7 +17,7 @@ const sharedPackages = new Set(["zod", "papaparse"]);
 const browserPackages = new Set([
   ...sharedPackages, "react", "react/jsx-runtime", "react/jsx-dev-runtime", "react-dom", "react-dom/client",
   "next/image", "next/link", "next/navigation", "next/dynamic", "next/script", "next-auth/react",
-  "@dnd-kit/core", "@dnd-kit/sortable", "@dnd-kit/utilities", "qrcode.react",
+  "@dnd-kit/core", "@dnd-kit/sortable", "@dnd-kit/utilities", "qrcode.react", "recharts",
 ]);
 const databasePackages = new Set([
   "@neondatabase/serverless", "@electric-sql/pglite", "pg", "postgres", "@prisma/client", "prisma",

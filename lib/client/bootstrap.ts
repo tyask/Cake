@@ -1,7 +1,7 @@
 import type { BootstrapData, BootstrapMetadata, BootstrapScope, DashboardTab } from "../shared/types";
 
 export function bootstrapScopeForTab(tab: DashboardTab): BootstrapScope {
-  return tab === "import" || tab === "settings" ? "metadata" : "full";
+  return tab === "import" || tab === "settings" || tab === "analytics" ? "metadata" : "full";
 }
 
 /** Keep transaction data only when the metadata belongs to the same workspace. */
