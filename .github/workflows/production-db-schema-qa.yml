@@ -1,0 +1,49 @@
+name: Cake Production DB Schema QA
+run-name: Production DB schema QA ${{ inputs.operation }}
+on:
+  workflow_dispatch:
+    inputs:
+      controlSha:
+        description: Exact reviewed trusted main SHA; must match the workflow checkout
+        type: string
+        required: true
+      operation:
+        description: New operation UUID; reruns are refused
+        type: string
+        required: true
+permissions: {}
+concurrency:
+  group: cake-production-db-migration
+  cancel-in-progress: false
+jobs:
+  schema-qa:
+    name: schema-qa
+    if: >-
+      github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' && inputs.controlSha == github.sha
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Check out trusted main only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify the fixed Production schema candidate
+        env:
+          NEON_SOURCE_API_KEY: ${{ secrets.PRODUCTION_DB_SOURCE_NEON_API_KEY }}
+          NEON_TARGET_API_KEY: ${{ secrets.PRODUCTION_DB_TARGET_NEON_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: node --import tsx scripts/production-db-schema-qa.ts
+      - name: Publish the public receipt
+        if: success() || failure()
+        run: node --import tsx scripts/production-db-schema-qa.ts --notice

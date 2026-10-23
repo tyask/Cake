@@ -19,6 +19,17 @@ function records(value: unknown): Record<string, unknown>[] {
   return value.map(record);
 }
 export type Environment = Readonly<Record<string, string | undefined>>;
+/** Both runners reject malformed or shared credentials before the first provider read. */
+export function assertProductionCredentials(environment: Environment): void {
+  const sourceKey = environment.NEON_SOURCE_API_KEY, targetKey = environment.NEON_TARGET_API_KEY;
+  if (!sourceKey?.trim()) return fail('SOURCE_CREDENTIALS_MISSING');
+  if (!targetKey?.trim()) return fail('TARGET_CREDENTIALS_MISSING');
+  if (/[\r\n]/.test(sourceKey)) return fail('SOURCE_CREDENTIALS_INVALID');
+  if (/[\r\n]/.test(targetKey)) return fail('TARGET_CREDENTIALS_INVALID');
+  if (sourceKey.trim() === targetKey.trim()) return fail('CREDENTIALS_NOT_SEPARATED');
+  if ([environment.VERCEL_TOKEN,environment.GH_TOKEN].some(value => !value?.trim() || /[\r\n]/.test(value))
+    || environment.NODE_TLS_REJECT_UNAUTHORIZED === '0') return fail('CREDENTIALS_MISSING');
+}
 export function productionApi(environment: Environment, request: typeof fetch = fetch): Api {
   return async (provider, path) => {
     const providerCode = provider === 'neon' ? 'NEON' : provider === 'vercel' ? 'VERCEL' : provider === 'github' ? 'GITHUB' : undefined;

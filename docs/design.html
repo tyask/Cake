@@ -545,6 +545,7 @@
           <p>本番はmainへのmergeを検知するVercel Git連携でbuild後のDB更新が成功してから公開する。Actions検証機能をmainへ導入するmergeもこのProduction deployを起動し得るため、実装draft PR作成や検証の承認とは分ける。手動Production操作は別途明示依頼時だけ行う。</p>
           <p>本番DBの移行時は現用・移行候補・保持旧DBのendpointをPreview禁止集合に含め、準備用build・接続前guard・provider・正式receiptで分離する。既存Previewを本番移行先へ流用せず、新しい本番専用projectでリハーサルし、書込停止と最終コピーを検証してから接続先を切り替える。新DBへの書込み開始後は、旧Deploymentへのrollbackだけで最新データを保持できるとは扱わない。手順は<a href="production-database-upgrade.md">本番DB移行手順</a>を参照する。</p>
           <p>移行リハーサルは信頼済みmainの専用Actionsで、設定に固定した元本番と未接続・空の候補だけを扱う。移行元・移行先ごとのproject-scoped APIキーを専用Secretから実行stepだけへ渡し、固定projectに対応するキーを選ぶ。同じread-only snapshotからdumpと照合値を取得し、候補へ原子的に復元した後、Cakeの既存データ・schema・owner/ACL・適用台帳を照合する。資格情報とdumpをWSLや公開artifactへ持ち出さず、未使用Authの鍵・project設定とprovider管理の既定権限は各projectに保持する。本番停止・接続先切替・削除はリハーサル用workflowから行わない。</p>
+          <p>コピー済みの未接続PG18候補のschema QAは別のmain限定Actionsで行い、DB接続は固定targetだけに限定する。018までの台帳・019未適用を確認し、scratchでのrollback・更新待機、実setupの2 sessionによる019の一度だけの適用、全13表の既存列・schema・owner/ACLの保持、全適用済み再setupを検証する。実行前後のprovider所属・Native未接続と、独立した公開noticeの来歴を照合し、失敗・応答不明では候補を保持して停止する。Previewの認証・所有権・本番分離は維持し、このQAを最終同期・本人Google QA・Production切替の証拠として扱わない。</p>
         </section>
 
         <section id="requirements">

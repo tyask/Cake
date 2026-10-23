@@ -58,6 +58,30 @@ sourceでは一貫したread-only snapshotを維持し、dumpと照合値を同�
 
 DB接続前の失敗は、main・source/targetのprovider所属・Native接続数・接続情報取得・SQL接続のどこで止まったかを `stage` で区別する。providerの読取失敗は固定したprovider名とHTTP status、通信失敗、JSON解析失敗を `code` に記録する。401/403は認証・scopeの確認対象であり、404だけで資源の不在や権限不足を断定しない。応答本文・URL・生例外・資格情報は公開せず、記録した段階と対象を確認してから修正する。
 
+### Actionsによるコピー候補のschema QA
+
+`.github/workflows/production-db-schema-qa.yml` と `scripts/production-db-schema-qa.ts` は、コピー済みの未接続PG18候補へ019を一度だけ適用して検証する。レビュー済みmainへ導入後、`workflow_dispatch` に現在mainの完全SHAを `controlSha`、新しいUUIDを `operation` として指定する。入力はこの2項目だけとし、Actions rerun、任意SQL・URL・DB指定は受け付けない。対象の正本はコピーと同じ `production-migration.config.json` であり、元本番のDDL・書込停止・最終同期・Production切替・本人Google QA・旧DB削除はこのworkflowに含めない。
+
+実行前後にsource/targetのprovider所属と固定ID、targetのNative project接続0件を照合する。DB接続文字列はtargetだけ取得し、独立した3つの実PG sessionをtargetへ接続する。source DBには接続しない。移行専用のNeon Secret、既存の `VERCEL_TOKEN`、読取用 `GH_TOKEN` は実行stepだけへ渡し、notice公開stepには渡さない。接続文字列とデータはrunnerのメモリ内だけで扱い、raw SQL・秘密値・業務行・artifactを公開しない。PreviewのA/B認証・所有権marker・本番host分離を緩めて流用しない。
+
+実行条件と確認内容は次のとおりとする。
+
+1. コピー済みの13表と001〜018の適用台帳、PG18・UTF8・`pg_catalog.pg_unicode_fast`、019未適用を確認する。適用前の全既存列・件数・hash、schema・owner/ACL、旧台帳の適用時刻を記録し、比較元とする。
+2. 既存の取引先正規化migration helperを使い、所有権を確認できる新規scratch schema内で019の原文を検証する。生成値の計算、SQLSTATE `22012` によるDDL全体のrollback、別sessionのUPDATE待機を確認する。scratchのschema・table・function・Indexの残存0件とsession設定の復元を確認してからpublicへ進む。
+3. 実際の `setupDatabase` を2 sessionで実行し、両方が018までの同じ台帳を読み終えてから019へ進める。監視sessionの `SHARE` table lockの下で、一方の `ACCESS EXCLUSIVE` 待機と他方のmigration advisory lock待機を実PIDで観測する。監視lockを解放した後、両実行の成功と019台帳が1行だけであることを確認する。
+4. 全13表の既存全列・件数・hashと旧台帳の適用時刻、既存schema・owner/ACLの保持を照合する。差分は019の関数・STORED生成列・Index・台帳1行だけを許可し、生成式・関数属性・Index属性と正規化不一致0件を確認する。019適用後は新しい列を含むコピー時の全文一致を使わず、適用前の既存列projectionで比較する。
+5. `setupDatabase` を再実行し、本文0読込・2往復とデータ・全台帳適用時刻の不変を確認する。provider所属と未接続状態を再照合し、scratch残存とsession設定の復元を報告する。
+
+結果は専用protocol `cake-production-db-schema-qa/v1` の標準noticeを1件、4,096 UTF-8 bytes以下で受け取る。公開するのはrun/初回attempt・main完全SHA・operation・config hash・target ID・時刻・stage・固定code/SQLSTATE・合否・件数/hash・実PIDと待機観測・cleanup/session設定復元の結果だけとする。workflow/run/job/CheckRun/CheckSuite/repository/GitHub Actions appのmetadataとreceiptの来歴・要求・時刻を照合し、run成功だけで検証成功としない。欠落・重複・不一致・失敗・応答不明ではtargetを保持して停止し、盲目的な再実行・reset・削除を行わない。019適用済みの候補へ再dispatchして検証をやり直さない。
+
+終了後は同じ完全SHAのcleanなcontrol checkoutで、次の読取専用CLIを実行する。これはdispatchやDB接続を行わず、標準noticeとGitHubのmetadataを前後で照合して `.cake/production-schema-qa-<run ID>-receipt.json` へ保存する。成功は終了code 0、出所を照合できた失敗receiptは2、証拠不備は1として区別する。
+
+```bash
+node --import tsx scripts/production-db-schema-qa-proof.ts <run ID> <controlSha> <operation UUID>
+```
+
+この結果は候補のDB schema QAであり、実データの最終同期・Production候補の画面/API・本人Google認証・切替の証拠とは区別する。実行結果と残る資源はPR本文・Git外の検証報告へ記録する。
+
 ### Cakeのデータとprovider管理情報
 
 Cakeの認証はAuth.jsのGoogleログインとJWTを使い、利用者情報は `public.app_users` に保存する。Native projectに `neon_auth` がある場合も、未使用とは推定せず、両側のaccount・invitation・member・organization・session・user・verificationが0件であることを確認する。既知の管理9表だけが存在し、publicからの外部キー・関数・policy等の依存がなく、外部からもNeon Authを利用していない場合に限り、Cakeのpublicを移送対象にできる。利用データや未知の依存があれば停止し、Authを含めた移行方法を別に確認する。
