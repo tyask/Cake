@@ -21,6 +21,8 @@ function records(value: unknown): Record<string, unknown>[] {
 export type Environment = Readonly<Record<string, string | undefined>>;
 export function productionApi(environment: Environment, request: typeof fetch = fetch): Api {
   return async (provider, path) => {
+    const providerCode = provider === 'neon' ? 'NEON' : provider === 'vercel' ? 'VERCEL' : provider === 'github' ? 'GITHUB' : undefined;
+    if (!providerCode) return fail('INVALID_REQUEST');
     if (!path.startsWith('/') || path.startsWith('//') || /[\r\n#\\]/.test(path)) return fail('INVALID_REQUEST');
     const origin = provider === 'neon' ? 'https://console.neon.tech' : provider === 'vercel' ? 'https://api.vercel.com' : 'https://api.github.com';
     const url = new URL((provider === 'neon' ? '/api/v2' : '') + path, origin);
@@ -32,9 +34,12 @@ export function productionApi(environment: Environment, request: typeof fetch = 
     try {
       result = await request(url, { method: 'GET', redirect: 'error',
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, signal: AbortSignal.timeout(30_000) });
-    } catch { return fail('PROVIDER_READ_FAILED'); }
-    if (!result.ok) return fail(result.status === 401 || result.status === 403 ? 'CREDENTIAL_SCOPE' : 'PROVIDER_READ_FAILED');
-    try { return await result.json(); } catch { return fail('PROVIDER_READ_FAILED'); }
+    } catch { return fail(`PROVIDER_${providerCode}_TRANSPORT`); }
+    // Only fixed provider labels and a bounded integer status may enter public diagnostics.
+    const status = result.status;
+    if (!Number.isInteger(status) || status < 100 || status > 599) return fail(`PROVIDER_${providerCode}_INVALID_STATUS`);
+    if (!result.ok) return fail(`PROVIDER_${providerCode}_HTTP_${status}`);
+    try { return await result.json(); } catch { return fail(`PROVIDER_${providerCode}_JSON`); }
   };
 }
 

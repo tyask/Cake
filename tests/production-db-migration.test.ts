@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { config, hash, type Connection } from '../scripts/production-db-migration-provider';
+import { config, hash, MigrationError, type Connection } from '../scripts/production-db-migration-provider';
 import { appTables, type Snapshot, type Sql } from '../scripts/production-db-migration-inventory';
 import { assertEmptyTarget, assertUnconnectedTarget, childEnvironment, context, restoreList, runMigration, serializeReceipt, type Dependencies } from '../scripts/production-db-migration';
 
@@ -77,7 +77,7 @@ test('only an unconnected fixed Native candidate and empty compatible dataset ca
     { ...target, summary: { ...target.summary, localeHash: hash('another') } }]) assert.throws(() => assertEmptyTarget(source, changed), /TARGET_NOT_EMPTY|DATABASE_COMPATIBILITY/);
 });
 
-async function runFixture(mode: 'success' | 'dump-failure' | 'restore-failure' | 'main-changed' | 'not-empty' | 'hash-mismatch', action: 'inventory' | 'rehearsal' = 'rehearsal') {
+async function runFixture(mode: 'success' | 'dump-failure' | 'restore-failure' | 'main-changed' | 'not-empty' | 'hash-mismatch', action: 'inventory' | 'rehearsal' = 'rehearsal', failedStage?: string) {
   const directory = await mkdtemp(join(tmpdir(), 'cake-migration-unit-'));
   const eventPath = join(directory, 'event.json'), receiptPath = join(directory, 'receipt.json');
   await writeFile(eventPath, JSON.stringify({ ...event, inputs: { ...event.inputs, action } }));
@@ -88,11 +88,18 @@ async function runFixture(mode: 'success' | 'dump-failure' | 'restore-failure' |
   const commands: { program: string; args: string[]; credentials?: Connection }[] = [], queries: string[] = [];
   const clients: Sql[] = [];
   let targetReads = 0, mainReads = 0, ended = 0, privateDirectory: string | undefined;
+  const failAt = (stage: string) => {
+    if (stage === failedStage) throw new MigrationError('PROVIDER_NEON_HTTP_404');
+  };
   const dependencies: Partial<Dependencies> = {
-    receiptPath, head: () => sha, now: () => '2026-10-23T00:00:00.000Z', binding: async () => undefined,
-    resolveConnection: async () => credentials,
-    api: async (provider) => provider === 'vercel' ? { store } : { ref: 'refs/heads/main', object: { type: 'commit',
-      sha: mode === 'main-changed' && ++mainReads > 1 ? 'b'.repeat(40) : sha } },
+    receiptPath, head: () => sha, now: () => '2026-10-23T00:00:00.000Z',
+    binding: async (_api, binding) => { failAt(binding === config.source ? 'source-binding' : 'target-binding'); },
+    resolveConnection: async (_api, binding) => { failAt(binding === config.source ? 'source-connection' : 'target-connection'); return credentials; },
+    api: async (provider) => {
+      failAt(provider === 'vercel' ? 'target-store' : 'main-check');
+      return provider === 'vercel' ? { store } : { ref: 'refs/heads/main', object: { type: 'commit',
+        sha: mode === 'main-changed' && ++mainReads > 1 ? 'b'.repeat(40) : sha } };
+    },
     client: () => {
       const sql: Sql = { connect: async () => undefined, query: async text => { queries.push(text); return { rows: [{ version: '1.3' }] }; }, end: async () => { ended++; } };
       clients.push(sql); return sql;
@@ -119,7 +126,7 @@ async function runFixture(mode: 'success' | 'dump-failure' | 'restore-failure' |
   };
   try {
     const result = await runMigration({ ...environment, GITHUB_EVENT_PATH: eventPath }, dependencies);
-    assert.equal(ended, 2); assert.equal(result.temporaryFilesRemoved, true);
+    assert.equal(ended, failedStage ? 0 : 2); assert.equal(result.temporaryFilesRemoved, true);
     if (privateDirectory) await assert.rejects(stat(privateDirectory), { code: 'ENOENT' });
     const raw = await readFile(receiptPath, 'utf8');
     for (const secret of [credentials.password, environment.NEON_API_KEY, environment.VERCEL_TOKEN, 'raw SQL', 'raw business row']) assert.ok(!raw.includes(secret));
@@ -141,6 +148,21 @@ test('rehearsal shares the source snapshot and atomically restores pinned pgcryp
   assert.equal(queries.at(-1), 'ROLLBACK');
   assert.equal(serializeReceipt({ ...result, private: credentials.password } as typeof result), serializeReceipt(result));
 });
+
+for (const stage of ['main-check','source-binding','target-binding','target-store','source-connection','target-connection']) {
+  test(`inventory identifies ${stage} failure before any SQL connection or copy`, async () => {
+    const { result, commands, queries } = await runFixture('success', 'inventory', stage);
+    assert.equal(result.success, false); assert.equal(result.stage, stage);
+    assert.equal(result.code, 'PRODUCTION_MIGRATION_PROVIDER_NEON_HTTP_404');
+    assert.equal(result.restored, false); assert.equal(result.source, undefined); assert.equal(result.target, undefined);
+    assert.deepEqual(commands, []); assert.deepEqual(queries, []);
+    assert.equal(JSON.parse(serializeReceipt(result)).stage, stage);
+    for (const code of ['PRODUCTION_MIGRATION_PROVIDER_NEON_HTTP_999', 'PRODUCTION_MIGRATION_PROVIDER_UNKNOWN_HTTP_404',
+      'PRODUCTION_MIGRATION_PROVIDER_NEON_HTTP_404_PRIVATE', 'PRODUCTION_MIGRATION_secret_404']) {
+      assert.throws(() => serializeReceipt({ ...result, code }), /INVALID_RECEIPT/);
+    }
+  });
+}
 
 test('inventory can reconcile an existing candidate after a copy without running a restore or deleting data', async () => {
   const { result, commands } = await runFixture('not-empty', 'inventory');
