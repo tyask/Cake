@@ -3,8 +3,10 @@ export const CHART_AMOUNT_FONT_FAMILY = "Arial, sans-serif";
 export const CHART_AMOUNT_FONT_WEIGHT = 600;
 
 export type ChartAmountLabel = { text: string; width: number; height: number; color: string };
-export type ChartAmountPosition = { x: number; y: number };
+export type ChartAmountPosition = { x: number; y: number; rotation: number };
+type PieGeometry = { cx: number; cy: number; innerRadius: number; outerRadius: number; startAngle: number; endAngle: number };
 const LABEL_PADDING = 2;
+const radians = (degrees: number) => degrees * Math.PI / 180;
 
 function contrastingColor(background: string): string {
   const channels = background.slice(1).match(/.{2}/g)?.map(channel => {
@@ -32,7 +34,7 @@ export function createChartAmountMeasurer() {
 }
 
 /** Rectangles may have negative width/height for negative bars. */
-export function barAmountPosition(geometry: unknown, label: ChartAmountLabel | null): ChartAmountPosition | null {
+export function barAmountPosition(geometry: unknown, label: ChartAmountLabel | null, allowRotation: boolean): ChartAmountPosition | null {
   if (!label || !geometry || typeof geometry !== "object") return null;
   const box = geometry as Record<string, unknown>;
   if (![box.x, box.y, box.width, box.height].every(value => typeof value === "number" && Number.isFinite(value))) return null;
@@ -40,44 +42,38 @@ export function barAmountPosition(geometry: unknown, label: ChartAmountLabel | n
   const availableWidth = Math.abs(width) - LABEL_PADDING * 2;
   const availableHeight = Math.abs(height) - LABEL_PADDING * 2;
   const center = { x: x + width / 2, y: y + height / 2 };
-  if (label.width <= availableWidth && label.height <= availableHeight) return center;
+  if (label.width <= availableWidth && label.height <= availableHeight) return { ...center, rotation: 0 };
+  if (allowRotation && label.height <= availableWidth && label.width <= availableHeight) return { ...center, rotation: -90 };
   return null;
 }
 
-export const CHART_CALLOUT_LINE_HEIGHT = 14;
-export const CHART_CALLOUT_GAP = 8;
-export type ChartCalloutText = { names: string[]; amounts: string[]; width: number; height: number };
-
-/** Names have a two-line preview; the exact amount is wrapped without deleting characters. */
-export function chartCalloutText(name: string, amount: string, width: number, measure: ReturnType<typeof createChartAmountMeasurer>): ChartCalloutText {
-  const available = width - 8;
-  function wrap(parts: string[]) {
-    const lines: string[] = [];
-    let line = "";
-    for (const part of parts) {
-      const size = measure(line + part, "#fffef8");
-      if (line && (size?.width ?? (line.length + part.length) * 11) > available) { lines.push(line); line = part; }
-      else line += part;
-    }
-    if (line) lines.push(line);
-    return lines;
+/** The complete padded label must stay inside both the annulus and the sector angles. */
+export function pieAmountPosition(geometry: PieGeometry, label: ChartAmountLabel | null): ChartAmountPosition | null {
+  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle } = geometry;
+  if (!label || ![cx, cy, innerRadius, outerRadius, startAngle, endAngle].every(Number.isFinite)) return null;
+  const sweep = Math.abs(endAngle - startAngle);
+  if (sweep === 0 || outerRadius <= innerRadius) return null;
+  const midAngle = (startAngle + endAngle) / 2;
+  const radius = (innerRadius + outerRadius) / 2;
+  const halfWidth = label.width / 2 + LABEL_PADDING;
+  const halfHeight = label.height / 2 + LABEL_PADDING;
+  // Prefer the middle; a horizontal label can fit better away from a sector's horizontal radius.
+  for (const offset of [0, 10, -10, 20, -20, 30, -30, 40, -40, 50, -50, 60, -60, 70, -70, 80, -80]) {
+    if (Math.abs(offset) >= sweep / 2) continue;
+    const x = cx + radius * Math.cos(radians(-midAngle - offset));
+    const y = cy + radius * Math.sin(radians(-midAngle - offset));
+    const left = x - halfWidth, right = x + halfWidth, top = y - halfHeight, bottom = y + halfHeight;
+    // Corners alone cannot detect an edge crossing the inner hole.
+    const nearestX = Math.max(left, Math.min(cx, right));
+    const nearestY = Math.max(top, Math.min(cy, bottom));
+    if (Math.hypot(nearestX - cx, nearestY - cy) < innerRadius + LABEL_PADDING) continue;
+    const fits = [[left, top], [left, bottom], [right, top], [right, bottom]].every(([cornerX, cornerY]) => {
+      if (Math.hypot(cornerX - cx, cornerY - cy) > outerRadius - LABEL_PADDING) return false;
+      const angle = Math.atan2(cy - cornerY, cornerX - cx) * 180 / Math.PI;
+      const difference = Math.atan2(Math.sin(radians(angle - midAngle)), Math.cos(radians(angle - midAngle))) * 180 / Math.PI;
+      return Math.abs(difference) <= sweep / 2 - .5;
+    });
+    if (fits) return { x, y, rotation: 0 };
   }
-  const names = wrap(Array.from(name));
-  if (names.length > 2) {
-    names.length = 2;
-    while (names[1] && (measure(`${names[1]}…`, "#fffef8")?.width ?? names[1].length * 11) > available) names[1] = Array.from(names[1]).slice(0, -1).join("");
-    names[1] += "…";
-  }
-  const amounts = wrap(amount.match(/[^,]+,?/g) ?? [amount]);
-  return { names, amounts, width, height: (names.length + amounts.length) * CHART_CALLOUT_LINE_HEIGHT + 4 };
-}
-
-/** Pack one ordered column without changing the order of its connectors. */
-export function spreadChartCallouts<T extends { desiredY: number; text: ChartCalloutText }>(items: readonly T[], top: number, bottom: number): (T & { y: number })[] {
-  const result = items.slice().sort((a, b) => a.desiredY - b.desiredY).map(item => ({ ...item, y: 0 }));
-  let next = top;
-  for (const item of result) { item.y = Math.max(next, item.desiredY - item.text.height / 2); next = item.y + item.text.height + CHART_CALLOUT_GAP; }
-  next = bottom;
-  for (let index = result.length - 1; index >= 0; index--) { const item = result[index]; item.y = Math.min(item.y, next - item.text.height); next = item.y - CHART_CALLOUT_GAP; }
-  return result;
+  return null;
 }

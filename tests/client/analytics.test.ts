@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdir } from "node:fs/promises";
 import { build } from "esbuild";
-import { chromium, type Locator, type Route } from "playwright";
+import { chromium, type Route } from "playwright";
 import { resolveAnalyticsPeriods, type AnalyticsDataset, type AnalyticsQuery } from "../../lib/shared/analytics";
 import { formatYen } from "../../lib/shared/display-formatters";
 
@@ -167,7 +167,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
       } finally { await f.context.close(); }
     });
 
-    for (const width of [1440, 1000, 390, 320]) await t.test(`${width}px: 円の周囲と棒の横にカテゴリ名と正確金額を表示する`, async () => {
+    for (const width of [1440, 1000, 390, 320]) await t.test(`${width}px: 円は12時から時計回りの金額順で、収まる金額だけを図中に表示する`, async () => {
       const f = await fixture(width);
       try {
         const response = await f.take(), data = dataset(queryFromRoute(response));
@@ -185,35 +185,20 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         assert.deepEqual(await paths.evaluateAll(elements => elements.map(element => element.getAttribute("fill"))),
           ["#94a3b8", ...data.categories.slice(0, 4).map(category => category.colorHex), "#cbd5e1", ...data.categories.slice(4, 7).map(category => category.colorHex), data.categories[10].colorHex], "その他・未分類を含め降順、同額は安定順");
         assert.equal(await paths.first().evaluate(element => {
-          const path = element as SVGGeometryElement, center = path.ownerSVGElement!.querySelector('[data-analytics-center="total"]')!;
-          const cx = Number(center.getAttribute("data-center-x")), cy = Number(center.getAttribute("data-center-y"));
-          const r = (Number(center.getAttribute("data-inner-radius")) + Number(center.getAttribute("data-outer-radius"))) / 2, angle = 8 * Math.PI / 180;
+          const path = element as SVGGeometryElement, svg = path.ownerSVGElement!;
+          const cx = svg.viewBox.baseVal.width / 2, cy = svg.viewBox.baseVal.height / 2;
+          const r = Math.min(cx, cy) * .75, angle = 8 * Math.PI / 180;
           return path.isPointInFill(new DOMPoint(cx + Math.sin(angle) * r, cy - Math.cos(angle) * r))
             && !path.isPointInFill(new DOMPoint(cx - Math.sin(angle) * r, cy - Math.cos(angle) * r));
         }), true, "最大の領域は12時の右から時計回りに始まる");
         await pie.locator('[data-analytics-amount="pie"]').first().waitFor();
-        assert.equal(await pie.locator('[data-analytics-amount="pie"][data-category-id="c10"]').textContent(), "￥1", "細い円弧も外側に金額を表示する");
-        const expectedValues = new Set(["￥250", "￥57", ...amounts.map(formatYen)]);
+        assert.equal(await pie.locator('[data-analytics-amount="pie"][data-category-id="c10"]').count(), 0, "1円の小さい領域は非表示");
+        const expectedValues = new Set(["￥250", "￥57", ...amounts.slice(0, 7).map(formatYen)]);
         const labels = await pie.locator('[data-analytics-amount="pie"]').allTextContents();
-        assert.ok(labels.length === 10 && labels.every(label => expectedValues.has(label)), "全ての正の系列に正確な円表記");
-        assert.equal(await pie.locator('[data-analytics-category="pie"]').count(), 10);
-        await nonOverlappingLabels(pie, "pie");
-        assert.equal(await pie.locator('[data-analytics-label="pie"]').evaluateAll(elements => {
-          return elements.every(element => {
-            const group = element as SVGGElement, svg = group.ownerSVGElement!, inverse = svg.getScreenCTM()!.inverse();
-            const center = svg.querySelector('[data-analytics-center="total"]')!;
-            const cx = Number(center.getAttribute("data-center-x")), cy = Number(center.getAttribute("data-center-y")), r = Number(center.getAttribute("data-outer-radius"));
-            const box = group.getBoundingClientRect();
-            const a = new DOMPoint(box.left, box.top).matrixTransform(inverse), b = new DOMPoint(box.right, box.bottom).matrixTransform(inverse);
-            const x = Math.max(a.x, Math.min(cx, b.x)), y = Math.max(a.y, Math.min(cy, b.y));
-            return Math.hypot(x - cx, y - cy) >= r;
-          });
-        }), true, "カテゴリラベルは円の外側に配置する");
+        assert.ok(labels.length > 0 && labels.every(label => expectedValues.has(label)), "図内の金額は正確な円表記");
         const trend = f.page.getByRole("group", { name: "月ごとのカテゴリ別負担額。下の表でも確認できます。", exact: true });
         await trend.locator('[data-analytics-amount="trend"]').first().waitFor();
-        assert.equal(await trend.locator('[data-analytics-amount="trend"][data-category-id="c10"]').textContent(), "￥1");
-        assert.equal(await trend.locator('[data-analytics-category="trend"]').count(), 10);
-        await nonOverlappingLabels(trend, "trend");
+        assert.equal(await trend.locator('[data-analytics-amount="trend"][data-category-id="c10"]').count(), 0);
         const difference = f.page.getByRole("group", { name: "カテゴリ別の負担額の増減。正は増加、負は減少。全カテゴリの金額は次の表に表示します。", exact: true });
         assert.equal(await difference.locator('[data-analytics-amount="difference"][data-category-id="c10"]').textContent(), "-￥499", "減少額の符号も表示する");
         assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
@@ -224,18 +209,6 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         assert.equal(f.urls.length, 1); assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
-
-    async function nonOverlappingLabels(chart: Locator, kind: "pie" | "trend") {
-      const boxes = await chart.locator(`[data-analytics-label="${kind}"]`).evaluateAll(elements => elements.map(element => {
-        const box = element.getBoundingClientRect(), matrix = (element as SVGGraphicsElement).getCTM()!;
-        return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, horizontal: Math.abs(matrix.b) < 1e-6 && Math.abs(matrix.c) < 1e-6 };
-      }));
-      assert.ok(boxes.length > 0 && boxes.every(box => box.horizontal), "カテゴリ名と金額は横向き");
-      for (let a = 0; a < boxes.length; a++) for (let b = a + 1; b < boxes.length; b++) {
-        assert.ok(Math.min(boxes[a].right, boxes[b].right) - Math.max(boxes[a].left, boxes[b].left) <= 1
-          || Math.min(boxes[a].bottom, boxes[b].bottom) - Math.max(boxes[a].top, boxes[b].top) <= 1, "ラベル同士は重ならない");
-      }
-    }
 
     async function centerWithinHole(page: Awaited<ReturnType<typeof fixture>>["page"], expected: string) {
       const center = page.locator('[data-analytics-center="total"]');
@@ -278,44 +251,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
       } finally { await f.context.close(); }
     });
 
-    for (const width of [1440, 390, 320]) await t.test(`${width}px: 月ごとの横向きラベルは欠落月を含め元の月と金額が対応する`, async () => {
-      const f = await fixture(width);
-      try {
-        const request = await f.take(), data = dataset(queryFromRoute(request));
-        data.categories = data.categories.filter(category => ["food", "transport"].includes(category.id));
-        data.buckets = [{ ...data.buckets[0], categoryId: "food", burdenYen: "15000" }];
-        const months = ["2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"];
-        for (const [index, month] of months.entries()) {
-          if (index === 2) continue;
-          for (const [categoryId, amount] of [["food", 1000 + index], ["transport", (index + 1) * 1000]] as const) {
-            data.buckets.push({ scope: "trend", month, memberId: "a", expenseClass: "SHARED", categoryId, burdenYen: String(amount) });
-          }
-        }
-        await f.reply(request, data); await f.total("￥15,000");
-        const chart = f.page.getByRole("group", { name: "月ごとのカテゴリ別負担額。下の表でも確認できます。", exact: true });
-        await chart.locator('[data-analytics-amount="trend"]').first().waitFor();
-        assert.equal(await chart.locator('[data-analytics-amount="trend"]').count(), 10);
-        for (const bucket of data.buckets.filter(bucket => bucket.scope === "trend")) {
-          const amount = chart.locator(`[data-analytics-amount="trend"][data-category-id="${bucket.categoryId}"][data-month="${bucket.month}"]`);
-          assert.equal(await amount.textContent(), formatYen(BigInt(bucket.burdenYen)));
-        }
-        assert.equal(await chart.locator('[data-analytics-amount="trend"][data-month="2026-07"]').count(), 0);
-        await nonOverlappingLabels(chart, "trend");
-        assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-        const scroll = f.page.getByRole("group", { name: "月ごとのグラフ（横スクロールで各月のカテゴリ名と金額を確認できます）", exact: true });
-        await f.stable();
-        assert.ok(await scroll.evaluate(element => element.scrollLeft + element.clientWidth >= element.scrollWidth - 2), "初期表示は直近月を見せる");
-        await scroll.focus();
-        if (width <= 768) assert.ok(await scroll.evaluate(element => element.scrollWidth > element.clientWidth), "横スクロールはグラフ内に限定");
-        if (process.env.CAKE_ANALYTICS_SCREENSHOTS) {
-          await mkdir(".cake/output/playwright", { recursive: true });
-          await f.page.screenshot({ path: `.cake/output/playwright/analytics-month-labels-${width}.png`, fullPage: true, animations: "disabled" });
-        }
-        assert.equal(f.urls.length, 1); assert.deepEqual(f.errors, []);
-      } finally { await f.context.close(); }
-    });
-
-    await t.test("グラフの金額は安全整数を超えても元の整数を表示する", async () => {
+    await t.test("グラフ内の金額は安全整数を超えても元の整数を表示する", async () => {
       const f = await fixture();
       try {
         const request = await f.take(), data = dataset(queryFromRoute(request));
