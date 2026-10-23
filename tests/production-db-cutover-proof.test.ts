@@ -80,6 +80,17 @@ test('cutover proof accepts a completed failure and revalidates its provenance w
   assert.ok(f.calls.every(path => !path.includes('dispatches') && !path.includes('artifacts') && !path.includes('logs')));
 });
 
+test('コピー前に停止したProduction環境の固定理由codeを正式failure receiptとして照合する', async () => {
+  const f = fixture();
+  const value = receipt(); value.stage = 'environment';
+  value.code = 'PRODUCTION_CUTOVER_SWITCH_ENVIRONMENT_DEFAULT_DATABASE_REDACTED';
+  f.annotations[0].message = serializeCutoverReceipt(value);
+  const result = await readProductionCutoverReceipt(f.get, expected);
+  assert.equal(result.success, false); assert.equal(result.receipt.stage, 'environment');
+  assert.equal(result.receipt.copy, undefined); assert.equal(result.receipt.deployment, undefined);
+  assert.equal(result.receipt.code, value.code);
+});
+
 test('cutover proof accepts the copied snapshot and verified Production deployment', async () => {
   const f = fixture(true); const result = await readProductionCutoverReceipt(f.get, expected);
   assert.equal(result.success, true); assert.equal(result.protocol, 'cake-production-db-cutover-proof/v1');
