@@ -31,7 +31,8 @@ function htmlEntities(value: string): string {
 
 function withoutComments(content: string): string {
   return content.replace(/<!--[\s\S]*?-->/g, blank)
-    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, blank);
+    .replace(/(<(script|style)\b[^>]*>)([\s\S]*?)(<\/\2\s*>)/gi,
+      (_match, opening: string, _name: string, body: string, closing: string) => opening + blank(body) + closing);
 }
 
 function markdownParts(content: string): { prose: string; headings: string; code: { content: string; offset: number }[] } {

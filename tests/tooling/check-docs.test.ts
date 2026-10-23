@@ -77,6 +77,17 @@ test("コメント・コード例・script/style内のリンクと見出しを�
   assert.equal(inspect(`${content}\n[bad](#fake)`)[0].kind, "missing-anchor");
 });
 
+test("script/styleの開始タグのsrcを検査し本文内の疑似参照は除外する", () => {
+  for (const path of ["docs/source.md", "docs/source.html"]) {
+    const content = '<script src="missing.js">\nconst example = "<a href=missing.md>";\n</script>\n<style src="missing.css">/* <img src=missing.png> */</style>\n<script src="exists.js">const example = "<a href=missing.md>";</script>';
+    const document = { path, content };
+    assert.deepEqual(checkDocumentation([document], new Set([path, "docs/exists.js"]))
+      .map(({ line, target, kind }) => [line, target, kind]), [
+      [1, "missing.js", "missing-file"], [4, "missing.css", "missing-file"],
+    ]);
+  }
+});
+
 test("同じファイル内anchorとsourceファイルの行番号付き参照を扱う", () => {
   assert.deepEqual(inspect("# Local\n[local](#local)\n`lib/exists.ts:20` [source](../lib/exists.ts#L20)\n`lib/shared/`", [], ["lib/exists.ts", "lib/shared"]), []);
   assert.equal(inspect("[outside](../../missing.md)")[0].kind, "missing-file");
