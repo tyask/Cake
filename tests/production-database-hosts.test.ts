@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isProductionDatabaseHostDigest, productionDatabaseHostDigests } from '../lib/production-database-hosts.mjs';
 
 const retainedProductionDigest = '600033d07eb267fe31096a1bb98d0c1809be7a0ef7a895ad3bcbc6daabbbf0f6';
+const currentProductionDigest = '68939cf43ff8b955c8fd656808b1c252efe2ed5e4888e0f7a03f73c397f10f78';
 const oldHost = 'ep-production-old.ap-southeast-1.aws.neon.tech';
 const newHost = 'ep-production-new.ap-southeast-1.aws.neon.tech';
 const nativeHost = 'ep-native-preview.ap-southeast-1.aws.neon.tech';
@@ -50,9 +51,10 @@ test('保護集合から現在のscalarを除外した設定は拒否する', ()
   assert.throws(() => productionDatabaseHostDigests({ productionHostDigest: newDigest, productionHostDigests: [oldDigest] }), invalid);
 });
 
-test('source設定は移行前の本番hashを保持しNative Previewを保護集合へ混ぜない', () => {
+test('source設定は現用・保持旧本番hashを保護しNative Previewを保護集合へ混ぜない', () => {
   const configured = productionDatabaseHostDigests();
   assert.ok(configured.includes(retainedProductionDigest));
+  assert.ok(configured.includes(currentProductionDigest));
   for (const value of configured) assert.equal(isProductionDatabaseHostDigest(value), true);
   for (const value of [nativeDigest, undefined, null, 1, {}, [], configured[0].toUpperCase(), ` ${configured[0]}`]) {
     assert.equal(isProductionDatabaseHostDigest(value), false);
