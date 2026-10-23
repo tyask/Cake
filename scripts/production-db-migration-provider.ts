@@ -28,7 +28,22 @@ export function productionApi(environment: Environment, request: typeof fetch = 
     const url = new URL((provider === 'neon' ? '/api/v2' : '') + path, origin);
     if (url.origin !== origin) return fail('INVALID_REQUEST');
     if (provider === 'vercel') url.searchParams.set('teamId', config.vercelTeamId);
-    const token = environment[provider === 'neon' ? 'NEON_API_KEY' : provider === 'vercel' ? 'VERCEL_TOKEN' : 'GH_TOKEN'];
+    let token: string | undefined;
+    if (provider === 'neon') {
+      // Credentials follow the canonical project route; aliases and normalization are refused.
+      const rawPathname = path.split('?', 1)[0];
+      if (url.pathname !== `/api/v2${rawPathname}` || rawPathname.includes('%')) return fail('INVALID_REQUEST');
+      const projectId = url.pathname.split('/')[4];
+      const binding = projectId === config.source.projectId ? config.source
+        : projectId === config.target.projectId ? config.target : undefined;
+      if (!binding) return fail('INVALID_REQUEST');
+      const base = `/api/v2/projects/${binding.projectId}`;
+      if (![base, `${base}/branches`, `${base}/branches/${binding.branchId}`,
+        `${base}/endpoints`, `${base}/endpoints/${binding.endpointId}`,
+        `${base}/branches/${binding.branchId}/databases/${binding.database}`,
+        `${base}/branches/${binding.branchId}/roles/${binding.role}`, `${base}/connection_uri`].includes(url.pathname)) return fail('INVALID_REQUEST');
+      token = environment[projectId === config.source.projectId ? 'NEON_SOURCE_API_KEY' : 'NEON_TARGET_API_KEY'];
+    } else token = environment[provider === 'vercel' ? 'VERCEL_TOKEN' : 'GH_TOKEN'];
     if (!token?.trim() || /[\r\n]/.test(token)) return fail('CREDENTIALS_MISSING');
     let result: Response;
     try {

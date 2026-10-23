@@ -11,7 +11,8 @@ const sha = 'a'.repeat(40), operation = '10000000-0000-4000-8000-000000000001';
 const event = { repository: { full_name: config.repository, id: config.repositoryId }, inputs: { action: 'rehearsal', controlSha: sha, operation } };
 const environment = { GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: config.repository, GITHUB_REF: 'refs/heads/main', GITHUB_EVENT_NAME: 'workflow_dispatch',
   GITHUB_WORKFLOW_REF: `${config.repository}/${config.workflow}@refs/heads/main`, GITHUB_SHA: sha, GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1',
-  NEON_API_KEY: 'never-publish-provider', VERCEL_TOKEN: 'never-publish-vercel', GH_TOKEN: 'never-publish-github' };
+  NEON_SOURCE_API_KEY: 'never-publish-source-provider', NEON_TARGET_API_KEY: 'never-publish-target-provider',
+  VERCEL_TOKEN: 'never-publish-vercel', GH_TOKEN: 'never-publish-github' };
 const toc = [
   '; archive', '1; 2615 2200 SCHEMA - public pg_database_owner', '2; 3079 17000 EXTENSION - pgcrypto ',
   '3; 0 0 COMMENT - EXTENSION pgcrypto ', '4; 1259 17001 TABLE public app_users neondb_owner',
@@ -44,12 +45,12 @@ test('workflow context binds trusted main, exact checkout and operation before a
 });
 
 test('child credentials exist only in libpq environment with system TLS and no inherited overrides', () => {
-  const inherited = { ...environment, PATH: '/trusted/bin', HOME: '/private', PGHOST: 'attacker', PGOPTIONS: '-c unsafe',
+  const inherited = { ...environment, NEON_API_KEY: 'never-publish-legacy', PATH: '/trusted/bin', HOME: '/private', PGHOST: 'attacker', PGOPTIONS: '-c unsafe',
     NODE_OPTIONS: '--require=/unsafe', SSL_CERT_FILE: '/unsafe', PGPASSFILE: '/unsafe' };
   const child = childEnvironment(credentials, inherited);
   assert.equal(child.PGPASSWORD, credentials.password); assert.equal(child.PGSSLMODE, 'verify-full'); assert.equal(child.PGSSLROOTCERT, 'system');
   assert.equal(child.PGHOST, credentials.host); assert.equal(child.PGPASSFILE, '/dev/null');
-  for (const key of ['NEON_API_KEY','VERCEL_TOKEN','GH_TOKEN','PGOPTIONS','NODE_OPTIONS','HOME','SSL_CERT_FILE']) assert.equal(child[key], undefined);
+  for (const key of ['NEON_API_KEY','NEON_SOURCE_API_KEY','NEON_TARGET_API_KEY','VERCEL_TOKEN','GH_TOKEN','PGOPTIONS','NODE_OPTIONS','HOME','SSL_CERT_FILE']) assert.equal(child[key], undefined);
   assert.equal(childEnvironment(undefined, inherited).PGPASSWORD, undefined);
 });
 
@@ -77,7 +78,7 @@ test('only an unconnected fixed Native candidate and empty compatible dataset ca
     { ...target, summary: { ...target.summary, localeHash: hash('another') } }]) assert.throws(() => assertEmptyTarget(source, changed), /TARGET_NOT_EMPTY|DATABASE_COMPATIBILITY/);
 });
 
-async function runFixture(mode: 'success' | 'dump-failure' | 'restore-failure' | 'main-changed' | 'not-empty' | 'hash-mismatch', action: 'inventory' | 'rehearsal' = 'rehearsal', failedStage?: string) {
+async function runFixture(mode: 'success' | 'dump-failure' | 'restore-failure' | 'main-changed' | 'not-empty' | 'hash-mismatch', action: 'inventory' | 'rehearsal' = 'rehearsal', failedStage?: string, environmentOverrides: Record<string, string | undefined> = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'cake-migration-unit-'));
   const eventPath = join(directory, 'event.json'), receiptPath = join(directory, 'receipt.json');
   await writeFile(eventPath, JSON.stringify({ ...event, inputs: { ...event.inputs, action } }));
@@ -87,7 +88,7 @@ async function runFixture(mode: 'success' | 'dump-failure' | 'restore-failure' |
   if (mode === 'hash-mismatch') restored.summary.dataHash = hash('different');
   const commands: { program: string; args: string[]; credentials?: Connection }[] = [], queries: string[] = [];
   const clients: Sql[] = [];
-  let targetReads = 0, mainReads = 0, ended = 0, privateDirectory: string | undefined;
+  let targetReads = 0, mainReads = 0, ended = 0, providerCalls = 0, privateDirectory: string | undefined;
   const failAt = (stage: string) => {
     if (stage === failedStage) throw new MigrationError('PROVIDER_NEON_HTTP_404');
   };
@@ -96,6 +97,7 @@ async function runFixture(mode: 'success' | 'dump-failure' | 'restore-failure' |
     binding: async (_api, binding) => { failAt(binding === config.source ? 'source-binding' : 'target-binding'); },
     resolveConnection: async (_api, binding) => { failAt(binding === config.source ? 'source-connection' : 'target-connection'); return credentials; },
     api: async (provider) => {
+      providerCalls++;
       failAt(provider === 'vercel' ? 'target-store' : 'main-check');
       return provider === 'vercel' ? { store } : { ref: 'refs/heads/main', object: { type: 'commit',
         sha: mode === 'main-changed' && ++mainReads > 1 ? 'b'.repeat(40) : sha } };
@@ -125,13 +127,13 @@ async function runFixture(mode: 'success' | 'dump-failure' | 'restore-failure' |
     },
   };
   try {
-    const result = await runMigration({ ...environment, GITHUB_EVENT_PATH: eventPath }, dependencies);
-    assert.equal(ended, failedStage ? 0 : 2); assert.equal(result.temporaryFilesRemoved, true);
+    const result = await runMigration({ ...environment, GITHUB_EVENT_PATH: eventPath, ...environmentOverrides }, dependencies);
+    assert.equal(ended, clients.length); assert.equal(result.temporaryFilesRemoved, true);
     if (privateDirectory) await assert.rejects(stat(privateDirectory), { code: 'ENOENT' });
     const raw = await readFile(receiptPath, 'utf8');
-    for (const secret of [credentials.password, environment.NEON_API_KEY, environment.VERCEL_TOKEN, 'raw SQL', 'raw business row']) assert.ok(!raw.includes(secret));
+    for (const secret of [credentials.password, environment.NEON_SOURCE_API_KEY, environment.NEON_TARGET_API_KEY, environment.VERCEL_TOKEN, 'raw SQL', 'raw business row']) assert.ok(!raw.includes(secret));
     assert.ok(Buffer.byteLength(raw) <= 4096);
-    return { result, commands, queries };
+    return { result, commands, queries, providerCalls, connectionsCreated: clients.length };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
@@ -147,6 +149,33 @@ test('rehearsal shares the source snapshot and atomically restores pinned pgcryp
   assert.equal(queries.filter(query => query === 'BEGIN SOURCE READ ONLY').length, 2);
   assert.equal(queries.at(-1), 'ROLLBACK');
   assert.equal(serializeReceipt({ ...result, private: credentials.password } as typeof result), serializeReceipt(result));
+});
+
+for (const [name, overrides, code] of [
+  ['missing source', { NEON_SOURCE_API_KEY: undefined }, 'SOURCE_CREDENTIALS_MISSING'],
+  ['missing target', { NEON_TARGET_API_KEY: '' }, 'TARGET_CREDENTIALS_MISSING'],
+  ['shared legacy key only', { NEON_SOURCE_API_KEY: undefined, NEON_TARGET_API_KEY: undefined, NEON_API_KEY: 'never-publish-legacy' }, 'SOURCE_CREDENTIALS_MISSING'],
+  ['multiline source', { NEON_SOURCE_API_KEY: 'private-source\nvalue' }, 'SOURCE_CREDENTIALS_INVALID'],
+  ['multiline target', { NEON_TARGET_API_KEY: 'private-target\r\nvalue' }, 'TARGET_CREDENTIALS_INVALID'],
+  ['same source and target', { NEON_TARGET_API_KEY: ` ${environment.NEON_SOURCE_API_KEY} ` }, 'CREDENTIALS_NOT_SEPARATED'],
+] as const) {
+  test(`migration rejects ${name} credentials before provider access or SQL`, async () => {
+    const { result, commands, queries, providerCalls, connectionsCreated } = await runFixture('success', 'inventory', undefined, overrides);
+    assert.equal(result.success, false); assert.equal(result.code, `PRODUCTION_MIGRATION_${code}`);
+    assert.equal(result.stage, 'bindings'); assert.equal(result.restored, false);
+    assert.equal(providerCalls, 0); assert.equal(connectionsCreated, 0);
+    assert.deepEqual(commands, []); assert.deepEqual(queries, []);
+  });
+}
+
+test('workflow provides the two project credentials only to the trusted migration runtime', async () => {
+  const workflow = await readFile('.github/workflows/production-db-migration.yml', 'utf8');
+  const credentialSteps = workflow.split(/^      - /m).filter(step => /secrets\.PRODUCTION_DB_(?:SOURCE|TARGET)_NEON_API_KEY/.test(step));
+  assert.equal(credentialSteps.length, 1);
+  assert.ok(credentialSteps[0].startsWith('name: Inventory or copy the fixed isolated Production candidate'));
+  assert.match(credentialSteps[0], /NEON_SOURCE_API_KEY: \$\{\{ secrets\.PRODUCTION_DB_SOURCE_NEON_API_KEY \}\}/);
+  assert.match(credentialSteps[0], /NEON_TARGET_API_KEY: \$\{\{ secrets\.PRODUCTION_DB_TARGET_NEON_API_KEY \}\}/);
+  assert.ok(!workflow.includes('secrets.NEON_API_KEY'));
 });
 
 for (const stage of ['main-check','source-binding','target-binding','target-store','source-connection','target-connection']) {

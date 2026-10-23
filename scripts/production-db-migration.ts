@@ -145,7 +145,13 @@ export async function runMigration(environment: Environment = process.env, overr
     code: 'PRODUCTION_MIGRATION_FAILED', restored: false, temporaryFilesRemoved: true };
   let sourceClient: Sql | undefined, targetClient: Sql | undefined, directory: string | undefined;
   try {
-    if (!environment.NEON_API_KEY?.trim() || !environment.VERCEL_TOKEN?.trim() || !environment.GH_TOKEN?.trim() || environment.NODE_TLS_REJECT_UNAUTHORIZED === '0') return fail('CREDENTIALS_MISSING');
+    const sourceKey = environment.NEON_SOURCE_API_KEY, targetKey = environment.NEON_TARGET_API_KEY;
+    if (!sourceKey?.trim()) return fail('SOURCE_CREDENTIALS_MISSING');
+    if (!targetKey?.trim()) return fail('TARGET_CREDENTIALS_MISSING');
+    if (/[\r\n]/.test(sourceKey)) return fail('SOURCE_CREDENTIALS_INVALID');
+    if (/[\r\n]/.test(targetKey)) return fail('TARGET_CREDENTIALS_INVALID');
+    if (sourceKey.trim() === targetKey.trim()) return fail('CREDENTIALS_NOT_SEPARATED');
+    if (!environment.VERCEL_TOKEN?.trim() || !environment.GH_TOKEN?.trim() || environment.NODE_TLS_REJECT_UNAUTHORIZED === '0') return fail('CREDENTIALS_MISSING');
     receipt.stage = 'main-check';
     await assertCurrentMain(dependencies.api, request);
     receipt.stage = 'source-binding';
