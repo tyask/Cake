@@ -158,16 +158,23 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       });
       contexts.add(context); proof.resources.browserContexts = contexts.size;
       let routeFailed = false;
-      await context.route('**/*', async route => {
+      const page = await context.newPage(); page.setDefaultTimeout(30_000);
+      stage = 'boundary';
+      // Playwright routes only the first URL in a redirect chain; CDP checks every hop.
+      const interception = await context.newCDPSession(page);
+      interception.on('Fetch.requestPaused', async event => {
         try {
-          if (new URL(route.request().url()).origin !== origin) { item.blockedExternalRequests++; await route.abort('blockedbyclient'); }
-          else await route.continue();
+          if (new URL(event.request.url).origin !== origin) {
+            item.blockedExternalRequests++;
+            await interception.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'BlockedByClient' });
+          } else await interception.send('Fetch.continueRequest', { requestId: event.requestId });
         } catch {
           routeFailed = true;
-          try { await route.abort('failed'); } catch { /* A closing context has no active request. */ }
+          try { await interception.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'Failed' }); }
+          catch { /* A closing context has no active request. */ }
         }
       });
-      const page = await context.newPage(); page.setDefaultTimeout(30_000);
+      await interception.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
       const screenshot = async (name: string) => {
         const filename = `${item.name}-${name}.png`;
         await page.screenshot({ path: resolve(directory, filename) }); item.screenshots.push(filename);
