@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import { config } from '../../scripts/preview/preview-model';
 import { buildSteps, runVercelBuild } from '../../scripts/build/vercel-build';
 import { clearProvisioningOutput, provisioningBuild } from '../../scripts/build/preview-provisioning';
-import { databaseConnectionString } from '../../lib/server/database-environment';
+import { databaseConnectionString } from '../../lib/server/database/database-environment';
 
 const environment = {
   VERCEL_ENV: 'preview', AUTH_MODE: 'test', CAKE_PREVIEW_PHASE: 'provisioning',

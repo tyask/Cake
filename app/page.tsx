@@ -4,7 +4,7 @@ import { CakeIcon } from "@/components/cake-icon";
 import { getCurrentUser } from "@/lib/server/auth/current-user";
 import { isTestAuthEnabled } from "@/lib/server/auth/auth-mode";
 import { getBootstrap } from "@/lib/server/stores/repository";
-import { databaseVariable } from "@/lib/server/database-environment";
+import { databaseVariable } from "@/lib/server/database/database-environment";
 import { homeNavigation, type HomeSearchParams } from "@/lib/shared/home-navigation";
 
 export const dynamic = "force-dynamic";

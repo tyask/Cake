@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { guardPreviewDatabase } from "../../lib/server/database-environment";
+import { guardPreviewDatabase } from "../../lib/server/database/database-environment";
 import { prepareMigration, setupDatabase } from "../../scripts/db/setup-db.mjs";
 import { seedTestUsers, testSeedSql } from "../../scripts/db/seed-test-users";
 import { findTestUser, QA_TEST_USERS, TEST_USERS } from "../../lib/shared/test-users";

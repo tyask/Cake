@@ -234,7 +234,7 @@
             <div class="layer"><strong>UI / Client</strong><small><code>components/</code><br /><code>lib/client/</code><br />画面状態、取得・保存制御</small></div>
             <div class="layer"><strong>HTTP / Auth</strong><small><code>app/api/</code>・<code>auth.ts</code><br /><code>lib/server/handlers/</code><br />認証、入力parse、応答変換</small></div>
             <div class="layer"><strong>Application</strong><small><code>lib/server/services/</code><br />用途別の業務条件<br />注入したstoreの呼出し</small></div>
-            <div class="layer"><strong>Store / DB</strong><small><code>lib/server/stores/</code><br /><code>lib/server/db.ts</code><br />SQL・Transaction</small></div>
+            <div class="layer"><strong>Store / DB</strong><small><code>lib/server/stores/</code><br /><code>lib/server/database/db.ts</code><br />SQL・Transaction</small></div>
           </div>
           <h3>実行境界</h3>
           <div class="table-wrap"><table>
@@ -254,12 +254,14 @@
               <tr><td><code>lib/shared/</code></td><td>型、有限値、<code>schemas/</code>の入力検証、CSV変換、割合・清算等の共通計算。</td><td>sharedとブラウザで利用可能な依存を参照する。client・server・UI・運用処理を参照しない。</td></tr>
               <tr><td><code>lib/server/auth/</code></td><td>認証設定、現在利用者、利用可否・管理者権限の確認。</td><td>serverとsharedを参照し、clientを参照しない。</td></tr>
               <tr><td><code>lib/server/handlers/</code></td><td>認証結果の受入れ、入力parse、エラー・HTTP応答変換。</td><td>処理は引数で受け取り、実行時の推移依存にDBを含めない。</td></tr>
-              <tr><td><code>lib/server/services/</code></td><td>workspace・招待・明細・ルール・取込・清算・カテゴリの業務条件。</td><td>storeの型と注入された操作を使い、推移的な実行時依存にもstore・DB実装を含めない。</td></tr>
-              <tr><td><code>lib/server/stores/</code>・server直下のDB基盤</td><td>用途別SQL、DTO構築、Transaction、DB接続・接続先検査、runtime proof。</td><td>serverとsharedを参照し、clientを参照しない。</td></tr>
+              <tr><td><code>lib/server/services/</code></td><td>workspace・招待・明細・ルール・取込・清算・カテゴリ・定期支払いの業務条件。</td><td>storeの型と注入された操作を使い、推移的な実行時依存にもstore・DB実装を含めない。</td></tr>
+              <tr><td><code>lib/server/stores/</code></td><td>用途別SQL、DTO構築、Transaction。定期支払いの既定DB storeも含む。</td><td>database・server・sharedを参照し、clientを参照しない。</td></tr>
+              <tr><td><code>lib/server/database/</code></td><td>DB接続と接続先検査、query logging、本番host禁止集合、承認済DB fixtureの検証・生成参照。</td><td>serverとsharedを参照し、clientを参照しない。services・handlerからの推移的な実行時参照も禁止する。</td></tr>
+              <tr><td><code>lib/server/preview/</code></td><td>Preview runtime proofの入力検査、DB所有権照合と安全な応答。</td><td>databaseを使い、実際のDB clientはAPI入口から受け取る。</td></tr>
             </tbody>
           </table></div>
-          <p>定期支払いは<code>lib/server/recurring-payments.ts</code>にサービスと既定DB storeを置き、共有schema・DTO・予定日計算をsharedへ分ける。<code>services/</code>のDB分離規則を全サーバーファイルへ一律に広げない。HTTPで扱う<code>UserAccessError</code>・<code>RecurringPaymentError</code>は<code>lib/server/errors.ts</code>に単一定義し、handlerから認証・DB実装への実行時依存を生まない。</p>
-          <p><code>lib/</code>のモジュールはclient・server・sharedのいずれかに配置する。<code>npm test</code>の<code>tests/architecture/</code>が<code>lib/client/</code>と<code>"use client"</code>からの推移依存、shared・serverの依存方向、handler・servicesからstore・DBへの到達、アプリからscripts・testsへの参照とlibの配置を検査する。ブラウザで使う外部依存は検査側の許可一覧で管理し、Node組込み・サーバーSDK・未知の外部依存を拒否する。</p>
+          <p>定期支払いは<code>lib/server/services/recurring-payments.ts</code>に業務処理とstoreの型、<code>lib/server/stores/recurring-payment-store.ts</code>に既定のSQL操作を置く。APIのcomposition rootがstoreをサービスへ注入し、HTTP handlerは処理を引数で受け取る。共有schema・DTO・予定日計算はsharedに置く。HTTPで扱う<code>UserAccessError</code>・<code>RecurringPaymentError</code>は、認証・handler・サービスをまたぐ副作用のない定義として<code>lib/server/errors.ts</code>に単一定義し、handlerから認証・DB実装への実行時依存を生まない。</p>
+          <p><code>lib/</code>のモジュールはclient・server・sharedのいずれかに配置する。<code>npm test</code>の<code>tests/architecture/</code>が<code>lib/client/</code>と<code>"use client"</code>からの推移依存、shared・serverの依存方向、handler・servicesからstores・database全体への到達、アプリからscripts・testsへの参照とlibの配置を検査する。ブラウザで使う外部依存は検査側の許可一覧で管理し、Node組込み・サーバーSDK・未知の外部依存を拒否する。</p>
           <p>検査は相対path・<code>@/</code>のalias、拡張子省略・index、再export、文字列literalの<code>import()</code>・<code>require()</code>を追跡する。shared、client、handler、servicesの推移依存では、解決できないlocal参照や対象を静的に決められない動的参照を拒否する。<code>.d.ts</code>・<code>.d.mts</code>・<code>.d.cts</code>の型宣言ファイルと、<code>import type</code>・<code>export type</code>など明示された型だけの参照は実行時の依存から除き、通常のimport・再exportは型としてだけ使用していても実行時依存として扱う。</p>
           <div class="note"><code>lib/shared/paypay.ts</code>はブラウザでCSVを解析する。純粋関数の<code>lib/shared/settlement.ts</code>はRepositoryでの参照・清算処理に加え、ブラウザで保存済み明細の応答を反映するときにも呼び出す。</div>
           <h3>運用スクリプトとテストの配置</h3>
@@ -270,6 +272,7 @@
               <tr><td><code>scripts/preview/</code></td><td>Preview・常設PreviewのActions要求、provider管理、receipt・status・正式ブラウザ検証。</td></tr>
               <tr><td><code>scripts/build/</code></td><td>Vercel buildの実行順序と準備用静的配置。</td></tr>
               <tr><td><code>scripts/db/</code></td><td>migration、テストユーザー・サンプルseed、初期fixture生成。</td></tr>
+              <tr><td><code>scripts/tooling/</code></td><td>ローカル/ActionsのNode版確認、文書内のローカル参照検査。</td></tr>
               <tr><td><code>scripts/qa/db/</code>・<code>scripts/qa/windows/</code></td><td>実DBシナリオ・性能計測、Windows資格情報・QA子プロセスとC# helper。</td></tr>
               <tr><td><code>tests/shared/</code>・<code>tests/client/</code>・<code>tests/server/</code></td><td>共通業務規則、UI・ブラウザ制御、HTTP・サービス・SQLの回帰。</td></tr>
               <tr><td><code>tests/tooling/</code>・<code>tests/architecture/</code></td><td>運用スクリプト・Preview契約の回帰、ソースの依存境界検査。</td></tr>
@@ -398,7 +401,7 @@
           <div class="table-wrap"><table>
             <thead><tr><th>ファイル</th><th>主要処理</th></tr></thead>
             <tbody>
-              <tr><td>lib/server/db.ts / db-query-logging.ts / database-environment.ts</td><td><code>db()</code>でNeonクライアントを遅延生成・再利用。PreviewはテストDB接続を必須とし、本番接続へのfallbackを禁止。<code>instrumentDatabase()</code>で単発/Transactionの実行時間と安全な識別情報を記録。</td></tr>
+              <tr><td>lib/server/database/db.ts / db-query-logging.ts / database-environment.ts / database-connection.mjs</td><td><code>db()</code>でNeonクライアントを遅延生成・再利用。PreviewはテストDB接続を必須とし、本番接続へのfallbackを禁止。<code>instrumentDatabase()</code>で単発/Transactionの実行時間と安全な識別情報を記録。</td></tr>
               <tr><td>lib/server/auth/current-user.ts / auth-callbacks.ts / auth-mode.ts</td><td><code>getCurrentUser()</code>、<code>resolveSessionUser()</code>、<code>createAuthCallbacks()</code>、Productionでのテスト認証無効化。</td></tr>
               <tr><td>lib/server/auth/user-access.ts<br />lib/shared/schemas/user-profile.ts<br />lib/shared/test-users.ts</td><td>登録・有効状態・管理者権限のDB確認、表示名更新・入力schema、固定テストユーザー定義。</td></tr>
               <tr><td>lib/server/handlers/app-handlers.ts<br />lib/server/services/<br />lib/server/stores/app-store.ts / settlement-store.ts</td><td>HTTPの認証・入力/応答、actionの振分け、workspace/招待・明細・ルール・取込・清算の業務条件、SQL実行を分離する。サービスは差し替え可能なstoreを受け取る。</td></tr>
@@ -410,7 +413,7 @@
               <tr><td>lib/shared/schemas/transaction-memo.ts<br />lib/shared/transaction-filters.ts / transaction-list.ts<br />lib/client/transaction-filter-storage.ts</td><td>メモ専用schema、列条件・候補集計、localStorage形式の検証・保存、表示行と選択件数の導出。</td></tr>
               <tr><td>lib/shared/rule-order.ts</td><td>取得済みルールと楽観的な順序IDから表示順を組み立てる純粋関数。</td></tr>
               <tr><td>lib/shared/domain-values.ts<br />lib/shared/schemas/domain-schemas.ts / app-input.ts</td><td>分類値一覧・派生型・表示ラベル・入力上限、共通フィールドschema、アプリAPIのaction判別unionとクライアント送信型。DB・認証には依存しない。</td></tr>
-              <tr><td>lib/shared/schemas/recurring-payment-schemas.ts<br />lib/shared/recurring-payment-types.ts / recurring-payment-calendar.ts<br />lib/server/recurring-payments.ts</td><td>定期支払いの共有入力schema・DTO・有限状態/コード/表示・予定日計算と、DB接続を扱うサービスを分離する。クライアントは共有定義だけを参照する。</td></tr>
+              <tr><td>lib/shared/schemas/recurring-payment-schemas.ts<br />lib/shared/recurring-payment-types.ts / recurring-payment-calendar.ts<br />lib/server/services/recurring-payments.ts<br />lib/server/stores/recurring-payment-store.ts</td><td>定期支払いの共有入力schema・DTO・有限状態/コード/表示・予定日計算、注入されたstoreを使う業務処理、SQL操作を分離する。クライアントは共有定義だけを参照する。</td></tr>
               <tr><td>lib/shared/types.ts</td><td>UI、API、Repository、ドメイン関数間の共通データ契約。</td></tr>
             </tbody>
           </table></div>
@@ -1093,6 +1096,7 @@ BootstrapData extends BootstrapMetadata
         <section id="tests">
           <h2>13. テスト・ビルド・運用設計</h2>
           <h3>自動テスト</h3>
+          <p>ローカルとActionsは<code>.node-version</code>の完全版を共用し、<code>check:node</code>で確認する。日常の<code>check:fast</code>はNode版・lint・型・依存境界・文書参照を検査し、領域別の<code>test:architecture</code>・<code>test:shared</code>・<code>test:client</code>・<code>test:server</code>・<code>test:tooling</code>で変更箇所の回帰を実行できる。最終検証では全自動テストとbuildを行う。文書参照はローカルのリンク・anchor・明示的なリポジトリpathを対象にし、外部通信や記載コマンドの実行は行わない。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>テストファイル群</th><th>主な検証</th></tr></thead>
             <tbody>
@@ -1164,7 +1168,7 @@ BootstrapData extends BootstrapMetadata
           <h3>WSLと報告</h3>
           <p>WSLはLinux版Node.js/npm/gh/Playwrightを使用し、Windowsと依存・成果物・資格情報を分離する。本人のVercel認証からdevelopment OIDCをメモリ内だけで取得して既存browser helperへ明示的に渡し、Git/ghにはprovider tokenを渡さない。実行例は<a href="wsl-development.md">WSL手順</a>を参照する。標準の画面移動検証と業務更新テストを分け、明細の追加・編集・再読込・他ユーザー参照・作成済みIDだけの削除を確認する。PRのタイトル・本文・コメント・レビュー・検証報告は日本語にする。</p>
           <h3>資源とブラウザの共通照合</h3>
-          <p><code>lib/server/production-database-hosts.mjs</code>が設定の<code>productionHostDigest</code>（現用値）と<code>productionHostDigests</code>（現用PG18・保持旧PG17のPreview禁止集合）を検証する。集合は現用値を含む非空・重複なしの64桁hexとし、省略時だけ現用1件に補完する。接続前guard、provider、Deployment metadata、通常/verify receiptは同じ集合全件を拒否する。runtimeは従来の環境側本番digestと<code>DATABASE_URL</code>のendpoint一致拒否も維持する。準備用buildと実DBQAの注入本番digestは、対象コードの集合への厳密な所属を要求する。現用値をPG18へ更新した後も保持旧PG17のdigestを集合へ残し、どちらのDBもPreviewとして受け入れない。禁止集合は対象コードから読み、環境側の値だけを正本にしない。</p>
+          <p><code>lib/server/database/production-database-hosts.mjs</code>が設定の<code>productionHostDigest</code>（現用値）と<code>productionHostDigests</code>（現用PG18・保持旧PG17のPreview禁止集合）を検証する。集合は現用値を含む非空・重複なしの64桁hexとし、省略時だけ現用1件に補完する。接続前guard、provider、Deployment metadata、通常/verify receiptは同じ集合全件を拒否する。runtimeは従来の環境側本番digestと<code>DATABASE_URL</code>のendpoint一致拒否も維持する。準備用buildと実DBQAの注入本番digestは、対象コードの集合への厳密な所属を要求する。現用値をPG18へ更新した後も保持旧PG17のdigestを集合へ残し、どちらのDBもPreviewとして受け入れない。禁止集合は対象コードから読み、環境側の値だけを正本にしない。</p>
           <p>現用本番はNeon PostgreSQL 18・UTF8の専用projectを使い、Vercel NativeのProduction接続から供給される<code>DATABASE_URL</code>を使用する。旧PG17 DBと既存の復旧用branchは保持する。Productionの<code>build:vercel</code>はNext build後に通常の<code>db:setup</code>を行い、各migrationと台帳の記録を同じTransactionで確定してから公開する。テストseedは実行しない。019の取引先正規化と、専用Previewでの通常の実DBQAは継続する。</p>
           <p>本番DBの版更新・復旧では、対象とバックアップ、最新データの同期方法、ProductionのNative接続先を確認する。接続変更後は新しいProduction Deploymentを作成し、公開先・完全SHA・接続先と本人Googleログイン・既存データ表示を確認する。書込み開始後の復旧では追加データの保持と同期も確認する。現用本番・保持旧DB・復旧用branchの識別情報と手順は<a href="production-database-upgrade.md">本番DB運用手順</a>を参照する。</p>
           <p>Deployment metadataのprotocol・repository・PR・generation・operation・phaseとGitSourceの完全SHA・branchを全ページ一覧と直接GETで照合する。初回provisioningはDBに接続せず、対象PR・branch/SHA・世代・本番host digestと空の専用DB識別子を検査した後、Build Output API v3の静的準備中ページを.next/outputへ生成する。既存のNext.js builderで正常終了させ、API・ログイン・POSTは404とし、アプリのFunctionや環境値を成果物に含めない。通常アプリのbuild前には.next/outputと.vercel/outputを除去し、準備成果物の混入を防ぐ。準備用のREADYだけではstatusのapplicationと扱わず、新たな準備用のERROR/CANCELEDは管理処理を停止する。Native子branchの親・作成時刻・所属・非保護・read-write endpointを確認後、IDとhost digestをapplication deploymentへ渡す。初回の作成時刻下限はsource作成時刻と最古Deploymentの要求時刻（時計差60秒）から求める。単一世代の既存applicationがDB branch・endpoint・host digestを保持する更新では、source作成時刻だけを下限とし、現在残るDeploymentの作成時刻で継続DBを拒否しない。既知DBも親・所属・保護・単一endpoint・本番分離と一覧／直接GETの一致を再確認する。接続文字列はNativeが供給する。</p>

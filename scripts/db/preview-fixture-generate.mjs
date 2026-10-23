@@ -3,7 +3,7 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { prepareMigration } from "./setup-db.mjs";
-import { previewFixtureCatalogSql, previewFixtureCatalogFingerprintSql } from "../../lib/server/preview-fixture-base.mjs";
+import { previewFixtureCatalogSql, previewFixtureCatalogFingerprintSql } from "../../lib/server/database/preview-fixture-base.mjs";
 
 // Reproducible, explicit offline baseline generation. PGlite is installed outside
 // the repo; no env files, Neon clients or configured connections are accessed.
@@ -41,7 +41,7 @@ try {
     FROM (${previewFixtureCatalogSql()}) catalog CROSS JOIN LATERAL jsonb_each(descriptor) ORDER BY key`)).rows;
   const versions = (await db.query(`SELECT current_setting('server_version_num') AS postgres,
     (SELECT extversion FROM pg_extension WHERE extname='pgcrypto') AS pgcrypto`)).rows[0];
-  await writeFile(resolve(root, "lib/server/preview-fixture-reference.mjs"),
+  await writeFile(resolve(root, "lib/server/database/preview-fixture-reference.mjs"),
     `// Generated offline with PGlite PostgreSQL ${versions.postgres} + pgcrypto ${versions.pgcrypto} using trusted Preview prepareMigration.
 // Hashes pin the exact semantic catalog, excluding OIDs, owners and C library paths.
 // Review and regenerate explicitly when the approved baseline changes.

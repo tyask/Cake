@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { neon } from "@neondatabase/serverless";
-import { databaseConnectionString, previewDatabaseIdentity, previewDatabaseGuardSql, type DatabaseQueryExecutor } from "../../lib/server/database-environment";
+import { databaseConnectionString, previewDatabaseIdentity, previewDatabaseGuardSql, type DatabaseQueryExecutor } from "../../lib/server/database/database-environment";
 import { activeTestUsers } from "../../lib/server/auth/test-fixture-context";
 import { formatSeedError } from "./seed-error";
 import { previewSampleDataSql } from "./preview-sample-data";

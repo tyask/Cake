@@ -1,5 +1,5 @@
 import { protocol, sameDatabase, uuid, type Database, type Source } from './preview-model';
-import { isProductionDatabaseHostDigest } from '../../lib/server/production-database-hosts.mjs';
+import { isProductionDatabaseHostDigest } from '../../lib/server/database/production-database-hosts.mjs';
 import type { Receipt } from './preview-service';
 import { fullSha, previewUrl, validTaskBranch } from '../task/task-workflow';
 

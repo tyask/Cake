@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db } from "../database/db";
 import { requireWorkspaceMember } from "./repository";
 
 export async function findImportDuplicates(workspaceId: string, userId: string, requestedExternalIds: readonly string[]) {

@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db } from "../database/db";
 import { createSettlementStore } from "./settlement-store";
 import { createCategoryStore } from "./category-store";
 import { getBootstrap, requireWorkspaceMember } from "./repository";

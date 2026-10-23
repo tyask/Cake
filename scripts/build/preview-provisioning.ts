@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { config, uuid } from '../preview/preview-model';
 import staging from '../../staging.config.json';
-import { isProductionDatabaseHostDigest } from '../../lib/server/production-database-hosts.mjs';
+import { isProductionDatabaseHostDigest } from '../../lib/server/database/production-database-hosts.mjs';
 import { fullSha, validTaskBranch } from '../task/task-workflow';
 
 type Environment = Readonly<Record<string, string | undefined>>;

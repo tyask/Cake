@@ -4,8 +4,8 @@ import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'n
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { previewDatabaseIdentity, previewDatabaseGuardSql } from '../../../lib/server/database-connection.mjs';
-import { PREVIEW_FIXTURE_GUARD_REVISION, PREVIEW_FIXTURE_SCHEMA_SHA256, PREVIEW_FIXTURE_MIGRATIONS, previewFixtureCatalogFingerprintSql } from '../../../lib/server/preview-fixture-base.mjs';
+import { previewDatabaseIdentity, previewDatabaseGuardSql } from '../../../lib/server/database/database-connection.mjs';
+import { PREVIEW_FIXTURE_GUARD_REVISION, PREVIEW_FIXTURE_SCHEMA_SHA256, PREVIEW_FIXTURE_MIGRATIONS, previewFixtureCatalogFingerprintSql } from '../../../lib/server/database/preview-fixture-base.mjs';
 import { setupDatabase } from '../../db/setup-db.mjs';
 import { seedTestUsers, testSeedSql } from '../../db/seed-test-users.ts';
 

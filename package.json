@@ -2,15 +2,19 @@
   "name": "cake-next-sample",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "build:vercel": "node --import tsx scripts/build/vercel-build.ts",
     "start": "next start",
     "lint": "eslint .",
+    "check:node": "node scripts/tooling/check-node-version.mjs",
     "db:setup": "node scripts/db/setup-db.mjs",
     "db:seed:test": "tsx scripts/db/seed-test-users.ts",
-    "task:start": "node --import tsx scripts/task/start-task.ts",
+    "task:start": "node scripts/tooling/check-node-version.mjs && node --import tsx scripts/task/start-task.ts",
     "deploy:preview": "node --import tsx scripts/preview/preview-command.ts deploy",
     "task:pr": "node --import tsx scripts/task/task-pr.ts",
     "test": "node --import tsx --test --test-concurrency=2 \"tests/**/*.test.ts\"",
@@ -18,7 +22,15 @@
     "qa:verify": "node --import tsx scripts/preview/preview-command.ts verify",
     "qa:windows": "node --import tsx scripts/qa/windows/windows-qa.ts",
     "qa:verify:ci": "node --import tsx scripts/preview/preview-verify-command.ts",
-    "qa:release": "node --import tsx scripts/preview/preview-command.ts cleanup"
+    "qa:release": "node --import tsx scripts/preview/preview-command.ts cleanup",
+    "typecheck": "tsc --noEmit",
+    "check:docs": "node --import tsx scripts/tooling/check-docs.ts",
+    "test:architecture": "node --import tsx --test --test-concurrency=2 \"tests/architecture/**/*.test.ts\"",
+    "test:shared": "node --import tsx --test --test-concurrency=2 \"tests/shared/**/*.test.ts\"",
+    "test:client": "node --import tsx --test --test-concurrency=2 \"tests/client/**/*.test.ts\"",
+    "test:server": "node --import tsx --test --test-concurrency=2 \"tests/server/**/*.test.ts\"",
+    "test:tooling": "node --import tsx --test --test-concurrency=2 \"tests/tooling/**/*.test.ts\"",
+    "check:fast": "npm run check:node && npm run lint && npm run typecheck && npm run test:architecture && npm run check:docs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

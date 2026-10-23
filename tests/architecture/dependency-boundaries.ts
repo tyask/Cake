@@ -26,7 +26,7 @@ const databasePackages = new Set([
 
 const within = (path: string, directory: string) => path.startsWith(directory + "/");
 const productFile = (path: string) => !["scripts", "tests", "docs"].some(directory => within(path, directory));
-const databaseFile = (path: string) => within(path, "lib/server/stores") ||
+const databaseFile = (path: string) => within(path, "lib/server/stores") || within(path, "lib/server/database") ||
   (within(path, "lib/server") && /(?:^|\/)(?:db|repository)(?:[./-]|$)/.test(path));
 const databasePackage = (specifier: string) => [...databasePackages].some(name => specifier === name || specifier.startsWith(name + "/"));
 

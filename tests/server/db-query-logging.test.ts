@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { neon, neonConfig, NeonDbError } from "@neondatabase/serverless";
-import { instrumentDatabase } from "../../lib/server/db-query-logging";
+import { instrumentDatabase } from "../../lib/server/database/db-query-logging";
 
 const parameterSecret = "private.customer@example.test";
 const resultSecret = "private-transaction-result";

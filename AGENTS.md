@@ -2,7 +2,7 @@
 
 ## 開始と実行環境
 
-開発・PR操作・QAの前に[開発・QA運用手順](docs/development-workflow.md)を読む。WSL2ではLinux版Node.js 24・npm・Git・gh・Playwright Chromiumを使う。[WSL手順](docs/wsl-development.md)で実行環境と認証を確認する。Windowsネイティブでも開発でき、PowerShellでは `npm.cmd` / `npx.cmd` を使う。
+開発・PR操作・QAの前に[開発・QA運用手順](docs/development-workflow.md)を読む。ローカルとActionsのNode版は [.node-version](.node-version) を正本とし、`npm run check:node` で一致を確認する。WSL2ではLinux版Node.js・npm・Git・gh・Playwright Chromiumを使う。[WSL手順](docs/wsl-development.md)で実行環境と認証を確認する。Windowsネイティブでも開発でき、PowerShellでは `npm.cmd` / `npx.cmd` を使う。
 
 最新 `origin/main` から `npm run task:start -- <task-name>` で `codex/<task-name>` と専用worktreeを作る。既存の未コミット変更を保持し、worktreeごとに `node_modules`・`.next`・`.cake`・環境ファイルを分離する。WindowsとWSLで作業ディレクトリや資格情報を共有・コピーしない。npm/Playwrightのキャッシュは同じ実行環境内で共有できる。
 

@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db } from "../database/db";
 import type { AppUser, Category } from "../../shared/types";
 import type { Action } from "../services/types";
 import type { CategoryDeletion } from "../../shared/category-updates";

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { databaseConnectionString, previewDatabaseIdentity } from './database-environment';
+import { databaseConnectionString, previewDatabaseIdentity } from '../database/database-environment';
 type Environment = Readonly<Record<string, string | undefined>>;
 export function previewRuntimeProofHandler(dependencies: { environment: () => Environment; database: () => { query(statement: string, parameters: unknown[]): PromiseLike<readonly Record<string, unknown>[]> } }) {
   return async (request: Request): Promise<Response> => {
