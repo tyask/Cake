@@ -190,7 +190,7 @@ export async function runFinalCopy(options: FinalCopyOptions, overrides: Partial
         '--lock-wait-timeout=20s', `--snapshot=${exported}`, `--file=${archive}`], options.source);
       await writeFile(list, restoreList(await dependencies.command('pg_restore', ['--list', archive])), { mode: 0o600 });
       await dependencies.command('pg_restore', ['--exit-on-error','--clean','--if-exists', `--use-list=${list}`, `--file=${rawSql}`, archive]);
-      await writeFile(refreshFile, `${drop019}${await readFile(rawSql, 'utf8')}\n${statement}\n`, { mode: 0o600 });
+      await writeFile(refreshFile, `${drop019}${await readFile(rawSql, 'utf8')}\nSET LOCAL search_path = public;\n${statement}\n`, { mode: 0o600 });
     });
     await stage('pre-write', async () => {
       await options.beforeWrite();

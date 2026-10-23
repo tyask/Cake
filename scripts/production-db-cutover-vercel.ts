@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
+import { databaseConnectionString, previewDatabaseIdentity } from '../lib/database-connection.mjs';
 import { developmentToken } from './preview-browser';
-import { config, type Environment } from './production-db-migration-provider';
+import { config, parseConnection, type Binding, type Environment } from './production-db-migration-provider';
 
 export const productionSourceStore = 'store_MbDEtSbG9jVS4pDq';
 export const productionAliases = ['cake-omega-gilt.vercel.app', 'cake-git-main-fumin1.vercel.app', 'cake-fumin1.vercel.app'] as const;
@@ -9,7 +10,7 @@ type Stage = 'preflight' | 'source-scope' | 'target-connect' | 'native-check' | 
 type Code = 'OK' | 'INVALID_INPUT' | 'CREDENTIALS' | 'INVALID_RESPONSE' | 'HTTP' | 'RESPONSE_UNKNOWN' | 'JSON'
   | 'BINDING' | 'INCOMPLETE_INVENTORY' | 'NATIVE_CONNECTION' | 'BEFORE_WRITE' | 'DUPLICATE_DEPLOYMENT'
   | 'DEPLOYMENT_BINDING' | 'DEPLOYMENT_FAILED' | 'DEPLOYMENT_TIMEOUT' | 'ALIAS_CHANGED' | 'ALIAS_TIMEOUT'
-  | 'OIDC' | 'PROBE' | 'UNEXPECTED';
+  | 'ENVIRONMENT' | 'OIDC' | 'PROBE' | 'UNEXPECTED';
 type Write = 'source' | 'target' | 'deployment' | 'promote';
 type WriteState = 'not-started' | 'attempted' | 'acknowledged';
 type Alias = { alias: string; deploymentId: string; projectId: string };
@@ -75,9 +76,10 @@ export async function runProductionSwitch(context: ProductionSwitchContext, opti
     if (!json || response.status === 204) { await discard(response); return null; }
     try { return await response.json(); } catch { throw new SwitchFailure('JSON', response.status, method !== 'GET'); }
   }
-  async function write(name: Write, path: string, method: string, body?: unknown, json = false) {
+  async function write(name: Write, path: string, method: string, body?: unknown, json = false, checkEnvironment?: () => Promise<void>) {
     // A failed/unknown mutation is never retried, including when beforeWrite rejects.
     try { await context.beforeWrite(); } catch { return fail('BEFORE_WRITE'); }
+    await checkEnvironment?.();
     if (report.writes[name] !== 'not-started') return fail('BINDING');
     report.writes[name] = 'attempted';
     const value = await api(path, method, body, json);
@@ -102,6 +104,37 @@ export async function runProductionSwitch(context: ProductionSwitchContext, opti
       || String(link.repoId) !== String(config.repositoryId)) return fail('BINDING');
     if (expectedProduction !== undefined && value.targets != null && object(object(value.targets).production).id !== expectedProduction) return fail('DEPLOYMENT_BINDING');
     return value;
+  }
+  function validateEnvironment(value: unknown, expected: Binding, requireDatabase = true) {
+    try {
+      const variables = object(value);
+      if (Object.values(variables).some(item => typeof item !== 'string')
+        || variables.VERCEL_ENV !== undefined && variables.VERCEL_ENV !== 'production'
+        || variables.AUTH_MODE === 'test' || variables.NODE_TLS_REJECT_UNAUTHORIZED === '0'
+        || Object.keys(variables).some(key => key.startsWith('CAKE_PREVIEW'))) throw new Error();
+      const env = { ...variables, VERCEL_ENV: 'production' } as Record<string, string>;
+      previewDatabaseIdentity(env);
+      if (requireDatabase || Object.hasOwn(variables, 'DATABASE_URL')) {
+        const url = new URL(databaseConnectionString(env));
+        // Native supplies pooled URLs; all remaining binding and URL options use the shared strict parser.
+        url.hostname = url.hostname.replace(/-pooler(?=\.)/, '');
+        parseConnection(url.href, expected);
+      }
+    } catch { return fail('ENVIRONMENT'); }
+  }
+  async function projectEnvironment(expected: Binding) {
+    // The CLI encodes the branch in the path. Check both the default and main's resolved overrides.
+    for (const suffix of ['', '/main']) {
+      const value = object(await api(`/v3/env/pull/${config.vercelProjectId}/production${suffix}`));
+      validateEnvironment(value.env, expected);
+    }
+  }
+  async function candidateEnvironment(id: string) {
+    const value = object(await api(`/v3/env/pull/${id}`));
+    // CLI env pull --id uses buildEnv: env may contain only runtime decryption keys for large envs.
+    // This proves the deployment's resolved snapshot; any exposed runtime DATABASE_URL must agree too.
+    validateEnvironment(value.buildEnv, config.target);
+    if (value.env !== undefined) validateEnvironment(value.env, config.target, false);
   }
   async function routing(): Promise<Routing> {
     const aliases = (await list(`/v4/aliases?projectId=${config.vercelProjectId}`, 'aliases')).map(row => {
@@ -229,7 +262,7 @@ export async function runProductionSwitch(context: ProductionSwitchContext, opti
     unchangedRouting(initialRouting, await routing());
     report.stage = 'source-scope';
     await write('source', `/v1/storage/stores/${productionSourceStore}/connections/${source.id}`, remaining.length ? 'PATCH' : 'DELETE',
-      remaining.length ? { envVarEnvironments: remaining } : undefined);
+      remaining.length ? { envVarEnvironments: remaining } : undefined, false, () => projectEnvironment(config.source));
     report.sourceScopeUpdated = true;
     const actual = await stores();
     if (!same(actual.source, expectedSource) || actual.target.length !== 0) return fail('NATIVE_CONNECTION');
@@ -244,12 +277,13 @@ export async function runProductionSwitch(context: ProductionSwitchContext, opti
       return state;
     };
     report.stage = 'native-check'; await verifyNative(); report.nativeVerified = true;
+    await projectEnvironment(config.target);
     report.stage = 'create';
     const created = object(await write('deployment', '/v13/deployments?forceNew=1', 'POST', {
       name: 'cake', project: config.vercelProjectId, target: 'production', autoAssignCustomDomains: false,
       gitSource: { type: 'github', repoId: config.repositoryId, ref: 'main', sha: context.controlSha },
       meta: { cakeProductionCutoverOperation: context.operation, cakeProductionCutoverSha: context.controlSha },
-    }, true));
+    }, true, () => projectEnvironment(config.target)));
     const id = deploymentId(created.id ?? created.uid), readyStarted = now();
     report.stage = 'ready';
     let candidate: Deployment | undefined;
@@ -261,6 +295,7 @@ export async function runProductionSwitch(context: ProductionSwitchContext, opti
       await sleep(2_000);
     }
     if (!candidate || !report.ready) return fail('DEPLOYMENT_TIMEOUT');
+    await candidateEnvironment(id);
     await deployments(id);
     report.stage = 'aliases-before';
     const stagedRouting = await routing(); report.after = summary(stagedRouting);
@@ -269,7 +304,9 @@ export async function runProductionSwitch(context: ProductionSwitchContext, opti
     await project(); await verifyNative(); await deployments(id);
     report.stage = 'aliases-before'; unchangedRouting(initialRouting, await routing(), id);
     report.stage = 'promote';
-    await write('promote', `/v10/projects/${config.vercelProjectId}/promote/${id}`, 'POST', {});
+    await write('promote', `/v10/projects/${config.vercelProjectId}/promote/${id}`, 'POST', {}, false, async () => {
+      await projectEnvironment(config.target); await candidateEnvironment(id);
+    });
     report.promoted = true;
     report.stage = 'aliases-after'; const aliasStarted = now();
     let finalRouting: Routing | undefined;
@@ -288,6 +325,7 @@ export async function runProductionSwitch(context: ProductionSwitchContext, opti
     if (!report.aliasVerified || !finalRouting) return fail('ALIAS_TIMEOUT');
     report.knownAliasesCurrent = productionAliases.every(name => finalRouting!.aliases.some(row => row.alias === name && row.deploymentId === id));
     report.stage = 'final'; await project(id); await verifyNative(); await deployments(id);
+    await projectEnvironment(config.target); await candidateEnvironment(id);
     const final = validateDeployment(await api(`/v13/deployments/${id}?withGitRepoInfo=true`), id, true);
     if (final.state !== 'READY') return fail('DEPLOYMENT_BINDING');
     finalRouting = await routing(); unchangedRouting(initialRouting, finalRouting, id, true); report.after = summary(finalRouting);

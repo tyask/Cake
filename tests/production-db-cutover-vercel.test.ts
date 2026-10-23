@@ -6,6 +6,12 @@ import { config } from '../scripts/production-db-migration-provider';
 const sha = 'a'.repeat(40), operation = '12345678-1234-4123-8123-123456789abc';
 const oldId = 'dpl_OldCanonical', otherId = 'dpl_OldGenerated', newId = 'dpl_NewProduction', previewId = 'dpl_Preview';
 const privateText = 'private-provider-password-cookie';
+const databaseUrl = (target: 'source' | 'target', pooled = true) => `postgresql://neondb_owner:${privateText}@${target === 'source'
+  ? 'ep-ancient-flower-az7oh01x.c-3.ap-southeast-1.aws.neon.tech'
+  : 'ep-odd-wildflower-a1kwkl1v.ap-southeast-1.aws.neon.tech'}`.replace(/(?=\.)/, pooled ? '-pooler' : '') + '/neondb?sslmode=require&channel_binding=require';
+const productionEnvironment = (target: 'source' | 'target') => ({ DATABASE_URL: databaseUrl(target), AUTH_MODE: 'google', VERCEL_ENV: 'production' });
+const productionEnvPath = `/v3/env/pull/${config.vercelProjectId}/production`;
+const candidateEnvPath = `/v3/env/pull/${newId}`;
 const oidc = (changes = {}) => `header.${Buffer.from(JSON.stringify({ project_id: config.vercelProjectId, owner_id: config.vercelTeamId,
   environment: 'development', exp: Math.floor(Date.now() / 1000) + 3600, ...changes })).toString('base64url')}.signature`;
 type Call = { url: URL; method: string; body: Record<string, unknown> | undefined; headers: Headers };
@@ -60,6 +66,13 @@ function fixture(options: FixtureOptions = {}) {
       else if (url.pathname === `/v13/deployments/${newId}`) { assert.equal(url.searchParams.get('withGitRepoInfo'), 'true'); response = json(state.candidate); }
       else if (url.pathname === '/v6/deployments') response = json({ deployments: [old, ...(state.candidate ? [state.candidate] : [])], pagination: { next: null } });
       else if (url.pathname === `/v3/env/pull/${config.vercelProjectId}/development`) response = json({ env: { VERCEL_OIDC_TOKEN: oidc(), DATABASE_URL: privateText } });
+      else if (url.pathname === productionEnvPath || url.pathname === `${productionEnvPath}/main`) {
+        assert.equal(method, 'GET'); assert.equal(url.searchParams.has('gitBranch'), false);
+        response = json({ env: productionEnvironment(state.target.some(row => row.environments.includes('production')) ? 'target' : 'source') });
+      } else if (url.pathname === candidateEnvPath) {
+        assert.equal(method, 'GET'); assert.equal(url.searchParams.has('gitBranch'), false);
+        assert.ok(state.candidate); response = json({ env: productionEnvironment('target'), buildEnv: productionEnvironment('target') });
+      }
       else if (url.pathname === `/v1/storage/stores/${productionSourceStore}` || url.pathname === `/v1/storage/stores/${config.targetStoreId}`) {
         assert.equal(method, 'GET'); assert.equal(url.searchParams.get('skip-metadata'), 'true');
         const source = url.pathname.endsWith(productionSourceStore), connections = source ? state.source : state.target;
@@ -118,6 +131,104 @@ test('mixed scopeはProductionだけ除き、staged branch aliasの更新と旧g
   assert.deepEqual(mutations(f.state)[0].body, { envVarEnvironments: ['development','preview'] }); assert.equal(mutations(f.state)[0].method, 'PATCH');
   assert.deepEqual(f.state.source.find(row => row.id === 'conn_source')!.environments, ['development','preview']);
   assert.equal(report.after!.known[2][1], otherId); sanitized(report);
+});
+
+test('default Productionとmainの実効値、および候補の解決済みsnapshotを各変更境界で照合する', async () => {
+  const f = fixture(), report = await f.run(); assert.equal(report.success, true);
+  const envCalls = f.state.calls.filter(call => call.url.pathname.startsWith(productionEnvPath));
+  assert.deepEqual(envCalls.map(call => call.url.pathname), Array.from({ length: 5 }, () => [productionEnvPath, `${productionEnvPath}/main`]).flat());
+  const sourceWrite = f.state.calls.findIndex(call => call.method !== 'GET');
+  assert.equal(f.state.calls[sourceWrite - 2].url.pathname, productionEnvPath);
+  assert.equal(f.state.calls[sourceWrite - 1].url.pathname, `${productionEnvPath}/main`);
+  const create = f.state.calls.findIndex(call => call.url.pathname === '/v13/deployments' && call.method === 'POST');
+  assert.equal(f.state.calls[create - 2].url.pathname, productionEnvPath);
+  assert.equal(f.state.calls[create - 1].url.pathname, `${productionEnvPath}/main`);
+  const promote = f.state.calls.findIndex(call => call.url.pathname.includes('/promote/'));
+  assert.equal(f.state.calls[promote - 1].url.pathname, candidateEnvPath);
+  assert.equal(f.state.calls.filter(call => call.url.pathname === candidateEnvPath).length, 3); sanitized(report);
+});
+
+test('本番URLのendpoint、DB、role、SSL、接続optionとProduction guardを変更前に厳密照合する', async () => {
+  const valid = productionEnvironment('source');
+  const invalid: Record<string, unknown>[] = [
+    {}, { ...valid, DATABASE_URL: '' }, { ...valid, DATABASE_URL: '[SENSITIVE]' }, { ...valid, DATABASE_URL: 1 },
+    { ...valid, DATABASE_URL: databaseUrl('target') },
+    { ...valid, DATABASE_URL: valid.DATABASE_URL.replace('neondb_owner:', 'other_role:') },
+    { ...valid, DATABASE_URL: valid.DATABASE_URL.replace('/neondb?', '/other_database?') },
+    { ...valid, DATABASE_URL: valid.DATABASE_URL.replace('sslmode=require', 'sslmode=disable') },
+    { ...valid, DATABASE_URL: valid.DATABASE_URL.replace('?sslmode=require&channel_binding=require', '') },
+    { ...valid, DATABASE_URL: `${valid.DATABASE_URL}&sslmode=require` },
+    { ...valid, DATABASE_URL: `${valid.DATABASE_URL}&host=other.example.test` },
+    { ...valid, DATABASE_URL: `${valid.DATABASE_URL}&options=-c%20search_path%3Dother` },
+    { ...valid, DATABASE_URL: `${valid.DATABASE_URL}#override` },
+    { ...valid, AUTH_MODE: 'test' }, { ...valid, VERCEL_ENV: 'preview' },
+    { ...valid, CAKE_PREVIEW_PHASE: '' }, { ...valid, CAKE_PREVIEW_UNKNOWN: 'present' },
+    { ...valid, NODE_TLS_REJECT_UNAUTHORIZED: '0' },
+  ];
+  for (const env of invalid) {
+    const f = fixture({ after: (call, _state, response) => call.url.pathname === productionEnvPath ? json({ env }) : response });
+    const report = await f.run(); assert.equal(report.code, 'ENVIRONMENT'); assert.equal(report.success, false);
+    assert.equal(mutations(f.state).length, 0); assert.equal(report.writes.source, 'not-started'); sanitized(report);
+  }
+  const direct = fixture({ after: (call, state, response) => call.url.pathname.startsWith(productionEnvPath)
+    ? json({ env: { ...productionEnvironment(state.target.length ? 'target' : 'source'),
+      DATABASE_URL: databaseUrl(state.target.length ? 'target' : 'source', false) } }) : response });
+  const report = await direct.run(); assert.equal(report.success, true); sanitized(report);
+});
+
+test('mainだけのDB overrideもNative変更前に拒否する', async () => {
+  const f = fixture({ after: (call, _state, response) => call.url.pathname === `${productionEnvPath}/main`
+    ? json({ env: productionEnvironment('target') }) : response });
+  const report = await f.run(); assert.equal(report.code, 'ENVIRONMENT'); assert.equal(mutations(f.state).length, 0); sanitized(report);
+});
+
+test('Native変更後、候補作成直前、公開直前、完了時の実効URL driftでは後続書込みを止める', async () => {
+  for (const phase of ['native','create','promote','final'] as const) {
+    const f = fixture({ after: (call, state, response) => {
+      if (!call.url.pathname.startsWith(productionEnvPath)) return response;
+      const drift = phase === 'native' ? state.target.length > 0 : phase === 'create' ? state.callbacks === 3
+        : phase === 'promote' ? state.callbacks === 4 && !state.promoted : state.promoted;
+      return drift ? json({ env: productionEnvironment('source') }) : response;
+    } });
+    const report = await f.run(); assert.equal(report.code, 'ENVIRONMENT'); assert.equal(report.success, false);
+    assert.equal(mutations(f.state).length, phase === 'native' || phase === 'create' ? 2 : phase === 'promote' ? 3 : 4);
+    assert.equal(report.promoted, phase === 'final'); sanitized(report);
+  }
+});
+
+test('候補buildEnvは必須とし、欠落・伏せ字・旧DB・テスト認証snapshotを公開しない', async () => {
+  for (const buildEnv of [undefined, {}, { DATABASE_URL: '' }, { DATABASE_URL: '[SENSITIVE]' }, productionEnvironment('source'),
+    { ...productionEnvironment('target'), AUTH_MODE: 'test' }, { ...productionEnvironment('target'), CAKE_PREVIEW_KIND: 'main' }]) {
+    const f = fixture({ after: (call, _state, response) => call.url.pathname === candidateEnvPath
+      ? json({ env: productionEnvironment('target'), buildEnv }) : response });
+    const report = await f.run(); assert.equal(report.code, 'ENVIRONMENT'); assert.equal(report.ready, true); assert.equal(report.promoted, false);
+    assert.equal(mutations(f.state).length, 3); sanitized(report);
+  }
+});
+
+test('候補runtime envが無し・暗号鍵のみでもbuildEnvを検証し、実在するruntime URLの不一致は拒否する', async () => {
+  for (const env of [undefined, {}, { VERCEL_ENV_ENCRYPTION_KEY: privateText }]) {
+    const f = fixture({ after: (call, _state, response) => call.url.pathname === candidateEnvPath
+      ? json({ env, buildEnv: productionEnvironment('target') }) : response });
+    const report = await f.run(); assert.equal(report.success, true); sanitized(report);
+  }
+  for (const env of [productionEnvironment('source'), { ...productionEnvironment('target'), DATABASE_URL: '[SENSITIVE]' },
+    { AUTH_MODE: 'test' }, { CAKE_PREVIEW_PHASE: 'application' }]) {
+    const f = fixture({ after: (call, _state, response) => call.url.pathname === candidateEnvPath
+      ? json({ env, buildEnv: productionEnvironment('target') }) : response });
+    const report = await f.run(); assert.equal(report.code, 'ENVIRONMENT'); assert.equal(report.promoted, false);
+    assert.equal(mutations(f.state).length, 3); sanitized(report);
+  }
+});
+
+test('候補snapshotの公開直前と完了時の再照合も省略しない', async () => {
+  for (const phase of ['promote','final'] as const) {
+    const f = fixture({ after: (call, state, response) => call.url.pathname === candidateEnvPath
+      && (phase === 'final' ? state.promoted : state.callbacks === 4 && !state.promoted)
+      ? json({ buildEnv: productionEnvironment('source') }) : response });
+    const report = await f.run(); assert.equal(report.code, 'ENVIRONMENT'); assert.equal(report.success, false);
+    assert.equal(report.promoted, phase === 'final'); assert.equal(mutations(f.state).length, phase === 'final' ? 4 : 3); sanitized(report);
+  }
 });
 
 test('ownerIdを省略する現行Deployment viewのteam.idを照合し、矛盾するteamは拒否する', async () => {

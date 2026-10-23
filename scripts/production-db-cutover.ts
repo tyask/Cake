@@ -71,7 +71,7 @@ function restoreCopy(value: CopyEvidence): CopyEvidence {
 }
 const switchStages = ['preflight','source-scope','target-connect','native-check','create','ready','aliases-before','oidc','probe','promote','aliases-after','final','complete'];
 const switchCodes = ['OK','INVALID_INPUT','CREDENTIALS','INVALID_RESPONSE','HTTP','RESPONSE_UNKNOWN','JSON','BINDING','INCOMPLETE_INVENTORY',
-  'NATIVE_CONNECTION','BEFORE_WRITE','DUPLICATE_DEPLOYMENT','DEPLOYMENT_BINDING','DEPLOYMENT_FAILED','DEPLOYMENT_TIMEOUT','ALIAS_CHANGED','ALIAS_TIMEOUT','OIDC','PROBE','UNEXPECTED'];
+  'NATIVE_CONNECTION','ENVIRONMENT','BEFORE_WRITE','DUPLICATE_DEPLOYMENT','DEPLOYMENT_BINDING','DEPLOYMENT_FAILED','DEPLOYMENT_TIMEOUT','ALIAS_CHANGED','ALIAS_TIMEOUT','OIDC','PROBE','UNEXPECTED'];
 const writeState = (value: unknown): 'not-started' | 'attempted' | 'acknowledged' =>
   value === 'not-started' || value === 'attempted' || value === 'acknowledged' ? value : invalid();
 function routingEvidence(value: RoutingEvidence | null): RoutingEvidence | null {

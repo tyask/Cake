@@ -86,7 +86,7 @@ async function mockRun(mode: Mode = 'ok', optionsOverride: Partial<FinalCopyOpti
         assert.equal(connection, undefined);
         const file = args.find(argument => argument.startsWith('--file='))!.slice(7);
         assert.equal((await stat(file)).mode & 0o777, 0o600);
-        await writeFile(file, '-- private business rows in restore SQL\n'); return '';
+        await writeFile(file, "SELECT pg_catalog.set_config('search_path', '', false);\n-- private business rows in restore SQL\n"); return '';
       }
       assert.equal(connection, targetConnection);
       const file = args.find(argument => argument.startsWith('--file='))!.slice(7);
@@ -121,6 +121,7 @@ test('latest source snapshot refreshes target and applies the exact setupDatabas
   assert.ok(psql.args.includes('--single-transaction')); assert.ok(psql.args.includes('--set=ON_ERROR_STOP=1'));
   assert.ok(refresh.startsWith('ALTER TABLE public.transactions DROP COLUMN merchant_normalized;\nDROP FUNCTION public.cake_normalize_merchant(text);\n'));
   assert.ok(refresh.includes(await readFile(new URL(migration019.name, migrationDirectory), 'utf8')));
+  assert.ok(refresh.includes("SET LOCAL search_path = public;\nDO $cake_migration$"));
   assert.ok(refresh.includes("INSERT INTO schema_migrations (name) VALUES ('019_merchant_normalization.sql');"));
   assert.ok(!/DROP SCHEMA|CASCADE/i.test(refresh));
   assert.equal(queries[0].includes('COMMIT'), false); assert.deepEqual(events.slice(-3), ['before-write','refresh','after-write']);
@@ -194,11 +195,16 @@ test('real SQL refresh replaces all 13 tables and rolls back the original 019 ta
       if (args[0] === '--version') return `${program} (PostgreSQL) 18.6`;
       if (program === 'pg_dump') { await writeFile(args.find(argument => argument.startsWith('--file='))!.slice(7), 'private archive'); return ''; }
       if (program === 'pg_restore' && args[0] === '--list') return toc;
-      if (program === 'pg_restore') { await writeFile(args.find(argument => argument.startsWith('--file='))!.slice(7), sourceSql); return ''; }
+      if (program === 'pg_restore') { await writeFile(args.find(argument => argument.startsWith('--file='))!.slice(7), "SELECT pg_catalog.set_config('search_path', '', false);\n" + sourceSql); return ''; }
       const sql = await readFile(args.find(argument => argument.startsWith('--file='))!.slice(7), 'utf8');
+      const savedPath = (await targetDb.query<{ search_path: string }>('SHOW search_path')).rows[0].search_path;
       await targetDb.exec('BEGIN');
       try { await targetDb.exec(sql); if (injectedFailure) await targetDb.query('SELECT 1/0'); await targetDb.exec('COMMIT'); }
       catch (error) { await targetDb.exec('ROLLBACK'); throw error; }
+      finally {
+        // The psql process ends independently of the caller's verification session.
+        await targetDb.query("SELECT pg_catalog.set_config('search_path',$1,false)", [savedPath]);
+      }
       return '';
     } };
   const options = { source: sourceConnection, target: targetConnection, beforeWrite: async () => undefined, afterWrite: async () => undefined };
