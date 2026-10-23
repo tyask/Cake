@@ -100,6 +100,8 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
           if (width >= 700) {
             await auto().hover();
             assert.equal(await page.getByRole("tooltip").innerText(), description);
+            await page.getByRole("tooltip").hover();
+            assert.equal(await page.getByRole("tooltip").isVisible(), true, "説明へマウスを移動しても表示を保持する");
             await page.getByRole("heading", { name: "明細を取込", exact: true }).hover();
             await page.getByRole("tooltip").waitFor({ state: "hidden" });
             await auto().focus();
