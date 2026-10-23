@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { config, uuid } from '../preview/preview-model';
 import staging from '../../staging.config.json';
+import { isProductionDatabaseHostDigest } from '../../lib/server/production-database-hosts.mjs';
 import { fullSha, validTaskBranch } from '../task/task-workflow';
 
 type Environment = Readonly<Record<string, string | undefined>>;
@@ -19,7 +20,7 @@ export function provisioningBuild(environment: Environment): boolean {
     || environment.CAKE_PREVIEW_SOURCE_BRANCH !== environment.VERCEL_GIT_COMMIT_REF
     || !fullSha(environment.CAKE_PREVIEW_SOURCE_SHA)
     || environment.CAKE_PREVIEW_SOURCE_SHA !== environment.VERCEL_GIT_COMMIT_SHA
-    || environment.CAKE_PREVIEW_PRODUCTION_HOST_SHA256 !== config.productionHostDigest
+    || !isProductionDatabaseHostDigest(environment.CAKE_PREVIEW_PRODUCTION_HOST_SHA256)
     || environment.CAKE_PREVIEW_DATABASE_BRANCH_ID !== ''
     || environment.CAKE_PREVIEW_DATABASE_HOST_SHA256 !== '') {
     throw new Error('Preview準備用ビルドの対象を確認できません。アプリ・DB操作は開始しません。');

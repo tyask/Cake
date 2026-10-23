@@ -1,4 +1,5 @@
-import { config, protocol, sameDatabase, uuid, type Database, type Source } from './preview-model';
+import { protocol, sameDatabase, uuid, type Database, type Source } from './preview-model';
+import { isProductionDatabaseHostDigest } from '../../lib/server/production-database-hosts.mjs';
 import type { Receipt } from './preview-service';
 import { fullSha, previewUrl, validTaskBranch } from '../task/task-workflow';
 
@@ -31,7 +32,7 @@ function database(value: unknown): Database {
   if (typeof db.branchId !== 'string' || !/^br-[a-z0-9-]+$/.test(db.branchId)
     || typeof db.endpointId !== 'string' || !/^ep-[a-z0-9-]+$/.test(db.endpointId)
     || typeof db.hostDigest !== 'string' || !/^[a-f0-9]{64}$/.test(db.hostDigest)
-    || db.hostDigest === config.productionHostDigest) return invalid();
+    || isProductionDatabaseHostDigest(db.hostDigest)) return invalid();
   return db as Database;
 }
 function validate(value: unknown): OperationReceipt {

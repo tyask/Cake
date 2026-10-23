@@ -109,7 +109,7 @@ PR本文の要約は次の形式を使う。各値は今回の実際のレビュ
 | 同PRの更新 | 同じDB/endpoint/generationを維持し、未適用migrationとbuildを実行。初回seed済みのデータ・ユーザー名・権限を上書きしない |
 | PR merge/close | 紐づく全Deployment（準備用・旧版・失敗したものを含む）と専用DB/endpointを削除 |
 
-準備用のREADYだけではPreview完成とせず、statusは現在HEADのapplicationだけを返す。準備用の対象・branch/SHA・世代・本番host digestが不明なら静的生成も停止し、準備用でDB接続ガードを緩めない。静的成果物は既存Next.js builderが受け取るBuild Output API v3形式で `.next/output` に生成し、通常アプリのbuild前に `.next/output` と `.vercel/output` を除去する。準備用はルートのGET/HEADだけを表示し、API・ログイン・他のパスやPOSTは404となる。準備用の生成自体が失敗した場合はエラーとして止める。
+準備用のREADYだけではPreview完成とせず、statusは現在HEADのapplicationだけを返す。準備用の対象・branch/SHA・世代・本番host digestが不明なら静的生成も停止し、準備用でDB接続ガードを緩めない。準備用へ注入された本番digestは、対象コードの設定にある `productionHostDigests` のいずれかと厳密に一致させる。現用PG18・保持旧PG17の両DBを同じ禁止集合に含め、アプリ接続・provider・Deployment metadata・正式receiptで全件を拒否する。静的成果物は既存Next.js builderが受け取るBuild Output API v3形式で `.next/output` に生成し、通常アプリのbuild前に `.next/output` と `.vercel/output` を除去する。準備用はルートのGET/HEADだけを表示し、API・ログイン・他のパスやPOSTは404となる。準備用の生成自体が失敗した場合はエラーとして止める。
 
 DB setupは台帳初期化後に履歴を一度取得し、未適用ファイルだけを本文読込・適用する。全適用済みの通常再実行は本文0読込・2往復となる。Preview初回の所有権確保前は全原文のhash/bootstrap照合を維持し、空DBまたは承認済みfixture以外を受け入れない。同一世代では既存markerを照合して適用済み本文の読込を省く。各migrationの実行DO内でもadvisory lockと履歴再確認を行い、失敗時はそのSQLと履歴を一緒にrollbackする。過去に適用したSQLの変更検知や再適用のための仕組みではなく、既存migrationの原文は変更せず番号付きファイルを追加する。
 
@@ -226,9 +226,11 @@ closeして削除確認を依頼された場合は次を行う。
 
 失敗した場合は削除済み・残存・未確認のIDを分けて報告する。cleanupを再実行する必要があり、その対象削除が承認済みの場合だけ `npm run qa:release -- --pr <閉じたPR番号>` を使う。再作成で復旧しない。確認は既存資源の削除であり、開始済みFunction/transactionの即時停止を保証しない。
 
+現用本番はPG18・UTF8で、旧PG17 DBと復旧用branchは保持する。将来のmajor version更新・復旧は、[本番DB運用手順](production-database-upgrade.md)で対象・バックアップ・同期・接続切替・新しいProduction Deployment・本人確認を確認する。PR専用DBや常設Previewを本番用途へ流用しない。
+
 ## 7. 管理側の契約と停止条件
 
-- `preview.config.json` はrepository、Vercel project/team、Neon project/親branch、本番host digest、 `receiptTransport: github-actions-notice/v1` を固定する。provider protocolは `cake-preview/v1` 、DB markerはversion 2。具体IDの正本は設定ファイルを参照する。
+- `preview.config.json` はrepository、Vercel project/team、Neon project/親branch、現用PG18本番の `productionHostDigest` と本番用途の禁止集合 `productionHostDigests`、 `receiptTransport: github-actions-notice/v1` を固定する。禁止集合は現用値を含む非空・重複なしの64桁hexとし、不正なら停止する。配列を省略した設定は現用値1件として扱う。保持旧PG17の値も集合へ残す。provider protocolは `cake-preview/v1` 、DB markerはversion 2。Previewの具体IDと本番host digestの正本は設定ファイル、本番資源の識別情報は[本番DB運用手順](production-database-upgrade.md)を参照する。
 - `.github/workflows/preview.yml` は信頼済みmainだけをcheckoutし、PR単位のconcurrencyで直列化する。PRコードはVercel側で対象SHAをbuildする。手動dispatchの `controlSha` は実行時main SHAと一致させる。
 - Actions結果は標準noticeから受け取り、run/初回attempt/job/check/suite/repository/appと、PR/HEAD/operation/control SHA/時刻を照合する。receiptは公開項目だけ、4,096 UTF-8 bytes以下。Checks書込やartifact取得は使わない。
 - 欠落・重複・不正JSON・切詰め・秘密mask・対象変更・応答不明では停止する。単なるrun成功や過去receiptで現在の資源照合を省略しない。自動runの成否と、CLIで再取得する正式statusを区別する。

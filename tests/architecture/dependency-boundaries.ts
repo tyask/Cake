@@ -9,6 +9,7 @@ type Dependency = { specifier: string | null; position: number };
 type Module = { client: boolean; dependencies: Dependency[] };
 
 const sourceExtension = /\.(?:[cm]?[jt]s|[jt]sx)$/;
+const declarationExtension = /\.d\.[cm]?ts$/;
 const assetExtension = /\.(?:css|json|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|otf)$/;
 const ignoredDirectories = new Set([".git", ".cake", ".next", "node_modules"]);
 const sharedPackages = new Set(["zod", "papaparse"]);
@@ -37,7 +38,7 @@ export async function readProjectSources(root: string): Promise<Map<string, stri
       const path = join(directory, entry.name);
       const generatedOutput = directory === root && (entry.name === "out" || entry.name === "build");
       if (entry.isDirectory() && !ignoredDirectories.has(entry.name) && !generatedOutput) await visit(path);
-      else if (entry.isFile() && sourceExtension.test(entry.name)) {
+      else if (entry.isFile() && sourceExtension.test(entry.name) && !declarationExtension.test(entry.name)) {
         sources.set(relative(root, path).split(sep).join("/"), await readFile(path, "utf8"));
       }
     }

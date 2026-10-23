@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { isProductionDatabaseHostDigest } from '../../lib/server/production-database-hosts.mjs';
 import { array, config, deployment, hostDigest, object, sameDatabase, source, text, type Database, type Deployment, type Source } from './preview-model';
 export type Provider = 'github' | 'vercel' | 'neon';
 export type Transport = (provider: Provider, path: string, method?: string, body?: unknown, missing?: boolean) => Promise<unknown>;
@@ -96,7 +97,7 @@ export class PreviewProvider {
     const e = candidates[0];
     if (e.project_id !== config.neonProjectId || e.type !== 'read_write' || !/^ep-[a-z0-9-]+$/.test(String(e.id))) throw new Error('PREVIEW_DATABASE_IDENTITY');
     const database = { branchId: String(b.id), endpointId: String(e.id), hostDigest: hostDigest(text(e.host)) };
-    if (database.hostDigest === config.productionHostDigest || known && !sameDatabase(database, known)) throw new Error('PREVIEW_DATABASE_IDENTITY');
+    if (isProductionDatabaseHostDigest(database.hostDigest) || known && !sameDatabase(database, known)) throw new Error('PREVIEW_DATABASE_IDENTITY');
     // Cross-check list membership with exact provider GETs before trusting IDs.
     const directB = object(object(await this.api('neon', `/projects/${config.neonProjectId}/branches/${database.branchId}`)).branch);
     const directE = object(object(await this.api('neon', `/projects/${config.neonProjectId}/endpoints/${database.endpointId}`)).endpoint);

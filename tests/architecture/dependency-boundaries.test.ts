@@ -13,7 +13,7 @@ test("製品コードの実行場所と推移的な依存境界を維持する",
   assert.equal(violations.length, 0, formatBoundaryViolations(violations));
 });
 
-test("build/outという名前の下位ソースを収集し、rootの生成物だけを除外する", async t => {
+test("下位build/outのソースを収集し、root生成物と実行されない型宣言を除外する", async t => {
   const root = await mkdtemp(join(tmpdir(), "cake-boundary-sources-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const files = {
@@ -24,6 +24,10 @@ test("build/outという名前の下位ソースを収集し、rootの生成物�
     "build/generated.ts": "export const output = true;",
     "out/generated.ts": "export const output = true;",
     "node_modules/package/index.ts": "export const dependency = true;",
+    "next-env.d.ts": 'import "./.next/types/routes.d.ts";',
+    "types/auth.d.ts": 'import "next-auth";',
+    "lib/server/ports.d.mts": 'import "node:fs";',
+    "lib/server/ports.d.cts": 'import "node:fs";',
   };
   for (const [path, source] of Object.entries(files)) {
     const parts = path.split("/");
