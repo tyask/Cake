@@ -110,6 +110,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
   let stage: Stage = 'proof', currentCase: Case | undefined, caseStarted = 0;
   let browser: Browser | undefined, server: Awaited<ReturnType<typeof startCloudServer>> | undefined;
   let interrupted = false, baselineIds: string[] | undefined;
+  let activePage: Page | undefined;
   const contexts = new Set<BrowserContext>();
   const interrupt = () => {
     interrupted = true;
@@ -158,7 +159,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       });
       contexts.add(context); proof.resources.browserContexts = contexts.size;
       let routeFailed = false;
-      const page = await context.newPage(); page.setDefaultTimeout(30_000);
+      const page = await context.newPage(); activePage = page; page.setDefaultTimeout(30_000);
       stage = 'boundary';
       // Playwright routes only the first URL in a redirect chain; CDP checks every hop.
       const interception = await context.newCDPSession(page);
