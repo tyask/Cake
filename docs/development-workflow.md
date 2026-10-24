@@ -1,12 +1,13 @@
 # 開発・QA運用手順
 
-CakeはPRごとのVercel Preview固有URLと専用Neon Native DBで検証する。WSL2/LinuxまたはWindowsネイティブで開発し、通常CI・Preview/DB管理・close時cleanupはmainのActionsで実行する。PRと検証報告は日本語で書く。
+CakeはPRごとのVercel Preview固有URLと専用Neon Native DBで検証する。WSL2/Linux、Codex CloudまたはWindowsネイティブで開発し、通常CI・Preview/DB管理・close時cleanupはmainのActionsで実行する。PRと検証報告は日本語で書く。
 
 ## 1. 環境と作業ディレクトリ
 
 [.node-version](../.node-version) のNode.js・npm・Git・既存本人認証済みgh・公式Playwright Chromiumを使う。ローカルと全Actionsがこの完全版を共用する。`npm run check:node` は依存導入前でも版を確認でき、`task:start` と高速確認の冒頭でも実行する。ローカルの実行版を検証報告へ記録する。Vercelは `engines.node` の24系を選び、minor/patchを自動更新するため、ローカル/Actionsの完全版確認をbuild時には適用しない。
 
 - WSL2はLinux版ツールを使う。[WSL開発・ブラウザ検証](wsl-development.md)で環境・認証・実行方法を確認する。
+- Codex Cloudは[Cloud開発・ブラウザ検証](cloud-development.md)の`setup:cloud`で依存・公式Chromiumを準備し、`dev:cloud` / `qa:cloud`で外部DBなしのCake起動・画面操作を確認する。GitHubはCloudに連携された権限を使う。
 - WindowsはPowerShellで `npm.cmd` / `npx.cmd` を使い、[Windows QA手順](windows-qa-credentials.md)で保存済み資格情報を扱う。
 - タスクごと、OSごとに独立したclone/worktreeを使う。既存変更を保持し、依存・build成果物・ `.cake` ・環境ファイルを分離する。資格情報を別環境からコピーしない。
 - PATH補完は当該プロセスに限定する。globalのGit/PATH・CA・proxy・セキュリティ設定は変更しない。追跡テキストのLFは `.gitattributes` に従う。
@@ -18,6 +19,8 @@ npm run task:start -- feature-name
 ```
 
 このコマンドは最新 `origin/main` から `codex/feature-name` と専用worktreeを作り、その中で `npm ci` を実行する。作業先を変える場合は `CAKE_WORKTREE_ROOT` をそのプロセスだけに指定する。
+
+同じCloud環境内の並列タスクもworktree・ポートを分ける。Cloud用CakeはNode + PGliteのオンメモリDBに全migration・非管理者A/B・共有workspace・架空サンプルを設定し、停止時にDBを破棄する。Google/Vercelや外部DBの秘密値は不要で、他環境からコピーしない。CloudブラウザQAの結果は`.cake/cloud/`に保存し、正式Preview証拠とは区別する。
 
 実装前に[設計・実装原則](design-principles.md)を読み、変更する操作のデータ経路・共有する規則・保存と取得の順序・処理量・更新の整合性を確認する。関係する判断と分岐は基本/詳細設計へ反映し、同じ観点を自己レビュー・別Agentレビューでも確認する。
 
@@ -66,6 +69,8 @@ npm run build
 ```
 
 `npm test` は Node.js 24 の `node --import tsx --test --test-concurrency=2 "tests/**/*.test.ts"` で対象領域別のテストと `tests/architecture/` の依存境界検査を再帰的に実行する。globは引用してNodeへ渡し、下位ディレクトリのテストを取りこぼさない。ファイルごとのプロセス分離を保ち、同時実行を2つまでに制限する。fixture・PGlite・スタブ・ローカルChromiumを使い、実DBへ接続しない。ローカルCake全体の起動や実Previewでの操作とは区別する。文書のみの変更はリンク、コマンド、現行実装との整合性を確認する。アプリテストを省略した場合は理由を報告する。
+
+Cloudでは上記に加えて`npm run qa:cloud`を実行する。コマンド自身がCakeと新しいオンメモリDBを起動し、PC/mobile × 非管理者A/Bの画面移動と取引CRUDを確認して、終了時にサーバー・DBを破棄する。必要なら`-- --port 3001`で空いたポートを指定する。管理者機能・Google認証・provider固有の挙動は対象外で、必要な正式Preview検証は後段で行う。実行例と報告範囲は[Cloud手順](cloud-development.md#4-自動テストとcloudブラウザqa)を参照する。
 
 PRのタイトル・本文・コメント・レビューコメント・検証報告は日本語にする。コマンド、識別子、エラーコード、引用するログは原文のままでよい。PR本文は最終的な問題・変更内容・検証結果を記載し、作業途中の経緯や過去の受入記録を混ぜない。
 
@@ -180,7 +185,7 @@ OPEN PR・branch・完全SHA・READY application Deployment ID・固有URL・DB 
 
 | 認証 | 使用先 |
 | --- | --- |
-| OS側の既存gh本人認証 | PR/CI/Actions/Checksの管理・読取。 `GH_TOKEN` / `GITHUB_TOKEN` が設定されていればそちらが優先される |
+| OS側の既存gh本人認証、Cloudでは連携されたGitHub権限 | PR/CI/Actions/Checksの管理・読取。 `GH_TOKEN` / `GITHUB_TOKEN` が設定されていればそちらが優先される |
 | Actionsの `VERCEL_TOKEN` ・ `NEON_API_KEY` | mainのprovider管理。値をローカルへ移さない |
 | WSL側の本人Vercel認証、またはWindowsの保存済み資格情報 | 同一project/teamのdevelopment OIDC取得。QA処理のメモリ内だけで扱う |
 | PreviewのテストユーザーA/B | アプリへのログイン。Vercel保護の認証とは別 |
@@ -189,7 +194,7 @@ Vercelはproject読取とOIDC取得で確認し、 `whoami` の結果だけでpr
 
 ## 5. 実Previewのブラウザ検証
 
-WSLでは[WSL手順](wsl-development.md#実previewの正式ブラウザ検証)、Windowsでは[Windows QA手順](windows-qa-credentials.md)を使う。公式Playwright Chromiumを一時プロファイルで起動し、終了時にセッションを破棄する。OIDCは同一project/team・development・有効期限を確認し、redirect各hopを含めて対象originだけへ付ける。TLS/CA/権限の問題を保護や証明書検証の無効化で回避しない。
+WSLでは[WSL手順](wsl-development.md#実previewの正式ブラウザ検証)、Windowsでは[Windows QA手順](windows-qa-credentials.md)を使う。Cloudでは[Cloud手順](cloud-development.md#5-pr自動preview本人確認)から既存の`qa:verify:ci`とremote proofを使える。公式Playwright Chromiumを一時プロファイルで起動し、終了時にセッションを破棄する。OIDCは同一project/team・development・有効期限を確認し、redirect各hopを含めて対象originだけへ付ける。TLS/CA/権限の問題を保護や証明書検証の無効化で回避しない。
 
 標準helperはPC/mobile × A/Bでログイン、ホーム・取引明細・設定への16クリック、session/app GETとruntime proofの12観測を検証する。通常はGET/HEAD/OPTIONSとテスト認証callback POSTだけを許可する。前後のstatusで同じPR/SHA/Deployment/DB/generationを確認し、 `.cake/verification.json` と画面画像を保存する。検証実装のSHAとruntime対象のSHAも区別する。既存Chromeでの目視確認だけを正式証跡と扱わない。
 
@@ -215,6 +220,8 @@ Codexは次の条件をすべて確認し、マージ可能と判断したら、
 4. PR本文に最終変更内容と、今回の成功・失敗・未実施、根拠・制約・残る資源、最新の別Agentレビュー要約と詳細コメントへのリンクを日本語で記載している。詳細コメントの対象SHA・指摘への対応・再レビュー結果と本文が一致している。
 
 条件未達ならdraftを維持し、阻害要因と必要な対応を報告する。Ready直前にもPRのHEADとレビュー記録・検証証拠の一致を再確認し、更新後に過去SHAの成功を再利用しない。
+
+`qa:cloud`のローカル結果・画像は正式Previewのブラウザ証拠を代替しない。Cloudで開発した場合も上記のReady条件と既存の証拠gateを維持する。
 
 **アプリ変更のReady操作：** ローカル証拠は対象worktreeの `task:pr` で再照合する。Actionsで検証する場合は、最新mainとHEADが一致するcleanなcontrol checkoutから既存対象を指定する。これはWSL上のブラウザ検証とは別の実行環境である。
 

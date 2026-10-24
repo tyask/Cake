@@ -273,6 +273,7 @@
               <tr><td><code>scripts/preview/</code></td><td>Preview・常設PreviewのActions要求、provider管理、receipt・status・正式ブラウザ検証。</td></tr>
               <tr><td><code>scripts/build/</code></td><td>Vercel buildの実行順序と準備用静的配置。</td></tr>
               <tr><td><code>scripts/db/</code></td><td>migration、テストユーザー・サンプルseed、初期fixture生成。</td></tr>
+              <tr><td><code>scripts/cloud/</code></td><td>Cloudの依存準備、Node + PGliteのローカル起動、Cake全体のブラウザQA。</td></tr>
               <tr><td><code>scripts/tooling/</code></td><td>ローカル/ActionsのNode版確認、文書内のローカル参照検査。</td></tr>
               <tr><td><code>scripts/qa/db/</code>・<code>scripts/qa/windows/</code></td><td>実DBシナリオ・性能計測、Windows資格情報・QA子プロセスとC# helper。</td></tr>
               <tr><td><code>tests/shared/</code>・<code>tests/client/</code>・<code>tests/server/</code></td><td>共通業務規則、UI・ブラウザ制御、HTTP・サービス・SQLの回帰。</td></tr>
@@ -402,7 +403,7 @@
           <div class="table-wrap"><table>
             <thead><tr><th>ファイル</th><th>主要処理</th></tr></thead>
             <tbody>
-              <tr><td>lib/server/database/db.ts / db-query-logging.ts / database-environment.ts / database-connection.mjs</td><td><code>db()</code>でNeonクライアントを遅延生成・再利用。PreviewはテストDB接続を必須とし、本番接続へのfallbackを禁止。<code>instrumentDatabase()</code>で単発/Transactionの実行時間と安全な識別情報を記録。</td></tr>
+              <tr><td>lib/server/database/db.ts / db-query-logging.ts / database-environment.ts / database-connection.mjs</td><td><code>db()</code>で通常はNeonクライアントを遅延生成・再利用し、CloudではローカルsidecarのオンメモリDBを使う。PreviewはテストDB接続を必須とし、本番接続へのfallbackを禁止。<code>instrumentDatabase()</code>で単発/Transactionの実行時間と安全な識別情報を記録。</td></tr>
               <tr><td>lib/server/auth/current-user.ts / auth-callbacks.ts / auth-mode.ts</td><td><code>getCurrentUser()</code>、<code>resolveSessionUser()</code>、<code>createAuthCallbacks()</code>、Productionでのテスト認証無効化。</td></tr>
               <tr><td>lib/server/auth/user-access.ts<br />lib/shared/schemas/user-profile.ts<br />lib/shared/test-users.ts</td><td>登録・有効状態・管理者権限のDB確認、表示名更新・入力schema、固定テストユーザー定義。</td></tr>
               <tr><td>lib/server/handlers/app-handlers.ts<br />lib/server/services/<br />lib/server/stores/app-store.ts / settlement-store.ts</td><td>HTTPの認証・入力/応答、actionの振分け、workspace/招待・明細・ルール・取込・清算の業務条件、SQL実行を分離する。サービスは差し替え可能なstoreを受け取る。</td></tr>
@@ -1206,6 +1207,15 @@ BootstrapData extends BootstrapMetadata
             </tbody>
           </table></div>
           <p>テストは対象領域別の<code>tests/</code>配下に置く。<code>*.test.ts</code>は<code>npm test</code>で再帰的に実行し、<code>*.typecheck.ts</code>はTypeScriptの型検査で確認する。純粋関数、PGliteのSQL、外部コマンドのスタブ、スクリプト起動、ローカルChromiumのUIを検証する。隔離実DBの制約・同時操作と実Previewのブラウザ操作は別途確認する。</p>
+          <h3 id="cloud-runtime">CloudのローカルCakeとブラウザQA</h3>
+          <div class="layers" role="img" aria-label="CloudのブラウザからNext.jsの画面とAPIを経由し、Node sidecar内のオンメモリPGliteへ接続する流れ">
+            <div class="layer"><strong>Browser</strong><small>公式Playwright Chromium<br />PC/mobile・テストA/B</small></div>
+            <div class="layer"><strong>Next.js dev</strong><small>0.0.0.0で待受<br />既存の画面・認証・API・store</small></div>
+            <div class="layer"><strong>Node sidecar</strong><small>HMR/workerから共有<br />SQL・Transactionの実行</small></div>
+            <div class="layer"><strong>PGlite</strong><small>オンメモリDB<br />全migration・local fixture・架空サンプル</small></div>
+          </div>
+          <p><code>dev:cloud</code>がDB sidecarとNext.jsを管理する。全migration適用後、既存local test profileの固定A/Bを両方非管理者で登録し、共有workspaceと架空サンプルを用意する。通常のAuth.jsテスト認証・API・SQLを通し、外部Neon DBやGoogle OAuthは使わない。DBをNext.jsのworker内へ置かずsidecarで所有するため、HMRとworker間で同じ更新を参照する。停止・再起動でDBを破棄し、Previewのデータとは同期しない。Cloud用の子プロセスに外部DB・Google/Vercel等の秘密値を継承せず、Vercel上でのCloudモード実行を拒否する。</p>
+          <p><code>qa:cloud</code>はサーバーと新しいDBを自分で起動し、PC/mobile × 非管理者A/Bのログイン・画面移動と取引の追加・編集・削除を検証する。SHA・結果・画面画像をGit外の<code>.cake/cloud/</code>に保存し、終了時に起動したサーバーとDBを破棄する。管理者機能・Google認証・providerの実DB/配置固有の挙動は対象外。Cloud結果は正式Previewのruntime proof・前後status・Ready証拠の代わりにしない。同一Cloudの並列実行は専用worktreeとポートを分ける。setup、任意port、PRから既存Actionsへの引継ぎは<a href="cloud-development.md">Cloud手順</a>を参照する。</p>
           <p>定期支払いの実DB回帰は、承認された対象タスクの<code>CAKE_TEST_DATABASE_URL</code>を設定し、<code>npx tsx scripts/qa/db/verify-recurring-payments.ts</code>で実行する。09:00境界・月末・即時変更/再開・設定日変更後の月内複数登録・同時実行・失敗時rollbackを検証し、新規検証データだけを作成・削除する。環境ファイルや本番の<code>DATABASE_URL</code>は読み込まない。日付比較はNeonが直接SELECTで返すDateとJSONB内のYYYY-MM-DD文字列を同じ暦日へ整形し、日時比較はミリ秒を保持する。通常の<code>npm test</code>でもUTC・Asia/Tokyo・America/Los_Angelesでドライバーの返却型を使う回帰を実行するが、こちらはDBへ接続せず、実DB回帰とは別の検証である。</p>
           <p>CSVカテゴリの実DB並行検証は、承認されたPRの現在commitに独立行<code>[cake-db-qa:csv-categories]</code>がある場合だけ、Native専用接続を持つPreview/test/application build内で<code>scripts/qa/db/verify-csv-category-concurrency.ts</code>を実行する。行の前後空白だけを除いて比較し、文中・未知のmarkerは無視する。Production・準備用・常設Preview・Development・ローカルでは実行しない。子プロセスへ渡す環境は専用接続、完全SHA・branch・Deployment・DB世代等のidentity、Node/TLSの明示allowlistに限定し、provider token・認証secret・共通DATABASE_URLを継承しない。接続前と各sessionで本番分離・既存DB markerを確認し、独立した二つの実DB sessionと監視sessionでロック待機・確定結果・rollbackを検証する。新規fixtureだけを削除し、既存データ保持と残存0件を確認する。公開結果<code>cake-csv-category-db-qa/v1</code>をbuildログへ記録し、通常migration・初回seedの更新は検証fixtureとは別に報告する。秘密値・業務DTO・生例外は保存しない。実行方法と前後statusの照合は<a href="development-workflow.md#pr-preview-build内の実db並行検証">開発・QA運用手順</a>を参照する。</p>
           <h3>コマンドとデプロイ</h3>
@@ -1215,6 +1225,8 @@ BootstrapData extends BootstrapMetadata
             <thead><tr><th>コマンド</th><th>目的</th></tr></thead>
             <tbody>
               <tr><td><code>npm run task:start -- &lt;タスク名&gt;</code></td><td>originを取得し、main-only Git設定を導入した最新origin/mainからcodex/ブランチと専用worktreeを作成してnpm ci。元の未コミット変更・環境設定を保持。</td></tr>
+              <tr><td><code>npm run setup:cloud</code></td><td>Node版を確認し、npm ciと公式Playwright Chromiumの導入。<code>-- --with-deps</code>でシステム依存も導入する。</td></tr>
+              <tr><td><code>npm run dev:cloud</code> / <code>npm run qa:cloud</code></td><td>Node + PGliteの外部DB不要Cake起動／自前サーバーでのブラウザQA。<code>-- --port 3001</code>などでNext.jsのポートを指定できる。</td></tr>
               <tr><td><code>npm test</code></td><td><code>node --import tsx --test --test-concurrency=2 "tests/**/*.test.ts"</code>。対象領域別の回帰と依存境界検査を再帰的に実行する。</td></tr>
               <tr><td><code>npm run lint</code> / <code>npm run build</code></td><td>ESLintとNext.js Production build・型/ルート検証。</td></tr>
               <tr><td><code>npm run db:setup</code></td><td>未適用番号付きSQLと適用履歴をatomicに追加。</td></tr>

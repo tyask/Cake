@@ -42,16 +42,17 @@ CSVの「カテゴリ自動補完」は、チェック状態に関係なく登�
 | `lib/client/` | 取得・保存制御、応答反映、ブラウザ保存 |
 | `lib/server/` | 認証、HTTP境界、用途別サービス、DB store・接続 |
 | `lib/shared/` | 型、定数、`schemas/`、CSV変換・割合・清算などの共通計算 |
-| `scripts/` | `task/`・`preview/`・`build/`・`db/`・`tooling/`・`qa/db/`・`qa/windows/` の運用処理 |
+| `scripts/` | `task/`・`preview/`・`build/`・`db/`・`cloud/`・`tooling/`・`qa/db/`・`qa/windows/` の運用処理 |
 | `tests/` | `shared/`・`client/`・`server/`・`tooling/` の回帰と `architecture/` の依存境界検査 |
 
 ## ローカルセットアップ
 
 ### DB接続なしの開発・テスト
 
-WSL2/LinuxまたはWindowsネイティブで、[.node-version](.node-version) に記載したNode.js・npm・Git・既存本人認証済みgh・公式Playwright Chromiumを使います。OSごとに独立したclone/worktreeを用意し、依存・build成果物・環境ファイル・資格情報を混ぜません。
+WSL2/Linux、Codex CloudまたはWindowsネイティブで、[.node-version](.node-version) に記載したNode.js・npm・Git・GitHubの認証・公式Playwright Chromiumを使います。環境ごとに独立したclone/worktreeを用意し、依存・build成果物・環境ファイル・資格情報を混ぜません。GitHubは既存本人認証済みgh、Cloudでは連携された権限を使います。
 
 - WSLは[WSL開発・ブラウザ検証](docs/wsl-development.md)でLinux版ツール・認証・実行方法を確認してください。
+- Codex Cloudは[Cloud開発・ブラウザ検証](docs/cloud-development.md)で外部DBなしのCake起動、ブラウザQA、既存Actionsへの引継ぎを確認してください。
 - WindowsのPowerShellは `npm.cmd` / `npx.cmd` を使います。QAの認証は[Windows QA手順](docs/windows-qa-credentials.md)を参照してください。
 
 ```bash
@@ -67,7 +68,20 @@ npm run build
 
 日常の確認は `npm run check:fast`（Node版・lint・型・依存境界・文書参照）を使えます。対象領域だけの回帰は `test:shared`・`test:client`・`test:server`・`test:tooling`・`test:architecture` を使い、最終検証では `npm test` とbuildまで実行します。文書参照チェックの対象と除外は[開発手順](docs/development-workflow.md#日常の高速確認と文書参照チェック)を参照してください。
 
-以下はlocalhostでCake全体を起動する場合の追加準備です。ログイン後の操作には承認された隔離DB・認証設定・migration/seedが必要です。通常の回帰テストの前提ではなく、他環境から資格情報をコピーしません。既存Previewの検証は[開発手順](docs/development-workflow.md)に従ってください。
+### Codex CloudでCake全体を起動・操作する
+
+NodeとオンメモリのPGliteでCakeを起動できます。Docker・外部DB・Google/Vercelの秘密値は不要です。
+
+```bash
+npm run setup:cloud
+npm run dev:cloud
+# dev:cloudをCtrl+Cで停止してから、自前サーバーでブラウザQA
+npm run qa:cloud -- --port 3001
+```
+
+`dev:cloud`は全migrationと固定の非管理者A/B・共有workspace・架空サンプルを準備します。再起動するとDBは初期状態へ戻ります。`qa:cloud`はPC/mobile × A/Bと取引CRUDを確認し、結果を`.cake/cloud/`に保存します。ポート指定、Chromiumのシステム依存、並列worktree、PRまでの流れは[Cloud手順](docs/cloud-development.md)を参照してください。正式Previewの証拠とReady条件は既存のものを使います。
+
+以下は外部Neon DBを使ってlocalhostでCake全体を起動する場合の追加準備です。ログイン後の操作には承認された隔離DB・認証設定・migration/seedが必要です。通常の回帰テストやCloud起動の前提ではなく、他環境から資格情報をコピーしません。既存Previewの検証は[開発手順](docs/development-workflow.md)に従ってください。
 
 ### 1. Neonを作成
 
@@ -157,12 +171,15 @@ QAのDB初回照合・fixture・migration/seed・同PR更新時のデータ保�
 
 専用worktreeで実装・関連テスト・自己レビューを終えてcommitし、別Agentレビュー→指摘への対応・必要な再レビュー→最終SHAでのローカル検証→draft PR→自動Preview→変更に必要な検証の順に進めます。文書のみの変更も別Agentレビューの対象です。レビュー担当のモデル・推論強度は通常未指定とし、PR本文に最新の要約、PRごとに1件のコメントに詳細を残します。Codexが現在HEADのレビュー・検証を揃えてマージ可能と判断したら、追加確認を待たずReadyにし、このチャットで日本語で通知します。文書のみの変更の検証範囲とReady条件は開発手順を参照してください。PRのタイトル・本文・コメント・レビュー・検証報告は日本語で書きます。「変更内容」は対象機能・変更前後の挙動・主な修正と理由を関連付けて記載します。`task:pr`には説明用の`--changes-file`とレビュー要約を含む検証報告用の`--verification-file`を指定します。マージは依頼された範囲で別に行います。
 
-操作範囲とDB書込、実行前後の対象照合、PR close後の資源削除確認は[開発・QA運用手順](docs/development-workflow.md)にまとめています。WSLは[WSL手順](docs/wsl-development.md)、Windowsは[Windows QA手順](docs/windows-qa-credentials.md)を使います。ローカル自動テスト、実Previewでの画面移動、明細の追加・編集・削除を分けて報告します。
+操作範囲とDB書込、実行前後の対象照合、PR close後の資源削除確認は[開発・QA運用手順](docs/development-workflow.md)にまとめています。WSLは[WSL手順](docs/wsl-development.md)、Codex Cloudは[Cloud手順](docs/cloud-development.md)、Windowsは[Windows QA手順](docs/windows-qa-credentials.md)を使います。ローカル自動テスト、CloudのCake操作、実Previewでの画面移動、明細の追加・編集・削除を分けて報告します。
 
 ## コマンド
 
 ```bash
 npm run dev       # 開発サーバー
+npm run setup:cloud # CloudのNode確認・依存・公式Chromiumの準備
+npm run dev:cloud # オンメモリDB付き開発サーバー
+npm run qa:cloud  # CloudのCake起動・PC/mobile A/B・取引CRUD
 npm run build     # production build
 npm run lint      # ESLint
 npm test          # 回帰テスト・依存境界検査
