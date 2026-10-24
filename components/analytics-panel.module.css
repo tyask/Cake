@@ -81,6 +81,9 @@
   .periodGroup { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .7rem; }
   .conditions > .field { grid-column: 1 / -1; }
   .field input,.field select { width: 100%; }
+  /* 日付系入力の固有幅でグリッド列を押し広げない。 */
+  .field input[type="month"],.field input[type="date"] { display: block; width: 0; min-width: 100%; max-width: 100%; }
+  .field input::-webkit-datetime-edit { min-width: 0; padding: 0; }
   .checkGroup { position: relative; padding-top: .75rem; border-top: 1px solid var(--line); }
   .checkGroup legend { min-height: 1.5rem; line-height: 1.5rem; }
   .memberHelp { position: static; }
