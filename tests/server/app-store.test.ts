@@ -256,6 +256,30 @@ test("明示値と保存済み割合の保存はルールSELECTを省き、省�
   }
 });
 
+test("収入保存は支払いルールを取得せず、種別と正の金額をそのまま保存・応答する", async t => {
+  const receipt = { ...transaction, type: "RECEIPT" };
+  const f = fixture(t, { transaction: receipt });
+  for (const input of [
+    { ...save, type: "RECEIPT" },
+    { ...save, type: "RECEIPT", expenseClass: "SHARED" },
+    { ...save, type: "RECEIPT", transactionId },
+  ]) {
+    f.trips.length = 0;
+    const response = await f.post(input);
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.transaction.type, "RECEIPT");
+    assert.equal(body.transaction.amountYen, save.amountYen);
+    const queries = f.trips.flatMap(trip => trip.queries);
+    assert.equal(queries.some(query => query.query.includes("FROM default_rules")), false);
+    const write = f.trips.at(-1)!;
+    assert.equal(write.transaction, true);
+    assert.ok(write.queries[1].params.includes("RECEIPT"));
+    assert.ok(write.queries[1].params.includes(String(save.amountYen)));
+    assert.equal(write.queries[1].params.includes(String(-save.amountYen)), false);
+  }
+});
+
 test("別workspaceまたは不存在のルール更新は対象SELECT後に書き込まない", async t => {
   const f = fixture(t, { rules: [{ ...ruleRow, workspace_id: transactionId }] });
   for (const id of [ruleId, transactionId]) {

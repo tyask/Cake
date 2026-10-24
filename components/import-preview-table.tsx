@@ -1,6 +1,6 @@
 "use client";
 
-import { formatYen } from "@/lib/shared/display-formatters";
+import { cashflowClass, formatTransactionAmount } from "@/lib/shared/display-formatters";
 
 import { expenseClassLabels, expenseClasses } from "@/lib/shared/domain-values";
 
@@ -14,7 +14,7 @@ import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } fro
 import styles from "./transactions-panel.module.css";
 
 const money = (value: number) => Number.isFinite(value)
-  ? formatYen(value) : "—";
+  ? formatTransactionAmount("PAYMENT", value) : "—";
 
 export function ImportPreviewTable({ rows, members, actorId, saving, categoryChoices, onSelect, onSelectAll, onChangeClass, onChangeSplit, onChangeCategory, onDelete }: {
   rows: PayPayPreviewRow[];
@@ -36,7 +36,7 @@ export function ImportPreviewTable({ rows, members, actorId, saving, categoryCho
     { id: "selection", label: "選択" }, { id: "occurredAt", label: "取引日時" },
     { id: "merchant", label: "取引先" }, { id: "method", label: "方法" },
     { id: "amountYen", label: "金額（円）" }, { id: "actorUserId", label: "支払者" },
-    { id: "expenseClass", label: "費用区分" }, { id: "splitWeights", label: transactionSplitLabel(members) },
+    { id: "expenseClass", label: "区分" }, { id: "splitWeights", label: transactionSplitLabel(members) },
     { id: "category", label: "カテゴリ" }, { id: "status", label: "状態" },
   ] as const;
   return <TransactionTable columns={columns} label="取り込み明細" header={<tr>
@@ -83,13 +83,13 @@ function ImportPreviewRow({ row, members, actorId, saving, categoryChoices, onSe
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell}>{row.occurredAt || "—"}</td>
     <td data-label="取引先"><b>{row.merchant || "—"}</b></td>
     <td data-label="方法">{row.method}</td>
-    <td data-label="金額（円）">{money(row.amountYen)}</td>
+    <td data-label="金額（円）" className={Number.isFinite(row.amountYen) ? cashflowClass(-row.amountYen) : undefined}>{money(row.amountYen)}</td>
     <td data-label="支払者">{actorName}</td>
-    <td data-label="費用区分"><select aria-label={`${row.merchant}の費用区分`} disabled={disabled} value={row.expenseClass} onChange={event => onChangeClass(row.key, event.target.value as ExpenseClass)}>
+    <td data-label="区分"><select aria-label={`${row.merchant}の区分`} disabled={disabled} value={row.expenseClass} onChange={event => onChangeClass(row.key, event.target.value as ExpenseClass)}>
       {expenseClasses.map(value => <option key={value} value={value}>{expenseClassLabels[value]}</option>)}
     </select></td>
     <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}>
-      <SplitEditor compact inline label="支払い割合" members={members} value={row.splitWeights} amountYen={row.amountYen}
+      <SplitEditor compact inline label="配分割合" members={members} value={row.splitWeights} amountYen={row.amountYen}
         disabled={disabled || row.expenseClass === "PERSONAL"} onChange={value => onChangeSplit(row.key, value)} />
     </td>
     <td data-label="カテゴリ" className={styles.categoryCell + " " + styles.fullCell}>

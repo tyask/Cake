@@ -36,7 +36,7 @@ export function changeSplitAmount(total: number, amount: number, memberId: strin
     throw new Error("支払い分は0から合計金額までの整数で設定してください。");
   }
   const valid = validateSplitWeights(weights, members);
-  if (!members.some((member) => member.id === memberId)) throw new Error("支払い割合の参加者が不正です。");
+  if (!members.some((member) => member.id === memberId)) throw new Error("配分割合の参加者が不正です。");
   const others = members.filter((member) => member.id !== memberId);
   if (others.length === 0) {
     if (amount !== total) throw new Error("参加者が一人の場合は全額を負担します。");

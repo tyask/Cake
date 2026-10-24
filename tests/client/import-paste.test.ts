@@ -245,15 +245,15 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
             for (const item of await row(merchant).all()) if (width < 700) await item.getByRole("button", { name: /の詳細を開く$/ }).click();
           }
           assert.equal(await page.getByRole("combobox", { name: /^支払者/ }).inputValue(), "a");
-          assert.equal(await row("和食のお店").first().getByLabel("本人の支払い割合", { exact: true }).inputValue(), "60");
-          assert.equal(await row("個人カフェ").getByLabel("個人カフェの費用区分", { exact: true }).inputValue(), "PERSONAL");
-          assert.equal(await row("個人カフェ").getByLabel("本人の支払い割合", { exact: true }).inputValue(), "100");
+          assert.equal(await row("和食のお店").first().getByLabel("本人の配分割合", { exact: true }).inputValue(), "60");
+          assert.equal(await row("個人カフェ").getByLabel("個人カフェの区分", { exact: true }).inputValue(), "PERSONAL");
+          assert.equal(await row("個人カフェ").getByLabel("本人の配分割合", { exact: true }).inputValue(), "100");
           assert.equal(await row("保存済みのお店").getByRole("checkbox", { name: "保存済みのお店を選択", exact: true }).isDisabled(), true);
           assert.equal(await row("和食のお店").last().getByRole("checkbox", { name: "和食のお店を選択", exact: true }).isDisabled(), true);
           assert.ok((await row("和食のお店").last().textContent())?.includes("CSV内で重複しています"));
           assert.ok((await page.locator(".import-summary").textContent())?.includes("3 / 5件"));
           assert.equal(await page.getByRole("button", { name: "削除", exact: true }).isDisabled(), true);
-          assert.equal(await page.getByRole("button", { name: "個人費に変更", exact: true }).isDisabled(), true);
+          assert.equal(await page.getByRole("button", { name: "個人に変更", exact: true }).isDisabled(), true);
           assert.equal(await page.getByRole("button", { name: "確認して登録", exact: true }).isEnabled(), true);
           for (const checkbox of await page.getByRole("checkbox").all()) assert.equal(await checkbox.isChecked(), false);
           const savedStyle = await row("保存済みのお店").evaluate(element => ({
@@ -276,12 +276,12 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
           assert.equal(await row("除外するお店").count(), 0);
           assert.equal(await page.locator("[data-import-key]").count(), 4);
           assert.ok((await page.locator(".import-summary").textContent())?.includes("2 / 4件"));
-          assert.equal(await row("和食のお店").first().getByLabel("本人の支払い割合", { exact: true }).inputValue(), "60");
+          assert.equal(await row("和食のお店").first().getByLabel("本人の配分割合", { exact: true }).inputValue(), "60");
           await row("個人カフェ").getByRole("checkbox", { name: "個人カフェを選択", exact: true }).check();
-          await page.getByRole("button", { name: "共通費に変更", exact: true }).click();
-          assert.equal(await row("個人カフェ").getByLabel("個人カフェの費用区分", { exact: true }).inputValue(), "SHARED");
-          await page.getByRole("button", { name: "個人費に変更", exact: true }).click();
-          assert.equal(await row("和食のお店").first().getByLabel("和食のお店の費用区分", { exact: true }).inputValue(), "SHARED");
+          await page.getByRole("button", { name: "共有に変更", exact: true }).click();
+          assert.equal(await row("個人カフェ").getByLabel("個人カフェの区分", { exact: true }).inputValue(), "SHARED");
+          await page.getByRole("button", { name: "個人に変更", exact: true }).click();
+          assert.equal(await row("和食のお店").first().getByLabel("和食のお店の区分", { exact: true }).inputValue(), "SHARED");
           assert.equal(requests.length, 1);
           await page.getByRole("button", { name: "確認して登録", exact: true }).click();
           await page.getByRole("alert").filter({ hasText: "検証用の登録失敗" }).waitFor();
@@ -325,7 +325,7 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
           page.once("dialog", dialog => { assert.equal(dialog.message(), "選択した3件を取込一覧から削除しますか？"); void dialog.accept(); });
           await page.getByRole("button", { name: "削除", exact: true }).click();
           assert.equal(await page.locator("[data-import-key]").count(), 2);
-          for (const roleName of ["確認して登録", "削除", "個人費に変更", "共通費に変更"]) assert.equal(await page.getByRole("button", { name: roleName, exact: true }).isDisabled(), true);
+          for (const roleName of ["確認して登録", "削除", "個人に変更", "共有に変更"]) assert.equal(await page.getByRole("button", { name: roleName, exact: true }).isDisabled(), true);
           assert.equal(await page.getByRole("checkbox", { name: "登録可能な明細をすべて選択", exact: true }).isDisabled(), true);
           assert.equal(requests.length, 1);
           await page.getByRole("button", { name: "キャンセル", exact: true }).click();

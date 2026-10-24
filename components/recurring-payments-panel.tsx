@@ -1,6 +1,6 @@
 "use client";
 
-import { formatYen } from "@/lib/shared/display-formatters";
+import { cashflowClass, formatTransactionAmount } from "@/lib/shared/display-formatters";
 
 import { commonExpenseClassLabels, expenseClasses, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/shared/domain-values";
 
@@ -130,7 +130,7 @@ export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: 
     {data && data.eligibleActorUserIds.length === 0 && <p className={tableStyles.bulkError}>現在、支払者として選べる参加者がいません。</p>}
     {data && data.payments.length > 0 && <div className={tableStyles.tableWrap}><table className={`${tableStyles.table} ${styles.table}`} aria-label="定期支払い一覧">
       <colgroup>{["予定", "取引先", "方法", "金額", "支払者", "区分", "割合", "メモ", "状態", "操作"].map((label, index) => <col key={label} className={styles[`column${index}`]} />)}</colgroup>
-      <thead><tr>{["毎月の日 / 次回", "取引先", "方法", "金額（円）", "支払者", "費用区分", `支払い割合（${selected.members.map(member => member.name).join(", ")}）`, "メモ", "状態", "操作"].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
+      <thead><tr>{["毎月の日 / 次回", "取引先", "方法", "金額（円）", "支払者", "区分", `配分割合（${selected.members.map(member => member.name).join(", ")}）`, "メモ", "状態", "操作"].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
       <tbody>{data.payments.map(payment => <RecurringPaymentRow key={payment.id} payment={payment} members={selected.members} busy={busy || loading}
         onEdit={() => setForm({ payment })} onAction={action => setConfirmation({ action, payment })} />)}</tbody>
     </table></div>}
@@ -150,13 +150,13 @@ function RecurringPaymentRow({ payment, members, busy, onEdit, onAction }: { pay
     <td className={tableStyles.mobileSummary} colSpan={10}><SwipeDelete label={config.merchant} disabled={busy} onDelete={() => onAction("archive")}><button type="button" className={`${tableStyles.summaryButton} ${styles.summaryButton}`} aria-expanded={expanded}
       aria-label={`${config.merchant}の詳細を${expanded ? "閉じる" : "開く"}`} onClick={() => setExpanded(current => !current)}>
       <span className={tableStyles.summaryName}><b>{config.merchant}</b><small>毎月{config.dayOfMonth}日 · {actorName}</small></span>
-      <span className={tableStyles.summaryAmount}><strong>{formatYen(config.amountYen)}</strong><small>{stateLabel}</small></span><span className={tableStyles.summaryChevron} aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
+      <span className={tableStyles.summaryAmount}><strong className={cashflowClass(-config.amountYen)}>{formatTransactionAmount("PAYMENT", config.amountYen)}</strong><small>{stateLabel}</small></span><span className={tableStyles.summaryChevron} aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
     </button></SwipeDelete></td>
     <td data-label="毎月の日 / 次回" className={tableStyles.fullCell}><b>毎月{config.dayOfMonth}日</b><small>次回：{payment.nextScheduledOn ? dateLabel(payment.nextScheduledOn) : "—"}</small>
       {config.dayOfMonth >= 29 && <small>その日がない月は月末に追加</small>}</td>
-    <td data-label="取引先"><b>{config.merchant}</b></td><td data-label="方法">{config.method}</td><td data-label="金額（円）">{formatYen(config.amountYen)}</td>
-    <td data-label="支払者">{actorName}</td><td data-label="費用区分">{commonExpenseClassLabels[config.expenseClass]}</td>
-    <td data-label={`支払い割合（${members.map(member => member.name).join(", ")}）`} className={tableStyles.fullCell}><RecurringSplit config={config} members={members} /></td>
+    <td data-label="取引先"><b>{config.merchant}</b></td><td data-label="方法">{config.method}</td><td data-label="金額（円）" className={cashflowClass(-config.amountYen)}>{formatTransactionAmount("PAYMENT", config.amountYen)}</td>
+    <td data-label="支払者">{actorName}</td><td data-label="区分">{commonExpenseClassLabels[config.expenseClass]}</td>
+    <td data-label={`配分割合（${members.map(member => member.name).join(", ")}）`} className={tableStyles.fullCell}><RecurringSplit config={config} members={members} /></td>
     <td data-label="メモ" className={`${tableStyles.fullCell} ${styles.memo}`}>{config.memo || "—"}</td>
     <td data-label="状態" className={tableStyles.fullCell}><span className={payment.state === "BLOCKED" ? "error-tag" : payment.state === "ACTIVE" ? "success-tag" : "class-tag personal"}>{stateLabel}</span>
       {payment.state === "BLOCKED" && <small className={styles.blocked}>{blockedReasonLabel(payment.blockedReason)} 設定を確認して、再開してください。</small>}</td>
@@ -176,7 +176,7 @@ function RecurringSplit({ config, members }: { config: RecurringPaymentConfig; m
     shares = { percentages: splitAmounts(1000, splitWeights, members), amounts: splitAmounts(config.amountYen, splitWeights, members) };
   } catch { /* Saved membership inconsistencies need review, not a fabricated split. */ }
   if (!shares) return <span className={styles.blocked}>割合を確認してください。</span>;
-  return <span className={tableStyles.settledSplit}>{members.map(member => <span key={member.id}><span>{formatYen(shares.amounts[member.id])}</span><small>{shares.percentages[member.id] / 10}%</small></span>)}</span>;
+  return <span className={tableStyles.settledSplit}>{members.map(member => <span key={member.id}><span className={cashflowClass(-shares.amounts[member.id])}>{formatTransactionAmount("PAYMENT", shares.amounts[member.id])}</span><small>{shares.percentages[member.id] / 10}%</small></span>)}</span>;
 }
 
 function RecurringPaymentForm({ selected, currentUserId, data, payment, close, save, reloadLatest }: {
@@ -220,24 +220,24 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
           patch({ merchant, ...(!customized ? recurringFormDefaults(selected, merchant, config.actorUserId, matchRule) : {}) });
         }} /></label>
         <label>取引方法<input required maxLength={MAX_METHOD_LENGTH} value={config.method} onChange={event => patch({ method: event.target.value })} /></label>
-        <label>金額（円）<input type="number" required min="1" max={MAX_AMOUNT_YEN} step="1" value={config.amountYen || ""} onChange={event => patch({ amountYen: Number(event.target.value) })} /></label>
+        <label>金額（円）<span className="signed-amount-input"><span className="negative" aria-hidden="true">−</span><input aria-label="金額（円）" type="number" required min="1" max={MAX_AMOUNT_YEN} step="1" value={config.amountYen || ""} onChange={event => patch({ amountYen: Number(event.target.value) })} /></span></label>
         <label>支払者<select required value={config.actorUserId} onChange={event => {
           const actorUserId = event.target.value;
           patch({ actorUserId, ...(config.expenseClass === "PERSONAL" ? { splitWeights: personalSplitWeights(selected.members, actorUserId) } : {}) });
         }}>{unavailableActor && <option value={config.actorUserId} disabled>支払者を選択してください</option>}{eligible.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
-        <label>費用区分<select value={config.expenseClass} disabled={selected.workspace.type === "PERSONAL"} onChange={event => {
+        <label>区分<select value={config.expenseClass} disabled={selected.workspace.type === "PERSONAL"} onChange={event => {
           const expenseClass = event.target.value as ExpenseClass;
           patch({ expenseClass, splitWeights: expenseClass === "PERSONAL" ? personalSplitWeights(selected.members, config.actorUserId) : defaultSplitWeights(selected.members) }); setCustomized(true);
         }}>{expenseClasses.map(value => <option key={value} value={value}>{commonExpenseClassLabels[value]}</option>)}</select></label>
-        <div className="full"><SplitEditor inline label={`支払い割合（${selected.members.map(member => member.name).join(", ")}）`} amountYen={config.amountYen} members={selected.members} value={config.splitWeights}
+        <div className="full"><SplitEditor inline label={`配分割合（${selected.members.map(member => member.name).join(", ")}）`} amountYen={config.amountYen} members={selected.members} value={config.splitWeights}
           disabled={saving || config.expenseClass === "PERSONAL" || !splitValid} onChange={splitWeights => { patch({ splitWeights }); setCustomized(true); }} />
-          {!splitValid && <p className="form-error">負担割合の参加者を確認してください。「取引先のルールを適用」で現在の参加者の割合に設定し直せます。</p>}
-          <p className="ratio-note">{config.expenseClass === "PERSONAL" ? "個人費は支払者の負担が100%になります。" : "割合・金額で設定できます。相手の分は自動計算します。"}</p>
+          {!splitValid && <p className="form-error">配分割合の参加者を確認してください。「取引先のルールを適用」で現在の参加者の割合に設定し直せます。</p>}
+          <p className="ratio-note">{config.expenseClass === "PERSONAL" ? "区分が「個人」の場合、支払者に100%を配分します。" : "割合・金額で設定できます。相手の分は自動計算します。"}</p>
           <button type="button" className="text-button" disabled={!config.actorUserId} onClick={applyDefaults}>取引先のルールを適用</button></div>
       </div><label className={`new-transaction-memo ${styles.memoLabel}`}>メモ<textarea rows={2} maxLength={MAX_TRANSACTION_MEMO_LENGTH} value={config.memo} onChange={event => patch({ memo: event.target.value })} /></label></fieldset>
-      {preview && <div className={styles.preview}><b>毎月{config.dayOfMonth}日 · {formatYen(config.amountYen)}</b><span>{payment ? "変更後の予定" : "初回予定"}：{preview.firstOn && dateLabel(preview.firstOn)}</span><span>{eligible.find(member => member.id === config.actorUserId)?.name ?? "支払者を選択してください"}の支払い · {commonExpenseClassLabels[config.expenseClass]}</span><RecurringSplit config={config} members={selected.members} />
+      {preview && <div className={styles.preview}><b>毎月{config.dayOfMonth}日 · <span className={cashflowClass(-config.amountYen)}>{formatTransactionAmount("PAYMENT", config.amountYen)}</span></b><span>{payment ? "変更後の予定" : "初回予定"}：{preview.firstOn && dateLabel(preview.firstOn)}</span><span>{eligible.find(member => member.id === config.actorUserId)?.name ?? "支払者を選択してください"}の支払い · {commonExpenseClassLabels[config.expenseClass]}</span><RecurringSplit config={config} members={selected.members} />
         {config.dayOfMonth >= 29 && <small>その日がない月は月末に追加します。</small>}</div>}
-      {payment && <p className={styles.current}>現在：毎月{payment.currentConfig.dayOfMonth}日 / {formatYen(payment.currentConfig.amountYen)} / {payment.currentConfig.merchant}</p>}
+      {payment && <p className={styles.current}>現在：毎月{payment.currentConfig.dayOfMonth}日 / <span className={cashflowClass(-payment.currentConfig.amountYen)}>{formatTransactionAmount("PAYMENT", payment.currentConfig.amountYen)}</span> / {payment.currentConfig.merchant}</p>}
       {error && <p className="form-error" role="alert">{error} 入力内容は保持しています。</p>}
       {conflict && payment && <button type="button" className="text-button" disabled={saving} onClick={() => {
         if (window.confirm("入力中の内容を破棄して、最新の設定を読み込みますか？")) void reloadLatest(payment);

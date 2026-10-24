@@ -81,6 +81,35 @@ test("更新で割合省略時は保存済み共有割合を継承し、明示�
   assert.deepEqual(f.calls[2].args[2], { expenseClass: "SHARED", splitWeights: { a: 1, b: 4 } });
 });
 
+for (const scenario of [
+  { name: "新規で区分・割合省略は個人", input: {}, expected: { expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } } },
+  { name: "共有指定の割合省略はworkspace割合", input: { expenseClass: "SHARED" }, expected: { expenseClass: "SHARED", splitWeights: { a: 1, b: 3 } } },
+  { name: "共有の明示割合を保持", input: { expenseClass: "SHARED", splitWeights: { a: 4, b: 1 } }, expected: { expenseClass: "SHARED", splitWeights: { a: 4, b: 1 } } },
+  { name: "種別を収入へ変更しても保存済み共有配分を保持", input: { transactionId }, expected: { expenseClass: "SHARED", splitWeights: { a: 5, b: 2 } } },
+]) test(`収入に支払いルールを適用しない: ${scenario.name}`, async () => {
+  const f = fixture({
+    splitRules: async () => { throw new Error("収入に支払いルールを読み込まない"); },
+    previousTransaction: async () => ({ expense_class: "SHARED", actor_user_id: "a", split_weights: { a: 5, b: 2 } }),
+    insertTransaction: async () => ({ ...savedRow(), type: "RECEIPT" }),
+    updateTransaction: async () => ({ ...savedRow(), type: "RECEIPT" }),
+  });
+  const result = await f.execute({ ...save, ...scenario.input, type: "RECEIPT" });
+  assert.ok("transaction" in result);
+  assert.ok(result.transaction && typeof result.transaction === "object" && "type" in result.transaction && "amountYen" in result.transaction);
+  assert.equal(result.transaction.type, "RECEIPT");
+  assert.equal(result.transaction.amountYen, save.amountYen);
+  assert.deepEqual(f.calls.at(-1)!.args[2], scenario.expected);
+  assert.equal(f.calls.some(call => call.name === "splitRules"), false);
+});
+
+test("収入の割合省略はルール判定にも触れず、参加者と入力割合は引き続き検証する", () => {
+  const context = { members, get matchRule(): never { throw new Error("収入にルール判定を使わない"); } };
+  assert.deepEqual(resolveTransactionSplit({ merchant: "店", actorUserId: "b", type: "RECEIPT" }, context), { expenseClass: "PERSONAL", splitWeights: { a: 0, b: 1 } });
+  assert.deepEqual(resolveTransactionSplit({ merchant: "店", actorUserId: "b", type: "RECEIPT", expenseClass: "SHARED" }, context), { expenseClass: "SHARED", splitWeights: { a: 1, b: 3 } });
+  assert.throws(() => resolveTransactionSplit({ merchant: "店", actorUserId: "outsider", type: "RECEIPT" }, context), /参加していません/);
+  assert.throws(() => resolveTransactionSplit({ merchant: "店", actorUserId: "a", type: "RECEIPT", expenseClass: "SHARED", splitWeights: { a: 0, b: 0 } }, context), /少なくとも/);
+});
+
 test("担当者変更した個人費は旧担当者の割合を継承せず、不参加担当者は保存前に拒否する", async () => {
   const f = fixture({ previousTransaction: async () => ({ expense_class: "PERSONAL", actor_user_id: "b", split_weights: { a: 0, b: 1 } }), updateTransaction: async () => savedRow() });
   await f.execute({ ...save, transactionId });
@@ -123,12 +152,12 @@ test("単件・複数ルール削除は所属確認後に同じstoreへ渡し、
   ]);
 });
 
-test("個人費ルールの明示割合と一括削除のDB失敗を拒否し、存在しない単独削除は成功する", async () => {
+test("個人ルールの明示割合と一括削除のDB失敗を拒否し、存在しない単独削除は成功する", async () => {
   const f = fixture({ deleteRules: async (_workspaceId, _userId, _ids, requireAll) => {
     if (requireAll) throw new Error("選択したルールが見つかりません。画面を更新して選び直してください。");
     return 0;
   } });
-  await assert.rejects(f.execute({ action: "createRule", workspaceId, merchantContains: "店", expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } }), /個人費ルールの割合/);
+  await assert.rejects(f.execute({ action: "createRule", workspaceId, merchantContains: "店", expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } }), /個人ルールの割合/);
   await assert.rejects(f.execute({ action: "deleteRules", workspaceId, ruleIds: [ruleId] }), /選択したルールが見つかりません/);
   assert.deepEqual(await f.execute({ action: "deleteRule", workspaceId, ruleId }), { ok: true });
   assert.equal(f.calls.filter(call => call.name === "deleteRules").length, 2);
@@ -213,7 +242,7 @@ test("明示値で確定する経路ではルールの参照・判定をせず�
   assert.equal(f.calls.length, 0);
 });
 
-test("省略値は有効・部分一致・優先順を維持し、明示共有費では個人費ルールよりworkspace割合を使う", async () => {
+test("省略値は有効・部分一致・優先順を維持し、明示共有費では個人ルールよりworkspace割合を使う", async () => {
   const rules: DefaultRule[] = [{ ...activeRule, id: "later", sortOrder: 2 }, { ...activeRule, id: "first", merchantContains: "店", sortOrder: 1, splitWeights: { a: 3, b: 2 } }, { ...rule, sortOrder: 0 }];
   const f = fixture({ splitRules: async () => rules, insertTransaction: async () => savedRow() });
   await f.execute({ ...save, merchant: "支店の店" });
@@ -248,7 +277,7 @@ test("ルールの未知参加者と個人費の明示割合を保存前に拒�
     { expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } },
   ]) {
     const f = fixture();
-    await assert.rejects(f.execute({ action, workspaceId, ruleId, merchantContains: "店", ...input }), /参加者が一致|個人費ルール/);
+    await assert.rejects(f.execute({ action, workspaceId, ruleId, merchantContains: "店", ...input }), /参加者が一致|個人ルール/);
     assert.ok(!f.calls.some(call => call.name === "createRule" || call.name === "updateRule" || call.name === "splitRules"));
   }
 });

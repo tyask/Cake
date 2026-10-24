@@ -1,19 +1,20 @@
 "use client";
 
-import { formatYen } from "@/lib/shared/display-formatters";
+import { cashflowClass, formatTransactionAmount } from "@/lib/shared/display-formatters";
 
 import { MAX_AMOUNT_YEN, MAX_SPLIT_WEIGHT } from "@/lib/shared/domain-values";
 
 import { useId, useState } from "react";
 import { changeSplitAmount, equalSplitWeights, splitAmounts } from "@/lib/shared/split-allocations";
-import type { SplitWeights, WorkspaceMember } from "@/lib/shared/types";
+import type { SplitWeights, TransactionType, WorkspaceMember } from "@/lib/shared/types";
 
-export function SplitEditor({ members, value, onChange, onCommit, amountYen, disabled = false, compact = false, inline = false, label = "負担割合" }: {
+export function SplitEditor({ members, value, onChange, onCommit, amountYen, type = "PAYMENT", disabled = false, compact = false, inline = false, label = "配分割合" }: {
   members: WorkspaceMember[];
   value: SplitWeights;
   onChange?: (value: SplitWeights) => void;
   onCommit?: () => void;
   amountYen?: number;
+  type?: TransactionType;
   disabled?: boolean;
   compact?: boolean;
   inline?: boolean;
@@ -68,15 +69,17 @@ export function SplitEditor({ members, value, onChange, onCommit, amountYen, dis
         {members.map((member) => (
           <label key={member.id} htmlFor={`${id}-${member.id}`}>
             {!inline && <span>{member.name}</span>}
-            <div className="split-input"><input id={`${id}-${member.id}`} type="number" min="0"
-              aria-label={`${member.name}の${transactionSplit && mode === "AMOUNT" ? "支払い金額（円）" : "支払い割合"}`}
+            <div className={`split-input${transactionSplit && mode === "AMOUNT" ? " split-input-signed" : ""}`}>
+              {transactionSplit && mode === "AMOUNT" && <span className={`amount-sign ${cashflowClass(type === "PAYMENT" ? -amounts[member.id] : amounts[member.id])}`} aria-hidden="true">{amounts[member.id] > 0 ? type === "PAYMENT" ? "−" : "+" : ""}</span>}
+              <input id={`${id}-${member.id}`} type="number" min="0" className={transactionSplit && mode === "AMOUNT" ? cashflowClass(type === "PAYMENT" ? -amounts[member.id] : amounts[member.id]) : undefined}
+              aria-label={`${member.name}の${transactionSplit && mode === "AMOUNT" ? "配分金額（円）" : "配分割合"}`}
               max={transactionSplit ? mode === "AMOUNT" ? amountYen : 100 : MAX_SPLIT_WEIGHT}
               step={transactionSplit && mode === "RATIO" ? "0.1" : "1"}
               value={emptyInput?.memberId === member.id ? "" : transactionSplit ? mode === "AMOUNT" ? amounts[member.id] : percentages[member.id] / 10 : value[member.id] ?? 0}
               readOnly={!onChange} disabled={transactionSplit && (members.length < 2 || mode === "AMOUNT" && !validAmount)}
               onChange={(event) => updateShare(member.id, event.target.value)} />
               {transactionSplit && <span aria-hidden="true">{mode === "AMOUNT" ? "円" : "%"}</span>}</div>
-            <small>{transactionSplit && mode === "RATIO" ? formatYen(amounts[member.id]) : total > 0 ? `${percentages[member.id] / 10}%` : "—"}</small>
+            <small className={transactionSplit && mode === "RATIO" ? cashflowClass(type === "PAYMENT" ? -amounts[member.id] : amounts[member.id]) : undefined}>{transactionSplit && mode === "RATIO" ? formatTransactionAmount(type, amounts[member.id]) : total > 0 ? `${percentages[member.id] / 10}%` : "—"}</small>
           </label>
         ))}
         {inline && transactionSplit && <select aria-label={`${label}の単位`} value={mode} onChange={(event) => changeMode(event.target.value)}>

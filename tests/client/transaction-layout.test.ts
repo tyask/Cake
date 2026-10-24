@@ -52,7 +52,7 @@ test("PC明細は表示領域に合わせて項目を折り返し、入力・絞
         assert.ok(bounds);
         assert.equal(Math.round(bounds.width), available);
         assert.equal(await wrapper.evaluate(element => element.scrollWidth <= element.clientWidth + 1), true, "明細表に横スクロールが発生しない");
-        const wrapped = available < 1344;
+        const wrapped = available < 1440;
         const first = page.locator('[data-transaction-id="first"]');
         const settled = page.locator('[data-transaction-id="settled"]');
         for (const row of [first, settled]) {

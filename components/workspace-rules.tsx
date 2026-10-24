@@ -127,8 +127,8 @@ function RulesEditor({ selected, run }: { selected: WorkspaceData; run: RunActio
   }
 
   return (
-    <SettingsSection title="費用区分のデフォルトルール" className={styles.section} contentClassName="settings-section" busy={pending > 0}>
-      <p className={styles.description}>ワークスペースの共有設定です。上から最初に一致する有効なルールを適用します。文字と割合は欄を離れるかEnterで保存し、費用区分・デフォルト・有効の変更はすぐ保存します。</p>
+    <SettingsSection title="区分のデフォルトルール" className={styles.section} contentClassName="settings-section" busy={pending > 0}>
+      <p className={styles.description}>支払いに適用する、ワークスペースの共有設定です。上から最初に一致する有効なルールを適用します。収入には適用しません。文字と割合は欄を離れるかEnterで保存し、区分・デフォルト・有効の変更はすぐ保存します。</p>
       <p className={styles.description}>右端のハンドルをドラッグして並べ替えます。キーボードではスペースキーで開始し、上下キーで移動、スペースキーで確定します。</p>
       {error && <div className={`form-error ${styles.error}`} role="alert">{error}{failedAction && failedAction.payload.action !== "createRule" && <button type="button" className="text-button" disabled={structuralBusy} onClick={() => { void perform(failedAction); }}>再試行</button>}</div>}
       <div className={styles.create}>
@@ -288,16 +288,16 @@ function InlineFields({ values, members, disabled, onChange, onCommit, status }:
   return <>
     <label className={styles.merchant} htmlFor={`${id}-merchant`}><span>取引先に含まれる文字</span><input id={`${id}-merchant`} required maxLength={MAX_RULE_MERCHANT_LENGTH} value={values.merchantContains} disabled={disabled}
       onChange={(event) => onChange({ merchantContains: event.target.value })} onBlur={onCommit} onKeyDown={commitOnEnter} placeholder="例: スーパー" /></label>
-    <label className={styles.expenseClass} htmlFor={`${id}-class`}><span>費用区分</span><select id={`${id}-class`} disabled={disabled} value={values.expenseClass}
+    <label className={styles.expenseClass} htmlFor={`${id}-class`}><span>区分</span><select id={`${id}-class`} disabled={disabled} value={values.expenseClass}
       onChange={(event) => onChange({ expenseClass: event.target.value as ExpenseClass, splitWeights: null }, true)}>{expenseClasses.map(value => <option key={value} value={value}>{expenseClassLabels[value]}</option>)}</select></label>
-    <div className={styles.ratios} role="group" aria-label="ルールの負担割合">
-      {values.expenseClass === "PERSONAL" ? <span className={styles.personalRatio}>支払者・受取者 <b>1</b> : 相手 <b>0</b></span> : members.map((member) => <label key={member.id} htmlFor={`${id}-${member.id}`}>
+    <div className={styles.ratios} role="group" aria-label="ルールの配分割合">
+      {values.expenseClass === "PERSONAL" ? <span className={styles.personalRatio}>支払者 <b>1</b> : 相手 <b>0</b></span> : members.map((member) => <label key={member.id} htmlFor={`${id}-${member.id}`}>
         <span title={member.name}>{member.name}</span><input id={`${id}-${member.id}`} type="number" required min="0" max={MAX_SPLIT_WEIGHT} step="1" disabled={disabled || values.splitWeights === null}
           aria-label={`${member.name}の割合`} value={weights[member.id] ?? 0} onChange={(event) => onChange({ splitWeights: { ...weights, [member.id]: Number(event.target.value) } })} onBlur={onCommit} onKeyDown={commitOnEnter} />
       </label>)}
     </div>
     <div className={styles.options}>
-      {values.expenseClass === "SHARED" && <label className={styles.checkbox}><input type="checkbox" checked={values.splitWeights === null} disabled={disabled} aria-label="共有費のデフォルト割合を使う"
+      {values.expenseClass === "SHARED" && <label className={styles.checkbox}><input type="checkbox" checked={values.splitWeights === null} disabled={disabled} aria-label="共有のデフォルト割合を使う"
         onChange={(event) => onChange({ splitWeights: event.target.checked ? null : defaultWeights }, true)} />デフォルト</label>}
       <label className={styles.checkbox}><input type="checkbox" checked={values.enabled} disabled={disabled} aria-label="このルールを有効にする" onChange={(event) => onChange({ enabled: event.target.checked }, true)} />有効</label>
       {status}

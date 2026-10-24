@@ -11,13 +11,12 @@ export const workspaceTypeLabels = { PERSONAL: "個人用", SHARED: "共有用" 
 
 export const expenseClasses = ["PERSONAL", "SHARED"] as const;
 export type ExpenseClass = typeof expenseClasses[number];
-export const expenseClassLabels = { PERSONAL: "個人費", SHARED: "共有費" } satisfies Record<ExpenseClass, string>;
-// These screens already use 共通費; keep their wording while sharing the values.
-export const commonExpenseClassLabels = { ...expenseClassLabels, SHARED: "共通費" } satisfies Record<ExpenseClass, string>;
+export const expenseClassLabels = { PERSONAL: "個人", SHARED: "共有" } satisfies Record<ExpenseClass, string>;
+export const commonExpenseClassLabels = expenseClassLabels;
 
 export const transactionTypes = ["PAYMENT", "RECEIPT"] as const;
 export type TransactionType = typeof transactionTypes[number];
-export const transactionTypeLabels = { PAYMENT: "支払い", RECEIPT: "受け取り" } satisfies Record<TransactionType, string>;
+export const transactionTypeLabels = { PAYMENT: "支払い", RECEIPT: "収入" } satisfies Record<TransactionType, string>;
 export const transactionActorLabels = { PAYMENT: "支払者", RECEIPT: "受取者" } satisfies Record<TransactionType, string>;
 
 export const transactionSources = ["MANUAL", "PAYPAY", "RECURRING"] as const;

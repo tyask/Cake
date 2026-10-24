@@ -13,9 +13,9 @@ const panels: Record<DashboardTab, { navigation: string; heading: string | null 
   home: { navigation: "ホーム", heading: null },
   transactions: { navigation: "取引明細", heading: "取引明細" },
   settings: { navigation: "設定", heading: "設定" },
-  analytics: { navigation: "集計", heading: "集計" },
+  analytics: { navigation: "集計", heading: "支出の集計" },
   import: { navigation: "取込", heading: "明細を取込" },
-  settlement: { navigation: "清算", heading: "共通費を清算" },
+  settlement: { navigation: "清算", heading: "共有の収支を清算" },
 };
 
 function bootstrap(): BootstrapData {

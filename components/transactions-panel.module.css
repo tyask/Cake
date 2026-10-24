@@ -35,7 +35,7 @@
 .tableWrap { width: 100%; overflow-x: auto; }
 .table { width: 100%; min-width: 72rem; border-collapse: collapse; table-layout: fixed; font-size: .72rem; }
 .wrappingTableWrap { container: transaction-table / inline-size; overflow: visible; }
-.wrappingTable { min-width: 84rem; }
+.wrappingTable { min-width: 90rem; }
 .categoryColumn { width: 10rem; }
 .categoryCell { color: var(--ink); }
 .memoColumn { width: 12rem; }
@@ -46,7 +46,8 @@
 .dateColumn { width: 9rem; }
 .merchantColumn { width: 7.5rem; }
 .methodColumn { width: 5rem; }
-.amountColumn { width: 5.5rem; }
+.typeColumn { width: 5rem; }
+.amountColumn { width: 6.5rem; }
 .actorColumn { width: 5.5rem; }
 .classColumn { width: 4.5rem; }
 .ratioColumn { width: 15rem; }
@@ -85,7 +86,7 @@
 .empty { margin: 0; padding: 2rem 1rem; color: var(--muted); font-size: .8rem; text-align: center; }
 
 @media (width > 48rem) {
-  @container transaction-table (width < 84rem) {
+  @container transaction-table (width < 90rem) {
     .wrappingTable { display: block; min-width: 0; }
     .wrappingTable colgroup { display: none; }
     .wrappingTable thead, .wrappingTable tbody { display: block; }

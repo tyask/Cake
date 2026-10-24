@@ -89,3 +89,14 @@ test("破損した保存値、保存拒否、容量不足、削除拒否で画�
   assert.doesNotThrow(() => writeStoredTransactionFilters(unavailable, "blocked", { merchant: ["スーパー"] }));
   assert.doesNotThrow(() => writeStoredTransactionFilters(unavailable, "blocked", {}));
 });
+
+
+test("旧金額フィルタは同額の支払いと収入の両方を復元する", () => {
+  assert.deepEqual(parseStoredTransactionFilters(JSON.stringify({ amountYen: ["1000", "PAYMENT:2000"], merchant: ["店舗"], type: ["RECEIPT"] })), {
+    amountYen: ["PAYMENT:1000", "RECEIPT:1000", "PAYMENT:2000"], merchant: ["店舗"], type: ["RECEIPT"],
+  });
+  const storage = memoryStorage();
+  const filters = { amountYen: ["PAYMENT:1000", "RECEIPT:1000"], type: ["RECEIPT"] };
+  writeStoredTransactionFilters(storage, "signed", filters);
+  assert.deepEqual(readStoredTransactionFilters(storage, "signed"), filters);
+});

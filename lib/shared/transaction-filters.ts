@@ -1,4 +1,5 @@
-import { expenseClassLabels } from "./domain-values";
+import { expenseClassLabels, transactionTypeLabels } from "./domain-values";
+import { formatTransactionAmount } from "./display-formatters";
 import { splitAmounts } from "./split-allocations";
 import { transactionDateInput } from "./transaction-editing";
 import type { TransactionRecord, WorkspaceMember } from "./types";
@@ -7,10 +8,11 @@ export const transactionColumns = [
   { id: "occurredAt", label: "取引日時" },
   { id: "merchant", label: "取引先" },
   { id: "method", label: "方法" },
+  { id: "type", label: "種別" },
   { id: "amountYen", label: "金額（円）" },
-  { id: "actorUserId", label: "支払者" },
-  { id: "expenseClass", label: "費用区分" },
-  { id: "splitWeights", label: "支払い割合" },
+  { id: "actorUserId", label: "支払者／受取者" },
+  { id: "expenseClass", label: "区分" },
+  { id: "splitWeights", label: "配分割合" },
   { id: "memo", label: "メモ" },
   { id: "settlement", label: "清算" },
 ] as const;
@@ -28,7 +30,8 @@ export function transactionFilterValue(item: TransactionRecord, column: Transact
     case "merchant": return { value: item.merchant, label: item.merchant };
     case "method": return { value: item.method, label: item.method };
     case "memo": return { value: item.memo, label: item.memo || "（空白）" };
-    case "amountYen": return { value: String(item.amountYen), label: item.amountYen.toLocaleString("ja-JP") + "円" };
+    case "type": return { value: item.type, label: transactionTypeLabels[item.type] };
+    case "amountYen": return { value: `${item.type}:${item.amountYen}`, label: formatTransactionAmount(item.type, item.amountYen) };
     case "actorUserId": return { value: item.actorUserId, label: members.find(member => member.id === item.actorUserId)?.name ?? item.actorName };
     case "expenseClass": return { value: item.expenseClass, label: expenseClassLabels[item.expenseClass] };
     case "settlement": {
@@ -55,8 +58,13 @@ export function transactionFilterOptions(items: TransactionRecord[], column: Tra
     options.set(value, { value, label, count: counts.get(value) ?? 0 });
   }
   return [...options.values()].sort((a, b) => column === "amountYen"
-    ? Number(a.value) - Number(b.value)
+    ? amountFilterNumber(a.value) - amountFilterNumber(b.value)
     : a.label.localeCompare(b.label, "ja", { numeric: true }));
+}
+
+function amountFilterNumber(value: string): number {
+  const [type, amount] = value.split(":");
+  return Number(amount) * (type === "PAYMENT" ? -1 : 1);
 }
 
 export function createTransactionFilterMatcher(filters: TransactionFilters, members: WorkspaceMember[]): (item: TransactionRecord) => boolean {

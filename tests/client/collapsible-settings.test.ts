@@ -52,7 +52,7 @@ test("個人・ワークスペースの設定枠は閉じて始まり、独立�
           { toggle: summary(workspace, "ワークスペースのデフォルト割合"), content: workspace.getByRole("button", { name: "割合を保存", exact: true, includeHidden: true }) },
           { toggle: summary(workspace, "集計用カテゴリ"), content: workspace.getByRole("button", { name: "＋ 大分類を追加", exact: true, includeHidden: true }) },
           { toggle: summary(workspace, "定期支払い"), content: workspace.getByRole("button", { name: "＋ 定期支払いを追加", exact: true, includeHidden: true }) },
-          { toggle: summary(workspace, "費用区分のデフォルトルール"), content: workspace.getByRole("button", { name: "ルールを追加", exact: true, includeHidden: true }) },
+          { toggle: summary(workspace, "区分のデフォルトルール"), content: workspace.getByRole("button", { name: "ルールを追加", exact: true, includeHidden: true }) },
           { toggle: summary(workspace, "ワークスペースを削除"), content: workspace.getByRole("button", { name: "完全に削除", exact: true, includeHidden: true }) },
         ];
         for (const { toggle, content } of panels) {
@@ -83,12 +83,12 @@ test("個人・ワークスペースの設定枠は閉じて始まり、独立�
         await panels[1].content.fill("保存前の家計名");
         assert.equal(await panels[0].content.isVisible(), true, "他の枠を開いても個人設定は開いたまま");
         await panels[2].toggle.click();
-        await workspace.getByLabel("Aの支払い割合", { exact: true }).fill("7");
+        await workspace.getByLabel("Aの配分割合", { exact: true }).fill("7");
         assert.equal(await panels[1].content.isVisible(), true, "割合を開いても基本情報は開いたまま");
         for (const index of [0, 1, 2]) { await panels[index].toggle.click(); await panels[index].toggle.click(); }
         assert.equal(await panels[0].content.inputValue(), "変更中の名前");
         assert.equal(await panels[1].content.inputValue(), "保存前の家計名");
-        assert.equal(await workspace.getByLabel("Aの支払い割合", { exact: true }).inputValue(), "7");
+        assert.equal(await workspace.getByLabel("Aの配分割合", { exact: true }).inputValue(), "7");
 
         await panels[3].toggle.click();
         await workspace.getByRole("button", { name: "食費を選択", exact: true }).click();
@@ -144,7 +144,7 @@ test("個人・ワークスペースの設定枠は閉じて始まり、独立�
         await email.fill("partner@example.test");
         await toggle.click(); await toggle.click();
         assert.equal(await email.inputValue(), "partner@example.test");
-        assert.equal(await workspace.getByLabel("Aの支払い割合", { exact: true }).isDisabled(), true, "一人参加時の割合編集条件を維持する");
+        assert.equal(await workspace.getByLabel("Aの配分割合", { exact: true }).isDisabled(), true, "一人参加時の割合編集条件を維持する");
         assert.deepEqual(writes, []);
       } finally { await context.close(); }
     });

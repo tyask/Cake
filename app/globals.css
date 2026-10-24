@@ -147,6 +147,11 @@ code { padding: .12rem .35rem; border-radius: .3rem; background: var(--surface-m
 .split-input { position: relative; min-width: 0; }
 .split-editor-fields .split-input:has(> span) input { padding-right: 1.5rem; }
 .split-input > span { position: absolute; top: 50%; right: .45rem; transform: translateY(-50%); color: var(--muted); font-size: .65rem; pointer-events: none; }
+.signed-amount-input { display: block; position: relative; min-width: 0; }
+.signed-amount-input > span { position: absolute; top: 50%; left: .45rem; transform: translateY(-50%); pointer-events: none; }
+.signed-amount-input input[type="number"] { padding-left: 1.2rem; }
+.split-input > .amount-sign { right: auto; left: .35rem; }
+.split-editor-fields .split-input-signed input { padding-left: 1rem; }
 .split-note { display: block; margin-top: .5rem; color: var(--muted); font-size: .65rem; line-height: 1.5; }
 .split-editor-inline { min-width: 0; max-width: none; }
 .split-editor-inline .split-editor-fields { display: grid; flex-wrap: nowrap; align-items: start; gap: .4rem; }
