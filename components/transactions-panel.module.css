@@ -153,7 +153,10 @@
   .table .fullCell { grid-column: 1 / -1; }
   .table .splitCell :global(.split-editor-compact) { max-width: none; }
   .table input, .table select { min-height: 2.3rem; font-size: .78rem; }
-  .table input[type="datetime-local"] { padding: .35rem .4rem; font-size: .78rem; }
+  /* Constrain native date controls to the cell, including iOS Safari's intrinsic width. */
+  .table input[type="datetime-local"] { display: block; width: 0; min-width: 100%; max-width: 100%; padding: .35rem .4rem; font-size: .78rem; }
+  .table input[type="datetime-local"]::-webkit-date-and-time-value { text-align: left; }
+  .table input[type="datetime-local"]::-webkit-datetime-edit { min-width: 0; padding: 0; }
   .table .dateCell { font-size: .78rem; }
   .table .feedbackRow { display: block; margin-top: -.4rem; }
   .table .feedbackCell { padding: 0; }

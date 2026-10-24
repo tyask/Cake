@@ -722,6 +722,7 @@
             </tbody>
           </table></div>
           <h3>金額・日時の表示と入力</h3>
+          <p>幅48rem以下の取引明細では、datetime-local入力の幅を0、最小幅・最大幅をセル幅の100%にして、ブラウザ固有の日時コントロールの固有幅によるはみ出しを防ぐ。WebKitの日時表示は左寄せにし、内部編集領域の最小幅と余白を抑える。秒・ミリ秒の入力値と保存処理は維持する。</p>
           <p>サーバーは日時をミリ秒付きUTC ISO文字列としてブラウザへ返す。明細の保存応答・full再取得の取引日時と清算日時、清算履歴の完了日時、full/metadataの招待期限では秒への切捨てを行わない。DB driverのDateは文字列化を挟まずISOへ変換する。ブラウザは表示時にJSTと秒・分の書式を適用し、日時入力・再保存ではミリ秒を保持する。DBスキーマとクエリ回数・並び順・期限判定は変えない。</p>
           <p><code>formatYen</code>は日本円の通貨記号と桁区切りを表示し、ホーム・明細・清算・定期支払い・負担金額・CSV確認表で共用する。CSVの非有限金額を「—」にする補正は確認表に残す。通貨記号を付けない円表記や数値入力は各画面の書式を使う。</p>
           <p><code>formatJstDateTime</code>は<code>DateTimePrecision.Minute</code>／<code>Second</code>で表示精度を指定し（既定は秒）、Asia/Tokyo固定で、ホーム・清算履歴・清算済み明細では秒まで、スマートフォンの明細要約では分まで表示する。CSVの元日時と定期支払いの日付表示は各画面で保持する。表示関数はdatetime-local入力には使わない。明細編集の<code>transactionDateInput</code>／<code>transactionDateToIso</code>は秒・ミリ秒を保持し、UTCへ変換する。新規明細の入力初期値は専用formatterを再利用して分まで表示する。</p>

@@ -99,8 +99,8 @@ test("PC明細は表示領域に合わせて項目を折り返し、入力・絞
         assert.deepEqual(errors, []);
       } finally { await context.close(); }
     });
-    await t.test("mobileの要約・詳細展開", async () => {
-      const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    for (const width of [320, 352, 375, 390, 430, 768]) await t.test(`mobile ${width}pxの要約・詳細展開と日時欄の枠`, async () => {
+      const context = await browser.newContext({ viewport: { width, height: 844 }, locale: "ja-JP", isMobile: true, hasTouch: true });
       try {
         const page = await context.newPage();
         await page.goto(origin);
@@ -109,6 +109,19 @@ test("PC明細は表示領域に合わせて項目を折り返し、入力・絞
         assert.equal(await memo.isVisible(), false);
         await first.getByRole("button", { name: "firstの詳細を開く", exact: true }).click();
         assert.equal(await memo.isVisible(), true);
+        const cell = first.locator('[data-label="取引日時"]');
+        const date = cell.locator('input[type="datetime-local"]');
+        const bounds = await cell.boundingBox();
+        assert.ok(bounds);
+        await assertInside(date, bounds.x, bounds.x + bounds.width);
+        const inputBounds = await date.boundingBox();
+        assert.ok(inputBounds && Math.abs(inputBounds.width - bounds.width) <= 1, "日時欄の左右の枠はセル内に収まる");
+        await date.fill("2026-10-20T12:34:56.789");
+        assert.equal(await date.inputValue(), "2026-10-20T12:34:56.789", "秒・ミリ秒を保ったまま編集できる");
+        if (process.env.CAKE_LAYOUT_SCREENSHOTS && width === 390) {
+          await mkdir(".cake", { recursive: true });
+          await page.screenshot({ path: ".cake/transaction-layout-mobile.png", fullPage: true });
+        }
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
       } finally { await context.close(); }
     });
