@@ -283,6 +283,13 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       proof.resources.servers = null; proof.resources.databases = null; proof.resources.testTransactions = null;
     }
     fail(interrupted ? 'interrupted' : stage);
+    if (activePage && currentCase && !activePage.isClosed()) {
+      try {
+        const filename = `${currentCase.name}-failure.png`;
+        await activePage.screenshot({ path: resolve(directory, filename), timeout: 5_000 });
+        currentCase.screenshots.push(filename);
+      } catch { /* The fixed failure stage remains available if Chromium cannot capture an image. */ }
+    }
   } finally {
     stage = 'cleanup';
     for (const context of contexts) {
