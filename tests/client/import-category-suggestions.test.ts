@@ -103,7 +103,7 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
           assert.equal(await categoryGroup.getByLabel("選択行のカテゴリ", { exact: true }).count(), 1);
           assert.equal(await categoryGroup.getByRole("button", { name: "カテゴリを設定", exact: true }).count(), 1);
           assert.equal(await categoryGroup.getByRole("button", { name: "カテゴリ自動補完", exact: true }).count(), 1);
-          assert.equal(await selectionGroup.getByRole("button", { name: "個人費に変更", exact: true }).count(), 1);
+          assert.equal(await selectionGroup.getByRole("button", { name: "個人に変更", exact: true }).count(), 1);
           assert.equal(await selectionGroup.getByRole("button", { name: "削除", exact: true }).count(), 1);
           const categoryBounds = (await categoryGroup.boundingBox())!, selectionBounds = (await selectionGroup.boundingBox())!;
           if (width > 768) assert.ok(categoryBounds.x < selectionBounds.x && categoryBounds.x + categoryBounds.width <= selectionBounds.x + 1, "カテゴリ操作を他の選択行操作より左にまとめる");
@@ -151,14 +151,14 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
 
           await category("classified").selectOption("transport");
           await row("selected").getByRole("checkbox", { name: "selectedを選択", exact: true }).check();
-          await row("unchecked").first().getByLabel("Aの支払い割合", { exact: true }).fill("70");
+          await row("unchecked").first().getByLabel("Aの配分割合", { exact: true }).fill("70");
           await page.locator(".import-summary select").selectOption("b");
           if (width <= 768) await auto().tap(); else await auto().click();
           await page.getByRole("button", { name: "カテゴリ補完中…", exact: true }).waitFor();
           if (width <= 768) assert.equal(await page.getByRole("tooltip").count(), 0, "補完ボタンのタップでは説明を開かない");
           const pendingButton = page.getByRole("button", { name: "カテゴリ補完中…", exact: true });
           assert.equal(await pendingButton.isDisabled(), true);
-          for (const label of ["確認して登録", "やり直す", "キャンセル", "個人費に変更", "共通費に変更", "削除", "カテゴリを設定"]) {
+          for (const label of ["確認して登録", "やり直す", "キャンセル", "個人に変更", "共有に変更", "削除", "カテゴリを設定"]) {
             assert.equal(await page.getByRole("button", { name: label, exact: true }).isDisabled(), true, label);
           }
           assert.equal(await page.locator(".import-summary select").isDisabled(), true);
@@ -174,7 +174,7 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
           for (const merchant of ["none", "archived", "gone", "invalid", "duplicate"]) assert.equal(await category(merchant).inputValue(), "");
           assert.equal(await row("selected").getByRole("checkbox").isChecked(), true);
           assert.equal(await row("unchecked").first().getByRole("checkbox").isChecked(), false);
-          assert.equal(await row("unchecked").first().getByLabel("Aの支払い割合", { exact: true }).inputValue(), "70");
+          assert.equal(await row("unchecked").first().getByLabel("Aの配分割合", { exact: true }).inputValue(), "70");
           assert.equal(requests.filter(request => request.path === "/api/app").length, 0, "補完はDBへ登録しない");
           await category("unchecked").selectOption("transport");
           await page.getByRole("button", { name: "確認して登録", exact: true }).click();

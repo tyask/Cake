@@ -184,7 +184,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       const navigate = async (name: string) => {
         await navigation.getByRole('button', { name: new RegExp(name) }).click();
         if (name === 'ホーム') await page.getByRole('heading', { name: '最近の取引', exact: true }).waitFor();
-        else await page.getByRole('heading', { name, exact: true }).waitFor();
+        else await page.getByRole('heading', { name: name === '集計' ? '支出の集計' : name, exact: true }).waitFor();
       };
       stage = 'navigation';
       const response = await page.goto(origin, { waitUntil: 'networkidle', timeout: 60_000 });
@@ -214,13 +214,16 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       const merchant = `Cloud QA ${item.name} ${randomUUID()}`, editedMerchant = `${merchant} 更新`, memo = `Cloud QA autosave ${item.name}`;
       await page.getByRole('button', { name: '＋ 明細を追加', exact: true }).click();
       const modal = page.getByRole('dialog', { name: '明細を追加', exact: true });
+      await modal.getByRole('combobox', { name: '種別', exact: true }).selectOption('RECEIPT');
+      await modal.getByRole('combobox', { name: '受取者', exact: true }).waitFor();
       await modal.getByLabel('取引先', { exact: true }).fill(merchant);
       await modal.getByLabel('金額（円）', { exact: true }).fill('1234');
       await modal.getByRole('button', { name: '追加する', exact: true }).click();
       await modal.waitFor({ state: 'hidden' });
       const created = await waitForApp(page, item.user, data => data.selected!.transactions.some(transaction => transaction.merchant === merchant));
       const matches = created.selected!.transactions.filter(transaction => transaction.merchant === merchant && !existingIds.includes(transaction.id));
-      requireCondition(matches.length === 1 && matches[0].amountYen === 1234 && matches[0].actorUserId === `test-user-${item.user}`);
+      requireCondition(matches.length === 1 && matches[0].amountYen === 1234 && matches[0].type === 'RECEIPT'
+        && matches[0].expenseClass === 'PERSONAL' && matches[0].actorUserId === `test-user-${item.user}`);
       item.createdTransactionId = matches[0].id; proof.resources.testTransactions = 1; check('transaction-ui-create-api-read');
       const row = page.locator(`tr[data-transaction-id="${item.createdTransactionId}"]`);
       const expand = async (name: string) => {
@@ -231,6 +234,15 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       };
       await expand(merchant); await screenshot('created');
       stage = 'edit';
+      const savedWeights = JSON.stringify(matches[0].splitWeights);
+      for (const type of ['PAYMENT', 'RECEIPT'] as const) {
+        await row.getByRole('combobox', { name: '種別', exact: true }).selectOption(type);
+        const updated = await waitForApp(page, item.user, data => data.selected!.transactions.some(transaction => transaction.id === item.createdTransactionId && transaction.type === type));
+        const transaction = updated.selected!.transactions.find(transaction => transaction.id === item.createdTransactionId)!;
+        requireCondition(transaction.amountYen === 1234 && transaction.expenseClass === 'PERSONAL' && JSON.stringify(transaction.splitWeights) === savedWeights);
+        await row.getByRole('combobox', { name: type === 'PAYMENT' ? '支払者' : '受取者', exact: true }).waitFor();
+      }
+      check('transaction-type-ui-autosave-preserves-positive-amount-and-allocation');
       await row.getByRole('textbox', { name: '取引先', exact: true }).fill(editedMerchant);
       await row.getByRole('textbox', { name: '取引先', exact: true }).press('Enter');
       await waitForApp(page, item.user, data => data.selected!.transactions.some(transaction => transaction.id === item.createdTransactionId && transaction.merchant === editedMerchant));
@@ -247,11 +259,12 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       await page.reload({ waitUntil: 'networkidle', timeout: 60_000 });
       await page.locator('.app-shell').waitFor(); await navigate('取引明細'); await expand(editedMerchant);
       requireCondition(await row.getByRole('textbox', { name: '取引先', exact: true }).inputValue() === editedMerchant
+        && await row.getByRole('combobox', { name: '種別', exact: true }).inputValue() === 'RECEIPT'
         && await row.getByRole('spinbutton', { name: '金額（円）', exact: true }).inputValue() === '2345'
         && await row.getByRole('textbox', { name: `${editedMerchant}のメモ`, exact: true }).inputValue() === memo);
       const reloaded = await readApp(page, item.user);
       requireCondition(reloaded.selected!.transactions.some(transaction => transaction.id === item.createdTransactionId
-        && transaction.merchant === editedMerchant && transaction.amountYen === 2345 && transaction.memo === memo));
+        && transaction.type === 'RECEIPT' && transaction.merchant === editedMerchant && transaction.amountYen === 2345 && transaction.memo === memo));
       await screenshot('reloaded'); check('transaction-ui-api-reload-persistence');
       stage = 'delete';
       requireCondition(!existingIds.includes(item.createdTransactionId));

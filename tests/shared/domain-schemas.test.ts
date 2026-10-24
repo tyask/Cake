@@ -50,7 +50,7 @@ test("共有分類の全値をschemaが受け付け、未知値を拒否する",
     for (const value of values) assert.equal(schema.safeParse(value).success, true);
     assert.equal(schema.safeParse("UNKNOWN").success, false);
   }
-  assert.deepEqual(expenseClasses.map(value => expenseClassLabels[value]), ["個人費", "共有費"]);
+  assert.deepEqual(expenseClasses.map(value => expenseClassLabels[value]), ["個人", "共有"]);
 });
 
 for (const amount of [0, 1, 2_147_483_647, 2_147_483_648]) {

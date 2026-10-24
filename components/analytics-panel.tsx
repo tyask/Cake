@@ -3,7 +3,7 @@
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { analyticsQuerySchema, analyticsToday, type AnalyticsQuery, type AnalyticsRange } from "@/lib/shared/analytics";
 import { buildAnalyticsView, prepareAnalyticsDataset } from "@/lib/shared/analytics-view";
-import { formatJstDateTime, formatYen } from "@/lib/shared/display-formatters";
+import { formatYen, formatJstDateTime } from "@/lib/shared/display-formatters";
 import { expenseClassLabels, expenseClasses } from "@/lib/shared/domain-values";
 import type { ExpenseClass } from "@/lib/shared/types";
 import { PageHeading } from "./dashboard-ui";
@@ -11,7 +11,7 @@ import { useAnalytics } from "./use-analytics";
 import styles from "./analytics-panel.module.css";
 
 const AnalyticsCharts = lazy(() => import("./analytics-charts"));
-const burdenDescription = "選んだ人の、明細ごとに割り当てられた負担額を合計します";
+const burdenDescription = "選んだ人の、明細ごとに割り当てられた支出額を合計します";
 const displayedExpenseClasses = [...expenseClasses].reverse();
 
 export function analyticsRangeLabel(range: AnalyticsRange) {
@@ -97,7 +97,7 @@ export function AnalyticsPanel({ workspaceId, revision, active }: { workspaceId:
   }
 
   return <div hidden={!active} className={styles.analytics}>
-    <PageHeading eyebrow="ANALYTICS" title="集計" description="家計の使いみちと、負担額の変化を確認します。"
+    <PageHeading eyebrow="ANALYTICS" title="支出の集計" description="家計の使いみちと、配分後の支出額の変化を確認します。"
       action={<button type="button" className={`refresh-button ${styles.refresh}`} disabled={loading} onClick={refresh}>↻ 更新</button>} />
     <section className={styles.conditions} aria-label="集計の表示条件">
       <div className={styles.periodGroup}>
@@ -129,16 +129,16 @@ export function AnalyticsPanel({ workspaceId, revision, active }: { workspaceId:
       </form>}
       {periodError && <p className={styles.periodError} role="alert">{periodError}</p>}
     </section>
-    <p className={styles.scopeNote}>清算済みの明細を含みます。受け取りは集計対象外です。</p>
+    <p className={styles.scopeNote}>支払いを配分割合で分けた支出額を集計します。清算済みの明細を含みます。収入は集計対象外です。</p>
     {loading && <div role="status" className={styles.empty}>集計を読み込んでいます…</div>}
     {error && <div role="alert" className={styles.error}><p>{error}</p><button type="button" onClick={refresh}>再試行</button></div>}
     {selectionEmpty && !loading && !error && <div role="status" className={styles.empty}>対象者と集計対象をそれぞれ1つ以上選んでください。</div>}
     {view && data && !loading && !error && <>
       <div className={styles.selectionLine}><span>対象期間 <b>{analyticsRangeLabel(data.periods.current)}</b></span><span>比較期間 <b>{analyticsRangeLabel(data.periods.comparison)}</b></span></div>
-      <div className={styles.stats} aria-label="負担額の概要">
-        <article className={`${styles.stat} ${styles.primaryStat}`}><span>負担額</span><strong data-testid="analytics-total">{formatYen(view.totalYen)}</strong><small>{data.members.filter(member => selectedMembers.includes(member.id)).map(member => member.name).join("・")}の合計</small></article>
-        <article className={styles.stat}><span>比較期間の負担額</span><strong>{formatYen(view.comparisonYen)}</strong><small>{analyticsRangeLabel(data.periods.comparison)}</small></article>
-        <article className={styles.stat}><span>比較期間との差額</span><strong>{view.differenceYen > BigInt(0) ? "+" : ""}{formatYen(view.differenceYen)}</strong><small>{view.rate ?? (view.totalYen > BigInt(0) ? "比較期間は0円" : "比較期間も0円")}</small></article>
+      <div className={styles.stats} aria-label="支出額の概要">
+        <article className={`${styles.stat} ${styles.primaryStat}`}><span>支出額</span><strong data-testid="analytics-total">{formatYen(view.totalYen)}</strong><small>{data.members.filter(member => selectedMembers.includes(member.id)).map(member => member.name).join("・")}の合計</small></article>
+        <article className={styles.stat}><span>比較期間の支出額</span><strong>{formatYen(view.comparisonYen)}</strong><small>{analyticsRangeLabel(data.periods.comparison)}</small></article>
+        <article className={styles.stat}><span>比較期間との差額</span><strong data-testid="analytics-difference">{view.differenceYen > BigInt(0) ? "+" : ""}{formatYen(view.differenceYen)}</strong><small>{view.differenceYen > BigInt(0) ? "支出が増加" : view.differenceYen < BigInt(0) ? "支出が減少" : "支出の増減なし"} · {view.rate ? `支出の増減率 ${view.rate}` : view.totalYen > BigInt(0) ? "比較期間は0円" : "比較期間も0円"}</small></article>
       </div>
       <Suspense fallback={<div role="status" className={styles.empty}>グラフを準備しています…</div>}><AnalyticsCharts view={view} periods={data.periods} /></Suspense>
       <p className={styles.snapshot}>取得日時 {formatJstDateTime(data.snapshotAt)}（日本時間）</p>

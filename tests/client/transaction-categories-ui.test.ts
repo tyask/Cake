@@ -34,7 +34,7 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(resolve => server.close(() => resolve())); throw error; });
   try {
-    for (const width of [1440, 390]) await t.test(`${width}px`, async () => {
+    for (const width of [1600, 390]) await t.test(`${width}px`, async () => {
       const context = await browser.newContext({ viewport: { width, height: 900 } });
       const page = await context.newPage();
       const writes: Record<string, unknown>[] = [], errors: string[] = [];

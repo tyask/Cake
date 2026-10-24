@@ -16,7 +16,10 @@ export function parseStoredTransactionFilters(raw: string | null): TransactionFi
     for (const { id } of transactionColumns) {
       const value = stored[id];
       if (Array.isArray(value) && value.every(item => typeof item === "string")) {
-        filters[id] = value;
+        // v1 stored an unsigned amount matching both types. Preserve that meaning.
+        filters[id] = id === "amountYen"
+          ? [...new Set(value.flatMap(item => /^\d+$/.test(item) ? [`PAYMENT:${item}`, `RECEIPT:${item}`] : [item]))]
+          : value;
       }
     }
     return filters;

@@ -292,7 +292,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
         <div className={styles.selectionGroup} role="group" aria-label="選択行の操作">
           <div className={styles.selectionHeading}><span className={styles.groupHeading}>選択行の操作</span><span className={styles.selectedCount}>{selectedCount}件を選択中</span></div>
           <div className={styles.selectionControls}>
-            <button disabled={busy || selectedCount === 0} onClick={() => bulk("PERSONAL")}>個人費に変更</button><button disabled={busy || selectedCount === 0} onClick={() => bulk("SHARED")}>共通費に変更</button>
+            <button disabled={busy || selectedCount === 0} onClick={() => bulk("PERSONAL")}>個人に変更</button><button disabled={busy || selectedCount === 0} onClick={() => bulk("SHARED")}>共有に変更</button>
             <button disabled={busy || selectedCount === 0} onClick={removeSelectedPreviewRows}>削除</button>
           </div>
         </div>

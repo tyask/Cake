@@ -138,11 +138,11 @@ test("CSVカテゴリはプレビュー内で個別・選択行へ設定し、�
           const expectedCategories = ["japanese", "food", "transport", "japanese", "", "", ""];
           for (const [index, merchant] of merchants.entries()) assert.equal(await category(merchant).inputValue(), expectedCategories[index]);
 
-          await row("first").getByLabel("firstの費用区分", { exact: true }).selectOption("PERSONAL");
-          await row("first").getByLabel("firstの費用区分", { exact: true }).selectOption("SHARED");
-          await row("first").getByLabel("Aの支払い割合", { exact: true }).fill("70");
+          await row("first").getByLabel("firstの区分", { exact: true }).selectOption("PERSONAL");
+          await row("first").getByLabel("firstの区分", { exact: true }).selectOption("SHARED");
+          await row("first").getByLabel("Aの配分割合", { exact: true }).fill("70");
           await page.locator(".import-summary select").selectOption("b");
-          for (const [index, merchant] of merchants.entries()) assert.equal(await category(merchant).inputValue(), expectedCategories[index], "費用区分・割合・支払者の変更でカテゴリを保持する");
+          for (const [index, merchant] of merchants.entries()) assert.equal(await category(merchant).inputValue(), expectedCategories[index], "区分・割合・支払者の変更でカテゴリを保持する");
           assert.equal(await checkbox("first").isChecked(), true);
           assert.equal(await checkbox("personal").isChecked(), true);
           assert.equal(await checkbox("unchecked").isChecked(), false);

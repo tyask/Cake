@@ -129,7 +129,7 @@ test("番号migrationはそれぞれidentity確認と適用履歴を同一transa
   const queries: string[] = [];
   const names = readdirSync(new URL("../../db/migrations/", import.meta.url)).filter((name) => /^\d+_[a-z0-9_]+\.sql$/.test(name)).sort();
   await setupDatabase(preview, { connect: () => ({ query: async (statement) => { queries.push(statement); return []; } }) });
-  assert.equal(names.length, 20);
+  assert.equal(names.length, 21);
   assert.equal(queries.length, names.length + 2);
   for (const [index, name] of names.entries()) {
     const statement = queries[index + 2];
@@ -232,7 +232,7 @@ test("一時メモリPostgreSQLで空DB・厳密fixture base・同PR保持・Pro
     engine: string; memoryDatabases: number; migrations: number; cases: number; outcomes: { name: string; result: string }[];
   };
   assert.equal(report.engine, "PGlite");
-  assert.equal(report.migrations, 20);
+  assert.equal(report.migrations, 21);
   assert.equal(report.memoryDatabases, 4);
   assert.equal(report.cases, report.outcomes.length);
   assert.ok(report.cases > 23, "The original 23 SQL cases must be retained and extended");

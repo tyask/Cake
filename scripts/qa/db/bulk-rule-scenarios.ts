@@ -96,15 +96,28 @@ export async function verifyBulkRuleScenarios(sql: BulkRuleDatabase, options: Bu
       const stored = (await sql.query("SELECT expense_class,split_weights,updated_by,memo,method FROM transactions WHERE id=$1::uuid", ids)).rows[0];
       assert.deepEqual(stored, { expense_class: row.expenseClass, split_weights: row.splitWeights, updated_by: "a", memo: "fixture", method: "QA" });
     });
-    await check("最大5000件を一括更新し、交互の支払者・受取明細・確定DTOのID順を維持する", async () => {
+    await check("最大5000件の支払いを一括更新し、交互の支払者・確定DTOのID順を維持する", async () => {
       await f.reset(); const rules = await f.setRules([sampleRule]);
-      const values = Array.from({ length: 5000 }, (_, i) => ({ merchant: i % 3 ? "スーパー本店" : "未一致", actorUserId: i % 2 ? "a" : "b", type: i % 4 ? "PAYMENT" : "RECEIPT", amountYen: 101 + i % 3 }));
+      const values = Array.from({ length: 5000 }, (_, i) => ({ merchant: i % 3 ? "スーパー本店" : "未一致", actorUserId: i % 2 ? "a" : "b", type: "PAYMENT", amountYen: 101 + i % 3 }));
       const ids = await f.insert(values), result = await f.apply([...ids].reverse());
       assert.equal(result.affected, 5000); assert.equal(result.transactions!.length, 5000);
       assert.deepEqual(result.transactions!.map(t => t.id), [...ids].sort());
       const matchRule = prepareDefaultRuleMatcher(rules);
       const expected = new Map(ids.map((id, i) => [id, { ...values[i], ...transactionDefaults(values[i].merchant, matchRule, ruleMembers, values[i].actorUserId) }]));
       for (const row of result.transactions!) { const e = expected.get(row.id)!; for (const key of ["merchant", "actorUserId", "type", "amountYen", "expenseClass", "splitWeights"] as const) assert.deepEqual(row[key], e[key]); }
+    });
+    await check("収入だけ・支払いとの混在・選択後の種別変更を全件拒否し、削除は収入も対象にする", async () => {
+      await f.reset(); await f.setRules([sampleRule]);
+      const ids = await f.insert([{ merchant: "スーパー", actorUserId: "a" }, { merchant: "スーパー", actorUserId: "b", type: "RECEIPT" }]);
+      await rejected(() => f.apply([ids[1]]), /ルールを適用できるのは支払い明細だけ/);
+      await rejected(() => f.apply(ids), /ルールを適用できるのは支払い明細だけ/);
+      await sql.query("UPDATE transactions SET expense_class='PERSONAL', split_weights='{\"a\":0,\"b\":1}'::jsonb WHERE id=$1::uuid", [ids[1]]);
+      await rejected(() => f.apply(ids), /ルールを適用できるのは支払い明細だけ/);
+      await sql.query("UPDATE transactions SET type='PAYMENT' WHERE id=$1::uuid", [ids[1]]);
+      assert.equal((await f.apply(ids)).affected, 2);
+      await sql.query("UPDATE transactions SET type='RECEIPT' WHERE id=$1::uuid", [ids[0]]);
+      await rejected(() => f.apply(ids), /ルールを適用できるのは支払い明細だけ/);
+      assert.deepEqual(await f.apply(ids, "DELETE"), { affected: 2 });
     });
     await check("未選択・無効・下位の不正割合は参照せず、選択された不正割合だけ全件中止する", async () => {
       for (const bad of ["1", true, {}, -1, 0.5, 2147483648, 0]) {
@@ -113,7 +126,7 @@ export async function verifyBulkRuleScenarios(sql: BulkRuleDatabase, options: Bu
         await sql.query("INSERT INTO default_rules(workspace_id,merchant_contains,expense_class,sort_order,split_weights,created_by) VALUES ($1::uuid,'スーパー','SHARED',2,$2::jsonb,'a')", [f.workspaceId, JSON.stringify({ a: bad, b: bad === 0 ? 0 : 1 })]);
         const ids = await f.insert([{ merchant: "スーパー", actorUserId: "a" }, { merchant: "不正", actorUserId: "b" }]);
         assert.equal((await f.apply([ids[0]])).affected, 1);
-        await rejected(() => f.apply(ids), /共有費ルールの割合が不正/);
+        await rejected(() => f.apply(ids), /支払いルールの割合が不正/);
         await sql.query("UPDATE default_rules SET enabled=false WHERE workspace_id=$1::uuid AND merchant_contains='不正'", [f.workspaceId]);
         assert.equal((await f.apply(ids)).transactions!.find(t => t.id === ids[1])!.expenseClass, "PERSONAL");
       }
@@ -125,7 +138,7 @@ export async function verifyBulkRuleScenarios(sql: BulkRuleDatabase, options: Bu
       assert.deepEqual((await f.apply(ids)).transactions![0].splitWeights, { a: 0, b: 2 });
       await sql.query("UPDATE default_rules SET split_weights=NULL WHERE workspace_id=$1::uuid", [f.workspaceId]);
       await sql.query("UPDATE workspace_members SET weight=0 WHERE workspace_id=$1::uuid", [f.workspaceId]);
-      await rejected(() => f.apply(ids), /共有費ルールの割合が不正/);
+      await rejected(() => f.apply(ids), /支払いルールの割合が不正/);
       await sql.query("UPDATE workspace_members SET weight=CASE user_id WHEN 'a' THEN 6 ELSE 4 END WHERE workspace_id=$1::uuid", [f.workspaceId]);
     });
     await check("清算済み・不存在・他workspaceの混在は全件を中止する", async () => {

@@ -73,7 +73,7 @@ export function Dashboard({ initialData, initialTab = "home", testAuth = false }
           <PageHeading title="設定" />
           <PersonalSettings key={`${data.user.id}-${data.user.name}`} user={data.user} run={run} />
           {selected && <section className="settings-group" aria-labelledby="workspace-settings-title">
-            <div className="settings-group-heading"><h2 id="workspace-settings-title">ワークスペース設定</h2><p>{selected.workspace.name}の情報・共有費の割合・ルールを設定します。</p></div>
+            <div className="settings-group-heading"><h2 id="workspace-settings-title">ワークスペース設定</h2><p>{selected.workspace.name}の情報・共有の配分割合・ルールを設定します。</p></div>
             <SettingsPanel key={selected.workspace.id} selected={selected} currentUserId={data.user.id} run={run} afterDelete={async () => { await refresh(); }} />
           </section>}
           {data.user.isAdmin === true && !testAuth && <UserManagement />}

@@ -35,7 +35,7 @@ export function SettingsPanel({ selected, currentUserId, run, afterDelete }: { s
     try {
       const validWeights = validateSplitWeights(weights, selected.members);
       await run({ action: "updateWeights", workspaceId: selected.workspace.id,
-        weights: selected.members.map((member) => ({ userId: member.id, weight: validWeights[member.id] })) }, "共有費のデフォルト割合を保存しました。");
+        weights: selected.members.map((member) => ({ userId: member.id, weight: validWeights[member.id] })) }, "共有のデフォルト割合を保存しました。");
     } catch (failure) { setError(failure instanceof Error ? failure.message : "割合を保存できませんでした。"); }
     finally { setSavingWeights(false); }
   }
@@ -60,7 +60,7 @@ export function SettingsPanel({ selected, currentUserId, run, afterDelete }: { s
       </div>)}
       {selected.workspace.type === "SHARED" && <div className="default-split-settings">
         <SplitEditor members={selected.members} value={weights} onChange={setWeights} disabled={savingWeights || selected.members.length < 2} label="デフォルト割合" />
-        <p className="ratio-note">新しい共有費の初期値に使います。保存済みの明細は、それぞれの割合で清算します。</p>
+        <p className="ratio-note">区分が「共有」の新しい明細の初期値に使います。保存済みの明細は、それぞれの割合で清算します。</p>
         {selected.members.length === 2 && <button className="secondary" disabled={savingWeights} onClick={saveWeights}>{savingWeights ? "保存中…" : "割合を保存"}</button>}
       </div>}
       {selected.workspace.type === "SHARED" && selected.members.length < 2 && <div className="invite-form">

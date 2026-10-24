@@ -25,7 +25,7 @@ test("同じ列はOR、複数列はANDで照合し、空の選択は0件にな�
 test("重複した値を集約して件数を表示し、金額は数値順になる", () => {
   const items = [base, { ...base, id: "two", amountYen: 20 }, { ...base, id: "three", amountYen: 100 }];
   assert.deepEqual(transactionFilterOptions(items, "merchant", members), [{ value: "スーパー", label: "スーパー", count: 3 }]);
-  assert.deepEqual(transactionFilterOptions(items, "amountYen", members).map(option => option.value), ["20", "100", "1001"]);
+  assert.deepEqual(transactionFilterOptions(items, "amountYen", members).map(option => option.value), ["PAYMENT:1001", "PAYMENT:100", "PAYMENT:20"]);
 });
 
 test("支払者はIDで照合し、日時はJSTの秒とミリ秒を保持する", () => {
@@ -88,4 +88,18 @@ test("多数候補を一度準備して再利用し、保存用配列は変更�
   const changed = createTransactionFilterMatcher({ ...filters, merchant: [] }, members);
   assert.equal(changed(base), false);
   assert.equal(matches(base), true);
+});
+
+
+test("同額の支払いと収入は別候補になり種別と金額で絞り込める", () => {
+  const receipt = { ...base, id: "receipt", type: "RECEIPT" as const };
+  const options = transactionFilterOptions([base, receipt], "amountYen", members);
+  assert.deepEqual(options.map(option => option.value), ["PAYMENT:1001", "RECEIPT:1001"]);
+  assert.match(options[0].label, /^−/);
+  assert.match(options[1].label, /^\+/);
+  assert.equal(matchesTransactionFilters(base, { amountYen: ["PAYMENT:1001"] }, members), true);
+  assert.equal(matchesTransactionFilters(receipt, { amountYen: ["PAYMENT:1001"] }, members), false);
+  assert.equal(matchesTransactionFilters(receipt, { type: ["RECEIPT"] }, members), true);
+  assert.equal(matchesTransactionFilters(base, { type: ["RECEIPT"] }, members), false);
+  assert.equal(transactionFilterValue(receipt, "type", members).label, "収入");
 });

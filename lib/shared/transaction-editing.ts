@@ -53,7 +53,7 @@ export function validateTransactionValues(values: TransactionValues, members: re
     throw new Error(`金額は1〜${MAX_AMOUNT_YEN}円の整数で入力してください。`);
   }
   if (!transactionTypeSchema.safeParse(values.type).success) throw new Error("取引種別が不正です。");
-  if (!expenseClassSchema.safeParse(values.expenseClass).success) throw new Error("費用区分が不正です。");
+  if (!expenseClassSchema.safeParse(values.expenseClass).success) throw new Error("区分が不正です。");
   if (!members.some((member) => member.id === values.actorUserId)) throw new Error("担当者が参加者に含まれていません。");
   return {
     ...values, merchant, method,

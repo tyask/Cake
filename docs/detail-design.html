@@ -210,7 +210,7 @@
           <h1>コードから辿れる、実装の設計図。</h1>
           <p>Next.jsアプリケーションのルート、コンポーネント、APIアクション、ドメイン関数、型、SQLスキーマをソースコード単位で定義する。</p>
           <div class="meta">
-            <span>更新日: 2026-10-17</span>
+            <span>更新日: 2026-10-24</span>
             <span>対象: 現行リポジトリ</span>
             <span>粒度: ファイル / 関数 / API / テーブル</span>
             <span>基準: As-Is実装</span>
@@ -244,7 +244,7 @@
               <tr><td>Server Component</td><td>Next.jsサーバー</td><td>セッション取得、初期データ取得、初期画面の分岐。</td><td>ブラウザAPIの使用。</td></tr>
               <tr><td>Client Component</td><td>ブラウザ</td><td>画面状態、入力、Fetch、CSV解析・プレビュー。</td><td>DB接続文字列や秘密情報の参照。</td></tr>
               <tr><td>Route Handler</td><td>Node.js Runtime</td><td>認証、入力検証、認可、サービス・storeの組立て、JSON応答。</td><td>クライアント入力の無検証利用、SQLの直接記述。</td></tr>
-              <tr><td>Pure Domain Function</td><td>呼出元に従う</td><td>CSV変換、費用区分判定、清算計算。</td><td>DBや画面状態への副作用。</td></tr>
+              <tr><td>Pure Domain Function</td><td>呼出元に従う</td><td>CSV変換、区分判定、清算計算。</td><td>DBや画面状態への副作用。</td></tr>
             </tbody>
           </table></div>
           <h3>ライブラリの配置と依存</h3>
@@ -336,7 +336,7 @@
                 <div class="dfd-arrow"><b>→</b><small>File.text() / readText()<br />処理内の一時値</small></div>
                 <div class="dfd-node process"><strong>parsePayPayCsv</strong><small>PapaParse・Header検証<br />支払い抽出・Rule適用</small></div>
                 <div class="dfd-arrow"><b>→</b><small>PreviewRow[]</small></div>
-                <div class="dfd-node output"><strong>取込プレビュー</strong><small>選択・担当者・費用区分<br />割合・カテゴリを編集</small></div>
+                <div class="dfd-node output"><strong>取込プレビュー</strong><small>選択・担当者・区分<br />割合・カテゴリを編集</small></div>
                 <div class="dfd-arrow"><b>→</b><small>登録可能な全items<br />JSON 最大2000件</small></div>
                 <div class="dfd-node process"><strong>bulkImport</strong><small>再検証・所属確認<br />カテゴリ・重複内容を検証</small></div>
                 <div class="dfd-arrow"><b>→</b><small>Transaction</small></div>
@@ -481,8 +481,8 @@
           <ul>
             <li>各操作はDB上の最新workspace所属を確認してから取得する。<code>splitMembers(workspaceId)</code>は参加者のID・重み・名前、<code>splitRules(workspaceId)</code>は部分一致判定に必要なルール一覧を優先順・作成日時・ID順で返す。</li>
             <li><code>createRule</code>は参加者だけを取得。<code>updateRule</code>は参加者と<code>ruleForUpdate(workspaceId, ruleId)</code>を並列取得し、対象1件の区分・割合・enabledだけを読む。対象SELECTとUPDATEはともにworkspaceとrule IDで限定する。不在は更新せず拒否。区分同一で割合省略なら保存値を継承し、明示nullはデフォルト参照、enabled省略は保存値を維持する。</li>
-            <li><code>saveTransaction</code>は既存明細かつ割合省略の場合だけ未清算の前回値を取得し、区分と割合を従来の条件で継承する。その結果の区分が未指定、または共有費で割合が未指定の場合だけ<code>splitRules</code>とルール判定を行う。明示個人費は担当者1・ほか0を生成し、区分・割合が確定済みならルールを参照しない。どの経路でも参加者・担当者・割合の検証を実行する。</li>
-            <li>明示割合で区分だけ省略された通常明細はルール区分を使い、前回明細の区分を読まない。共有費の割合省略時は一致する共有費ルールの割合を使い、それ以外はworkspaceのデフォルト割合を使う。CSV取込は参加者とルールを取得し、省略値を共有費既定で補完する。</li>
+            <li><code>saveTransaction</code>は既存明細かつ割合省略の場合だけ未清算の前回値を取得し、区分と割合を従来の条件で継承する。PAYMENTで、その結果の区分が未指定またはSHAREDの割合が未指定の場合だけ<code>splitRules</code>とルール判定を行う。RECEIPTはルールを取得・判定しない。明示PERSONALは支払者／受取者1・ほか0を生成し、区分・割合が確定済みならルールを参照しない。どの経路でも参加者・支払者／受取者・割合の検証を実行する。</li>
+            <li>明示割合で区分だけ省略された通常支払い明細はルール区分を使い、前回明細の区分を読まない。共有の支払いで割合省略時は一致するルールの割合、それ以外はworkspaceのデフォルト割合を使う。新規収入の区分未指定はPERSONAL、SHARED指定時の割合省略はworkspaceのデフォルト割合を使う。CSV取込は支払いだけを対象に参加者とルールを取得し、省略値をSHARED既定で補完する。</li>
           </ul>
           <h3>POSTアクション一覧</h3>
           <div class="table-wrap"><table>
@@ -678,7 +678,7 @@
           <p>対応する実装：<a href="../components/dashboard.tsx">Dashboard</a>、<a href="../components/use-dashboard-controller.ts">controller hook</a>、<a href="../lib/client/dashboard-requests.ts">応答採用条件</a>、<a href="../lib/client/transaction-refresh.ts">保存待ち更新</a>、<a href="../lib/server/handlers/app-handlers.ts">HTTP境界</a>、<a href="../lib/server/services/app-service.ts">action振分け</a>。</p>
 
           <h3>設定枠の開閉</h3>
-          <p>個人設定は「基本情報」、ワークスペース設定は「基本情報」「ワークスペースのデフォルト割合」「集計用カテゴリ」「定期支払い」「費用区分のデフォルトルール」「ワークスペースを削除」を縦に並べる。共通の<a href="../components/settings-section.tsx">SettingsSection</a>がnativeのdetails / summaryで各枠を初期状態では閉じ、見出し全体のクリック・タップ、Enter・Spaceで個別に開閉する。開閉マークは直径28pxの淡い丸背景に20pxのSVG矢印を置き、閉じているときは下、開いているときは上を向く。回転は短いアニメーションで示し、動きを減らす利用者設定ではアニメーションを行わない。マーク自体は装飾として読み上げとフォーカスの対象外とする。</p>
+          <p>個人設定は「基本情報」、ワークスペース設定は「基本情報」「ワークスペースのデフォルト割合」「集計用カテゴリ」「定期支払い」「区分のデフォルトルール」「ワークスペースを削除」を縦に並べる。共通の<a href="../components/settings-section.tsx">SettingsSection</a>がnativeのdetails / summaryで各枠を初期状態では閉じ、見出し全体のクリック・タップ、Enter・Spaceで個別に開閉する。開閉マークは直径28pxの淡い丸背景に20pxのSVG矢印を置き、閉じているときは下、開いているときは上を向く。回転は短いアニメーションで示し、動きを減らす利用者設定ではアニメーションを行わない。マーク自体は装飾として読み上げとフォーカスの対象外とする。</p>
           <p>開閉状態は各detailsが保持し、サーバーへの保存や永続化は行わない。本文の子コンポーネントは閉じてもunmountしないため、名前・割合・カテゴリの編集中の値、ルールの選択、保存中・失敗状態を保持する。画面を離れて再表示した場合やワークスペース切替で再マウントした枠は閉じて開始する。開閉自体ではAPIを呼ばず、定期支払いの表示時GET・日付境界の再取得と各設定の既存の保存契機は維持する。</p>
 
           <h3>Dashboardと取得・更新hookの状態</h3>
@@ -714,9 +714,9 @@
           <div class="table-wrap"><table>
             <thead><tr><th>タブ</th><th>参照・操作</th></tr></thead>
             <tbody>
-              <tr><td>ホーム</td><td>今月の支払い、未清算共通費、次の送金、最近6件、保留招待数、登録/取込/清算への導線。lib/shared/home-summary.tsで日本時間の年・月が一致する明細を抽出する。</td></tr>
+              <tr><td>ホーム</td><td>今月の収支（月全体）と収入・支払い内訳、未清算の共有収支、次の送金、最近6件、保留招待数、登録/取込/清算への導線。lib/shared/home-summary.tsで日本時間の年・月が一致する明細を抽出し、BigIntで収入合計−支払い合計を求める。個人/共有・清算状態に関係なく当月の全登録明細を含め、未来日付も月末まで含める。未清算の共有収支は全期間の未清算SHAREDだけを同じ方式で合計する。</td></tr>
               <tr><td>取引明細</td><td>全明細の列フィルタ、未清算行のインライン保存、清算済みもメモ・カテゴリ保存、選択削除/ルール適用。</td></tr>
-              <tr><td>CSV取込</td><td>ファイルまたは貼り付け本文を、metadataのルール・参加者で共通解析し、外部IDを専用APIで照合。カテゴリ補完はボタン押下時に未分類行の取引先だけを候補APIへ送る。選択行の費用区分・カテゴリの一括変更、行ごとの割合・カテゴリの編集を経て、最終値を確認してbulkImport。</td></tr>
+              <tr><td>CSV取込</td><td>ファイルまたは貼り付け本文を、metadataのルール・参加者で共通解析し、外部IDを専用APIで照合。カテゴリ補完はボタン押下時に未分類行の取引先だけを候補APIへ送る。選択行の区分・カテゴリの一括変更、行ごとの割合・カテゴリの編集を経て、最終値を確認してbulkImport。</td></tr>
               <tr><td>清算</td><td>保存割合による清算内訳、対象明細、最新20件の履歴、清算完了。</td></tr>
               <tr><td>設定</td><td>本人表示名、workspace名・デフォルト割合・招待・削除、共有ルール、定期支払い、管理者だけの利用者登録/停止。</td></tr>
             </tbody>
@@ -724,10 +724,11 @@
           <h3>金額・日時の表示と入力</h3>
           <p>幅48rem以下の取引明細では、datetime-local入力の幅を0、最小幅・最大幅をセル幅の100%にして、ブラウザ固有の日時コントロールの固有幅によるはみ出しを防ぐ。WebKitの日時表示は左寄せにし、内部編集領域の最小幅と余白を抑える。秒・ミリ秒の入力値と保存処理は維持する。</p>
           <p>サーバーは日時をミリ秒付きUTC ISO文字列としてブラウザへ返す。明細の保存応答・full再取得の取引日時と清算日時、清算履歴の完了日時、full/metadataの招待期限では秒への切捨てを行わない。DB driverのDateは文字列化を挟まずISOへ変換する。ブラウザは表示時にJSTと秒・分の書式を適用し、日時入力・再保存ではミリ秒を保持する。DBスキーマとクエリ回数・並び順・期限判定は変えない。</p>
-          <p><code>formatYen</code>は日本円の通貨記号と桁区切りを表示し、ホーム・明細・清算・定期支払い・負担金額・CSV確認表で共用する。CSVの非有限金額を「—」にする補正は確認表に残す。通貨記号を付けない円表記や数値入力は各画面の書式を使う。</p>
+          <p>DB/APIの<code>amountYen</code>は正の整数と<code>type=PAYMENT|RECEIPT</code>を保持し、表示のために保存値を負数へ変換しない。<code>formatCashflow</code>は収支値を「−¥5,000」「+¥5,000」、0円を符号なしで表示する。<code>formatTransactionAmount</code>はPAYMENTを負、RECEIPTを正に変換して同じ書式を使い、<code>cashflowClass</code>は正にpositive（緑）、負にnegative（赤）、0に通常色を返す。ホーム・明細・CSV確認表・定期支払い・配分金額で共用する。支出のみを扱う集計画面はこの符号・色の規則の対象外とし、通常の通貨書式を使う。CSVの非有限金額を「—」にする補正は確認表に残す。</p>
+          <p>金額入力は正の整数とし、符号を入力欄の外側に表示する。<code>SplitEditor</code>は種別を受け取り、円モードの符号と補足の配分金額へ反映する。%は無符号とする。清算の送金指示・履歴は双方に共通の金額なので、<code>formatYen</code>による絶対額と送金方向で示す。支払い時は「支払者」、収入時は「受取者」、一覧共通見出しは「支払者／受取者」とし、「区分」（個人／共有）と「配分割合」は両種別で統一する。</p>
           <p><code>formatJstDateTime</code>は<code>DateTimePrecision.Minute</code>／<code>Second</code>で表示精度を指定し（既定は秒）、Asia/Tokyo固定で、ホーム・清算履歴・清算済み明細では秒まで、スマートフォンの明細要約では分まで表示する。CSVの元日時と定期支払いの日付表示は各画面で保持する。表示関数はdatetime-local入力には使わない。明細編集の<code>transactionDateInput</code>／<code>transactionDateToIso</code>は秒・ミリ秒を保持し、UTCへ変換する。新規明細の入力初期値は専用formatterを再利用して分まで表示する。</p>
           <h3>新規明細</h3>
-          <p>NewTransactionModalはPAYMENTを登録する。UI初期値は共通費と現在のデフォルト割合で、取引先ルールに一致すると区分・割合を適用する。ルール未一致もUIでは共通費を選び、利用者が区分/割合を変更した後は自動適用を止める。APIと清算計算はRECEIPTも扱うが、新規画面には種別切替を持たない。</p>
+          <p>NewTransactionModalはPAYMENTまたはRECEIPTを登録する。初期値は支払い・共有・現在のデフォルト割合で、支払い時だけ取引先ルールを適用する。新規収入の区分・割合初期化と保存経路は後述の「支払い・収入の追加と種別変更」に従う。登録成功でフォームを閉じ、保存失敗では入力を保持する。</p>
           <h3 id="recurring-payments">定期支払いの取得・変更・実行</h3>
           <p>設定表示時に<code>GET /api/recurring-payments?workspaceId=UUID</code>を実行し、payments、eligibleActorUserIds、日本時間のtoday、サーバー時刻のISO文字列nowを取得する。設定を既存bootstrapへ混在させず、full/metadataの通常2 SQLを維持する。現在の設定と次回予定を返し、開始日・適用月・変更予約・成功月はDTOへ含めない。</p>
           <p>ワークスペース設定では集計用カテゴリの次、デフォルトルールの前に定期支払いを配置する。追加・編集フォームと一覧に開始日の項目は設けない。</p>
@@ -761,23 +762,36 @@
             <p>サーバー更新は成功応答を既存の状態管理で反映し、失敗時は対象行・入力を保持する。</p>
           </div>
           <p>単件の明細・ルール削除はチェック状態を書き換えず対象ID配列を既存の一括操作へ渡し、他行の選択を保持する。明細は保存待ちと入力をflushしてから最新の未清算対象を再確認する。ルールの保存中・構造更新中・並べ替え中はスワイプ削除を無効にし、既存キューで編集と削除を直列化する。取り込み行は確認ポップアップの承認後にだけ除外する。キャンセル時は行・入力・選択を保持し、除外ではAPIを呼ばず、元の読込件数を別Stateに保持して取込履歴のtotalRowsへ渡す。ファイル選択・貼り付けで再度読み込むと除外もリセットし、両入口で元の読込件数を保持する。取り込み登録中は行削除を無効にする。</p>
+          <h3>支払い・収入の追加と種別変更</h3>
+          <p><code>NewTransactionModal</code>が種別・日時・取引先・方法・金額・支払者／受取者・区分・割合・カテゴリ・メモのdraftを所有する。初期種別はPAYMENTで、共有と現在のデフォルト割合を使い、一致する支払いルールを適用する。RECEIPTへ変更すると個人・受取者100%を設定し、共有を選べば現在のデフォルト割合から調整できる。支払いへ戻すと現在の取引先ルールを適用する。種別変更だけでは日時・取引先・方法・金額・カテゴリ・メモを変更せず、APIも呼ばない。収入時はルールの自動適用・再適用を行わない。</p>
+          <div class="data-flow">
+            <div class="dfd-track" role="img" aria-label="種別変更は入力中の区分と配分割合だけを初期化し、追加ボタンで種別と正の金額を保存する">
+              <div class="dfd-node source"><strong>種別を選択</strong><small>PAYMENT / RECEIPT<br />フォームのdraftだけを更新</small></div>
+              <div class="dfd-arrow"><b>→</b></div>
+              <div class="dfd-node process"><strong>区分・割合の初期化</strong><small>支払い: 取引先ルール<br />収入: 個人・受取者100%</small></div>
+              <div class="dfd-arrow"><b>→</b><small>追加する</small></div>
+              <div class="dfd-node store"><strong>saveTransaction</strong><small>種別＋正の金額＋最終割合<br />所属・入力・保存割合を検証</small></div>
+              <div class="dfd-arrow"><b>→</b></div>
+              <div class="dfd-node output"><strong>確定値を反映</strong><small>ホーム収支・一覧・清算を更新<br />失敗時は入力を保持</small></div>
+            </div>
+          </div>
           <h3>明細編集・一括操作</h3>
           <ul>
-            <li>文字・日時・金額・割合は欄を離れるかEnterで保存。選択項目は変更時に保存。入力検証後、保存キューで順番に実行し、失敗時の下書きと再試行を保持する。</li>
+            <li>文字・日時・金額・割合は欄を離れるかEnterで保存。種別・支払者／受取者・区分などの選択項目は変更時に保存。既存明細の種別だけの変更では保存済みの区分・配分割合を保持する。清算済みの種別・金額・割合は編集不可。入力検証後、保存キューで順番に実行し、失敗時の下書きと再試行を保持する。</li>
             <li>明細・ルールの保存は<code>lib/client/autosave.ts</code>で要求集約・値比較・確定値追従を共通化する。Enter直後のblurは進行中の要求に集約し、キュー実行時に最新下書きと確定値を比較して同値のPOSTを省略する。確定値と下書きの反映をキュー内で完了してから次を実行する。保存中の追加編集は保持し、失敗時は自動再送せず入力を残して再試行する。日時の未確定入力、メモの独立保存、明細のfreeze/flushは各エディタで管理する。遅れたReact反映の間だけ確定値を補い、反映完了後の外部更新を受け入れる。</li>
-            <li>取引の担当者を変更すると個人費の割合は新担当者1・ほか0に追従。共通費の保存済み割合は保持する。費用区分を新たに共通費へ変更すると現在のデフォルト割合を使う。</li>
+            <li>取引の担当者を変更すると個人費の割合は新担当者1・ほか0に追従。共通費の保存済み割合は保持する。区分を新たに共通費へ変更すると現在のデフォルト割合を使う。</li>
             <li>割合は%と円入力を切替可能。円表示は最大剰余法で配分し同率時は参加者順、合計を整数円に一致させる。円入力は分担金額を重みとして保存する。</li>
             <li><code>SplitEditor</code>の単位プルダウンは共通部品で常に「%」「円」「1:1」の3択を表示し、呼出元ごとの表示可否フラグは持たない。明細追加・一覧・CSV取込・定期支払いの追加/編集で同じ選択肢を使う。二人参加中で編集可能な共通費に限り、選択すると二人の重みを1ずつに設定し、%表示の50%ずつへ戻す。新規明細では手動調整としてルールの自動適用を止め、一覧では変更した割合を即時保存キューへ送る。奇数円でも保存割合は1:1を保持する。個人費・清算済み・参加者一人では利用不可とし、CSV取込では対象行のプレビューだけを変更し、取込実行時にsplitWeightsとして送信する。未選択の登録可能行も編集でき、選択状態・他行・workspaceのデフォルト割合を変更しない。エラー行・重複行・保存中はfieldsetを無効化する。定期支払いではフォームのconfigと手動調整状態を更新し、追加/変更の保存時に専用APIへ送る。onChangeがない参照用と参加者一人では1:1のoptionを無効にする。workspaceのデフォルト割合入力は単位プルダウンを持たない。API・DBの変更は不要。</li>
             <li>メモは空文字で削除可能、改行/空白を保持し最大2000文字。blurまたはCtrl/⌘+Enterで専用保存。清算済み行はメモとカテゴリを専用保存で編集できる。</li>
             <li>列を絞り込んでも未清算行の選択を保持する。編集・保存・エラー中の行は条件外になっても表示を維持。一括操作の前に未保存の変更を保存し、確定した取引先と担当者へルールを適用する。</li>
-            <li>一括削除/ルール適用は選択全件の存在と未清算をDBで確認し、対象の一部だけを変更しない。ルール未一致は個人費へ戻る。適用済み明細の確定値を応答し、編集Stateにも反映する。</li>
+            <li>一括削除/ルール適用は選択全件の存在と未清算をDBで確認し、対象の一部だけを変更しない。ルール適用は支払いだけに許可し、収入を選択中は画面の実行を無効にする。DBでも対象全件のロック後に種別を検証し、収入が混在すれば全体を失敗させる。支払いでルール未一致は個人へ戻る。適用済み明細の確定値を応答し、編集Stateにも反映する。</li>
           </ul>
-          <p><code>SplitEditor</code>は明細追加・一覧編集・CSV取込・ワークスペースのデフォルト割合で共用する。割合・負担金額の入力欄には<code>required</code>を指定せず、削除後の空欄を表示として保持し、計算と保存には数値0を使う。初期値の0と明示的に入力した0は0を表示する。単位の切替、明細金額の変更、親からのルール・費用区分の再適用では空欄表示を解除し、新しい値に追従する。相手の残額の自動計算、割合の0.1%単位、整数円、既存の数値範囲と全員0の拒否は維持する。</p>
+          <p><code>SplitEditor</code>は明細追加・一覧編集・CSV取込・ワークスペースのデフォルト割合で共用する。割合・配分金額の入力欄には<code>required</code>を指定せず、削除後の空欄を表示として保持し、計算と保存には数値0を使う。初期値の0と明示的に入力した0は0を表示する。単位の切替、明細金額の変更、親からのルール・区分の再適用では空欄表示を解除し、新しい値に追従する。相手の残額の自動計算、割合の0.1%単位、整数円、既存の数値範囲と全員0の拒否は維持する。</p>
           <h3>ルール編集</h3>
           <p>有効なルールを上から評価し、取引先の部分一致が最初に成立する一件を使う。文字・割合はblur/Enter、区分・デフォルト利用・有効状態は即保存。追加は末尾、ドラッグまたはスペース/上下キーで並び替え、選択したルールをまとめて削除する。操作キューは並び替え・削除と行編集を直列化し、失敗した入力や構造操作の再試行を保持する。ルール変更だけでは保存済み明細を変更しない。</p>
           <p><code>orderedWorkspaceRules</code>はID→ルールのMapと出力済みIDのSetを用い、楽観的な順序に現在存在するルールを一度ずつ配置する。未知・外部削除済みIDは除外し、外部追加は最新取得順で末尾に残す。順序保存の成功時は最新取得順へ戻し、失敗時は操作前の順序へ戻す。選択IDの所属判定にもSetを使う。取引先の部分一致・優先順によるルール適用判定は変更しない。</p>
           <h3>PC取引明細の折り返し</h3>
-          <p><code>TransactionTable</code>の<code>wrap</code>を取引明細だけで有効にする。表のラッパーをinline-size containerとし、PC幅（48rem超）かつ表示領域84rem未満では明細行をflex-wrap、各セルを項目別の幅を基準に配置する。日時・割合・カテゴリ・メモの入力幅を確保し、既存の<code>data-label</code>を項目名として表示する。見出しのフィルタと全選択も折り返し、保存中表示・全幅のエラー行・カテゴリ色線を維持する。幅変更はCSSだけで切り替え、入力部品の再生成やデータ取得・保存は行わない。84rem以上の列別テーブル、48rem以下の要約と詳細展開、CSV取込と定期支払いの表示はそれぞれの既存レイアウトを使う。</p>
+          <p><code>TransactionTable</code>の<code>wrap</code>を取引明細だけで有効にする。表のラッパーをinline-size containerとし、PC幅（48rem超）かつ表示領域90rem未満では明細行をflex-wrap、各セルを項目別の幅を基準に配置する。日時・割合・カテゴリ・メモの入力幅を確保し、既存の<code>data-label</code>を項目名として表示する。見出しのフィルタと全選択も折り返し、保存中表示・全幅のエラー行・カテゴリ色線を維持する。幅変更はCSSだけで切り替え、入力部品の再生成やデータ取得・保存は行わない。90rem以上の列別テーブル、48rem以下の要約と詳細展開、CSV取込と定期支払いの表示はそれぞれの既存レイアウトを使う。</p>
           <h3>取引明細のフィルタ保存</h3>
           <p><code>TransactionsPanel</code>は<code>useTransactionFilters(userId, workspaceId)</code>で列ごとの条件を管理し、<code>lib/client/transaction-filter-storage.ts</code>を通して<code>localStorage</code>へ保存・復元する。API・DBへは保存しない。</p>
           <p>保存用の列条件は文字列配列のまま保持し、条件または参加者の変更時に<code>createTransactionFilterMatcher</code>が列ごとの検索用Setを準備する。同じ列はOR、列間はAND、空選択は0件とする。<code>transactionListView</code>は各明細の条件を一度だけ判定し、編集中・保存失敗・メモ編集中の条件外行を含む表示と条件外表示の印で結果を共用する。表示ID・未清算ID・選択IDの所属をSetで照合して非表示選択数と全選択状態を求め、削除済み・清算済みIDは一括操作対象から除く。絞り込みでは非表示の選択を保持する。</p>
@@ -785,17 +799,17 @@
             <thead><tr><th>項目</th><th>仕様</th></tr></thead>
             <tbody>
               <tr><td>保存キー</td><td><code>cake:transaction-filters:v1:{encodeURIComponent(userId)}:{encodeURIComponent(workspaceId)}</code>。ユーザーとワークスペースごとに分離し、キー内の<code>v1</code>で保存形式を識別する。</td></tr>
-              <tr><td>保存内容</td><td><code>TransactionFilters</code>をJSON化したオブジェクト。列IDは<code>occurredAt</code>、<code>merchant</code>、<code>method</code>、<code>amountYen</code>、<code>actorUserId</code>、<code>expenseClass</code>、<code>splitWeights</code>、<code>memo</code>、<code>settlement</code>だけを認め、各値は文字列配列とする。</td></tr>
-              <tr><td>条件の意味</td><td>列IDの省略はその列の絞り込みなし。空配列はすべての候補を未選択にした条件として保持し、該当明細を0件にする。全列の絞り込み解除でオブジェクトが空になった場合は保存キーを削除する。</td></tr>
-              <tr><td>復元・更新</td><td>ユーザーIDまたはワークスペースIDの変更時に保存先を切り替える。画面再表示・再読み込み時に保存値を読み、変更時は即時保存する。<code>useSyncExternalStore</code>のサーバー描画時の初期値は空オブジェクトとし、ブラウザで復元する。同じブラウザの別タブによる変更・削除は<code>storage</code>イベントで再読込する。</td></tr>
+              <tr><td>保存内容</td><td><code>TransactionFilters</code>をJSON化したオブジェクト。列IDは<code>occurredAt</code>、<code>merchant</code>、<code>method</code>、<code>type</code>、<code>amountYen</code>、<code>actorUserId</code>、<code>expenseClass</code>、<code>splitWeights</code>、<code>memo</code>、<code>settlement</code>だけを認め、各値は文字列配列とする。</td></tr>
+              <tr><td>条件の意味</td><td>種別はPAYMENT／RECEIPTの値で絞り込む。金額候補は<code>PAYMENT:1000</code>／<code>RECEIPT:1000</code>のように種別と正額を組み合わせ、−¥1,000と+¥1,000を区別する。列IDの省略はその列の絞り込みなし。空配列はすべての候補を未選択にした条件として保持し、該当明細を0件にする。全列の絞り込み解除でオブジェクトが空になった場合は保存キーを削除する。</td></tr>
+              <tr><td>復元・更新</td><td>保存キーのv1を維持し、旧形式の金額条件である符号なし数字文字列は復元時にPAYMENTとRECEIPTの両候補へ展開して、同じ正額の両種別に一致する意味を維持する。その他の列条件は保持する。ユーザーIDまたはワークスペースIDの変更時に保存先を切り替える。画面再表示・再読み込み時に保存値を読み、変更時は即時保存する。<code>useSyncExternalStore</code>のサーバー描画時の初期値は空オブジェクトとし、ブラウザで復元する。同じブラウザの別タブによる変更・削除は<code>storage</code>イベントで再読込する。</td></tr>
               <tr><td>異常時</td><td>JSON不正やオブジェクト以外の値は空条件へ戻す。不明な列IDや文字列配列以外の列値は無視する。読込・書込・削除の例外を捕捉し、保存領域が利用できない場合も現在の画面上の絞り込み操作を継続する。</td></tr>
               <tr><td>保存範囲</td><td>同じサイトのブラウザ内だけに保持し、別端末・別ブラウザへ同期しない。サイトデータの削除で保存条件を初期化する。</td></tr>
             </tbody>
           </table></div>
           <h3>日時・金額表示</h3>
           <ul>
-            <li><code>money()</code>: <code>Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" })</code>。</li>
-            <li><code>dateTime()</code>: <code>Asia/Tokyo</code>で年月日時分秒を表示。</li>
+            <li><code>formatYen()</code>: <code>Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" })</code>。収支・明細金額は<code>formatCashflow()</code>／<code>formatTransactionAmount()</code>で符号を追加し、清算送金の絶対額と集計の支出額は<code>formatYen()</code>を使う。</li>
+            <li><code>formatJstDateTime()</code>: <code>Asia/Tokyo</code>で年月日時分秒を表示。</li>
             <li>新規入力の<code>inputDate()</code>/<code>jstInputToIso()</code>はJSTのdatetime-localとUTC ISOを変換。</li>
             <li>一覧の<code>transactionDateInput()</code>/<wbr><code>transactionDateToIso()</code>は秒・ミリ秒を維持し、存在しない日付/時刻を拒否。Repositoryのfull取得は従来互換の秒精度を保ち、SQL内の順序判定には元の日時精度を使用する。</li>
           </ul>
@@ -861,9 +875,10 @@
           <h2>8. ドメイン処理詳細設計</h2>
           <h3>保存割合・デフォルト判定</h3>
           <p><code>SplitWeights = Record&lt;userId, number&gt;</code>は現在の参加者IDをすべて含み、余分なIDなし、各値0〜2147483647の整数、合計は正とする。<code>validateSplitWeights()</code>は入力のコピーを返す。個人費はactorが1・ほか0、共通費は任意の有効割合を保存する。</p>
-          <p><code>prepareDefaultRuleMatcher(rules)</code>は有効なルールだけを新しい配列へ抽出し、<code>sortOrder</code>昇順の安定ソートを一度行って、先頭から最初に部分一致したルールを返す判定関数を作る。同順位は入力順を維持し、入力配列を変更せず、未整列入力も受け付ける。<code>transactionDefaults()</code>は準備済み判定関数を一度呼び、区分と割合を返す。CSV解析はファイル全行、取込APIはリクエスト内の全明細で一つの判定関数を共有し、単件登録も同じ方式で準備する。明細追加・定期支払いフォームはルール一覧を依存値にした<code>useMemo</code>で準備し、取引先の変更や再描画で再ソートせず、一覧更新時に作り直す。グローバルなルールキャッシュは持たない。未一致は既定PERSONAL、明細追加・定期支払いの共有workspace・CSV取込ではSHAREDフォールバックを指定する。共通費のルール割合nullはmemberの現在デフォルトをコピーする。明示ルールの新参加者IDがない場合は0として補う。個人費は担当者1・ほか0とし、デフォルトやルール変更だけでは過去明細の保存割合を変更しない。</p>
+          <p><code>prepareDefaultRuleMatcher(rules)</code>は有効なルールだけを新しい配列へ抽出し、<code>sortOrder</code>昇順の安定ソートを一度行って、先頭から最初に部分一致したルールを返す判定関数を作る。同順位は入力順を維持し、入力配列を変更せず、未整列入力も受け付ける。<code>transactionDefaults()</code>は準備済み判定関数を一度呼び、区分と割合を返す。CSV解析はファイル全行、取込APIはリクエスト内の全明細で一つの判定関数を共有し、支払いの単件登録も同じ方式で準備する。収入保存は支払いルールを取得・判定せず、区分未指定はPERSONAL、SHARED指定かつ割合未指定は現在のデフォルト割合を使う。更新時は保存済み区分・割合を先に継承する。明細追加・定期支払いフォームはルール一覧を依存値にした<code>useMemo</code>で準備し、取引先の変更や再描画で再ソートせず、一覧更新時に作り直す。グローバルなルールキャッシュは持たない。未一致は既定PERSONAL、明細追加・定期支払いの共有workspace・CSV取込ではSHAREDフォールバックを指定する。共通費のルール割合nullはmemberの現在デフォルトをコピーする。明示ルールの新参加者IDがない場合は0として補う。個人費は担当者1・ほか0とし、デフォルトやルール変更だけでは過去明細の保存割合を変更しない。</p>
+          <p>支払い向けルールはCSV・手動支払い・定期支払いに適用する。<code>cake_bulk_transactions</code>のAPPLY_RULESは、ロック中の対象にRECEIPTが1件でもあれば全件を失敗させる。DELETEの対象種別は制限しない。</p>
           <h3>PayPay CSV解析</h3>
-          <p>上部の一括操作欄は、先頭の「カテゴリ」group、続く「選択行の操作」group、末尾の「やり直す」で構成する。カテゴリの選択と「カテゴリを設定」を隣接させ、自動補完との間にはPCで区切り線を置く。幅48rem以下では区切り線を外し、画面幅に応じて折り返す。選択行の操作には選択件数・費用区分変更・削除をまとめ、小見出しと薄い枠で目的を示す。groupにはそれぞれ同名のaria-labelを付ける。幅48rem以下では各groupを縦に並べ、上部一括操作欄と下部登録操作欄のposition・top・bottomをImportPanelのCSSで上書きし、明細とともにスクロールする。PCの下部sticky表示と他画面の操作欄は維持する。</p>
+          <p>上部の一括操作欄は、先頭の「カテゴリ」group、続く「選択行の操作」group、末尾の「やり直す」で構成する。カテゴリの選択と「カテゴリを設定」を隣接させ、自動補完との間にはPCで区切り線を置く。幅48rem以下では区切り線を外し、画面幅に応じて折り返す。選択行の操作には選択件数・区分変更・削除をまとめ、小見出しと薄い枠で目的を示す。groupにはそれぞれ同名のaria-labelを付ける。幅48rem以下では各groupを縦に並べ、上部一括操作欄と下部登録操作欄のposition・top・bottomをImportPanelのCSSで上書きし、明細とともにスクロールする。PCの下部sticky表示と他画面の操作欄は維持する。</p>
           <p>カテゴリの入力値はImportPanelのrows[].categoryIdが所有し、解析時はnull（未分類）。選択肢はmetadataのcategoriesからuseMemoで一度準備した共通CategoryChoicesを各行と一括欄で共有し、使用停止済みを新規選択肢から除く。行別CategorySelectはチェック状態にかかわらず登録可能な行を更新し、一括欄のbulkCategoryIdは「カテゴリを設定」を押したときだけ選択中かつ登録可能な行へ適用する。未分類も同じ操作で解除できる。行・一括欄とも保存中は無効、対象0件では一括欄を無効にする。支払者・区分・割合の変更はcategoryIdを変更せず、選択・カテゴリ変更だけでは通信しない。プレビューの全経路・色線は入力値から導出する。登録時に全登録可能行の最終categoryIdを送信し、失敗時はカテゴリ・選択・他の入力を保持、成功時は確認表を解除する。workspaceやタブ切替時は画面Stateごと破棄し、遅延応答は既存の要求世代で抑止する。</p>
           <p>「カテゴリ自動補完」は<code>isPayPayRowImportable</code>がtrueかつ<code>categoryId === null</code>の行だけを対象とし、selectedは参照しない。同じ元文字列の取引先を一度だけ照会し、2000件を超える場合はbatchへ分け、全batchが成功してから結果を一括適用する。エラー・重複行と設定済みカテゴリは保持し、候補なしは未分類のままとする。候補表示だけではDBも確認状態も更新せず、同じCSV内の別行を補完根拠にしない。ボタンは読取・登録・補完中または対象0件で無効にし、補完中は行編集・選択・支払者・一括操作・登録・やり直し・キャンセルを無効にして入力を固定する。</p>
           <p>補完要求はAbortControllerと要求ID・workspaceで照合し、workspace切替・unmount時は中止する。応答採用時にも現在のカテゴリ一覧で存在と非停止を確認し、要求開始時の未分類行へだけ適用する。全体失敗や中止・古い応答ではrowsを変更せず、失敗は再試行できる。設定済み値や別CSV・別workspaceへ遅延応答を混ぜない。補完ボタンのhover/focusで「未分類の明細について、最近の登録履歴に基づいてカテゴリを補完します」を表示する。説明用の「ⓘ」は幅48rem超でdisplay: noneとして表示・キーボードフォーカス対象から除く。幅48rem以下では24pxの枠・背景のないテキスト状の操作として表示する。buttonの意味と説明ラベル・キーボードフォーカスを保ち、タップまたはEnterで同じ説明を開閉する。説明は外側の押下・Escape・補完実行時に閉じ、説明の開閉だけでは通信しない。スマートフォンでも補完ボタン自体は1タップで実行する。</p>
@@ -875,12 +890,12 @@
               <tr><td>必須列</td><td>取引日、出金金額（円）、取引内容、取引先、取引方法、取引番号。欠落時はファイル全体を例外。</td></tr>
               <tr><td>対象行・金額</td><td>取引内容をtrimした値が支払いと完全一致する行だけ。金額のカンマ/前後空白を除去し、数字のみ・1〜2147483647の整数を許可。上限超過は行エラーにして選択不可にする。</td></tr>
               <tr><td>日時・外部ID</td><td><code>yyyy/MM/dd HH:mm:ss</code>を存在するJST日時として検証。<code>PayPay_YYYYMMDDHHMMSS_{取引番号}</code>を生成し、番号の先頭ゼロを保持。日時/actor編集後も保存IDは保持。</td></tr>
-              <tr><td>行の値</td><td>取引先はtrim後1〜240文字。取引方法はtrim後1〜120文字、空ならPayPay。文字数超過行はAPI送信前のプレビューで登録不可にする。区分・割合はtransactionDefaultsのフォールバックをSHAREDとして決める。有効な一致ルールがなければ共有費とワークスペースのデフォルト割合、一致時はルールを優先する。bulkImport APIも費用区分省略時のフォールバックをSHAREDとする。通常明細のPERSONALフォールバックは維持する。ImportPanelにはログイン本人のcurrentUserIdを渡し、支払者actorIdの初期値に使う。支払者・区分・割合の手動変更は維持する。</td></tr>
+              <tr><td>行の値</td><td>取引先はtrim後1〜240文字。取引方法はtrim後1〜120文字、空ならPayPay。文字数超過行はAPI送信前のプレビューで登録不可にする。区分・割合はtransactionDefaultsのフォールバックをSHAREDとして決める。有効な一致ルールがなければ共有費とワークスペースのデフォルト割合、一致時はルールを優先する。bulkImport APIも区分省略時のフォールバックをSHAREDとする。通常明細のPERSONALフォールバックは維持する。ImportPanelにはログイン本人のcurrentUserIdを渡し、支払者actorIdの初期値に使う。支払者・区分・割合の手動変更は維持する。</td></tr>
               <tr><td>重複・衝突</td><td>全行の初期選択はOFF。既存IDとCSV内同一キーの一致行は選択・編集不可。登録済み行はPCの行・mobileの要約と展開詳細をグレー表示する。同一CSVの繰返しは最初の一件だけ登録候補。同じキーで金額/取引先が異なる場合、既存sourceがPAYPAY以外の場合は衝突エラーとして登録不可。</td></tr>
               <tr><td>専用API照合</td><td>有効な外部IDをまとめ、最大2000件ずつ選択workspaceへ照合。照合完了前や失敗後に未確認のプレビューは表示しない。ファイル変更時の遅延応答は破棄する。</td></tr>
               <tr><td>カテゴリ候補照合</td><td>ボタン押下時に登録可能な未分類行の取引先を最大2000件ずつ候補APIへ送り、同workspace・正規化後の同取引先の確認済み支払い履歴から候補を取得する。有効カテゴリありの履歴をoccurred_at・created_at・id降順の30件に絞って最多を採用し、同率は該当カテゴリの最新履歴順で決める。全batch成功後に有効な候補だけ一括反映し、通信失敗時は全入力を保持する。カテゴリ別の根拠件数や行ごとの確認ボタンは表示しない。</td></tr>
               <tr><td>CSV原本・確認表</td><td><code>File.text()</code>またはタップ時の<code>navigator.clipboard.readText()</code>で取得した本文を共通解析する。readTextはreadCsv内の最初のawaitより前に呼び、タップのuser activationを保持する。CSV本文の入力欄・下書きStateは持たず、原本は読取処理内の一時値として解析し、明細のrowsだけを画面Stateへ反映する。拒否・非対応時はペースト許可の確認と再試行・ファイル選択を案内する。空本文・支払い行なし・ヘッダー不備・重複照合失敗では確認表を出さずエラーを表示し、再試行はCSVをコピーし直すかファイルを選び直す。読み込み中は形式・両入口を無効化し、ドロップも受け付けない。workspace切替後の読取結果は照会開始前に破棄し、古い照会結果も反映しない。貼り付けのファイル名は固定の表示名を使う。サーバーへ送るのは照会用外部ID・カテゴリ候補照会用の取引先と、登録時の登録可能な全items・ファイル名・件数で、CSV本文は送信・保存しない。登録失敗は確認表・行選択を保持し、成功時は確認表を解除する。ImportPanelは利用者・workspaceに属する画面Stateとし、workspaceやタブの切替で破棄する。取込先の家計名を入力画面と確認表へ表示する。</td></tr>
-              <tr><td>選択・削除・登録</td><td>rowsはImportPanelが所有する。チェックは費用区分・カテゴリの一括変更と削除だけに使う。共通のisPayPayRowImportable（errorなし・duplicateでない）で登録可否を判定し、「取込対象」件数・全選択・補完対象・登録APIのitemsに使う。「共通費に変更」の右隣の「削除」は選択件数を確認後に選択行だけrowsから除去し、他行の編集値と選択は保持する。取消ではrowsを変更しない。削除時のAPI通信・DB更新はない。元のtotalRowsは保持して削除行を履歴のスキップ件数へ含める。「確認して登録」はチェックに関係なく残った登録可能行を送信し、対象0件・登録中・補完中は無効。直前に「表示中のカテゴリを確定し、次回のカテゴリ補完に利用します。」を表示する。登録中は選択・編集・削除も無効にする。</td></tr>
+              <tr><td>選択・削除・登録</td><td>rowsはImportPanelが所有する。チェックは区分・カテゴリの一括変更と削除だけに使う。共通のisPayPayRowImportable（errorなし・duplicateでない）で登録可否を判定し、「取込対象」件数・全選択・補完対象・登録APIのitemsに使う。「共有に変更」の右隣の「削除」は選択件数を確認後に選択行だけrowsから除去し、他行の編集値と選択は保持する。取消ではrowsを変更しない。削除時のAPI通信・DB更新はない。元のtotalRowsは保持して削除行を履歴のスキップ件数へ含める。「確認して登録」はチェックに関係なく残った登録可能行を送信し、対象0件・登録中・補完中は無効。直前に「表示中のカテゴリを確定し、次回のカテゴリ補完に利用します。」を表示する。登録中は選択・編集・削除も無効にする。</td></tr>
               <tr><td>取込ヘルプ</td><td>見出しは「クリップボードから貼り付け」、実行ボタンは「貼り付け」。既存のページ説明・貼付説明・ファイル説明・末尾注記は表示せず、指定の注記はSafariのときだけ表示し、小さい「ヘルプ」は全ブラウザに置く。navigator.userAgentのVersion/Safari識別子から判定し、Chrome・Firefox・Edge・Operaなどの識別子は除外する。useSyncExternalStoreのサーバーsnapshotはfalseとし、hydration時には注記を出さず、client snapshotで表示を決める。ヘルプ操作では親Stateに現在originから構築した<code>/?tab=import</code>だけを保存し、ImportHelpDialogをnative dialogのshowModalで開く。現在URLのquery/hash、workspaceId、CSV本文、認証情報は渡さない。ショートカットの作成・共有受取・テキスト化・コピー・URLを開く設定とPayPayからの使い方を表示し、「URLをコピー」の明示操作時だけwriteTextを呼ぶ。コピー失敗は固定の長押し案内を表示する。開閉だけでは通信・clipboard APIを呼ばない。native dialogでfocus trapとEscapeを使い、閉じる操作はdialog.closeからonCloseで親Stateを破棄してトリガーへfocusを戻す。トリガーを明示focusしてから開き、モバイルのfocus復帰も確保する。ヘルプ本文だけをスクロールし、上下の閉じる操作は常に使える。読取・登録中はヘルプを無効化する。</td></tr>
               <tr><td>DB登録</td><td>外部IDを正規化し、同一入力内のキー重複は最初を維持して金額・取引先差異を拒否する。全入力のカテゴリIDを重複除去し、skip候補も含めてworkspace・最新所属・同workspaceの有効カテゴリを同じTransactionで集合検証する。batchを作成し、jsonb_to_recordsetから外部ID順の単一INSERTを行い、batchの実挿入件数を確定する。アプリ側SQLは入力件数によらず4本。既存の割合検証行triggerは維持し、新しいカテゴリ所属照会を行ごとに増やさない。登録済みキーはロック下でsource・金額・取引先を確認し、一致は既存カテゴリも含めて保持、不一致は履歴も全行もrollbackする。カテゴリIDは登録時に再選択・自動補完せず、最終選択を保存する。カテゴリ付き新規行のcategory_confirmedはtrue、未分類はfalseとなり、成功した登録だけを次回の補完根拠にする。</td></tr>
             </tbody>
@@ -892,9 +907,9 @@
           <ol>
             <li>メンバーがちょうど2人でなければnull。未清算のSHARED明細だけを抽出し、0件ならnull。</li>
             <li>対象actorの所属、正の安全整数金額、各明細の保存割合を検証する。</li>
-            <li>支払いを正、受け取りを負として正味共通費を計算。各明細の金額に、その明細の先頭参加者割合を掛けた分数をBigIntで正確に合算する。</li>
+            <li>支払いを正、収入を負として正味共通費を計算。各明細の金額に、その明細の先頭参加者割合を掛けた分数をBigIntで正確に合算する。</li>
             <li>全明細を合算した先頭参加者の負担を一度だけ<code>Math.round</code>相当で丸める。負の0.5も正の方向に丸め、二人目の負担は正味共通費から先頭負担を引く。</li>
-            <li><code>actual = ownPayments - ownReceipts</code>、<code>balance = actual - target</code>。負balanceの人が支払い、正balanceの人が受け取り、送金額は負balanceの絶対値。</li>
+            <li><code>actual = ownPayments - ownReceipts</code>、<code>balance = actual - target</code>。負balanceの人が支払側、正balanceの人が受取側で、送金額は負balanceの絶対値。</li>
             <li>差額0ならpayer/payeeのID・名前はnull、金額0。対象明細があれば0円の清算完了も可能。</li>
           </ol>
           <div class="code-block">targetTransactions = SHARED &amp;&amp; !settledAt
@@ -908,6 +923,7 @@ actual            = ownPayments - ownReceipts
 balance           = actual - target
 amountYen         = abs(payer.balance)</div>
           <p><code>SettlementPerson.weight</code>と<code>weight_snapshot</code>は現在のデフォルト割合を記録するが、計算は各明細の<code>splitWeights</code>を使用する。清算Snapshotには対象明細ごとの保存割合も含める。</p>
+          <p>清算の内部計算は負担額の方向（支払いを正・収入を負）で保持し、表示だけを収支方向へ変換する。共通支払いは<code>-paymentTotal</code>、共通収入は<code>receiptTotal</code>、「共有収支」は<code>-netTotal</code>、「実際の収支」は<code>-actual</code>、「配分後の収支」は<code>-target</code>を表示する。<code>balance</code>は清算で受け取る予定額を正、支払う予定額を負とする既存の意味で表示し、0円は通常色とする。見出しは「共有の収支を清算」。Aが共有収入10,000円を受け取り、割合が1:1ならAからBへ5,000円の送金となる。送金指示と履歴は方向＋正の金額で表示し、清算完了による送金取引を家計明細へ追加しない。</p>
           <h3>清算完了と同時操作</h3>
           <div class="state-flow"><span>清算専用取得・再計算</span><i>→</i><span>対象値をID順に固定</span><i>→</i><span>ロック・Snapshot照合</span><i>→</i><span>履歴・関連INSERT</span><i>→</i><span>settled_at更新</span></div>
           <p><code>cake_assert_settlement_snapshot()</code>をTransaction先頭で実行し、workspace行の更新ロックを取得して所属を再確認する。現在の未清算SHARED全明細のID・actor・type・amount・class・splitWeightsが期待値と完全一致しなければ全体を失敗させる。計算に関係しないメモ・日時・取引先・方法は照合Snapshotの対象外。</p>
@@ -943,7 +959,7 @@ amountYen         = abs(payer.balance)</div>
           <p><code>app/api/app/route.ts</code>は実装を配線し、<code>appHandlers()</code>が認証、共有schemaによるparse、サービス呼出し、HTTP応答を担当する。<code>createAppService(store)</code>はactionを用途別サービスへ振り分け、所属・担当者・割合・招待条件・清算Snapshotを検証する。DB依存はstoreから注入し、SQLは<code>createAppStore()</code>と既存のrepository・user-access・paypay-importが実行する。サービスはRequest/ResponseやSQL clientを扱わない。</p>
           <p>GETの通常2 SQL、各操作の所属確認、表示名更新時の有効利用者再確認、DB関数内の最新権限・清算Snapshot照合を維持する。明細保存のworkspace更新と明細更新、ルール更新/再採番、清算のSnapshot照合・履歴・関連・明細更新は従来のTransaction境界で実行する。単件・複数ルール削除は共通storeから<code>cake_delete_default_rules</code>を一回呼び、workspace行更新ロック→actorのmember行FOR SHARE→対象ID順FOR UPDATE→全対象確認→削除→残存順序再採番を同じTransactionで行う。全対象不足や後続エラーはworkspace更新も含めてrollbackする。単件不存在だけは0件成功とする。workspace削除は、対象清算の関連行を先に除去するCTEの結果を消費してからworkspaceを削除し、明細・清算などのCASCADEを同じ一回のSQLで完了する。途中で制約違反が起きれば関連行の削除もrollbackする。</p>
           <h3>清算専用取得</h3>
-          <p><code>settlement-store.ts</code>の<code>settlementContext(workspaceId, userId)</code>は所属確認を含む1 SQLで対象workspaceの種別、参加者のID・名前・現在の重み、未清算SHARED明細のID・担当者・種別・金額・費用区分・保存割合だけを取得する。参加者順はjoined_at・user_id、明細順はoccurred_at DESC・created_at DESCでfull取得と揃える。ルール・招待・履歴・他workspace一覧・個人費・清算済み明細を転送せず、初期workspaceも作成しない。</p>
+          <p><code>settlement-store.ts</code>の<code>settlementContext(workspaceId, userId)</code>は所属確認を含む1 SQLで対象workspaceの種別、参加者のID・名前・現在の重み、未清算SHARED明細のID・担当者・種別・金額・区分・保存割合だけを取得する。参加者順はjoined_at・user_id、明細順はoccurred_at DESC・created_at DESCでfull取得と揃える。ルール・招待・履歴・他workspace一覧・個人費・清算済み明細を転送せず、初期workspaceも作成しない。</p>
           <p>清算POSTは利用可否確認1 SQL、専用取得1 SQL、固定4 SQLのNeon Transactionという3回の通信で完了する。サービスは同じ<code>calculateSettlement()</code>を再利用し、対象IDをSetで照合してSnapshotをID順に固定する。保存時のworkspaceロック・最新の所属確認・Snapshot照合と一明細一清算のUNIQUE制約を維持する。通常の画面/<code>GET /api/app</code>の2 SQL契約は変えない。</p>
           <h3>DB実行ログ</h3>
           <p>ローカルではサーバーを起動した端末、VercelではプロジェクトのLogsで確認する。調査時に全件が必要なら<code>DB_QUERY_LOG=all</code>へ変更する。例えば<code>DB_QUERY_LOG=slow</code>と<code>DB_SLOW_QUERY_MS=1000</code>では、1,000ms以上の成功とすべての失敗を記録する。<code>.env.example</code>の設定例はコメントで、コピーだけでは環境別の既定値を上書きしない。</p>
@@ -952,12 +968,12 @@ amountYen         = abs(payer.balance)</div>
         </section>
 
         <section id="analytics">
-          <h2>9.1 集計API・グラフ</h2>
+          <h2>9.1 支出の集計API・グラフ</h2>
           <p><code>lib/shared/analytics.ts</code>にquery schema、JST期間、DTO・表示条件・金額型を定義し、<code>lib/shared/analytics-view.ts</code>が集計済みデータから表示値を純粋計算する。<code>app/api/analytics/route.ts</code>が認証・handler・storeを配線する。<code>lib/server/handlers/analytics-handler.ts</code>はHTTP入力と応答、<code>lib/server/stores/analytics-store.ts</code>は認可を含む集合SQLを担当する。</p>
           <h3>取得条件と表示条件</h3>
           <p>幅48rem以下の条件欄では期間選択と月入力を2列に配置する。月・開始日・終了日の入力は固有幅で列を押し広げず、各列の内側に収める。</p>
           <p>GETのqueryは<code>workspaceId</code>と<code>period=month&amp;month=YYYY-MM</code>または<code>period=range&amp;from=YYYY-MM-DD&amp;to=YYYY-MM-DD</code>。実在する日付・未来不可・開始終了順・最大24暦月を共有schemaで検証し、サーバーの現在日時から今回・比較元・月次の3範囲を確定する。各範囲は日本時間の開始日・終了日を含む。今月は本日まで、過去月は月全体、指定期間は入力どおりで、比較元は前月同日まで／前暦月全体／直前の同日数。月次は終了月を含む6暦月で、今月だけ本日を上限とする。</p>
-          <p>対象者集合・費用区分集合・カテゴリ深さは画面Stateで所有し、APIのqueryに含めない。全員・共有費と個人費の両方・大分類を初期値とし、全OFFとONへの復帰も通信しない。入力途中の指定日付と取得に適用した期間を分け、適用操作でのみ取得条件を変更する。</p>
+          <p>対象者集合・区分集合・カテゴリ深さは画面Stateで所有し、APIのqueryに含めない。全員・共有と個人の両方・大分類を初期値とし、全OFFとONへの復帰も通信しない。入力途中の指定日付と取得に適用した期間を分け、適用操作でのみ取得条件を変更する。</p>
           <div class="data-flow">
             <div class="data-flow-head"><h3>集計取得とローカル切替</h3><small>取得キーと表示条件を分離</small></div>
             <div class="dfd-track" role="img" aria-label="期間変更で全員分の集約を取得し、チェック変更は保持した集計済みデータから表示値だけを合成する">
@@ -969,7 +985,7 @@ amountYen         = abs(payer.balance)</div>
               <div class="dfd-arrow"><b>→</b><small>AnalyticsDataset</small></div>
               <div class="dfd-node output"><strong>集計hook</strong><small>1 snapshotの金額・参加者・カテゴリ</small></div>
             </div>
-            <div class="dfd-track" role="img" aria-label="対象者・費用区分・階層の操作はAPIを呼ばず、集計済みbucketから3グラフと表を更新する">
+            <div class="dfd-track" role="img" aria-label="対象者・区分・階層の操作はAPIを呼ばず、集計済みbucketから3グラフと表を更新する">
               <div class="dfd-node source"><strong>チェック / 階層</strong><small>画面の表示条件</small></div>
               <div class="dfd-arrow"><b>→</b><small>通信なし</small></div>
               <div class="dfd-node process"><strong>buildAnalyticsView</strong><small>選択bucketをBigIntで合算</small></div>
@@ -986,8 +1002,8 @@ amountYen         = abs(payer.balance)</div>
           <p><code>AnalyticsDataset</code>は<code>workspaceId / snapshotAt / timeZone / periods / members / categories / buckets</code>。bucketは<code>scope(current|comparison|trend) / month / memberId / expenseClass / categoryId / burdenYen</code>で、burdenYenは非負10進整数文字列。0円のみの組合せは省略でき、欠落を0円として扱う。scopeごとに合計し、別scopeを合算しない。月次の欠落月は範囲から0円を補う。</p>
           <p>参加者・カテゴリは金額と同じsnapshotの情報を使い、metadataの別応答を後から混ぜない。停止中の参加者、旧使用停止カテゴリ、未分類も集計に含む。現在の名称・階層・色で表示し、カテゴリの削除で参照解除された明細は未分類とする。親やrootへの対応表はdatasetの更新時に準備し、フィルタ変更時の祖先探索を繰り返さない。</p>
           <p>カテゴリ粒度は最上位、任意の途中階層、全階層。深い設定は祖先へ集約し、浅い親に直接設定された額を失わず、親集計と子を二重計上しない。全階層で親への直接設定は「直接設定」と表示する。比較元だけのカテゴリも差分に残す。図の共通系列は今回・比較元・各月の最大額順の上位8件＋その他＋未分類、同額はカテゴリ表示順・IDで固定する。一覧・表は全カテゴリ。</p>
-          <p>円の描画時は共通系列のうち対象期間が正の項目を取り出し、その他・未分類も含め対象期間の整数金額の降順へ安定整列する。同額は共通系列の順を保つ。開始角90度・終了角−270度とし、12時から時計回りに表示する。他の図と一覧の系列順は変えない。円と棒の金額は領域内へ重ね、描画領域に収まらなければ省略する。月次棒は横置きを優先し、長辺方向に収まる場合は回転して表示する。背景色に応じた文字色で判読性を確保し、金額ラベルは操作を遮らない。中央合計も実際の内円へ収め、文字サイズと改行を調整する。12px以上で全桁を表示できない場合は中央の金額を省略し、画面上部の負担額で全桁を確認できる。円のコンテナは中間幅のgrid配置でも幅を確保する。対象者の説明は開く時とリサイズ時に左右の画面端へ収まるよう補正する。</p>
-          <p>加算・差額・率計算はBigIntを使う。構成比・増減率は小数1桁で表示し、比較元0円は0÷0も含め率を算出しない。Rechartsへ渡すNumberは座標用だけとし、金額はグラフ内のラベルも含め元の整数値をformatYenで表示する。ラベルが省略されても一覧・表とツールチップで全額を確認できる。複数人の個別件数を足した取引件数は表示しない。</p>
+          <p>円の描画時は共通系列のうち対象期間が正の項目を取り出し、その他・未分類も含め対象期間の整数金額の降順へ安定整列する。同額は共通系列の順を保つ。開始角90度・終了角−270度とし、12時から時計回りに表示する。他の図と一覧の系列順は変えない。円と棒の金額は領域内へ重ね、描画領域に収まらなければ省略する。月次棒は横置きを優先し、長辺方向に収まる場合は回転して表示する。金額ラベルは背景カテゴリ色に応じた白または黒の文字色で判読性を確保し、金額ラベルは操作を遮らない。中央合計も実際の内円へ収め、文字サイズと改行を調整する。12px以上で全桁を表示できない場合は中央の金額を省略し、画面上部の負担額で全桁を確認できる。円のコンテナは中間幅のgrid配置でも幅を確保する。対象者の説明は開く時とリサイズ時に左右の画面端へ収まるよう補正する。</p>
+          <p>加算・差額・率計算はBigIntを使う。構成比・増減率は小数1桁で表示し、比較元0円は0÷0も含め率を算出しない。Rechartsへ渡すNumberは座標用だけとし、金額はグラフ内のラベルも含め元の整数値からformatYenで表示する。支出額は負へ変換せず、合計・表・ツールチップ・中央合計を符号なしの通常色で表示する。グラフ内の金額も符号なしとし、背景との可読性で文字色を選ぶ。面積・積上げの座標と構成比は非負の金額を使う。前期間との差額は<code>totalYen - comparisonYen</code>とし、支出増を正、支出減を負として通常色で表示する。差額に限って正は＋、負は−を付け、増減がない場合は無符号とする。API/表示計算の非負金額と差額の内部契約は保持し、率は支出の増減として説明する。ラベルが省略されても一覧・表とツールチップで全額を確認できる。複数人の個別件数を足した取引件数は表示しない。</p>
           <h3>取得・保存・遅延応答</h3>
           <p>集計panelは同じworkspace内のタブ切替でStateを保持する。同階層の条件付きpanelと識別子が衝突しないよう、Reactのkeyには画面種別とworkspace IDを組み合わせる。初回表示・再入場・期間変更・明示更新・保存後の無効化で取得する。未選択でも期間取得は行い、その後ONへ戻して追加通信しない。取得中にcheckboxを変えても応答は保持し、最新の表示条件で描画する。workspace・期間・保存後世代・要求順が古い応答は破棄する。workspace切替中は旧グラフを非表示とし、切替先で条件を初期化する。切替後の別タブ取得により元の要求を破棄しても切替中を保持し、最新の取得が採用されたときだけ解除する。最新の取得が失敗した場合は以前のworkspaceへ戻して解除し、遅い旧応答を採用しない。</p>
           <p>期間変更中は読込表示とし、旧期間のグラフを新条件の結果として見せない。取得失敗は選択を保持して再試行を表示し、0円の成功へ置き換えない。明細の未保存入力は含めず、保存成功後に世代を進める。グラフは遅延importし、未訪問タブでRechartsを読み込まない。PCホバー・キーボード、mobileタップと対象者の小さいⓘ、全カテゴリの表を用意する。</p>
@@ -1017,7 +1033,7 @@ amountYen         = abs(payer.balance)</div>
           <h3 id="merchant-normalization">取引先の照合用正規化</h3>
           <p>照合規則の正本は<code>cake_normalize_merchant(text)</code>とし、現行基準はPostgreSQL 18組込みのUnicode 16とする。関数は<code>IMMUTABLE STRICT PARALLEL SAFE</code>で、<code>pg_catalog.normalize</code>のNFKCを適用後、<code>pg_catalog.pg_unicode_fast</code>照合順序を明示した<code>lower</code>で小文字化する。その結果の連続空白を1個の半角スペースへ置き換え、前後のスペースを除去する。小文字化はUnicodeの小文字変換であり、case folding・ひらがなとカタカナの相互変換・記号除去・部分一致への拡張は行わない。</p>
           <p>空白はECMAScriptのWhiteSpaceとLineTerminatorに相当する固定25コードポイント、<code>U+0009〜U+000D, U+0020, U+00A0, U+1680, U+2000〜U+200A, U+2028, U+2029, U+202F, U+205F, U+3000, U+FEFF</code>を使う。NFKC後にこの集合を適用し、<code>U+0085</code>と<code>U+200B</code>は保持する。空文字・空白だけの入力の結果は空文字、NULL入力の結果はNULLとなる。入力の必須・長さ制約は既存schemaとDB制約を維持する。</p>
-          <p><code>transactions.merchant_normalized</code>は<code>text COLLATE "C" GENERATED ALWAYS AS (cake_normalize_merchant(merchant)) STORED NOT NULL</code>で保持し、<code>(workspace_id, merchant_normalized)</code>のBtree Indexを設ける。NFKCによる展開後の値へ240文字の上限や切捨てを適用せず、例えば<code>㌕</code>240文字は<code>キログラム</code>の繰返し1200文字・3600バイトとして保存・Index登録する。通常の列値として直接指定せず、<code>merchant</code>のINSERT/UPDATEと同じDB処理で計算する。手入力・一覧編集・CSV集合INSERT・定期生成・seed・旧版の保存・直接SQLにも適用され、呼出元の指定漏れで照合用値が古くならない。表示用の<code>merchant</code>と現在の公開API/DTOは保持する。共有費ルールの部分一致、CSV内・既存重複の金額と取引先比較にも照合用値を流用しない。</p>
+          <p><code>transactions.merchant_normalized</code>は<code>text COLLATE "C" GENERATED ALWAYS AS (cake_normalize_merchant(merchant)) STORED NOT NULL</code>で保持し、<code>(workspace_id, merchant_normalized)</code>のBtree Indexを設ける。NFKCによる展開後の値へ240文字の上限や切捨てを適用せず、例えば<code>㌕</code>240文字は<code>キログラム</code>の繰返し1200文字・3600バイトとして保存・Index登録する。通常の列値として直接指定せず、<code>merchant</code>のINSERT/UPDATEと同じDB処理で計算する。手入力・一覧編集・CSV集合INSERT・定期生成・seed・旧版の保存・直接SQLにも適用され、呼出元の指定漏れで照合用値が古くならない。表示用の<code>merchant</code>と現在の公開API/DTOは保持する。区分のルールの部分一致、CSV内・既存重複の金額と取引先比較にも照合用値を流用しない。</p>
           <div class="data-flow">
             <div class="dfd-track" role="img" aria-label="手入力、一覧編集、CSV、定期生成、seed、旧版、直接SQLの取引先保存をDB共通関数で正規化し、生成列とIndexへ反映する。APIと画面は表示用取引先を保持する">
               <div class="dfd-node source"><strong>取引先を保存</strong><small>手入力・一覧編集・CSV・定期生成<br />seed・旧版・直接SQL</small></div>
@@ -1044,7 +1060,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>cake_reorder_default_rules</code></td><td>workspace行ロック・所属・現在全ルールとの完全一致を確認し、sort_orderを0始まりで再採番。</td></tr>
               <tr><td><code>cake_delete_default_rules</code></td><td>単件/複数の共通削除。1〜5000件・UUIDとしての一意性を確認し、workspace→actorのmember FOR SHARE→対象ID順FOR UPDATEでロックする。全件必須モードは不足時に中止、単件モードは不存在0件成功。削除後はsort_order/created_at/id順を0始まりへ再採番し、互換Triggerでpriorityも同期する。旧並べ替え関数・旧版の削除SQLを保持する。</td></tr>
               <tr><td><code>cake_assert_settlement_snapshot</code></td><td>workspace行ロック・所属・全未清算SHARED明細の計算値Snapshot一致を同じTransactionで確認。</td></tr>
-              <tr><td><code>cake_bulk_transactions</code></td><td>operationと1〜5000件の一意IDを検証。workspace行ロック、member FOR SHARE、対象をID順FOR UPDATE。全件存在・未清算を確認後、DELETEまたはAPPLY_RULESを実行し、ロック中の確定値を返す。APPLY_RULESは参加者/現在割合の集約を一回行い、LATERALで各明細の有効・部分一致・sort_order/created_at/id順の先頭を選ぶ。実際に使う共有費ルールごとに参加者キーを補完し、最大5000件の仮割合JSONを全件検証して一つのUPDATEで保存する。</td></tr>
+              <tr><td><code>cake_bulk_transactions</code></td><td>operationと1〜5000件の一意IDを検証。workspace行ロック、member FOR SHARE、対象をID順FOR UPDATE。全件存在・未清算を確認後、DELETEまたはAPPLY_RULESを実行し、ロック中の確定値を返す。APPLY_RULESは対象全件のロック後に全明細がPAYMENTであることを検証し、非PAYMENTを含めば一件も更新しない。参加者/現在割合の集約を一回行い、LATERALで各明細の有効・部分一致・sort_order/created_at/id順の先頭を選ぶ。実際に使う区分のルールごとに参加者キーを補完し、最大5000件の仮割合JSONを全件検証して一つのUPDATEで保存する。</td></tr>
               <tr><td><code>cake_normalize_paypay_external_id</code> / <code>cake_assert_paypay_duplicate</code></td><td>PayPay INSERT時の旧ID正規化と、ON CONFLICT条件でのsource・金額・取引先照合。</td></tr>
               <tr><td><code>cake_normalize_merchant</code></td><td>取引先のNFKC・Unicode小文字化・固定集合の空白整理を一つのSQL関数で定義する。transactionsのSTORED生成列から呼び、全保存経路で照合用値を維持する。</td></tr>
               <tr><td><code>cake_mutate_recurring_payment</code> / <code>cake_generate_recurring_payment</code></td><td>workspace→定期設定→利用者(ID順)・memberの順にロック。所属・利用可否・状態・revision・設定を再確認する。編集は設定を即時更新し、再開は即時ACTIVEにする。追加・編集・再開時に処理予定日を09:00境界で計算する。生成では当日予定の再判定、明細INSERTと処理予定日の翌月への更新を同じTransactionで確定する。</td></tr>
@@ -1074,6 +1090,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>018_import_categories.sql</td><td>カテゴリ付きINSERTをtransition tableで集合検証する。workspace・最新所属・全カテゴリの共通検証とロック順を揃え、既存行triggerの確認状態・revisionと通常/旧APIの保存互換性を維持する。適用済み014〜017は変更しない。</td></tr>
               <tr><td>019_merchant_normalization.sql</td><td>PostgreSQL 18以上・UTF8向けの共通正規化関数・取引先の照合用STORED生成列・workspaceとの複合Btree Indexを追加する。既存全明細の生成値を計算し、他列・監査情報・カテゴリrevisionを維持する。適用済み001〜018は変更しない。</td></tr>
               <tr><td>020_import_category_suggestions.sql</td><td>確認済み・カテゴリありの支払いを対象に、workspace・正規化後の取引先・取引日時/登録日時/IDの降順とcategory_idのINCLUDEを持つ部分複合Indexを追加する。既存の明細値・通常保存API・候補選択の正規化関数は変更しない。</td></tr>
+              <tr><td>021_payment_rules_only.sql</td><td>cake_bulk_transactionsの署名・SQL本数・DELETE・全件ロック・確定DTOを維持し、APPLY_RULESでロック済みの対象にPAYMENT以外を含む場合に全体を失敗させる。既存明細と過去migrationは変更しない。</td></tr>
             </tbody>
           </table></div>
           <p>019のSTORED生成列追加は<code>transactions</code>の<code>ACCESS EXCLUSIVE</code>ロックと全テーブル・Indexの書換えを伴い、適用中の明細参照・更新は待機する。現在のデータ規模では関数・生成列・Index・既存行の計算を単一の原子的なmigrationで確定する。アプリ側でUPDATEして補完する方式は使わず、既存の金額・カテゴリ・確認状態・revision・監査列を変更しない。旧版アプリも生成列を指定せずに保存できる。</p>
@@ -1096,7 +1113,7 @@ amountYen         = abs(payer.balance)</div>
 
         <section id="types">
           <h2>11. TypeScript型設計</h2>
-          <p><code>domain-values.ts</code>の定数値一覧から分類型とZodのenumを導出し、表示ラベルは各分類を網羅するRecordで型検査する。保存値・JSON値・画面ごとの「共有費／共通費」の表記を維持する。共有入力モジュールはZodと純粋な定義だけを実行時依存に持ち、DB・認証・Node専用モジュールを取り込まない。</p>
+          <p><code>domain-values.ts</code>の定数値一覧から分類型とZodのenumを導出し、表示ラベルは各分類を網羅するRecordで型検査する。保存値・JSON値は維持し、画面の種別は「支払い／収入」、区分は「個人／共有」に統一する。支払者／受取者は種別に応じたラベルを使う。共有入力モジュールはZodと純粋な定義だけを実行時依存に持ち、DB・認証・Node専用モジュールを取り込まない。</p>
           <p>定期支払いの状態・既知の停止原因・サービスエラーコード・ログ状態/コードは有限型とする。DBから来る未知の状態・停止原因は明示的な変換境界で識別し、DTOのJSON文字列を保持したまま「要確認」と既存の確認案内へ戻す。未知のDB停止コードはログへ転送せずDATABASE_UNAVAILABLEへ置き換える。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>型</th><th>値・重要フィールド</th></tr></thead>
@@ -1175,7 +1192,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>tests/server/import-duplicates-store.test.ts</td><td>所属確認後に指定外部IDだけを照会し、既存明細の最小照合情報を返すことを確認する。</td></tr>
               <tr><td>tests/client/import-paste.test.ts</td><td>PC/mobileの実ImportPanelで初期チェックOFF・チェックによらない全登録・選択行の削除と取消・元のtotalRows保持・対象0件/登録中の無効化・登録済み行のグレー表示、見出し・ボタン・Safari注記、ヘルプの内容・安全なURL・明示コピーと拒否時案内・開閉時の通信/読取なし・閉じ方とfocus復帰・モバイルスクロール、CSV本文・手動入力UIの不在、タップ時だけのclipboard読取とファイル選択の共通処理、拒否・非対応・空/不正CSV・照会失敗からの再コピー/再選択と再試行、原本不送信、本人・ルール・重複、登録失敗時の確認表保持と成功時解除、読み込み中の入口抑止、workspace切替後の遅延読取・照会結果破棄を検証する。</td></tr>
               <tr><td>tests/client/home-navigation.test.ts</td><td>取込直リンクとworkspace指定の安全な内部URL化、未知・複数tabのhomeへのフォールバック、Google/テストログイン双方への復帰先引き渡しを確認する。実認証後の復帰はPreviewで別途確認する。</td></tr>
-              <tr><td>tests/shared/settlement.test.ts / tests/shared/expense-splits.test.ts / tests/shared/split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、受け取り、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>
+              <tr><td>tests/shared/settlement.test.ts / tests/shared/expense-splits.test.ts / tests/shared/split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、収入、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>
               <tr><td>tests/shared/transaction-editing.test.ts / tests/client/transaction-updates.test.ts / tests/shared/transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>
               <tr><td>tests/shared/transaction-filters.test.ts / tests/client/transaction-filter-storage.test.ts / tests/shared/transaction-list.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗、多数候補・非表示選択・条件外行の保持。</td></tr>
               <tr><td>tests/tooling/setup-db.test.ts / scripts/qa/db/migration-scenarios.ts</td><td>新規/一部適用/全適用時の本文読込・SQL往復数、初回Previewの原文照合と同一世代再実行、SQL/履歴のrollback、後続の不正ファイルによる適用停止。隔離PostgreSQLの独立sessionで同じ未適用一覧を取得し、advisory lock待機後の台帳再確認で二重適用を防ぐことを確認する。</td></tr>
@@ -1186,13 +1203,13 @@ BootstrapData extends BootstrapMetadata
               <tr><td>tests/shared/rule-order.test.ts</td><td>楽観順序の組み立てと解除、多数ルール、外部追加・削除、未知・重複ID、入力配列の維持。</td></tr>
               <tr><td>tests/shared/domain-schemas.test.ts / tests/shared/app-input.typecheck.ts</td><td>入口間の金額・文字数・割合境界、全actionの入力、既存の省略・strict/strip契約、共有入力の実行時依存境界。型検査では不一致payload・未知action・有限ログ値の拒否を確認する。</td></tr>
               <tr><td>tests/server/user-access.test.ts / tests/server/user-profile.test.ts</td><td>確認済みGoogleメールと事前登録、内部ID、有効状態・権限再確認、テストモード、表示名保持・本人更新schema。</td></tr>
-              <tr><td>tests/server/settlement-store.test.ts / scripts/qa/db/settlement-scenarios.ts</td><td>専用取得の認可と最小項目、既存計算との一致、支払い/受け取り・保存割合・丸め・ゼロ円、取得後の変更・削除・追加・所属解除・先行/並列清算と全体rollback、多数明細の固定4 SQL、取得JSON量とEXPLAINによる比較。メモリPostgreSQLと専用Preview DBで同じシナリオを使う。</td></tr>
+              <tr><td>tests/server/settlement-store.test.ts / scripts/qa/db/settlement-scenarios.ts</td><td>専用取得の認可と最小項目、既存計算との一致、支払い/収入・保存割合・丸め・ゼロ円、取得後の変更・削除・追加・所属解除・先行/並列清算と全体rollback、多数明細の固定4 SQL、取得JSON量とEXPLAINによる比較。メモリPostgreSQLと専用Preview DBで同じシナリオを使う。</td></tr>
               <tr><td>tests/server/workspace-deletion.test.ts</td><td>一時PostgreSQLで清算済みworkspaceと関連データの削除、他workspace保持、制約エラー時の全体rollback、所属確認と削除の2往復を確認する。</td></tr>
               <tr><td>tests/server/app-handlers.test.ts / tests/server/app-services.test.ts / tests/server/app-store.test.ts</td><td>HTTP応答・入力・未認証・所属拒否・DB失敗、割合継承・招待・清算Snapshot、全19操作のSQL往復とTransaction境界、通常bootstrapの2 SQL。</td></tr>
-              <tr><td>tests/shared/analytics.test.ts / analytics-view.test.ts<br />tests/server/analytics-handler.test.ts / analytics-store.test.ts</td><td>JST期間・24暦月・日付境界、保存割合の整数配分とTS/実SQL一致、3scopeの独立・未分類・階層総額不変、全員/一人/費用区分、金額精度、認可・固定往復・読取専用・既存indexを確認。</td></tr>
+              <tr><td>tests/shared/analytics.test.ts / analytics-view.test.ts<br />tests/server/analytics-handler.test.ts / analytics-store.test.ts</td><td>JST期間・24暦月・日付境界、保存割合の整数配分とTS/実SQL一致、3scopeの独立・未分類・階層総額不変、全員/一人/区分、金額精度、認可・固定往復・読取専用・既存indexを確認。</td></tr>
               <tr><td>tests/server/bootstrap.test.ts / tests/client/bootstrap-updates.test.ts</td><td>集約SQL一回、所属境界、full/metadata範囲・順序・ミリ秒保持、初期workspace作成、同じ家計の併合/別家計full再取得。</td></tr>
               <tr><td>tests/server/db-query-logging.test.ts</td><td>lazy実行、安全な匿名ログ、all/slow/off、閾値、Transaction一件・SQL数、エラー保持。</td></tr>
-              <tr><td>tests/client/transaction-layout.test.ts</td><td>PCの表示領域7パターン（84rem境界前後を含む）と参加者名120文字の4条件で横溢れ・項目の折り返し・カテゴリ色線・全選択・フィルタを確認。幅変更による入力とフォーカスの保持・追加送信なし・メモ保存失敗時の入力保持と、スマートフォンの要約/展開をローカルChromiumで検証する。</td></tr>
+              <tr><td>tests/client/transaction-layout.test.ts</td><td>PCの表示領域7パターン（90rem境界前後を含む）と参加者名120文字の4条件で横溢れ・項目の折り返し・カテゴリ色線・全選択・フィルタを確認。幅変更による入力とフォーカスの保持・追加送信なし・メモ保存失敗時の入力保持と、スマートフォンの要約/展開をローカルChromiumで検証する。</td></tr>
               <tr><td>tests/client/import-categories.test.ts</td><td>PC/mobileで3階層・使用停止カテゴリ・カテゴリ0件、未分類初期値、未選択行の個別編集、選択行だけの一括設定と解除、区分・担当者・割合変更でのカテゴリ保持、操作中の通信なし、保存payload、失敗後の入力・選択保持、保存中・不正・重複行の無効化、色線と全経路表示をChromiumで確認する。</td></tr>
               <tr><td>tests/client/import-category-suggestions.test.ts</td><td>PC/mobileでボタンの明示実行、チェックを見ない未分類全行の補完、設定済み・重複・エラー行の保持、カテゴリ操作の先頭への集約、PCの説明用「ⓘ」非表示、スマートフォンの小さいテキスト状操作とキーボード操作、短い説明のhover/focus・「ⓘ」タップと閉じ方、補完中の入力固定、候補なしと失敗からの再試行、複数batch失敗時の部分反映なし、削除・停止カテゴリ除外、workspace切替・unmount後の応答破棄、「確認して登録」の最終payloadと失敗時保持をローカルChromiumで確認する。</td></tr>
               <tr><td>tests/client/swipe-delete.test.ts</td><td>スマートフォンの取引明細・CSV取込・定期支払い・ルールでスワイプ削除とキーボード補助操作、確認・取消・失敗を確認する。CSVでは上部一括操作欄・下部登録操作欄がスクロールして中間の行を覆わないことと、PCの登録操作欄が手前に固定され操作できることをローカルChromiumで確認する。</td></tr>

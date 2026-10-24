@@ -117,10 +117,10 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
 
   return <>
     <div className={styles.chartGrid}>
-      <section className={styles.card} aria-labelledby="analytics-composition-heading"><div className={styles.cardHeading}><h2 id="analytics-composition-heading">カテゴリ別の内訳</h2><span>負担額</span></div>
+      <section className={styles.card} aria-labelledby="analytics-composition-heading"><div className={styles.cardHeading}><h2 id="analytics-composition-heading">カテゴリ別の内訳</h2><span>支出額</span></div>
         <p className={styles.cardSubtitle}>{analyticsRangeLabel(periods.current)}</p>
         <div className={styles.compositionBody}>
-          {view.totalYen > BigInt(0) ? <div className={styles.donutChart} role="group" aria-label="カテゴリ別の負担額。金額と割合は次の一覧でも確認できます。">
+          {view.totalYen > BigInt(0) ? <div className={styles.donutChart} role="group" aria-label="カテゴリ別の支出額。金額と割合は次の一覧でも確認できます。">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}><PieChart accessibilityLayer>
               <Pie data={composition} dataKey="value" nameKey={entry => entry.row.label} innerRadius="50%" outerRadius="88%"
                 startAngle={90} endAngle={-270} paddingAngle={2} isAnimationActive={false} stroke="var(--paper)" labelLine={false}
@@ -135,14 +135,14 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
                 <Label content={<DonutCenter totalText={formatYen(view.totalYen)} />} />
               </Pie><Tooltip content={<ChartTooltip />} />
             </PieChart></ResponsiveContainer>
-          </div> : <p className={styles.chartEmpty}>この期間の負担額はありません。</p>}
-          <ul className={styles.categoryList} aria-label="全カテゴリの負担額と割合">{view.rows.map(row => <li key={row.id}><CategoryName row={row} /><strong>{formatYen(row.currentYen)}</strong><span>{share(row.currentYen, view.totalYen)}</span></li>)}</ul>
+          </div> : <p className={styles.chartEmpty}>この期間の支出額はありません。</p>}
+          <ul className={styles.categoryList} aria-label="全カテゴリの支出額と割合">{view.rows.map(row => <li key={row.id}><CategoryName row={row} /><strong>{formatYen(row.currentYen)}</strong><span>{share(row.currentYen, view.totalYen)}</span></li>)}</ul>
         </div>
         <p className={styles.miniNote}>グラフは主な8カテゴリを表示し、残りは「その他」にまとめます。未分類は別に表示します。</p>
       </section>
       <section className={styles.card} aria-labelledby="analytics-trend-heading"><div className={styles.cardHeading}><h2 id="analytics-trend-heading">月ごとの推移</h2><span>直近6か月</span></div>
         <p className={styles.cardSubtitle}>{analyticsRangeLabel(periods.trend)}<br />終了月までの6か月を表示します。</p>
-        {hasTrend ? <div className={styles.trendChart} role="group" aria-label="月ごとのカテゴリ別負担額。下の表でも確認できます。">
+        {hasTrend ? <div className={styles.trendChart} role="group" aria-label="月ごとのカテゴリ別支出額。下の表でも確認できます。">
           <ResponsiveContainer width="100%" height="100%" minWidth={0}><BarChart data={trend} accessibilityLayer margin={{ top: 12, right: 2, bottom: 0, left: 0 }}>
             <CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="3 4" />
             <XAxis dataKey="month" tickFormatter={monthLabel} axisLine={false} tickLine={false} tick={chartStyle} />
@@ -162,10 +162,10 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
               }} />
             </Bar>)}
           </BarChart></ResponsiveContainer>
-        </div> : <p className={styles.chartEmpty}>この6か月の負担額はありません。</p>}
+        </div> : <p className={styles.chartEmpty}>この6か月の支出額はありません。</p>}
         <ul className={styles.legend} aria-label="グラフのカテゴリ">{view.chartRows.map(row => <li key={row.id}><CategoryName row={row} /></li>)}</ul>
-        <details className={styles.tableDetails}><summary>月ごとの金額を表で見る</summary><div className={styles.tableScroll} tabIndex={0} aria-label="月ごとの負担額の表（横スクロール可能）"><table>
-          <caption>月ごとの負担額（円）</caption><thead><tr><th scope="col">カテゴリ</th>{view.months.map(month => <th scope="col" key={month}>{month.replace("-", "/")}</th>)}</tr></thead>
+        <details className={styles.tableDetails}><summary>月ごとの金額を表で見る</summary><div className={styles.tableScroll} tabIndex={0} aria-label="月ごとの支出額の表（横スクロール可能）"><table>
+          <caption>月ごとの支出額（円）</caption><thead><tr><th scope="col">カテゴリ</th>{view.months.map(month => <th scope="col" key={month}>{month.replace("-", "/")}</th>)}</tr></thead>
           <tbody>{view.rows.map(row => <tr key={row.id}><th scope="row"><CategoryName row={row} /></th>{row.monthlyYen.map((value, index) => <td key={view.months[index]}>{formatYen(value)}</td>)}</tr>)}</tbody>
           <tfoot><tr><th scope="row">合計</th>{monthlyTotals.map((value, index) => <td key={view.months[index]}>{formatYen(value)}</td>)}</tr></tfoot>
         </table></div></details>
@@ -174,7 +174,7 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
     <section className={`${styles.card} ${styles.comparison}`} aria-labelledby="analytics-comparison-heading"><div className={styles.cardHeading}><h2 id="analytics-comparison-heading">カテゴリ別の増減</h2><span>同じ条件で比較</span></div>
       <p className={styles.cardSubtitle}>対象：{analyticsRangeLabel(periods.current)} ／ 比較：{analyticsRangeLabel(periods.comparison)}</p>
       <div className={styles.comparisonBody}>
-        {view.rows.length > 0 ? <div className={styles.differenceChart} style={{ height: Math.max(180, differences.length * 43 + 32) }} role="group" aria-label="カテゴリ別の負担額の増減。正は増加、負は減少。全カテゴリの金額は次の表に表示します。">
+        {view.rows.length > 0 ? <div className={styles.differenceChart} style={{ height: Math.max(180, differences.length * 43 + 32) }} role="group" aria-label="カテゴリ別の支出額の増減。正は増加、負は減少。全カテゴリの金額は次の表に表示します。">
           <ResponsiveContainer width="100%" height="100%" minWidth={0}><BarChart data={differences} layout="vertical" accessibilityLayer margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
             <CartesianGrid horizontal={false} stroke="var(--line)" strokeDasharray="3 4" />
             <XAxis type="number" axisLine={false} tickLine={false} tick={chartStyle} tickFormatter={value => compactYen.format(Number(value))} />
@@ -190,14 +190,14 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
               }} />
             </Bar>
           </BarChart></ResponsiveContainer>
-        </div> : <p className={styles.chartEmpty}>比較できる負担額はありません。</p>}
+        </div> : <p className={styles.chartEmpty}>比較できる支出額はありません。</p>}
         <div className={styles.tableScroll} tabIndex={0} aria-label="カテゴリ別の増減の表（横スクロール可能）"><table className={styles.differenceTable}>
-          <caption>全カテゴリの増減（円）</caption><thead><tr><th scope="col">カテゴリ</th><th scope="col">対象期間</th><th scope="col">比較期間</th><th scope="col">差額</th><th scope="col">増減率</th></tr></thead>
+          <caption>全カテゴリの増減（円）</caption><thead><tr><th scope="col">カテゴリ</th><th scope="col">対象期間</th><th scope="col">比較期間</th><th scope="col">差額</th><th scope="col">支出の増減率</th></tr></thead>
           <tbody>{view.rows.map(row => <tr key={row.id}><th scope="row"><CategoryName row={row} /></th><td>{formatYen(row.currentYen)}</td><td>{formatYen(row.comparisonYen)}</td><td>{signed(row.currentYen - row.comparisonYen)}</td><td>{analyticsChangeRate(row.currentYen, row.comparisonYen) ?? (row.currentYen > BigInt(0) ? "比較元0円" : "—")}</td></tr>)}</tbody>
           <tfoot><tr><th scope="row">合計</th><td>{formatYen(view.totalYen)}</td><td>{formatYen(view.comparisonYen)}</td><td>{signed(view.differenceYen)}</td><td>{view.rate ?? "—"}</td></tr></tfoot>
         </table></div>
       </div>
-      <p className={styles.comparisonNote}>「＋」は負担額の増加、「−」は減少です。比較期間が0円の場合、増減率は表示しません。</p>
+      <p className={styles.comparisonNote}>「＋」は支出額の増加、「−」は減少です。比較期間が0円の場合、支出の増減率は表示しません。</p>
     </section>
   </>;
 }

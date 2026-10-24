@@ -9,3 +9,14 @@ export function currentMonthTransactions(transactions: readonly TransactionRecor
   const month = japanMonth.format(now);
   return transactions.filter(item => japanMonth.format(new Date(item.occurredAt)) === month);
 }
+
+/** Income and spending are stored as positive yen; cashflow is income minus spending. */
+export function cashflowSummary(transactions: readonly Pick<TransactionRecord, "type" | "amountYen">[]) {
+  let paymentTotal = BigInt(0);
+  let receiptTotal = BigInt(0);
+  for (const transaction of transactions) {
+    if (transaction.type === "PAYMENT") paymentTotal += BigInt(transaction.amountYen);
+    else receiptTotal += BigInt(transaction.amountYen);
+  }
+  return { paymentTotal, receiptTotal, balanceYen: receiptTotal - paymentTotal };
+}

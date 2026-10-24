@@ -17,12 +17,12 @@ export function validateSplitWeights(
     throw new Error("割合の参加者が不正です。");
   }
   if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new Error("負担割合を設定してください。");
+    throw new Error("配分割合を設定してください。");
   }
   const values = input as Record<string, unknown>;
   const keys = Object.keys(values);
   if (keys.length !== ids.length || keys.some((key) => !ids.includes(key))) {
-    throw new Error("負担割合の参加者が一致しません。");
+    throw new Error("配分割合の参加者が一致しません。");
   }
   const entries = ids.map((id) => {
     const parsed = weightSchema.safeParse(values[id]);
@@ -36,10 +36,10 @@ export function validateSplitWeights(
   }
   if (expenseClass === "PERSONAL") {
     if (!actorUserId || !ids.includes(actorUserId)) {
-      throw new Error("個人費の担当者が参加者に含まれていません。");
+      throw new Error("個人の担当者が参加者に含まれていません。");
     }
     if (entries.some(([id, weight]) => weight !== (id === actorUserId ? 1 : 0))) {
-      throw new Error("個人費の割合は担当者が1、ほかの参加者が0です。");
+      throw new Error("個人の割合は担当者が1、ほかの参加者が0です。");
     }
   }
   return Object.fromEntries(entries);
