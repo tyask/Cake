@@ -65,7 +65,7 @@ async function assertPanel(page: Page, tab: DashboardTab, loading = false) {
   assert.deepEqual(await main.getByRole("heading", { level: 1 }).allTextContents(), expected ? [expected] : [],
     `${tab}: 現在の画面の見出しだけを1つ表示する`);
   const allHeadings = await main.locator("h1").allTextContents();
-  assert.equal(allHeadings.filter(value => value === "集計").length, 1, "集計の保持用パネルは1つだけ存在する");
+  assert.equal(allHeadings.filter(value => value === "支出の集計").length, 1, "集計の保持用パネルは1つだけ存在する");
   for (const [id, panel] of Object.entries(panels)) {
     if (!panel.heading || id === "analytics") continue;
     assert.equal(allHeadings.filter(value => value === panel.heading).length, id === tab ? 1 : 0,
