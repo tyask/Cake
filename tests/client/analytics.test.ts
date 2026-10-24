@@ -6,7 +6,7 @@ import { mkdir } from "node:fs/promises";
 import { build } from "esbuild";
 import { chromium, type Route } from "playwright";
 import { resolveAnalyticsPeriods, type AnalyticsDataset, type AnalyticsQuery } from "../../lib/shared/analytics";
-import { formatCashflow } from "../../lib/shared/display-formatters";
+import { formatYen } from "../../lib/shared/display-formatters";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const otherWorkspaceId = "22222222-2222-4222-8222-222222222222";
@@ -88,13 +88,34 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
       try {
         const request = await f.take();
         assert.deepEqual([...new URL(request.request().url()).searchParams.keys()].sort(), ["month", "period", "workspaceId"]);
-        await f.reply(request); await f.total("−￥150");
-        assert.equal(await f.page.getByTestId("analytics-total").evaluate(element => element.classList.contains("negative")), true, "支出額は赤字で表示する");
-        assert.equal(await f.page.getByTestId("analytics-difference").textContent(), "−￥50", "支出の増加はマイナスで表示する");
-        assert.equal(await f.page.getByTestId("analytics-difference").evaluate(element => element.classList.contains("negative")), true);
+        await f.reply(request); await f.total("￥150");
+        assert.equal(await f.page.getByTestId("analytics-total").evaluate(element => getComputedStyle(element).color), "rgb(51, 42, 24)", "費用の集計額は通常色・無符号で表示する");
+        assert.equal(await f.page.getByTestId("analytics-difference").textContent(), "+￥50", "支出の増加はプラスで表示する");
+        assert.equal(await f.page.getByTestId("analytics-difference").evaluate(element => getComputedStyle(element).color), "rgb(51, 42, 24)", "差額も収支の色分けをしない");
         await f.page.getByRole("heading", { name: "カテゴリ別の内訳" }).waitFor();
         const pie = f.page.getByRole("group", { name: "カテゴリ別の支出額。金額と割合は次の一覧でも確認できます。", exact: true });
         await pie.locator("path.recharts-sector").first().waitFor();
+        const categoryAmounts = f.page.getByLabel("全カテゴリの支出額と割合").locator("strong");
+        assert.ok((await categoryAmounts.allTextContents()).every(text => /^￥[\d,]+$/.test(text)), "カテゴリの費用も無符号の正額で表示する");
+        assert.ok((await categoryAmounts.evaluateAll(elements => elements.map(element => getComputedStyle(element).color))).every(color => color === "rgb(51, 42, 24)"));
+        if (width === 1440) {
+          await pie.scrollIntoViewIfNeeded();
+          // Hover the filled ring, since the sector's bounding-box center is in the donut hole.
+          const point = await pie.locator("path.recharts-sector").first().evaluate(element => {
+            const path = element as SVGGeometryElement, svg = path.ownerSVGElement!;
+            const cx = Number(path.getAttribute("cx")), cy = Number(path.getAttribute("cy"));
+            const radius = Math.min(svg.viewBox.baseVal.width, svg.viewBox.baseVal.height) * .375;
+            const point = new DOMPoint(cx + radius / Math.SQRT2, cy - radius / Math.SQRT2);
+            if (!path.isPointInFill(point)) throw new Error("最大カテゴリの内部を操作する");
+            const screen = point.matrixTransform(path.getScreenCTM()!);
+            return { x: screen.x, y: screen.y };
+          });
+          await f.page.mouse.move(point.x, point.y);
+          const amount = pie.locator(".recharts-tooltip-wrapper strong");
+          await amount.first().waitFor({ state: "visible" });
+          assert.ok((await amount.allTextContents()).every(text => /^￥[\d,]+$/.test(text)), "ツールチップの費用も正額で表示する");
+          assert.ok((await amount.evaluateAll(elements => elements.map(element => getComputedStyle(element).color))).every(color => color === "rgb(51, 42, 24)"));
+        }
         const pieBounds = (await pie.locator("svg").first().boundingBox())!;
         assert.ok(pieBounds.width > 100 && pieBounds.height > 100, "中間幅でも円グラフが消えない");
         assert.equal(await f.page.getByRole("combobox", { name: "集計の基準" }).count(), 0);
@@ -131,19 +152,22 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
           await f.page.getByRole("heading", { name: "支出の集計", exact: true }).tap();
           assert.equal(await f.page.getByRole("tooltip").count(), 0, "外側のタップで説明を閉じる");
         }
-        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck(); await f.total("−￥80");
-        await f.page.getByRole("checkbox", { name: "共有", exact: true }).uncheck(); await f.total("−￥20");
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck(); await f.total("￥80");
+        await f.page.getByRole("checkbox", { name: "共有", exact: true }).uncheck(); await f.total("￥20");
         await f.page.getByRole("checkbox", { name: "個人", exact: true }).uncheck();
         await f.page.getByRole("status").filter({ hasText: "それぞれ1つ以上" }).waitFor();
         assert.equal(await f.page.getByTestId("analytics-total").count(), 0);
-        await f.page.getByRole("checkbox", { name: "共有", exact: true }).check(); await f.total("−￥60");
+        await f.page.getByRole("checkbox", { name: "共有", exact: true }).check(); await f.total("￥60");
         await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).uncheck();
         await f.page.getByRole("status").filter({ hasText: "それぞれ1つ以上" }).waitFor();
-        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).check(); await f.total("−￥40");
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).check(); await f.total("￥40");
         await f.page.getByLabel("カテゴリの細かさ", { exact: true }).selectOption("all");
         await f.page.getByLabel("全カテゴリの支出額と割合").getByText("食費 › スーパー", { exact: true }).waitFor();
         await f.page.getByText("月ごとの金額を表で見る", { exact: true }).click();
         await f.page.getByRole("table", { name: "月ごとの支出額（円）" }).waitFor();
+        const monthlyAmounts = f.page.getByRole("table", { name: "月ごとの支出額（円）" }).locator("td");
+        assert.ok((await monthlyAmounts.allTextContents()).every(text => /^￥[\d,]+$/.test(text)));
+        assert.ok((await monthlyAmounts.evaluateAll(elements => elements.map(element => getComputedStyle(element).color))).every(color => color === "rgb(51, 42, 24)"), "月別表の費用も通常色で表示する");
         await f.stable();
         assert.equal(f.urls.length, 1, "表示条件と表の変更はAPIを呼ばない");
         if (width === 1440) {
@@ -196,16 +220,18 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         }), true, "最大の領域は12時の右から時計回りに始まる");
         await pie.locator('[data-analytics-amount="pie"]').first().waitFor();
         assert.equal(await pie.locator('[data-analytics-amount="pie"][data-category-id="c10"]').count(), 0, "1円の小さい領域は非表示");
-        const expectedValues = new Set(["−￥250", "−￥57", ...amounts.slice(0, 7).map(value => formatCashflow(-value))]);
+        const expectedValues = new Set(["￥250", "￥57", ...amounts.slice(0, 7).map(value => formatYen(value))]);
         const labels = await pie.locator('[data-analytics-amount="pie"]').allTextContents();
         assert.ok(labels.length > 0 && labels.every(label => expectedValues.has(label)), "図内の金額は正確な円表記");
         const trend = f.page.getByRole("group", { name: "月ごとのカテゴリ別支出額。下の表でも確認できます。", exact: true });
         await trend.locator('[data-analytics-amount="trend"]').first().waitFor();
         assert.equal(await trend.locator('[data-analytics-amount="trend"][data-category-id="c10"]').count(), 0);
-        const difference = f.page.getByRole("group", { name: "カテゴリ別の支出額の増減。正は支出の減少、負は支出の増加。全カテゴリの金額は次の表に表示します。", exact: true });
-        assert.equal(await difference.locator('[data-analytics-amount="difference"][data-category-id="c10"]').textContent(), "+￥499", "支出の減少額はプラスで表示する");
+        const difference = f.page.getByRole("group", { name: "カテゴリ別の支出額の増減。正は増加、負は減少。全カテゴリの金額は次の表に表示します。", exact: true });
+        assert.equal(await difference.locator('[data-analytics-amount="difference"][data-category-id="c10"]').textContent(), "-￥499", "支出の減少額はマイナスで表示する");
         const decrease = f.page.getByRole("row").filter({ has: f.page.getByRole("rowheader", { name: "分類10", exact: true }) });
-        assert.equal(await decrease.getByRole("cell").nth(2).evaluate(element => element.classList.contains("positive")), true, "支出減少の差額は緑字で表示する");
+        assert.equal(await decrease.getByRole("cell").nth(2).evaluate(element => getComputedStyle(element).color), "rgb(51, 42, 24)", "支出減少の差額も通常色で表示する");
+        assert.ok((await f.page.locator("[data-analytics-amount]").evaluateAll(elements => elements.map(element => element.getAttribute("fill")))).every(color => color === "#000000" || color === "#ffffff"), "図内の金額はカテゴリ背景に応じた白黒で表示する");
+        assert.equal(await f.page.locator("[data-analytics-amount][stroke]").count(), 0, "図内金額へ色付き表示のための縁取りを強制しない");
         assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
         if (process.env.CAKE_ANALYTICS_SCREENSHOTS) {
           await mkdir(".cake/output/playwright", { recursive: true });
@@ -219,6 +245,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
       const center = page.locator('[data-analytics-center="total"]');
       await center.locator("text").last().waitFor();
       assert.equal(await center.locator("text").last().textContent(), expected, "中央合計も全桁を保持する");
+      assert.equal(await center.locator("text").last().evaluate(element => getComputedStyle(element).fill), "rgb(51, 42, 24)", "中央の費用合計も通常色で表示する");
       const lines = await center.locator("text").last().locator("tspan").allTextContents();
       assert.ok(lines.slice(0, -1).every(line => line.endsWith(",")), "改行は桁区切りで行う");
       assert.ok(await center.evaluate(element => {
@@ -241,13 +268,13 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         const first = await f.take();
         const initial = dataset(queryFromRoute(first));
         initial.buckets = [{ ...initial.buckets[0], burdenYen: "100000" }];
-        await f.reply(first, initial); await f.total("−￥100,000");
-        await centerWithinHole(f.page, "−￥100,000");
+        await f.reply(first, initial); await f.total("￥100,000");
+        await centerWithinHole(f.page, "￥100,000");
         await f.page.getByRole("button", { name: "更新", exact: false }).click();
         const next = await f.take(), data = dataset(queryFromRoute(next));
         data.buckets = [{ ...data.buckets[0], burdenYen: "10000000" }];
-        await f.reply(next, data); await f.total("−￥10,000,000");
-        await centerWithinHole(f.page, "−￥10,000,000");
+        await f.reply(next, data); await f.total("￥10,000,000");
+        await centerWithinHole(f.page, "￥10,000,000");
         if (process.env.CAKE_ANALYTICS_SCREENSHOTS) {
           await mkdir(".cake/output/playwright", { recursive: true });
           await f.page.screenshot({ path: `.cake/output/playwright/analytics-center-${width}.png`, fullPage: true, animations: "disabled" });
@@ -262,10 +289,10 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         const request = await f.take(), data = dataset(queryFromRoute(request));
         const exact = "9007199254740993";
         data.buckets = ["current", "trend"].map(scope => ({ scope: scope as "current" | "trend", month: "2026-10", memberId: "a", expenseClass: "SHARED", categoryId: "grocery", burdenYen: exact }));
-        await f.reply(request, data); await f.total(formatCashflow(-BigInt(exact)));
-        await centerWithinHole(f.page, formatCashflow(-BigInt(exact)));
+        await f.reply(request, data); await f.total(formatYen(BigInt(exact)));
+        await centerWithinHole(f.page, formatYen(BigInt(exact)));
         await f.page.locator('[data-analytics-amount="trend"]').first().waitFor();
-        assert.deepEqual(await f.page.locator('[data-analytics-amount="trend"]').allTextContents(), [formatCashflow(-BigInt(exact))]);
+        assert.deepEqual(await f.page.locator('[data-analytics-amount="trend"]').allTextContents(), [formatYen(BigInt(exact))]);
         assert.equal(f.urls.length, 1); assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
@@ -273,11 +300,11 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
     await t.test("取得中にチェックを変更したら、最新の選択で応答を描画する", async () => {
       const f = await fixture();
       try {
-        await f.reply(await f.take()); await f.total("−￥150");
+        await f.reply(await f.take()); await f.total("￥150");
         await f.page.getByRole("button", { name: "更新", exact: false }).click(); const refreshing = await f.take();
         await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck();
         await f.page.getByRole("checkbox", { name: "個人", exact: true }).uncheck();
-        await f.reply(refreshing); await f.total("−￥60");
+        await f.reply(refreshing); await f.total("￥60");
         assert.equal(f.urls.length, 2); assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
@@ -286,29 +313,29 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
       const f = await fixture(1440, false);
       try {
         await f.stable(); assert.equal(f.urls.length, 0, "未訪問の画面は取得しない");
-        await f.page.evaluate(() => window.updateAnalytics({ active: true })); await f.reply(await f.take()); await f.total("−￥150");
+        await f.page.evaluate(() => window.updateAnalytics({ active: true })); await f.reply(await f.take()); await f.total("￥150");
         await f.page.getByLabel("集計する月", { exact: true }).fill("2026-09"); const older = await f.take();
         assert.equal(await f.page.getByTestId("analytics-total").count(), 0, "別期間の古いグラフを表示しない");
         await f.page.getByLabel("集計する月", { exact: true }).fill("2026-08"); const newer = await f.take();
         const latest = dataset(queryFromRoute(newer)); latest.buckets[0].burdenYen = "560";
-        await f.reply(newer, latest); await f.total("−￥650");
-        await f.reply(older); await f.stable(); await f.total("−￥650");
-        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck(); await f.total("−￥580");
+        await f.reply(newer, latest); await f.total("￥650");
+        await f.reply(older); await f.stable(); await f.total("￥650");
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck(); await f.total("￥580");
         await f.page.getByLabel("集計する期間", { exact: true }).selectOption("range");
         await f.page.getByLabel("開始日", { exact: true }).fill("2026-07-10");
         await f.page.getByLabel("終了日", { exact: true }).fill("2026-07-20");
         await f.stable(); assert.equal(f.urls.length, 3, "日付入力中は通信しない");
         await f.page.getByRole("button", { name: "この期間で表示" }).click(); const custom = await f.take();
         assert.deepEqual(queryFromRoute(custom), { workspaceId, period: "range", from: "2026-07-10", to: "2026-07-20" });
-        await f.reply(custom); await f.total("−￥80");
-        await f.page.evaluate(() => window.updateAnalytics({ revision: 1 })); await f.reply(await f.take()); await f.total("−￥80");
+        await f.reply(custom); await f.total("￥80");
+        await f.page.evaluate(() => window.updateAnalytics({ revision: 1 })); await f.reply(await f.take()); await f.total("￥80");
         await f.page.evaluate(() => window.updateAnalytics({ active: false, revision: 2 })); await f.stable(); assert.equal(f.urls.length, 5);
-        await f.page.evaluate(() => window.updateAnalytics({ active: true })); await f.reply(await f.take()); await f.total("−￥80");
+        await f.page.evaluate(() => window.updateAnalytics({ active: true })); await f.reply(await f.take()); await f.total("￥80");
         assert.equal(await f.page.getByLabel("開始日", { exact: true }).inputValue(), "2026-07-10");
         assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), false);
         await f.page.evaluate(id => window.updateAnalytics({ workspaceId: id }), otherWorkspaceId); const other = await f.take();
         assert.equal(queryFromRoute(other).workspaceId, otherWorkspaceId);
-        await f.reply(other); await f.total("−￥150");
+        await f.reply(other); await f.total("￥150");
         assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), true);
         assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
@@ -317,7 +344,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
     await t.test("取得失敗でも選択を保持して再試行でき、正しい0円と未選択を分ける", async () => {
       const f = await fixture();
       try {
-        await f.reply(await f.take()); await f.total("−￥150");
+        await f.reply(await f.take()); await f.total("￥150");
         await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck();
         await f.page.getByRole("button", { name: "更新", exact: false }).click();
         await (await f.take()).fulfill({ status: 503, json: { error: "集計を再取得してください。" } });
@@ -327,7 +354,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         await f.page.getByRole("button", { name: "再試行", exact: true }).click();
         const request = await f.take(), empty = dataset(queryFromRoute(request)); empty.buckets = [];
         await f.reply(request, empty); await f.total("￥0");
-        assert.equal(await f.page.getByTestId("analytics-total").getAttribute("class"), "", "0円には収入・支払いの色を付けない");
+        assert.equal(await f.page.getByTestId("analytics-total").getAttribute("class"), null, "0円にも収入・支払いの色を付けない");
         await f.page.getByText("この期間の支出額はありません。", { exact: true }).waitFor();
         await f.page.getByText("この6か月の支出額はありません。", { exact: true }).waitFor();
         assert.equal(f.urls.length, 3); assert.deepEqual(f.errors, []);

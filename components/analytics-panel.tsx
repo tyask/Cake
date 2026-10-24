@@ -3,7 +3,7 @@
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { analyticsQuerySchema, analyticsToday, type AnalyticsQuery, type AnalyticsRange } from "@/lib/shared/analytics";
 import { buildAnalyticsView, prepareAnalyticsDataset } from "@/lib/shared/analytics-view";
-import { cashflowClass, formatCashflow, formatJstDateTime } from "@/lib/shared/display-formatters";
+import { formatYen, formatJstDateTime } from "@/lib/shared/display-formatters";
 import { expenseClassLabels, expenseClasses } from "@/lib/shared/domain-values";
 import type { ExpenseClass } from "@/lib/shared/types";
 import { PageHeading } from "./dashboard-ui";
@@ -136,9 +136,9 @@ export function AnalyticsPanel({ workspaceId, revision, active }: { workspaceId:
     {view && data && !loading && !error && <>
       <div className={styles.selectionLine}><span>対象期間 <b>{analyticsRangeLabel(data.periods.current)}</b></span><span>比較期間 <b>{analyticsRangeLabel(data.periods.comparison)}</b></span></div>
       <div className={styles.stats} aria-label="支出額の概要">
-        <article className={`${styles.stat} ${styles.primaryStat}`}><span>支出額</span><strong className={cashflowClass(-view.totalYen)} data-testid="analytics-total">{formatCashflow(-view.totalYen)}</strong><small>{data.members.filter(member => selectedMembers.includes(member.id)).map(member => member.name).join("・")}の合計</small></article>
-        <article className={styles.stat}><span>比較期間の支出額</span><strong className={cashflowClass(-view.comparisonYen)}>{formatCashflow(-view.comparisonYen)}</strong><small>{analyticsRangeLabel(data.periods.comparison)}</small></article>
-        <article className={styles.stat}><span>比較期間との差額</span><strong className={cashflowClass(-view.differenceYen)} data-testid="analytics-difference">{formatCashflow(-view.differenceYen)}</strong><small>{view.differenceYen > BigInt(0) ? "支出が増加" : view.differenceYen < BigInt(0) ? "支出が減少" : "支出の増減なし"} · {view.rate ? `支出の増減率 ${view.rate}` : view.totalYen > BigInt(0) ? "比較期間は0円" : "比較期間も0円"}</small></article>
+        <article className={`${styles.stat} ${styles.primaryStat}`}><span>支出額</span><strong data-testid="analytics-total">{formatYen(view.totalYen)}</strong><small>{data.members.filter(member => selectedMembers.includes(member.id)).map(member => member.name).join("・")}の合計</small></article>
+        <article className={styles.stat}><span>比較期間の支出額</span><strong>{formatYen(view.comparisonYen)}</strong><small>{analyticsRangeLabel(data.periods.comparison)}</small></article>
+        <article className={styles.stat}><span>比較期間との差額</span><strong data-testid="analytics-difference">{view.differenceYen > BigInt(0) ? "+" : ""}{formatYen(view.differenceYen)}</strong><small>{view.differenceYen > BigInt(0) ? "支出が増加" : view.differenceYen < BigInt(0) ? "支出が減少" : "支出の増減なし"} · {view.rate ? `支出の増減率 ${view.rate}` : view.totalYen > BigInt(0) ? "比較期間は0円" : "比較期間も0円"}</small></article>
       </div>
       <Suspense fallback={<div role="status" className={styles.empty}>グラフを準備しています…</div>}><AnalyticsCharts view={view} periods={data.periods} /></Suspense>
       <p className={styles.snapshot}>取得日時 {formatJstDateTime(data.snapshotAt)}（日本時間）</p>
