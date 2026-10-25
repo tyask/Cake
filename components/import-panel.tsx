@@ -7,13 +7,15 @@ import { isPayPayRowImportable, parsePayPayCsv, payPayDateToIso, type PayPayPrev
 import { applyPayPayDuplicateChecks, MAX_DUPLICATE_CHECK_IDS, type ExistingPayPayTransaction } from "@/lib/shared/import-duplicates";
 import { MAX_IMPORT_CATEGORY_SUGGESTION_MERCHANTS, type ImportCategorySuggestionsResponse } from "@/lib/shared/import-category-suggestions";
 import type { ExpenseClass, WorkspaceData } from "@/lib/shared/types";
+import { IMPORT_FORMATS, type ImportFormat } from "@/lib/shared/import-history";
 import { ImportPreviewTable } from "./import-preview-table";
 import { PageHeading } from "./dashboard-ui";
 import { ImportHelpDialog } from "./import-help-dialog";
+import { ImportHistoryPanel } from "./import-history-panel";
 import { CategorySelect, prepareCategoryChoices } from "./category-select";
 import styles from "./import-panel.module.css";
 
-const importFormats = { PAYPAY: { label: "PayPay", parse: parsePayPayCsv } };
+const importFormats = { PAYPAY: { ...IMPORT_FORMATS.PAYPAY, parse: parsePayPayCsv } };
 const pastedFileName = "PayPay貼り付け.csv";
 const clipboardReadError = "クリップボードを読み取れませんでした。ペーストを許可して再度試すか、「ファイルを選択」からCSVを取り込んでください。";
 const subscribeToBrowser = () => () => {};
@@ -59,10 +61,10 @@ function CategorySuggestionButton({ disabled, working, onClick }: { disabled: bo
   </div>;
 }
 
-export function ImportPanel({ selected, currentUserId, run }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction }) {
+export function ImportPanel({ selected, currentUserId, run, importHistoryRevision }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction; importHistoryRevision: number }) {
   const isSafari = useSyncExternalStore(subscribeToBrowser, getSafariSnapshot, getServerSafariSnapshot);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [format, setFormat] = useState<keyof typeof importFormats>("PAYPAY");
+  const [format, setFormat] = useState<ImportFormat>("PAYPAY");
   const [rows, setRows] = useState<PayPayPreviewRow[]>([]);
   const [totalRows, setTotalRows] = useState(0);
   const [fileName, setFileName] = useState("");
@@ -313,6 +315,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
         <button className="primary" disabled={busy || importableRows.length === 0} onClick={submit}>{saving ? "登録中…" : "確認して登録"}</button>
       </div>
     </section>}
+    <ImportHistoryPanel key={`${selected.workspace.id}:${format}`} workspaceId={selected.workspace.id} format={format} refreshKey={importHistoryRevision} />
     {helpUrl !== null && <ImportHelpDialog importUrl={helpUrl} close={() => setHelpUrl(null)} />}
   </>;
 }

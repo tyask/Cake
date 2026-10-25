@@ -34,6 +34,7 @@ test("CSVカテゴリの実SQLは互換性・集合検証・重複保持・全�
   [workspaceId, externalId, category, source]);
   const beforeMigration = (await insertManual(categoryId, "manual-before")).rows[0];
   await memory.exec(await readFile(new URL("018_import_categories.sql", directory), "utf8"));
+  await memory.exec(await readFile(new URL("022_import_history.sql", directory), "utf8"));
   const previous = { url: process.env.DATABASE_URL, logging: process.env.DB_QUERY_LOG, fetch: neonConfig.fetchFunction };
   const fixtureUrl = "postgresql://fixture:fixture@mock.neon.tech/import_category_test";
   process.env.DATABASE_URL = fixtureUrl;

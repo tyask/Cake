@@ -68,6 +68,7 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
       try {
         await page.route("**/api/**", async route => {
           const path = new URL(route.request().url()).pathname;
+          if (path === "/api/import/history" && route.request().method() === "GET") { await route.fulfill({ json: { history: [] } }); return; }
           if (path === "/api/recurring-payments" && route.request().method() === "GET") { await route.fulfill({ json: { payments: archived ? [] : [payment], eligibleActorUserIds: ["a", "b"], today: "2026-10-18", now: "2026-10-18T03:00:00.000Z" } });return; }
           const payload = route.request().postDataJSON();
           if (path === "/api/import/duplicates") { await route.fulfill({ json: { transactions: [] } });return; }
@@ -179,7 +180,9 @@ test("スマホの4画面でスワイプ削除・確認・取消・失敗とPC�
       const csv = "取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n" + Array.from({ length: 30 }, (_, index) => `2026/10/18 12:00:00,100,支払い,sticky${index},現金,${index}`).join("\n");
       try {
         await page.route("**/api/**", async route => {
-          if (new URL(route.request().url()).pathname === "/api/import/duplicates") await route.fulfill({ json: { transactions: [] } });
+          const path = new URL(route.request().url()).pathname;
+          if (path === "/api/import/history" && route.request().method() === "GET") { await route.fulfill({ json: { history: [] } }); return; }
+          if (path === "/api/import/duplicates") await route.fulfill({ json: { transactions: [] } });
           else { writes.push(route.request().postDataJSON());await route.fulfill({ json: { ok: true } }); }
         });
         await page.goto(origin + "/?view=import");

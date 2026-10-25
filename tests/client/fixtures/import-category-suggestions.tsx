@@ -14,7 +14,7 @@ declare global {
 
 const root = createRoot(document.getElementById("root")!);
 function render(workspace: WorkspaceData) {
-  const panel = <ImportPanel key={workspace.workspace.id} selected={workspace} currentUserId="a" run={payload => postAction(payload)} />;
+  const panel = <ImportPanel importHistoryRevision={0} key={workspace.workspace.id} selected={workspace} currentUserId="a" run={payload => postAction(payload)} />;
   root.render(new URLSearchParams(location.search).has("shell") ? <div className="app-shell">
     <main className="app-main">
       <header className="mobile-header"><b>Cake</b><select aria-label="家計" defaultValue={workspace.workspace.id}><option value={workspace.workspace.id}>{workspace.workspace.name}</option></select></header>

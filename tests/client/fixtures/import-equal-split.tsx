@@ -11,4 +11,4 @@ declare global {
 
 createRoot(document.getElementById("root")!).render(new URLSearchParams(location.search).get("view") === "recurring"
   ? <RecurringPaymentsPanel selected={window.importWorkspace} currentUserId="a" />
-  : <ImportPanel selected={window.importWorkspace} currentUserId="a" run={payload => postAction(payload)} />);
+  : <ImportPanel importHistoryRevision={0} selected={window.importWorkspace} currentUserId="a" run={payload => postAction(payload)} />);

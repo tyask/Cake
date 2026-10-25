@@ -22,7 +22,7 @@ function Fixture() {
   const [selected, setSelected] = useState(window.importPasteWorkspace);
   return <>
     <button onClick={() => setSelected(current => ({ ...current, workspace: { ...current.workspace, id: "other-workspace", name: "切替後の家計" } }))}>家計を切り替える</button>
-    <ImportPanel key={selected.workspace.id} selected={selected} currentUserId="a" run={payload => postAction(payload)} />
+    <ImportPanel importHistoryRevision={0} key={selected.workspace.id} selected={selected} currentUserId="a" run={payload => postAction(payload)} />
   </>;
 }
 

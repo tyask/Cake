@@ -31,7 +31,7 @@ function Harness() {
     return result;
   };
   return <main style={{ padding: 12, maxWidth: 1600 }}>
-    {view === "import" ? <ImportPanel selected={selected} currentUserId="a" run={run} />
+    {view === "import" ? <ImportPanel importHistoryRevision={0} selected={selected} currentUserId="a" run={run} />
       : view === "rules" ? <WorkspaceRules selected={selected} run={run} />
       : view === "recurring" ? <RecurringPaymentsPanel selected={selected} currentUserId="a" />
       : <TransactionsPanel selected={selected} userId="a" add={() => undefined} run={run} onRefresh={async prepare => { await prepare(); }} refreshing={false} />}

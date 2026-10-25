@@ -1,0 +1,68 @@
+.dialog {
+  width: min(76rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 1rem;
+  color: var(--ink);
+  background: var(--paper);
+  box-shadow: 0 1rem 4rem #402b1926;
+}
+.dialog[open] { display: flex; flex-direction: column; }
+/* Keep the original overflow styles intact; the last open dialog owns the lock. */
+:global(html):has(.dialog[open]), :global(body):has(.dialog[open]) { overflow: hidden !important; }
+.dialog::backdrop { background: #30241666; }
+.header, .footer { flex-shrink: 0; padding: 1rem 1.2rem; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: .6rem; border-bottom: 1px solid var(--line); }
+.header h2 { min-width: 0; margin: 0; font-size: 1.05rem; line-height: 1.5; overflow-wrap: anywhere; }
+.closeIcon { display: grid; flex: 0 0 44px; width: 44px; min-height: 44px; place-items: center; padding: 0; border: 0; border-radius: .5rem; color: var(--muted); background: transparent; font-size: 1.6rem; cursor: pointer; }
+.closeIcon:hover { background: var(--surface-muted); }
+.body { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
+.description { margin: 1rem 1.2rem; color: var(--muted); font-size: .78rem; line-height: 1.8; overflow-wrap: anywhere; }
+.description p { margin: .3rem 0; }
+.message { margin: 0; padding: 2rem 1.2rem; font-size: .8rem; line-height: 1.8; overflow-wrap: anywhere; }
+.message p { margin: 0 0 1rem; }
+.message[role="alert"] { color: var(--red); }
+.count { margin: 0 1.2rem 1rem; color: var(--muted); font-size: .7rem; }
+.table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: .72rem; }
+.table th { padding: .7rem .55rem; color: var(--muted); background: var(--surface-muted); text-align: left; font-size: .63rem; }
+.table td { padding: .8rem .55rem; border-top: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.table tbody tr:nth-child(even) { background: #fffcf1; }
+.date { width: 13%; }.merchant { width: 15%; }.method { width: 9%; }.type { width: 6%; }.amount { width: 10%; }.actor { width: 9%; }.expense { width: 6%; }.category { width: 13%; }.settlement { width: 6%; }.memo { width: 13%; }
+.table th:nth-child(5), .amountCell { text-align: right; font-variant-numeric: tabular-nums; }
+.memoCell { white-space: pre-wrap; }
+.mobileList { display: none; }
+.footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--line); }
+.footer button { min-width: 6rem; min-height: 44px; }
+
+@media (max-width: 48rem) {
+  .table { display: none; }
+  .mobileList { display: block; margin: 0 .75rem .75rem; }
+  .mobileItem { min-width: 0; margin-top: .6rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--paper); }
+  .summary { display: flex; align-items: center; gap: .6rem; min-height: 44px; padding: .8rem; cursor: pointer; list-style: none; }
+  .summary::-webkit-details-marker { display: none; }
+  .summaryText { flex: 1; min-width: 0; }
+  .summaryText b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .82rem; }
+  .summaryText small { display: block; margin-top: .25rem; color: var(--muted); font-size: .61rem; line-height: 1.6; overflow-wrap: anywhere; }
+  .summaryText .summaryCategory { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .summaryAmount { flex: 0 1 auto; min-width: 0; max-width: 48%; text-align: right; font-weight: 700; font-size: .85rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .summaryAmount small { display: block; margin-top: .3rem; color: var(--muted); font-size: .61rem; font-weight: 400; }
+  .chevron { flex-shrink: 0; color: var(--muted); }
+  .mobileItem[open] .chevron { transform: rotate(180deg); }
+  .detailFields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .85rem; margin: 0; padding: .85rem; border-top: 1px solid var(--line); }
+  .detailFields > div { min-width: 0; }
+  .detailFields > div:nth-child(1), .detailFields > div:nth-child(2), .detailFields > div:nth-child(8), .detailFields > div:nth-child(10) { grid-column: 1 / -1; }
+  .detailFields dt { margin-bottom: .25rem; color: var(--muted); font-size: .62rem; }
+  .detailFields dd { margin: 0; font-size: .76rem; line-height: 1.7; overflow-wrap: anywhere; }
+}
+@media (max-width: 380px) {
+  .header, .footer { padding: .75rem; }
+  .header h2 { font-size: 1rem; }
+  .description, .count { margin-left: .85rem; margin-right: .85rem; }
+  .summary { gap: .4rem; padding: .65rem; }
+  .summaryAmount { font-size: .78rem; }
+}

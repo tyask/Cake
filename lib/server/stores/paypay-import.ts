@@ -47,8 +47,8 @@ export async function persistPayPayImport(input: PayPayImportInput) {
   const results = await sql.transaction([
     sql`SELECT cake_assert_transaction_categories(${JSON.stringify(categoryTargets)}::jsonb)`,
     sql`
-      INSERT INTO import_batches (id, workspace_id, imported_by, file_name, total_rows, imported_rows, skipped_rows)
-      VALUES (${batchId}::uuid, ${input.workspaceId}::uuid, ${input.userId}, ${input.fileName}, ${input.totalRows}, 0, ${input.totalRows})
+      INSERT INTO import_batches (id, workspace_id, imported_by, file_name, total_rows, imported_rows, skipped_rows, format)
+      VALUES (${batchId}::uuid, ${input.workspaceId}::uuid, ${input.userId}, ${input.fileName}, ${input.totalRows}, 0, ${input.totalRows}, 'PAYPAY')
     `,
     sql`
       INSERT INTO transactions (workspace_id, occurred_at, merchant, method, type, amount_yen, actor_user_id,
