@@ -1,18 +1,83 @@
 # Cake の開発ルール
 
+## 開発依頼の完了条件
+
+このrepositoryの機能追加・不具合修正・UI調整・文書更新などの通常の変更依頼は、次の工程を完了するまでを含む。
+
+1. 実装・関連テスト・自己レビューを終えてcommitする。
+2. 別Agentレビューと指摘への対応・必要な再レビューを終える。
+3. 最終SHAで所定のローカル検証を行う。
+4. 対象branchをpushし、PRを作成・更新する。
+5. 現在HEADのCI・自動Previewと変更に必要な検証を確認する。
+6. 条件を満たしたらPRをReadyにする。
+7. PRリンクと結果を報告する。
+
+利用者による「PRを作成して」「Readyにして」という追加依頼を待たず、ローカル実装・commit・pushだけで完了と報告しない。
+
+次の操作も既定の依頼範囲に含む。以下の資格情報・データ更新・資源照合の規則を守って進める。
+
+- 当該PRの検証結果・レビューコメントの掲載。
+- 既存Actionsによる当該PR専用Preview・DBの作成/更新・migration/seed。
+
+次の操作は既定範囲に含めず、対象と影響を含む利用者の依頼に従う。
+
+- PRのmerge・close。
+- Production操作。
+- 無関係な資源の操作。
+
+利用者が次のように指定した場合は、その制限を優先する。
+
+- 調査のみ、または提案のみ。
+- ローカル変更まで、またはPR不要。
+- draft維持。
+
+変更を求めていない質問や相談だけを根拠に、変更やPR作成を開始しない。
+
+認証・権限・環境・検証失敗などの阻害要因がある場合は、実施可能な作業を進めたうえで未完了として報告し、次を明示する。
+
+- PRの有無。作成済みならURLとdraft/Ready。
+- 未完了の工程。
+- 具体的な理由と必要な対応。
+
+「PR作成を明示されていない」ことだけを停止理由にしない。
+
 ## 開始と実行環境
 
-開発・PR操作・QAの前に[開発・QA運用手順](docs/development-workflow.md)を読む。ローカルとActionsのNode版は [.node-version](.node-version) を正本とし、`npm run check:node` で一致を確認する。WSL2ではLinux版Node.js・npm・Git・gh・Playwright Chromiumを使う。[WSL手順](docs/wsl-development.md)で実行環境と認証を確認する。Codex Cloudは[Cloud手順](docs/cloud-development.md)でsetup・オンメモリDB付きCake・ブラウザQAを行う。Windowsネイティブでも開発でき、PowerShellでは `npm.cmd` / `npx.cmd` を使う。
+開発・PR操作・QAの前に[開発・QA運用手順](docs/development-workflow.md)を読む。
+工程別の具体コマンド・実行場所・成功条件は[開発コマンド集](docs/development-commands.md)を参照する。
+ローカルとActionsのNode版は [.node-version](.node-version) を正本とし、`npm run check:node` で一致を確認する。
 
-最新 `origin/main` から `npm run task:start -- <task-name>` で `codex/<task-name>` と専用worktreeを作る。既存の未コミット変更を保持し、worktreeごとに `node_modules`・`.next`・`.cake`・環境ファイルを分離する。WindowsとWSLで作業ディレクトリや資格情報を共有・コピーしない。npm/Playwrightのキャッシュは同じ実行環境内で共有できる。
+WSL2ではLinux版Node.js・npm・Git・gh・Playwright Chromiumを使う。
+[WSL手順](docs/wsl-development.md)で実行環境と認証を確認する。
 
-Cloudの `setup:cloud` は依存・公式Chromiumの準備、`dev:cloud` はNode + PGliteによる外部DB不要のCake起動、`qa:cloud` はPC/mobile × 非管理者A/Bと取引CRUDのローカル検証に使う。同じCloud環境の並列タスクはworktreeとポートを分ける。外部DB・Google・Vercelの秘密値や他環境の資格情報を持ち込まない。Cloudの結果は `.cake/cloud/` に保存し、正式Preview証拠とReady条件は既存のものを維持する。
+Codex Cloudは[Cloud手順](docs/cloud-development.md)でsetup・オンメモリDB付きCake・ブラウザQAを行う。
+Windowsネイティブでも開発でき、PowerShellでは `npm.cmd` / `npx.cmd` を使う。
 
-機能・UI・API・DBを変更する際は[基本設計](docs/design.html)と[詳細設計](docs/detail-design.html)を確認し、仕様・運用の変更を関連文書へ反映する。文書には現在の仕様・手順だけを残す。個別PRの経緯、日時付き受入記録、廃止済み方式の説明はPR本文・検証結果に記録する。
+最新 `origin/main` から `npm run task:start -- <task-name>` で `codex/<task-name>` と専用worktreeを作る。
+既存の未コミット変更を保持し、worktreeごとに `node_modules`・`.next`・`.cake`・環境ファイルを分離する。
+WindowsとWSLで作業ディレクトリや資格情報を共有・コピーしない。
+npm/Playwrightのキャッシュは同じ実行環境内で共有できる。
+
+Cloudでは目的に応じて次のコマンドを使う。
+
+- `setup:cloud`：依存・公式Chromiumの準備。
+- `dev:cloud`：Node + PGliteによる外部DB不要のCake起動。
+- `qa:cloud`：PC/mobile × 非管理者A/Bと取引CRUDのローカル検証。
+
+同じCloud環境の並列タスクはworktreeとポートを分ける。
+外部DB・Google・Vercelの秘密値や他環境の資格情報を持ち込まない。
+Cloudの結果は `.cake/cloud/` に保存し、正式Preview証拠とReady条件は既存のものを維持する。
+
+機能・UI・API・DBを変更する際は[基本設計](docs/design.html)と[詳細設計](docs/detail-design.html)を確認し、
+仕様・運用の変更を関連文書へ反映する。
+文書には現在の仕様・手順だけを残す。
+個別PRの経緯、日時付き受入記録、廃止済み方式の説明はPR本文・検証結果に記録する。
 
 ## 設計・実装の原則
 
-新規機能・既存機能の変更では[設計・実装原則](docs/design-principles.md)を読み、変更に関係する観点を設計・自己レビュー・別Agentレビューで確認する。小さな変更へ一律に層・抽象化・キャッシュを追加せず、責務と副作用の境界を明確にする。
+新規機能・既存機能の変更では[設計・実装原則](docs/design-principles.md)を読み、
+変更に関係する観点を設計・自己レビュー・別Agentレビューで確認する。
+小さな変更へ一律に層・抽象化・キャッシュを追加せず、責務と副作用の境界を明確にする。
 
 - 操作から入力・分岐・API・業務処理・DB・画面反映までのデータの流れと、入力中/確定データの所有者を決める。複数経路・非同期分岐は詳細設計に図示する。
 - 有限値・入力schema・上限・純粋な業務計算は共通定義を使い、手入力・CSV・APIで同じ規則を適用する。サーバーでも検証・認可し、日時などの精度は通信で保持して表示境界で整える。
@@ -24,32 +89,143 @@ Cloudの `setup:cloud` は依存・公式Chromiumの準備、`dev:cloud` はNode
 
 PRのタイトル・本文・コメント・レビューコメント・検証報告は日本語で書く。コマンド、識別子、protocol名、エラーコード、引用するログは原文を保持できる。
 
-PR本文の「変更内容」は、対象機能と解決する問題、変更前後の挙動、そのために行った主な修正と理由が対応するように書く。タイトルの繰り返しやファイル一覧だけにしない。リファクタリングでは処理方法の変化と維持する仕様を説明し、関連する互換性・影響範囲も記載する。変更規模に応じて具体例や小見出しを使い、検証結果は別章に分ける。`task:pr`の作成・更新では説明を `.cake/changes.md` に用意し、`--changes-file`で渡す。詳細な書式は開発手順に従う。
+タスク・手順・確認項目の列挙は、文中に長く連結せずリスト形式で書く。
 
-実装と関連テストを同じbranchにcommitし、最終SHAでlint・型チェック・自動テスト・buildを実行する。前後で完全SHA一致とclean状態を確認する。文書だけの変更ではリンク・コマンド・現行実装との整合性を確認し、機能テストの再実施は必要性に応じて判断する。
+- 並列の項目は、1項目ずつ箇条書きにする。
+- 実行順序がある手順は、番号付きリストにする。
+- 進捗報告は「完了・実行中・未着手・阻害あり」を明記する。
+- 残作業は、完了した内容と分けて列挙する。
 
-実装・関連テスト・自己レビューを終えてcommitした後、最終検証の前に別Agentによるレビューを必須とする。文書のみの変更も対象とし、モデル・推論強度は利用者の指定がなければ未指定で起動する。実装時の会話履歴を引き継がない新しい文脈で、元の要求・設計・適用する開発ルール・対象worktree・比較元・完全SHAを渡す。レビュー担当はファイル変更やPR操作をせず、具体的な指摘と根拠を親Agentへ返す。親Agentが指摘を確認し、修正または不採用の理由を記録する。修正・QA・競合解消などでHEADが進んだら変更部分と影響範囲を再レビューし、現在HEADを対象とする完了記録を揃える。レビュー担当に別Agentの再起動を求める必要はない。
+チャット・PR・文書の文章は、長い一文や段落に詰め込まず、読みやすい長さに区切る。
 
-レビュー結果は親Agentが日本語で公開する。PR本文には現在HEADの完全SHA・完了状況・指摘件数と対応結果・未解決事項・詳細コメントへのリンクを載せ、PRごとに1件の詳細コメントへ指摘箇所・発生条件・影響・根拠・対応をまとめる。再レビュー時は同じコメントを更新し、過去SHAの結果と現在の状態を区別する。PR本文の要約は `.cake/report.md` に含め、`task:pr`による本文更新でも保持する。レビュー未実施・未完了や未解決の指摘がある場合はdraftを維持する。この記録はGitHubの正式なApproveや必須レビューの代わりにはしない。具体的な手順は開発手順に従う。
+- 長い文は、意味のまとまりに沿って短い文へ分ける。
+- 話題・条件・操作が変わる位置で段落を区切る。
+- Markdownの長い行は、文末や意味の切れ目で改行する。リストの継続行は字下げする。
+- リンク・識別子・コマンド・コードは、途中で改行して壊さない。
 
-報告は成功・失敗・未実施を分け、実行環境・版・完全SHA・所要時間・件数・残った資源を記録する。DB不要の自動テスト、ローカルCake、実Previewの画面移動、業務データの追加・編集・削除を区別する。件数や過去の成功を今回の検証結果として流用しない。
+PR本文の「変更内容」は、次の内容が対応するように書く。
+
+- 対象機能と解決する問題。
+- 変更前後の挙動。
+- その挙動を実現する主な修正と理由。
+
+タイトルの繰り返しやファイル一覧だけにしない。
+リファクタリングでは処理方法の変化と維持する仕様を説明し、関連する互換性・影響範囲も記載する。
+変更規模に応じて具体例や小見出しを使い、検証結果は別章に分ける。
+`task:pr`の作成・更新では説明を `.cake/changes.md` に用意し、`--changes-file`で渡す。
+詳細な書式は開発手順に従う。
+
+実装と関連テストを同じbranchにcommitし、最終SHAでlint・型チェック・自動テスト・buildを実行する。
+前後で完全SHA一致とclean状態を確認する。
+文書だけの変更ではリンク・コマンド・現行実装との整合性を確認し、機能テストの再実施は必要性に応じて判断する。
+
+別Agentレビューは、文書のみの変更も対象とし、次の順で行う。
+
+1. 実装・関連テスト・自己レビューを終えてcommitする。
+2. 最終検証の前に別Agentを起動する。モデル・推論強度は利用者の指定がなければ未指定とする。
+3. 実装時の会話履歴を引き継がない新しい文脈で、元の要求・設計・適用する開発ルール・対象worktree・比較元・完全SHAを渡す。
+4. レビュー担当はファイル変更やPR操作をせず、具体的な指摘と根拠を親Agentへ返す。
+5. 親Agentが指摘を確認し、修正または不採用の理由を記録する。
+6. 修正・QA・競合解消などでHEADが進んだら、変更部分と影響範囲を再レビューし、現在HEADを対象とする完了記録を揃える。レビュー担当に別Agentの再起動を求める必要はない。
+
+レビュー結果は親Agentが日本語で公開する。PR本文には次を載せる。
+
+- 現在HEADの完全SHA。
+- 完了状況。
+- 指摘件数と対応結果。
+- 未解決事項。
+- 詳細コメントへのリンク。
+
+PRごとに1件の詳細コメントへ次をまとめる。
+
+- 指摘箇所と発生条件。
+- 影響と根拠。
+- 対応。
+
+再レビュー時は同じコメントを更新し、過去SHAの結果と現在の状態を区別する。
+PR本文の要約は `.cake/report.md` に含め、`task:pr`による本文更新でも保持する。
+レビュー未実施・未完了や未解決の指摘がある場合はdraftを維持する。
+この記録はGitHubの正式なApproveや必須レビューの代わりにはしない。
+具体的な手順は開発手順に従う。
+
+報告は成功・失敗・未実施を分け、次を記録する。
+
+- 実行環境と版。
+- 完全SHA。
+- 所要時間と件数。
+- 残った資源。
+
+次の検証結果は区別して報告し、件数や過去の成功を今回の検証結果として流用しない。
+
+- DB不要の自動テスト。
+- ローカルCake。
+- 実Previewの画面移動。
+- 業務データの追加・編集・削除。
 
 ## PRと自動Preview
 
-同一repositoryの `codex/*` からmainへのPR作成・更新・再openは、draftを含めて専用Preview・Neon Native DBの作成/更新とmigration/seedを自動起動する。PR未作成のpushだけではPreviewを作らない。Vercel Git連携の `**: false` / `main: true` は維持し、管理処理は信頼済みmainのActionsだけで実行する。
+同一repositoryの `codex/*` からmainへのPR作成・更新・再openは、
+draftを含めて専用Preview・Neon Native DBの作成/更新とmigration/seedを自動起動する。
+PR未作成のpushだけではPreviewを作らない。
+Vercel Git連携の `**: false` / `main: true` は維持し、管理処理は信頼済みmainのActionsだけで実行する。
 
-PR作成・更新前に、対象と自動資源操作の影響が依頼の承認範囲に含まれることを確認する。承認済みの操作は再確認せず進める。文書変更でも同じ自動化が起動する。main mergeはProduction deploy、PR merge/closeは専用Deployment・DBのcleanupを起動するため、対象と削除影響が承認されていない操作は行わない。
+PR作成・更新前に、上記の既定の依頼範囲と利用者の明示した制限に照らして対象と自動資源操作の影響を確認し、
+範囲内の操作は追加確認せず進める。
+文書変更でも同じ自動化が起動する。
 
-通常CI・Preview/DB管理・cleanupはActionsを使い、結果は標準noticeの正式receiptから受け取る。対象PR・完全SHA・Deployment・固有URL・DB branch/endpoint・generationを検証前後に照合する。欠落・重複・不一致・応答不明では停止し、盲目的な再deployや削除をしない。削除完了はcleanup成功だけで判断せず、対象IDの直接GETによる不在確認とprovider一覧の再照合で確認する。Neon資格情報がWSLにない場合は、資格情報をコピーせずActions内の直接照合と後続statusの正式receiptを使う。
+main mergeはProduction deploy、PR merge/closeは専用Deployment・DBのcleanupを起動するため、
+対象と削除影響が承認されていない操作は行わない。
+
+通常CI・Preview/DB管理・cleanupはActionsを使い、結果は標準noticeの正式receiptから受け取る。
+対象PR・完全SHA・Deployment・固有URL・DB branch/endpoint・generationを検証前後に照合する。
+欠落・重複・不一致・応答不明では停止し、盲目的な再deployや削除をしない。
+
+削除完了はcleanup成功だけで判断せず、対象IDの直接GETによる不在確認とprovider一覧の再照合で確認する。
+Neon資格情報がWSLにない場合は、資格情報をコピーせずActions内の直接照合と後続statusの正式receiptを使う。
 
 ## ブラウザと資格情報
 
-WSLでは[WSL手順](docs/wsl-development.md)、Cloudでは[Cloud手順](docs/cloud-development.md)、Windowsでは[Windows QA資格情報・実行手順](docs/windows-qa-credentials.md)を使う。CloudのPR/Actions操作はCloudに連携されたGitHub権限を使う。既存本人認証を使い、未認証・失効時のログインは本人に依頼する。provider token・OIDC・Cookieをチャット・ログ・コマンド引数・Git・環境ファイル・検証artifactへ出さない。Vercel資格情報はQA処理のメモリ内で扱い、Git/gh子プロセスには渡さない。
+WSLでは[WSL手順](docs/wsl-development.md)、Cloudでは[Cloud手順](docs/cloud-development.md)、
+Windowsでは[Windows QA資格情報・実行手順](docs/windows-qa-credentials.md)を使う。
+CloudのPR/Actions操作はCloudに連携されたGitHub権限を使う。
+既存本人認証を使い、未認証・失効時のログインは本人に依頼する。
+provider token・OIDC・Cookieをチャット・ログ・コマンド引数・Git・環境ファイル・検証artifactへ出さない。
+Vercel資格情報はQA処理のメモリ内で扱い、Git/gh子プロセスには渡さない。
 
-OIDCは同一project/team・development・有効期限を確認し、redirectを含めて対象originだけへ付ける。TLS検証と保護設定を維持し、CA・proxy・権限・global PATH/Git設定は変更しない。WSLからWindowsの `qa:windows` やtoken受渡しexeを使わない。
+OIDCは同一project/team・development・有効期限を確認し、redirectを含めて対象originだけへ付ける。
+TLS検証と保護設定を維持し、CA・proxy・権限・global PATH/Git設定は変更しない。
+WSLからWindowsの `qa:windows` やtoken受渡しexeを使わない。
 
-通常の正式ブラウザ検証はPC/mobile × A/Bログインと画面移動・session/app GET・runtime proofを確認する。認証後のホーム/ `GET /api/app` はworkspaceが0件なら個人workspace・OWNER membershipをINSERTし得るため、GETだけを根拠にDB無変更と扱わない。明細追加などの業務更新は別途依頼された範囲で、識別できるテストデータだけを対象にし、削除と残存件数まで確認する。
+通常の正式ブラウザ検証はPC/mobile × A/Bログインと画面移動・session/app GET・runtime proofを確認する。
+認証後のホーム/ `GET /api/app` はworkspaceが0件なら個人workspace・OWNER membershipをINSERTし得るため、
+GETだけを根拠にDB無変更と扱わない。
+明細追加などの業務更新は別途依頼された範囲で、識別できるテストデータだけを対象にし、削除と残存件数まで確認する。
 
-Codexは現在HEADのCI、変更内容に必要な検証、差分の自己レビューと別Agentレビューを完了し、未解決の不具合・指摘・競合・検証不足がなくマージ可能と判断したら、追加確認を待たずPRをReadyにする。利用者がdraft維持を指定した場合は従う。Ready直前にHEADとレビュー記録・検証証拠を再照合し、完了後はこのチャットでPRリンク・判断理由・レビューと検証の結果・未実施項目・残る資源を日本語で通知し、PR本文も更新する。条件未達ならdraftを維持し、阻害要因を報告する。マージ・closeは依頼された範囲で別に判断する。
+Codexは次の条件を満たし、マージ可能と判断したら、追加確認を待たずPRをReadyにする。
 
-アプリ変更は現在HEADに対応する正式ブラウザ証拠を必要とする。Actions検証は `qa:verify:ci`、別checkoutからのReady管理は `task:pr --remote-proof ... --target-worktree ...` を使う。AGENTS.md・README.md・docs配下だけの文書変更は、差分・リンク・コマンド・現行実装との整合性をレビューし、現在HEADのCIと自動Preview/statusを確認したうえで、ブラウザ再検証を省略する理由を記録して `gh pr ready` を使える。CLIのブラウザ証拠チェックを省略するオプションは追加しない。詳細は開発手順を参照する。
+- 現在HEADのCIと、変更内容に必要な検証を完了している。
+- 差分の自己レビューと別Agentレビューを完了している。
+- 未解決の不具合・指摘・競合・検証不足がない。
+
+利用者がdraft維持を指定した場合は従う。Readyへの変更と結果報告は次の順で行う。
+
+1. Ready直前にHEADとレビュー記録・検証証拠を再照合する。
+2. PR本文を更新し、PRをReadyにする。
+3. このチャットで結果を日本語で通知する。
+
+通知には次を含める。
+
+- PRリンクと判断理由。
+- レビューと検証の結果。
+- 未実施項目と残る資源。
+
+条件未達ならdraftを維持し、PRリンク・未完了の工程・阻害要因と必要な対応を報告する。マージ・closeは依頼された範囲で別に判断する。
+
+アプリ変更は現在HEADに対応する正式ブラウザ証拠を必要とする。
+Actions検証は `qa:verify:ci`、
+別checkoutからのReady管理は `task:pr --remote-proof ... --target-worktree ...` を使う。
+AGENTS.md・README.md・docs配下だけの文書変更は、差分・リンク・コマンド・現行実装との整合性をレビューし、
+現在HEADのCIと自動Preview/statusを確認したうえで、
+ブラウザ再検証を省略する理由を記録して `gh pr ready` を使える。
+CLIのブラウザ証拠チェックを省略するオプションは追加しない。
+詳細は開発手順を参照する。
