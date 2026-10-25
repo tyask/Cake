@@ -1,40 +1,21 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { DateTimePrecision, formatJstDateTime, formatJstShortDateTime } from "@/lib/shared/display-formatters";
 import { IMPORT_FORMATS, IMPORT_HISTORY_PER_USER_LIMIT, type ImportFormat, type ImportHistoryEntry, type ImportHistoryResponse } from "@/lib/shared/import-history";
+import { ImportTransactionsDialog } from "./import-transactions-dialog";
 import styles from "./import-history-panel.module.css";
 
 type HistoryResult = { key: string } & (
   { status: "success"; history: ImportHistoryEntry[] } | { status: "error"; message: string }
 );
 
-function ImportHistoryDialog({ entry, close }: { entry: ImportHistoryEntry; close: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const titleId = useId();
-  useEffect(() => {
-    const element = dialog.current;
-    if (element && !element.open) element.showModal();
-  }, []);
-
-  return <dialog ref={dialog} className={styles.dialog} aria-labelledby={titleId} onClose={close}>
-    <h2 id={titleId}>取込の詳細</h2>
-    <dl>
-      <dt>ファイル名</dt><dd>{entry.fileName}</dd>
-      <dt>取込日時</dt><dd>{formatJstDateTime(entry.createdAt, DateTimePrecision.Minute)}</dd>
-      <dt>取込者</dt><dd>{entry.importedByName}</dd>
-      <dt>登録</dt><dd>{entry.importedRows}件</dd>
-      <dt>スキップ</dt><dd>{entry.skippedRows}件</dd>
-    </dl>
-    <footer><button type="button" className="secondary" onClick={() => dialog.current?.close()}>閉じる</button></footer>
-  </dialog>;
-}
-
 export function ImportHistoryPanel({ workspaceId, format, refreshKey }: { workspaceId: string; format: ImportFormat; refreshKey: number }) {
   const titleId = useId();
   const [result, setResult] = useState<HistoryResult | null>(null);
   const [retry, setRetry] = useState(0);
-  const [detail, setDetail] = useState<ImportHistoryEntry | null>(null);
+  const [detail, setDetail] = useState<{ workspaceId: string; format: ImportFormat; entry: ImportHistoryEntry } | null>(null);
+  const activeDetail = detail?.workspaceId === workspaceId && detail.format === format ? detail : null;
   const requestKey = `${workspaceId}:${format}:${refreshKey}:${retry}`;
   const current = result?.key === requestKey ? result : null;
   const formatLabel = IMPORT_FORMATS[format].label;
@@ -70,22 +51,21 @@ export function ImportHistoryPanel({ workspaceId, format, refreshKey }: { worksp
       : current.history.length === 0 ? <p className={styles.message}>{formatLabel}の取込履歴はまだありません。</p>
       : <>
         <table className={styles.table} aria-label={`${formatLabel}の取込履歴`}>
-          <thead><tr><th scope="col">日時</th><th scope="col">ファイル名</th><th scope="col">取込者</th><th scope="col">登録</th><th scope="col">スキップ</th></tr></thead>
+          <thead><tr><th scope="col">日時</th><th scope="col">ファイル名</th><th scope="col">取込者</th><th scope="col">登録</th></tr></thead>
           <tbody>{current.history.map(entry => {
             const fullDateTime = formatJstDateTime(entry.createdAt, DateTimePrecision.Minute);
             return <tr key={entry.id}>
               <td><time dateTime={entry.createdAt} title={fullDateTime} aria-label={fullDateTime}>
                 <span className={styles.fullDate}>{fullDateTime}</span><span className={styles.shortDate} aria-hidden="true">{formatJstShortDateTime(entry.createdAt)}</span>
               </time></td>
-              <td><button type="button" className={styles.fileName} title={entry.fileName} aria-label={`${entry.fileName}の取込詳細を開く`} onClick={() => setDetail(entry)}>{entry.fileName}</button></td>
+              <td><button type="button" className={styles.fileName} title={entry.fileName} aria-label={`${entry.fileName}の取込詳細を開く`} onClick={() => setDetail({ workspaceId, format, entry })}>{entry.fileName}</button></td>
               <td><span className={styles.truncated} title={entry.importedByName}>{entry.importedByName}</span></td>
               <td className={styles.registered}><span className={styles.truncated} title={`${entry.importedRows}件`}>{entry.importedRows}</span></td>
-              <td className={styles.skipped}><span className={styles.truncated} title={`${entry.skippedRows}件`}>{entry.skippedRows}</span></td>
             </tr>;
           })}</tbody>
         </table>
-        <p className={styles.note}>登録・スキップの単位は件。ファイル名を押すと詳細を確認できます。<br />スキップには重複や取込対象から外した明細などが含まれます。</p>
+        <p className={styles.note}>登録の単位は件。ファイル名を押すと、取り込んだ明細の現在の内容を確認できます。</p>
       </>}
-    {detail !== null && <ImportHistoryDialog entry={detail} close={() => setDetail(null)} />}
+    {activeDetail !== null && <ImportTransactionsDialog key={`${workspaceId}:${format}:${activeDetail.entry.id}`} workspaceId={workspaceId} format={format} entry={activeDetail.entry} close={() => setDetail(null)} />}
   </section>;
 }

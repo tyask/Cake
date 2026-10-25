@@ -4,11 +4,12 @@ import { ImportHistoryPanel } from "../../../components/import-history-panel";
 import { ImportPanel } from "../../../components/import-panel";
 import { postAction } from "../../../lib/client/app-client";
 import { useDashboardController } from "../../../components/use-dashboard-controller";
-import type { WorkspaceData } from "../../../lib/shared/types";
+import { TransactionListDialog } from "../../../components/transaction-list-dialog";
+import type { TransactionRecord, WorkspaceData } from "../../../lib/shared/types";
 import "../../../app/globals.css";
 
 declare global {
-  interface Window { importHistoryWorkspace: WorkspaceData }
+  interface Window { importHistoryWorkspace: WorkspaceData; importHistoryTransactions: TransactionRecord[] }
 }
 
 function Fixture() {
@@ -39,4 +40,16 @@ function ControlledFixture() {
   </main>;
 }
 
-createRoot(document.getElementById("root")!).render(new URLSearchParams(window.location.search).has("controller") ? <ControlledFixture /> : <Fixture />);
+function ReusableDialogFixture() {
+  const [open, setOpen] = useState(false);
+  return <main style={{ padding: "16px" }}>
+    <h1>別画面の明細</h1>
+    <button onClick={() => setOpen(true)}>取得済み明細を表示</button>
+    {open && <TransactionListDialog title="共有用の明細" description={<p>別画面で取得済みの明細を表示しています。</p>}
+      state={{ status: "success", transactions: window.importHistoryTransactions, categories: window.importHistoryWorkspace.categories }}
+      onClose={() => setOpen(false)} />}
+  </main>;
+}
+
+const parameters = new URLSearchParams(window.location.search);
+createRoot(document.getElementById("root")!).render(parameters.has("controller") ? <ControlledFixture /> : parameters.has("generic") ? <ReusableDialogFixture /> : <Fixture />);

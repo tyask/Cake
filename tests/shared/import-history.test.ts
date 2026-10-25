@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { IMPORT_FORMATS, IMPORT_HISTORY_PER_USER_LIMIT, importHistoryQuerySchema } from "../../lib/shared/import-history";
+import { IMPORT_FORMATS, IMPORT_HISTORY_PER_USER_LIMIT, importHistoryQuerySchema, importTransactionsQuerySchema } from "../../lib/shared/import-history";
 
 const workspaceId = "00000000-0000-4000-8000-000000000001";
 
@@ -22,5 +22,21 @@ test("取込履歴の照会は不正workspace・未対応形式・形式の省�
     { workspaceId, format: ["PAYPAY"] },
   ]) {
     assert.equal(importHistoryQuerySchema.safeParse(input).success, false);
+  }
+});
+
+test("取込明細の照会は対象workspace・形式とbatch UUIDを必須にする", () => {
+  const batchId = "00000000-0000-4000-8000-000000000002";
+  const input = { workspaceId, format: "PAYPAY", batchId };
+  assert.deepEqual(importTransactionsQuerySchema.parse(input), input);
+  for (const invalid of [
+    { workspaceId, format: "PAYPAY" },
+    { ...input, batchId: "invalid" },
+    { ...input, batchId: null },
+    { ...input, workspaceId: "invalid" },
+    { ...input, format: "CSV" },
+    { workspaceId, batchId },
+  ]) {
+    assert.equal(importTransactionsQuerySchema.safeParse(invalid).success, false);
   }
 });

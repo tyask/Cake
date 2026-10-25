@@ -6,38 +6,35 @@
 .table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: .76rem; }
 .table th { padding: .65rem 1rem; border-block: 1px solid var(--line); color: var(--muted); background: var(--surface-muted); font-size: .65rem; font-weight: 500; text-align: left; white-space: nowrap; }
 .table th:nth-child(1) { width: 24%; }
-.table th:nth-child(2) { width: 42%; }
-.table th:nth-child(3) { width: 12%; }
-.table th:nth-child(4),.table th:nth-child(5) { width: 11%; text-align: right; }
+.table th:nth-child(2) { width: 48%; }
+.table th:nth-child(3) { width: 16%; }
+.table th:nth-child(4) { width: 12%; text-align: right; }
 .table td { height: 44px; padding: 0 1rem; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
 .table tbody tr:nth-child(even) { background: #fffdf3; }
 .table tbody tr:last-child td { border-bottom: 0; }
-.table time,.registered,.skipped { font-variant-numeric: tabular-nums; }
+.table time,.registered { font-variant-numeric: tabular-nums; }
 .shortDate { display: none; }
 .truncated { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .fileName { display: block; width: 100%; height: 44px; overflow: hidden; padding: 0; border: 0; color: var(--ink); background: transparent; font: inherit; font-weight: 500; text-align: left; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; }
 .fileName:hover { color: var(--accent); text-decoration: underline; }
-.registered,.skipped { text-align: right; font-weight: 700; }
+.registered { text-align: right; font-weight: 700; }
 .registered { color: var(--accent-dark); }
-.skipped { color: var(--muted); }
 .note { margin: 0; padding: .75rem 1rem; border-top: 1px solid var(--line); color: var(--muted); background: #fffcf0; font-size: .65rem; line-height: 1.9; }
 .message { margin: 0; padding: 2rem 1rem; border-top: 1px solid var(--line); color: var(--muted); text-align: center; font-size: .8rem; }
 .message p { margin: 0 0 .75rem; }
-.dialog { width: min(28rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); margin: auto; padding: 1.3rem; overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 1rem; color: var(--ink); background: var(--paper); box-shadow: var(--shadow); }
-.dialog::backdrop { background: #332a1866; }
-.dialog h2 { margin: 0 0 1rem; font-size: 1rem; }
-.dialog dl { margin: 0; font-size: .85rem; line-height: 1.8; }
-.dialog dt { color: var(--muted); font-size: .7rem; }
-.dialog dd { margin: 0 0 .7rem; overflow-wrap: anywhere; }
-.dialog footer { display: flex; justify-content: flex-end; margin-top: 1rem; }
-.dialog button { min-width: 6rem; min-height: 44px; }
+.details { font-size: .75rem; line-height: 1.7; }
+.details dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .3rem .8rem; margin: 0; }
+.details dt { color: var(--muted); font-size: .7rem; }
+.details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.details p { margin: .6rem 0 0; color: var(--muted); font-size: .68rem; }
+.details .detailCount { color: var(--accent); font-weight: 700; font-size: .78rem; }
 @media (max-width: 70rem) and (min-width: 48.001rem) {
   .table td,.table th { padding-left: .65rem; padding-right: .65rem; }
   .table { font-size: .68rem; }
   .table th:nth-child(1) { width: 25%; }
-  .table th:nth-child(2) { width: 37%; }
-  .table th:nth-child(3) { width: 14%; }
-  .table th:nth-child(4),.table th:nth-child(5) { width: 12%; }
+  .table th:nth-child(2) { width: 45%; }
+  .table th:nth-child(3) { width: 17%; }
+  .table th:nth-child(4) { width: 13%; }
 }
 @media (max-width: 48rem) {
   .panel { margin-top: 1rem; }
@@ -50,11 +47,10 @@
   .table td { padding: 0 6px; }
   .table th:nth-child(1) { width: 84px; }
   .table th:nth-child(2) { width: auto; }
-  .table th:nth-child(3) { width: 42px; }
+  .table th:nth-child(3) { width: 48px; }
   .table th:nth-child(4) { width: 42px; }
-  .table th:nth-child(5) { width: 52px; }
   .fullDate { display: none; }
   .shortDate { display: inline; }
-  .registered,.skipped { font-size: 12px; }
+  .registered { font-size: 12px; }
   .note { padding: .65rem .75rem; font-size: .6rem; }
 }
