@@ -640,12 +640,12 @@
                 <div class="dfd-arrow"><b>→</b><small>全batch成功<br />要求・カテゴリ再照合</small></div>
                 <div class="dfd-node output"><strong>rowsの未分類行へ一括反映</strong><small>設定済み・候補なしは保持<br />失敗・古い応答は変更なし</small></div>
               </div>
-              <div class="dfd-track" role="img" aria-label="確認して登録ボタンで残った登録可能な全明細の最終カテゴリをbulkImportとしてrunへ送りDBへ保存し、metadataを再取得する。カテゴリ付き新規明細は確認済みになり、取引明細タブへ切り替えたときにfullで明細を取得する">
+              <div class="dfd-track" role="img" aria-label="確認して登録からbulkImportでDBへ保存し、POST成功時にcontrollerの対象家計の履歴revisionを進める。metadata取得の成否によらず保存済みとして扱い、専用GETで履歴を取得する">
                 <div class="dfd-node source"><strong>「確認して登録」</strong><small>登録可能な全行を検証<br />日時・金額・actor・割合・最終categoryId</small></div>
                 <div class="dfd-arrow"><b>→</b><small>run(bulkImport)<br />fileName / items（categoryId含む）</small></div>
                 <div class="dfd-node store"><strong>POST /api/app → DB</strong><small>明細・batchをTransaction保存<br />カテゴリ付き新規行は確認済み</small></div>
-                <div class="dfd-arrow"><b>→</b><small>metadata GET</small></div>
-                <div class="dfd-node output"><strong>登録数通知・プレビュー解除</strong><small>取込タブの情報を更新<br />明細タブを押すとfull GET</small></div>
+                <div class="dfd-arrow"><b>→</b><small>POST成功で家計別revision更新<br />metadata GETは別に成否を扱う</small></div>
+                <div class="dfd-node output"><strong>保存済み・プレビュー解除</strong><small>履歴は専用GETで更新<br />明細タブを押すとfull GET</small></div>
               </div>
               <div class="dfd-boundary"><b>送信範囲:</b> CSV本文はブラウザ内だけで解析する。重複照会はworkspace IDと外部ID、候補照会はworkspace IDと取引先、登録は登録可能な明細・ファイル名・件数を送る。読取と補完は要求とworkspaceを照合し、古い非同期結果を破棄する。補完中は入力を固定し、全batchの成功前は反映しない。本文はURL・Web Storageへ保存せず、画面起動時のクリップボード読取も行わない。</div>
             </div>
@@ -664,7 +664,7 @@
               <tr><td>CSVのカテゴリ個別・一括設定</td><td>行別categoryId、または選択中かつ登録可能な行へbulkCategoryIdを反映。</td><td>rowsだけを更新。通信・DB更新なし。</td></tr>
               <tr><td>CSVの「カテゴリ自動補完」</td><td>チェックによらず登録可能な未分類行の取引先を重複除去し、候補APIへworkspaceIdとmerchants。</td><td>E。DB参照のみ。全batch成功・現在要求の一致・カテゴリの有効性を確認してrowsへ一括反映。</td></tr>
               <tr><td>補完ボタンの説明</td><td>PCのhover/focus、隣の「ⓘ」タップで説明を表示。外側のタップまたはEscapeで閉じる。</td><td>画面表示だけ。候補APIや補完処理を開始しない。</td></tr>
-              <tr><td>CSVの「確認して登録」</td><td>run(bulkImport)：チェックによらず登録可能な全itemsと各行の最終categoryId。</td><td>E。DB保存時にカテゴリ付き新規行を確認済みにし、成功後はmetadata GET。</td></tr>
+              <tr><td>CSVの「確認して登録」</td><td>run(bulkImport)：チェックによらず登録可能な全itemsと各行の最終categoryId。</td><td>E。DB保存時にカテゴリ付き新規行を確認済みにし、POST成功で家計別履歴revisionを進める。metadata GETが失敗しても保存済みと案内して正常結果を返し、履歴は専用GETで更新する。</td></tr>
               <tr><td>設定の「変更を保存」／「割合を保存」</td><td>run(updateWorkspace)：workspaceId・name／run(updateWeights)：workspaceId・weights。</td><td>B → DB → settingsのmetadata GET。ルール操作もrunからDB更新後にmetadata GET。</td></tr>
               <tr><td>ホームの「清算を完了する」</td><td>confirm → run(completeSettlement)：workspaceId。</td><td>B → サーバーで対象明細を計算・再照合してDB確定 → homeのfull GET。画面の計算額を送金・保存指示として送らない。</td></tr>
               <tr><td>workspace作成フォームの「作成する」</td><td>run(createWorkspace)：name・type。</td><td>B → DB → 応答workspaceIdの取得。metadataで選択先が変わる場合はfullを追加取得。</td></tr>
@@ -678,7 +678,7 @@
             <tbody>
               <tr><td>workspaceの「完全に削除」</td><td>SettingsPanel → 確認 → postAction(deleteWorkspace) → /api/app → DB削除 → afterDeleteからhookのrefresh。共通runの保存後分岐は経由しない。</td></tr>
               <tr><td>定期支払いの更新・追加・編集・停止・再開・削除</td><td>RecurringPaymentsPanel → /api/recurring-paymentsのGET/POST → 専用サービス・DB。結果を同パネルのStateへ反映し、保存成功後は専用GETも行う。1:1の選択だけでは通信せず、フォーム保存時に重み1:1を送る。DashboardのBootstrapDataとは別に保持。</td></tr>
-              <tr><td>取込履歴の表示・更新・再試行</td><td>ImportHistoryPanel → GET /api/import/history → 認証・入力検証・workspace所属照合・取込者ごとの最新5件SQL → 同パネルのState。ImportPanelの登録成功時は更新キーを進め、履歴だけを再取得する。</td></tr>
+              <tr><td>取込履歴の表示・更新・再試行</td><td>ImportHistoryPanel → GET /api/import/history → 認証・入力検証・workspace所属照合・取込者ごとの最新5件SQL → 同パネルのState。controllerがbulkImport POST成功時に対象家計のrevisionを進め、Dashboard → ImportPanel → ImportHistoryPanelへ渡す更新キーで履歴だけを再取得する。</td></tr>
               <tr><td>利用者管理</td><td>UserManagement → /api/admin/usersのGET/POST/DELETE → 管理者認可・DB。応答一覧は同コンポーネントのStateへ反映。</td></tr>
               <tr><td>絞り込み・選択・コピー・ログアウト</td><td>絞り込み・行選択はブラウザ内の表示State（列条件はlocalStorageにも保存）。招待リンクのコピーはClipboard API。ログアウトはAuth.jsのsignOut。これらはrunから業務DB更新へ流れない。</td></tr>
             </tbody>
@@ -690,7 +690,7 @@
           <p>開閉状態は各detailsが保持し、サーバーへの保存や永続化は行わない。本文の子コンポーネントは閉じてもunmountしないため、名前・割合・カテゴリの編集中の値、ルールの選択、保存中・失敗状態を保持する。画面を離れて再表示した場合やワークスペース切替で再マウントした枠は閉じて開始する。開閉自体ではAPIを呼ばず、定期支払いの表示時GET・日付境界の再取得と各設定の既存の保存契機は維持する。</p>
 
           <h3>Dashboardと取得・更新hookの状態</h3>
-          <p><code>useDashboardController(initialData)</code>はdata・tab・loading・refreshing・noticeと、画面から呼ぶrun・refresh・switchWorkspace・openTab・refreshCurrentViewを返す。描画・フォームの入力は各コンポーネントに置く。遅延応答の採用条件は<code>canApplyBootstrapResponse</code>、<code>isWorkspaceViewCurrent</code>、<code>isDashboardViewCurrent</code>で判定する。要求対象のworkspaceと、要求開始時に選択していたworkspaceを区別し、新規作成や外部削除後のfull取得も同じ条件で照合する。</p>
+          <p><code>useDashboardController(initialData)</code>はdata・tab・loading・refreshing・notice・選択中の家計のimportHistoryRevisionと、画面から呼ぶrun・refresh・switchWorkspace・openTab・refreshCurrentViewを返す。描画・フォームの入力は各コンポーネントに置く。遅延応答の採用条件は<code>canApplyBootstrapResponse</code>、<code>isWorkspaceViewCurrent</code>、<code>isDashboardViewCurrent</code>で判定する。要求対象のworkspaceと、要求開始時に選択していたworkspaceを区別し、新規作成や外部削除後のfull取得も同じ条件で照合する。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>State / Ref</th><th>用途</th></tr></thead>
             <tbody>
@@ -700,14 +700,16 @@
               <tr><td><code>loading</code> / <code>pendingRequests</code></td><td>同時API要求数を管理し、処理が一件でも残ればローディング表示を維持。</td></tr>
               <tr><td><code>refreshing</code> / <code>manualRefreshPending</code></td><td>手動更新の保存待ち・取得中の表示と二重実行防止。更新前の個別保存通知を抑え、手動更新の完了・失敗通知へまとめる。</td></tr>
               <tr><td><code>noticeState</code> / <code>notice</code></td><td>成功・エラーの共通ポップアップ。通知ごとに新しいStateを作り、表示から2秒後に自動で消す。同じ文言の再通知でもタイマーをリセットし、再通知・手動閉じる・アンマウント時は古いタイマーを解除する。「×」で手動閉じる。各編集画面の保存状態・エラー・再試行は個別に保持する。</td></tr>
+              <tr><td><code>importHistoryRevisions</code> / <code>importHistoryRevision</code></td><td>controllerが家計IDごとの取込保存revisionを所有する。bulkImportのPOST成功直後、現在のタブ・選択家計・世代によらずoriginWorkspaceIdの値を増やす。選択家計のrevisionをDashboard → ImportPanelの必須prop → ImportHistoryPanelのrefreshKeyへ渡し、保存中に離脱して戻ったパネルにも保存完了を伝える。</td></tr>
               <tr><td><code>workspaceView</code> / <code>dataRevision</code> / <code>refreshRequest</code></td><td>workspace ID・世代・データ変更revision・要求IDで、古い家計/保存前/先行GETの遅延応答が現在の画面を置換しないよう検証。</td></tr>
             </tbody>
           </table></div>
           <h3>共通API呼出と再取得</h3>
           <ol>
             <li><code>postAction()</code>がJSONを<code>POST /api/app</code>し、非2xxのerrorを例外化する。</li>
-            <li><code>run()</code>が要求開始時のworkspace・世代を保持し、現在のworkspace向けの成功応答だけを反映する。通知はタブ世代も一致し、手動更新中でない場合だけ表示する。</li>
+            <li><code>run()</code>が要求開始時のworkspace・世代を保持し、現在のworkspace向けの成功応答だけを画面のdataへ反映する。取込履歴の家計別revisionはPOST成功時に独立して更新する。通知はタブ世代も一致し、手動更新中でない場合だけ表示する。</li>
             <li><code>saveTransaction</code>はサーバーの確定TransactionRecordを一覧へ追加し、既存行では専用保存で確定したメモを保持し、カテゴリはcategoryRevisionが新しい方を採用して通常項目を反映する。日時で並び替え、清算を再計算する。<code>saveTransactionMemo</code>と<code>saveTransactionCategory</code>はそれぞれ確定した項目だけ反映し、直後の全件GETを省く。</li>
+            <li><code>bulkImport</code>はPOST成功時に対象家計の履歴revisionを進める。現在のタブ・家計・世代が変わっていてもこの更新は行い、現在表示と一致する場合だけ通知する。保存後のmetadata GETで失敗した場合は、保存済みで家計情報だけを取得できなかった旨を通知し、保存結果を正常に返す。確認表は保存済みとして解除し、再送を促す登録失敗にはしない。</li>
             <li>その他の更新とタブ切替は<code>refresh()</code>で再取得。import/settings/analyticsはmetadata、home/transactionsはfull。workspace切替は常にfull。</li>
             <li>metadataは同一workspaceの取得済み明細・清算・履歴を保持して併合する。選択workspaceが変化した場合はfullを取得し直す。</li>
           </ol>
@@ -912,17 +914,17 @@
           <p>取込直リンクは<code>/?tab=import</code>とし、<code>workspaceId</code>を併用できる。app/page.tsxで初期タブを決め、Dashboardとhookのtab/currentTabへ同じ初期値を渡す。初回Bootstrapのfull取得は維持し、以後の取込画面のrefreshはmetadataを使う。LoginScreenはサーバーで構築した内部パスをGoogle/テストログインのredirectToへ渡し、ログイン後も取込画面と取込先指定へ復帰する。任意URLへのredirect入力は追加しない。</p>
           <div class="state-flow"><span>解析・重複照合 → rows（全チェックOFF・未分類）</span><i>→</i><span>個別・選択行の変更／ボタンで未分類行を履歴から補完／確認後にプレビュー削除</span><i>→</i><span>「確認して登録」→ 残った登録可能行すべて（最終categoryId） → bulkImport API → 所属・値・カテゴリ・重複再検証 → DB Transaction</span><i>→</i><span>成功：カテゴリを確定・確認表解除／失敗：編集値・チェック保持</span></div>
           <h3 id="import-history">最近の取込履歴</h3>
-          <p><code>ImportHistoryPanel</code>は入力画面・確認表のどちらでも取込ページの最下部に表示する。対象の<code>workspaceId</code>・<code>format</code>・<code>refreshKey</code>を受け取り、取得結果・再試行・開いている詳細を同パネルのStateで所有する。共有の<code>IMPORT_FORMATS</code>に表示名と形式を、<code>IMPORT_HISTORY_PER_USER_LIMIT</code>に一人5件の上限を定義し、取込形式選択とAPIで共用する。</p>
+          <p><code>ImportHistoryPanel</code>は入力画面・確認表のどちらでも取込ページの最下部に表示する。対象の<code>workspaceId</code>・<code>format</code>・<code>refreshKey</code>を受け取り、取得結果・再試行・開いている詳細を同パネルのStateで所有する。保存完了のrevisionはcontrollerが家計IDごとに所有し、<code>importHistoryRevisions[workspaceId]</code>をDashboardからImportPanelの必須prop <code>importHistoryRevision</code>へ渡して、履歴パネルの更新キーとする。共有の<code>IMPORT_FORMATS</code>に表示名と形式を、<code>IMPORT_HISTORY_PER_USER_LIMIT</code>に一人5件の上限を定義し、取込形式選択とAPIで共用する。</p>
           <p>パネル見出しに「取込者ごとに最新5件」と示し、日時・ファイル名・取込者・登録・スキップの表を表示する。PC・幅48rem以下ともtableの行・列を保持し、横スクロールせず1履歴1行に収める。日時は日本時間の分単位とし、PCは年/月/日・時分、スマートフォンは月/日・時分へ省略する。長いファイル名と取込者名は折り返さず省略し、件数は数字を右寄せして単位を件と案内する。</p>
           <p>ファイル名を押すとnative dialogの「取込の詳細」を開き、ファイル名・取込者名の全文、年を含む日本時間の取込日時、登録・スキップ件数を表示する。Escapeと閉じる操作で戻り、開閉ではAPIを呼ばない。CSV原本のダウンロード操作は設けない。登録件数・スキップ件数は完了時の保存値であり、その後の明細の編集・削除で再集計しない。</p>
           <div class="dfd-track" role="img" aria-label="取込画面の表示、形式と家計の切替、登録成功後に専用GETで取込者ごとの最新5件を取得し、現在の要求に一致する結果だけを履歴の表へ反映する">
-            <div class="dfd-node source"><strong>表示・条件切替・再試行</strong><small>workspaceId / format<br />登録成功後はrefreshKey更新</small></div>
+            <div class="dfd-node source"><strong>表示・条件切替・再試行</strong><small>workspaceId / format<br />controllerの家計別revisionをrefreshKeyへ</small></div>
             <div class="dfd-arrow"><b>→</b><small>GET /api/import/history</small></div>
             <div class="dfd-node store"><strong>認証・所属・履歴SQL</strong><small>形式・workspaceで限定<br />取込者IDごと最新5件</small></div>
             <div class="dfd-arrow"><b>→</b><small>ImportHistoryResponse</small></div>
             <div class="dfd-node output"><strong>現在の要求だけ反映</strong><small>一行の表 / 履歴なし<br />失敗は再試行、古い応答は破棄</small></div>
           </div>
-          <p>表示時・条件変更・取込成功後の更新キー変更・再試行で履歴GETを行う。workspace・format・更新キー・再試行の要求キーが現在と違う取得結果は表示せず、取得中として扱う。cleanup時に<code>AbortController</code>を中止し、応答時にも中止状態を確認して遅延応答を破棄する。通信失敗はエラーと再試行操作を表示し、成功した空配列の「取込履歴はまだありません」と区別する。履歴だけを同パネルへ反映し、Dashboardのfull/metadata取得やCSV確認表の入力を置換しない。</p>
+          <p>表示時・条件変更・取込成功後の更新キー変更・再試行で履歴GETを行う。bulkImportのPOST成功直後にoriginWorkspaceIdのrevisionが進むため、保存中に画面を離れ、戻った後に保存が完了する場合も新しい要求へ切り替える。metadata取得の失敗で保存完了を取り消さず、履歴は専用GETで独立に取得する。workspace・format・更新キー・再試行の要求キーが現在と違う取得結果は表示せず、取得中として扱う。cleanup時に<code>AbortController</code>を中止し、応答時にも中止状態を確認して遅延応答を破棄する。通信失敗はエラーと再試行操作を表示し、成功した空配列の「取込履歴はまだありません」と区別する。履歴だけを同パネルへ反映し、Dashboardのfull/metadata取得やCSV確認表の入力を置換しない。</p>
           <h3>清算計算</h3>
           <p><code>calculateSettlement(members, transactions): SettlementResult | null</code></p>
           <ol>
@@ -1214,7 +1216,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>tests/shared/paypay.test.ts / tests/shared/paypay-id.test.ts / tests/shared/import-duplicates.test.ts / tests/server/paypay-import.test.ts</td><td>支払い抽出、JST日時・外部ID・先頭ゼロ、旧ID正規化、行/既存重複・内容衝突、保存順、Transactionと実挿入件数。</td></tr>
               <tr><td>tests/server/import-duplicates-store.test.ts</td><td>所属確認後に指定外部IDだけを照会し、既存明細の最小照合情報を返すことを確認する。</td></tr>
               <tr><td>tests/client/import-paste.test.ts</td><td>PC/mobileの実ImportPanelで初期チェックOFF・チェックによらない全登録・選択行の削除と取消・元のtotalRows保持・対象0件/登録中の無効化・登録済み行のグレー表示、見出し・ボタン・Safari注記、ヘルプの内容・安全なURL・明示コピーと拒否時案内・開閉時の通信/読取なし・閉じ方とfocus復帰・モバイルスクロール、CSV本文・手動入力UIの不在、タップ時だけのclipboard読取とファイル選択の共通処理、拒否・非対応・空/不正CSV・照会失敗からの再コピー/再選択と再試行、原本不送信、本人・ルール・重複、登録失敗時の確認表保持と成功時解除、読み込み中の入口抑止、workspace切替後の遅延読取・照会結果破棄を検証する。</td></tr>
-              <tr><td>tests/shared/import-history.test.ts<br />tests/server/import-history-handler.test.ts / import-history-store.test.ts<br />tests/client/import-history.test.ts</td><td>query入力と形式・一人5件の上限、認証と現在所属の境界、取込者ごとの最新5件と全体順、同名ユーザー・同時刻・脱退済み取込者・登録0件、過去履歴の形式と旧保存互換を確認する。画面ではPC/mobileの一行表示、ファイル名詳細、取得中・空・失敗と再試行、登録成功後の再取得、条件変更と遅延応答の破棄を確認する。storeの実SQLはPGliteで検証する。</td></tr>
+              <tr><td>tests/shared/import-history.test.ts<br />tests/server/import-history-handler.test.ts / import-history-store.test.ts<br />tests/client/import-history.test.ts</td><td>query入力と形式・一人5件の上限、認証と現在所属の境界、取込者ごとの最新5件と全体順、同名ユーザー・同時刻・脱退済み取込者・登録0件、過去履歴の形式と旧保存互換を確認する。画面ではPC/mobileの一行表示、ファイル名詳細、取得中・空・失敗と再試行、登録成功後の再取得、条件変更と遅延応答の破棄、保存中にタブ・家計を切り替えて戻った際の履歴更新、POST成功後のmetadata取得失敗で保存済みの確認表を解除することを確認する。storeの実SQLはPGliteで検証する。</td></tr>
               <tr><td>tests/client/home-navigation.test.ts</td><td>取込直リンクとworkspace指定の安全な内部URL化、未知・複数tabのhomeへのフォールバック、Google/テストログイン双方への復帰先引き渡しを確認する。実認証後の復帰はPreviewで別途確認する。</td></tr>
               <tr><td>tests/shared/settlement.test.ts / tests/shared/expense-splits.test.ts / tests/shared/split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、収入、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>
               <tr><td>tests/shared/transaction-editing.test.ts / tests/client/transaction-updates.test.ts / tests/shared/transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>

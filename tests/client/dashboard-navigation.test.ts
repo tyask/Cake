@@ -75,6 +75,7 @@ async function assertPanel(page: Page, tab: DashboardTab, loading = false) {
     "非表示の取引明細テーブルも残さない");
   assert.equal(await main.locator(".kpi-grid").count(), tab === "home" ? 1 : 0);
   assert.equal(await main.locator('input[type="file"]').count(), tab === "import" ? 1 : 0);
+  assert.equal(await main.getByRole("heading", { name: "最近の取込履歴", exact: true }).count(), tab === "import" ? 1 : 0);
   assert.equal(await main.locator('section[aria-labelledby="workspace-settings-title"]').count(), tab === "settings" ? 1 : 0);
 }
 
@@ -115,6 +116,8 @@ test("実DashboardのPC・mobileタブ移動で見出しとパネルが重複・
             await route.fulfill({ json: analytics(query) });
           } else if (url.pathname === "/api/recurring-payments") {
             await route.fulfill({ json: { now: now.toISOString(), today: "2026-10-23", eligibleActorUserIds: ["a", "b"], payments: [] } });
+          } else if (url.pathname === "/api/import/history") {
+            await route.fulfill({ json: { history: [] } });
           } else { errors.push(`想定外のAPI: ${url.pathname}`); await route.abort(); }
         });
         await page.addInitScript(data => { window.navigationInitialData = data; }, data);
@@ -138,6 +141,8 @@ test("実DashboardのPC・mobileタブ移動で見出しとパネルが重複・
         }
         assert.equal(requests.filter(path => path === "/api/analytics").length, sequence.filter(tab => tab === "analytics").length,
           "集計は再入場ごとに1回取得し、保持用パネルの重複取得を起こさない");
+        assert.equal(requests.filter(path => path === "/api/import/history").length, sequence.filter(tab => tab === "import").length,
+          "取込履歴は取込画面への入場時だけ取得する");
         assert.deepEqual(errors, []);
       } finally { await context.close(); }
     });

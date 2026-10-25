@@ -61,11 +61,10 @@ function CategorySuggestionButton({ disabled, working, onClick }: { disabled: bo
   </div>;
 }
 
-export function ImportPanel({ selected, currentUserId, run }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction }) {
+export function ImportPanel({ selected, currentUserId, run, importHistoryRevision }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction; importHistoryRevision: number }) {
   const isSafari = useSyncExternalStore(subscribeToBrowser, getSafariSnapshot, getServerSafariSnapshot);
   const inputRef = useRef<HTMLInputElement>(null);
   const [format, setFormat] = useState<ImportFormat>("PAYPAY");
-  const [historyRevision, setHistoryRevision] = useState(0);
   const [rows, setRows] = useState<PayPayPreviewRow[]>([]);
   const [totalRows, setTotalRows] = useState(0);
   const [fileName, setFileName] = useState("");
@@ -239,7 +238,6 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
       }));
       if (items.length === 0) { setError("登録可能な明細がありません。"); return; }
       await run({ action: "bulkImport", workspaceId: selected.workspace.id, fileName, totalRows, items }, "明細を取り込みました。");
-      setHistoryRevision(value => value + 1);
       setRows([]);
       setFileName("");
     } catch (failure) { setError(failure instanceof Error ? failure.message : "明細を登録できませんでした。"); }
@@ -317,7 +315,7 @@ export function ImportPanel({ selected, currentUserId, run }: { selected: Worksp
         <button className="primary" disabled={busy || importableRows.length === 0} onClick={submit}>{saving ? "登録中…" : "確認して登録"}</button>
       </div>
     </section>}
-    <ImportHistoryPanel key={`${selected.workspace.id}:${format}`} workspaceId={selected.workspace.id} format={format} refreshKey={historyRevision} />
+    <ImportHistoryPanel key={`${selected.workspace.id}:${format}`} workspaceId={selected.workspace.id} format={format} refreshKey={importHistoryRevision} />
     {helpUrl !== null && <ImportHelpDialog importUrl={helpUrl} close={() => setHelpUrl(null)} />}
   </>;
 }

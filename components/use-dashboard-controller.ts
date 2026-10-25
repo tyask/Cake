@@ -24,6 +24,7 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
   const [refreshing, setRefreshing] = useState(false);
   const [workspaceSwitching, setWorkspaceSwitching] = useState(false);
   const [analyticsRevision, setAnalyticsRevision] = useState(0);
+  const [importHistoryRevisions, setImportHistoryRevisions] = useState<Record<string, number>>({});
   const [noticeState, setNoticeState] = useState<{ message: string } | null>(null);
   const notice = noticeState?.message ?? null;
   const selected = data.selected;
@@ -204,6 +205,11 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
     if (shouldNotify()) setNotice(null);
     try {
       const result = await postAction(payload);
+      if (payload.action === "bulkImport" && originWorkspaceId) {
+        // The import is committed even if the view changed while POST was in
+        // flight, or fetching fresh workspace metadata fails afterwards.
+        setImportHistoryRevisions(current => ({ ...current, [originWorkspaceId]: (current[originWorkspaceId] ?? 0) + 1 }));
+      }
       if (payload.action === "deleteCategory" && result.deletedCategoryIds && result.detachedTransactions && originWorkspaceId) {
         rememberCategoryDeletion(originWorkspaceId, result);
       }
@@ -256,10 +262,19 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
             transactionId: result.transactionId, categoryId: result.categoryId, categoryConfirmed: result.categoryConfirmed, categoryRevision: result.categoryRevision,
           }) : current);
           if (shouldNotify()) setNotice(success);
+        } else if (payload.action === "bulkImport") {
+          try {
+            const applied = await refresh(originWorkspaceId, generation);
+            if (shouldNotify()) setNotice(applied ? `${result.imported}件を取り込みました。`
+              : "取込は保存されました。画面を更新して最新の状態を確認してください。");
+          } catch {
+            // Do not turn a successful import into a failed-save retry.
+            if (shouldNotify()) setNotice(`${result.imported}件を取り込みました。家計の最新状態を取得できないため、画面を更新してください。`);
+          }
         } else {
           const applied = await refresh(workspaceId ?? result.workspaceId ?? originWorkspaceId, generation);
           if (applied && shouldNotify()) {
-            setNotice(payload.action === "bulkImport" ? `${result.imported}件を取り込みました。` : success);
+            setNotice(success);
           }
         }
       }
@@ -297,5 +312,6 @@ export function useDashboardController(initialData: BootstrapData, initialTab: T
     }).finally(finishLoading);
   }
 
-  return { data, selected, tab, loading, refreshing, workspaceSwitching, analyticsRevision, notice, setNotice, refresh, refreshCurrentView, run, switchWorkspace, openTab };
+  const importHistoryRevision = selected ? importHistoryRevisions[selected.workspace.id] ?? 0 : 0;
+  return { data, selected, tab, loading, refreshing, workspaceSwitching, analyticsRevision, importHistoryRevision, notice, setNotice, refresh, refreshCurrentView, run, switchWorkspace, openTab };
 }

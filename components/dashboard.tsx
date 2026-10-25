@@ -29,7 +29,7 @@ const navItems: { id: Tab; label: string; icon: string }[] = [
 ];
 
 export function Dashboard({ initialData, initialTab = "home", testAuth = false }: { initialData: BootstrapData; initialTab?: Tab; testAuth?: boolean }) {
-  const { data, selected, tab, loading, refreshing, workspaceSwitching, analyticsRevision, notice, setNotice, refresh, refreshCurrentView, run, switchWorkspace, openTab } = useDashboardController(initialData, initialTab);
+  const { data, selected, tab, loading, refreshing, workspaceSwitching, analyticsRevision, importHistoryRevision, notice, setNotice, refresh, refreshCurrentView, run, switchWorkspace, openTab } = useDashboardController(initialData, initialTab);
   const [workspaceModal, setWorkspaceModal] = useState(false);
   const [transactionModal, setTransactionModal] = useState(false);
   return (
@@ -64,7 +64,7 @@ export function Dashboard({ initialData, initialTab = "home", testAuth = false }
         {loading && <div className="loading-line" />}
         {selected && tab === "home" && <HomePanel selected={selected} pending={data.pendingInvitations.length} setTab={openTab} add={() => setTransactionModal(true)} run={run} refreshAction={<RefreshButton refreshing={refreshing} disabled={loading} onClick={() => { void refreshCurrentView(); }} />} refreshing={refreshing} />}
         {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} userId={data.user.id} add={() => setTransactionModal(true)} run={run} onRefresh={refreshCurrentView} refreshing={refreshing} />}
-        {selected && tab === "import" && <ImportPanel key={selected.workspace.id} selected={selected} currentUserId={data.user.id} run={run} />}
+        {selected && tab === "import" && <ImportPanel key={selected.workspace.id} selected={selected} currentUserId={data.user.id} run={run} importHistoryRevision={importHistoryRevision} />}
         {selected && <AnalyticsPanel key={`analytics:${selected.workspace.id}`} workspaceId={selected.workspace.id} revision={analyticsRevision} active={tab === "analytics" && !workspaceSwitching} />}
         {tab === "settings" && <>
           <PageHeading title="設定" />

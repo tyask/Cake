@@ -23,14 +23,14 @@ const workspace: WorkspaceData = {
 };
 
 type Api = (route: Route, url: URL) => Promise<void>;
-async function openFixture(browser: Browser, origin: string, width: number, api: Api, fullImport = false) {
+async function openFixture(browser: Browser, origin: string, width: number, api: Api, mode: boolean | "controller" = false) {
   const context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: "block", hasTouch: width <= 768 });
   const page = await context.newPage(), errors: string[] = [];
   page.setDefaultTimeout(10000);
   page.on("pageerror", error => errors.push(error.message));
   await page.route("**/api/**", route => api(route, new URL(route.request().url())));
   await page.addInitScript(selected => { window.importHistoryWorkspace = selected; }, workspace);
-  await page.goto(fullImport ? `${origin}/?import` : origin);
+  await page.goto(mode === "controller" ? `${origin}/?controller` : mode ? `${origin}/?import` : origin);
   return { context, page, errors };
 }
 
@@ -145,6 +145,76 @@ test("取込履歴は取込者ごとの履歴を一行の表で表示し、専�
         assert.equal(historyRequests, 2);
         assert.equal(await page.locator("main > section").last().getByRole("heading", { name: "最近の取込履歴", exact: true }).count(), 1);
         assert.equal(await page.getByRole("button", { name: "確認して登録", exact: true }).count(), 0);
+        assert.deepEqual(errors, []);
+      } finally { await context.close(); }
+    });
+
+    await t.test("controller: 登録済みならmetadata GETだけ失敗しても履歴を更新し、再登録を促さない", async () => {
+      let historyRequests = 0, saves = 0, metadataRequests = 0;
+      const { context, page, errors } = await openFixture(browser, origin, 390, async (route, url) => {
+        if (url.pathname === "/api/import/history") {
+          historyRequests += 1;
+          await route.fulfill({ json: { history: saves ? [{ ...history[0], fileName: "保存済み.csv" }] : [] } });
+        } else if (url.pathname === "/api/import/duplicates") await route.fulfill({ json: { transactions: [], externalIds: [] } });
+        else if (url.pathname === "/api/app" && route.request().method() === "POST") {
+          saves += 1;
+          await route.fulfill({ json: { ok: true, imported: 1, skipped: 0 } });
+        } else if (url.pathname === "/api/app") {
+          metadataRequests += 1;
+          assert.equal(url.searchParams.get("scope"), "metadata");
+          await route.fulfill({ status: 503, json: { error: "検証用metadata失敗" } });
+        } else assert.fail(`unexpected API ${url.pathname}`);
+      }, "controller");
+      try {
+        await page.getByText("PayPayの取込履歴はまだありません。", { exact: true }).waitFor();
+        const source = "取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n2026/10/25 14:32:42,100,支払い,取込履歴テスト,PayPay,12345";
+        await page.locator("input[type=file]").setInputFiles({ name: "保存済み.csv", mimeType: "text/csv", buffer: Buffer.from(source) });
+        await page.getByRole("button", { name: "確認して登録", exact: true }).click();
+        await page.getByRole("button", { name: "保存済み.csvの取込詳細を開く", exact: true }).waitFor();
+        await page.getByRole("status").filter({ hasText: "1件を取り込みました。家計の最新状態を取得できないため、画面を更新してください。" }).waitFor();
+        assert.equal(await page.getByRole("button", { name: "確認して登録", exact: true }).count(), 0, "成功済みCSVのプレビューを閉じる");
+        assert.equal(await page.getByRole("alert").count(), 0, "metadata失敗を保存失敗として表示しない");
+        assert.equal(saves, 1);
+        assert.equal(historyRequests, 2);
+        assert.equal(metadataRequests, 1);
+        assert.deepEqual(errors, []);
+      } finally { await context.close(); }
+    });
+
+    await t.test("controller: 保存中に別tabへ離脱して戻っても現在のPanelへ保存完了を反映する", async () => {
+      let historyRequests = 0, saves = 0, committed = false, releaseSave: (() => Promise<void>) | undefined;
+      const { context, page, errors } = await openFixture(browser, origin, 390, async (route, url) => {
+        if (url.pathname === "/api/import/history") {
+          historyRequests += 1;
+          await route.fulfill({ json: { history: committed ? [{ ...history[0], fileName: "離脱中の取込.csv" }] : [] } });
+        } else if (url.pathname === "/api/import/duplicates") await route.fulfill({ json: { transactions: [], externalIds: [] } });
+        else if (url.pathname === "/api/app" && route.request().method() === "POST") {
+          saves += 1;
+          releaseSave = async () => {
+            committed = true;
+            await route.fulfill({ json: { ok: true, imported: 1, skipped: 0 } });
+          };
+        } else if (url.pathname === "/api/app") await route.fulfill({ json: {
+          user: workspace.members[0], workspaces: [workspace.workspace], selected: workspace, pendingInvitations: [],
+        } });
+        else assert.fail(`unexpected API ${url.pathname}`);
+      }, "controller");
+      try {
+        await page.getByText("PayPayの取込履歴はまだありません。", { exact: true }).waitFor();
+        const source = "取引日,出金金額（円）,取引内容,取引先,取引方法,取引番号\n2026/10/25 14:32:42,100,支払い,取込履歴テスト,PayPay,12345";
+        await page.locator("input[type=file]").setInputFiles({ name: "離脱中の取込.csv", mimeType: "text/csv", buffer: Buffer.from(source) });
+        await page.getByRole("button", { name: "確認して登録", exact: true }).click();
+        await page.getByRole("button", { name: "登録中…", exact: true }).waitFor();
+        await page.getByRole("button", { name: "ホームへ移動", exact: true }).click();
+        await page.getByRole("heading", { name: "ホーム", exact: true }).waitFor();
+        await page.getByRole("button", { name: "取込へ移動", exact: true }).click();
+        await page.getByText("PayPayの取込履歴はまだありません。", { exact: true }).waitFor();
+        assert.equal(historyRequests, 2);
+        assert.ok(releaseSave); await releaseSave();
+        await page.getByRole("button", { name: "離脱中の取込.csvの取込詳細を開く", exact: true }).waitFor();
+        assert.equal(historyRequests, 3, "現在のPanelもcontrollerのrevisionで履歴を再取得する");
+        assert.equal(saves, 1);
+        assert.equal(await page.getByRole("alert").count(), 0);
         assert.deepEqual(errors, []);
       } finally { await context.close(); }
     });
