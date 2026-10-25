@@ -169,7 +169,7 @@ QAのDB初回照合・fixture・migration/seed・同PR更新時のデータ保�
 
 ## 開発・QA運用手順
 
-専用worktreeで実装・関連テスト・自己レビューを終えてcommitし、別Agentレビュー→指摘への対応・必要な再レビュー→最終SHAでのローカル検証→draft PR→自動Preview→変更に必要な検証の順に進めます。文書のみの変更も別Agentレビューの対象です。レビュー担当のモデル・推論強度は通常未指定とし、PR本文に最新の要約、PRごとに1件のコメントに詳細を残します。Codexが現在HEADのレビュー・検証を揃えてマージ可能と判断したら、追加確認を待たずReadyにし、このチャットで日本語で通知します。文書のみの変更の検証範囲とReady条件は開発手順を参照してください。PRのタイトル・本文・コメント・レビュー・検証報告は日本語で書きます。「変更内容」は対象機能・変更前後の挙動・主な修正と理由を関連付けて記載します。`task:pr`には説明用の`--changes-file`とレビュー要約を含む検証報告用の`--verification-file`を指定します。マージは依頼された範囲で別に行います。
+通常の変更依頼は、[開発依頼の完了条件](AGENTS.md#開発依頼の完了条件)に従い、PR作成・検証・Ready化と結果報告まで進めます。利用者が「PR作成まで」と付け加える必要はありません。専用worktreeで実装・関連テスト・自己レビューを終えてcommitし、別Agentレビュー→指摘への対応・必要な再レビュー→最終SHAでのローカル検証→draft PR→自動Preview→変更に必要な検証の順に進めます。文書のみの変更も別Agentレビューの対象です。レビュー担当のモデル・推論強度は通常未指定とし、PR本文に最新の要約、PRごとに1件のコメントに詳細を残します。Codexが現在HEADのレビュー・検証を揃えてマージ可能と判断したら、追加確認を待たずReadyにし、このチャットで日本語で通知します。文書のみの変更の検証範囲とReady条件は開発手順を参照してください。PRのタイトル・本文・コメント・レビュー・検証報告は日本語で書きます。「変更内容」は対象機能・変更前後の挙動・主な修正と理由を関連付けて記載します。`task:pr`には説明用の`--changes-file`とレビュー要約を含む検証報告用の`--verification-file`を指定します。マージは依頼された範囲で別に行います。
 
 操作範囲とDB書込、実行前後の対象照合、PR close後の資源削除確認は[開発・QA運用手順](docs/development-workflow.md)にまとめています。WSLは[WSL手順](docs/wsl-development.md)、Codex Cloudは[Cloud手順](docs/cloud-development.md)、Windowsは[Windows QA手順](docs/windows-qa-credentials.md)を使います。ローカル自動テスト、CloudのCake操作、実Previewでの画面移動、明細の追加・編集・削除を分けて報告します。
 
@@ -191,7 +191,7 @@ npm run db:seed:test # テストユーザーA・Bと共有ワークスペース�
 
 Previewの手動操作は下記のnpmコマンドを使います。作成・状態照合・削除は `scripts/preview/preview-command.ts` を入口としてmainのActionsへ要求し、PR作成・Ready管理は `npm run task:pr` を使います。
 
-同一repositoryの `codex/*` からmainへのPR作成・更新・再openで、draftを含めて専用Vercel PreviewとNeon Native DBを自動作成・更新します。PR未作成のpushだけでは作成せず、Vercel Git連携のfeature deployは止めたままmainのActionsで管理します。PR作成・更新は専用DBへのmigration/seedを、merge/closeは資源削除を起動するため、対象と影響が承認された範囲で実行してください。
+同一repositoryの `codex/*` からmainへのPR作成・更新・再openで、draftを含めて専用Vercel PreviewとNeon Native DBを自動作成・更新します。PR未作成のpushだけでは作成せず、Vercel Git連携のfeature deployは止めたままmainのActionsで管理します。通常の変更依頼には、当該PRの作成・更新と専用DBへのmigration/seedを含めます。利用者が明示した制限を優先してください。merge/closeは資源削除を起動するため、通常の変更依頼とは別に対象と影響を含む依頼範囲に従います。
 
 Previewの未使用の「テスト共有家計」には階層付きカテゴリ10件と、当月の `[サンプル]` 明細8件を自動設定します。A/Bの支払い・個人費・共通費・受け取り・未分類を確認でき、編集・削除した内容はPR更新後も保持します。入力済み・初期ユーザーや所属を変更済みの環境への追加は省略します。詳細は[初期化とデータ保持](docs/development-workflow.md#3-自動previewとdb書込)を参照してください。
 

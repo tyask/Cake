@@ -95,7 +95,7 @@ Cloudのスモークテストは管理者機能、Google OAuth、Vercel/Neonな�
 
 ## 5. PR・自動Preview・本人確認
 
-変更説明をGit外の`.cake/changes.md`へ、今回の検証結果と別Agentレビュー要約を`.cake/report.md`へ日本語で用意する。対象と専用Preview/DB操作が依頼範囲内であることを確認し、既存コマンドでdraft PRを作成・更新する。
+変更説明をGit外の`.cake/changes.md`へ、今回の検証結果と別Agentレビュー要約を`.cake/report.md`へ日本語で用意する。通常の変更依頼では[既定の依頼範囲](../AGENTS.md#開発依頼の完了条件)に当該PRと専用Preview/DBの自動処理を含める。利用者の明示した制限と対象を確認したうえで、追加のPR作成依頼を待たず、既存コマンドでdraft PRを作成・更新する。
 
 ```bash
 npm run task:pr -- --draft --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md

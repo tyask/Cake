@@ -1,5 +1,15 @@
 # Cake の開発ルール
 
+## 開発依頼の完了条件
+
+このrepositoryの機能追加・不具合修正・UI調整・文書更新などの通常の変更依頼は、実装・commit、所定の検証と別Agentレビュー、対象branchのpush、PR作成・更新、現在HEADのCI・自動Previewと変更に必要な検証、条件成立時のReady化、PRリンクと結果の報告までを含む。利用者による「PRを作成して」「Readyにして」という追加依頼を待たず、ローカル実装・commit・pushだけで完了と報告しない。
+
+当該PRの検証結果・レビューコメントの掲載と、既存Actionsによる専用Preview・DBの作成/更新・migration/seedもこの既定の依頼範囲に含む。以下の資格情報・データ更新・資源照合の規則を守って進める。PRのmerge・close、Production操作、無関係な資源の操作は、この既定範囲に含めず、対象と影響を含む利用者の依頼に従う。
+
+利用者が調査のみ・提案のみ・ローカル変更まで・PR不要・draft維持などを指定した場合は、その制限を優先する。変更を求めていない質問や相談だけを根拠に、変更やPR作成を開始しない。
+
+認証・権限・環境・検証失敗などの阻害要因がある場合は、実施可能な作業を進めたうえで未完了として報告する。PRの有無（作成済みならURLとdraft/Ready）、未完了の工程、具体的な理由と必要な対応を明示する。「PR作成を明示されていない」ことだけを停止理由にしない。
+
 ## 開始と実行環境
 
 開発・PR操作・QAの前に[開発・QA運用手順](docs/development-workflow.md)を読む。ローカルとActionsのNode版は [.node-version](.node-version) を正本とし、`npm run check:node` で一致を確認する。WSL2ではLinux版Node.js・npm・Git・gh・Playwright Chromiumを使う。[WSL手順](docs/wsl-development.md)で実行環境と認証を確認する。Codex Cloudは[Cloud手順](docs/cloud-development.md)でsetup・オンメモリDB付きCake・ブラウザQAを行う。Windowsネイティブでも開発でき、PowerShellでは `npm.cmd` / `npx.cmd` を使う。
@@ -38,7 +48,7 @@ PR本文の「変更内容」は、対象機能と解決する問題、変更前
 
 同一repositoryの `codex/*` からmainへのPR作成・更新・再openは、draftを含めて専用Preview・Neon Native DBの作成/更新とmigration/seedを自動起動する。PR未作成のpushだけではPreviewを作らない。Vercel Git連携の `**: false` / `main: true` は維持し、管理処理は信頼済みmainのActionsだけで実行する。
 
-PR作成・更新前に、対象と自動資源操作の影響が依頼の承認範囲に含まれることを確認する。承認済みの操作は再確認せず進める。文書変更でも同じ自動化が起動する。main mergeはProduction deploy、PR merge/closeは専用Deployment・DBのcleanupを起動するため、対象と削除影響が承認されていない操作は行わない。
+PR作成・更新前に、上記の既定の依頼範囲と利用者の明示した制限に照らして対象と自動資源操作の影響を確認し、範囲内の操作は追加確認せず進める。文書変更でも同じ自動化が起動する。main mergeはProduction deploy、PR merge/closeは専用Deployment・DBのcleanupを起動するため、対象と削除影響が承認されていない操作は行わない。
 
 通常CI・Preview/DB管理・cleanupはActionsを使い、結果は標準noticeの正式receiptから受け取る。対象PR・完全SHA・Deployment・固有URL・DB branch/endpoint・generationを検証前後に照合する。欠落・重複・不一致・応答不明では停止し、盲目的な再deployや削除をしない。削除完了はcleanup成功だけで判断せず、対象IDの直接GETによる不在確認とprovider一覧の再照合で確認する。Neon資格情報がWSLにない場合は、資格情報をコピーせずActions内の直接照合と後続statusの正式receiptを使う。
 
@@ -50,6 +60,6 @@ OIDCは同一project/team・development・有効期限を確認し、redirectを
 
 通常の正式ブラウザ検証はPC/mobile × A/Bログインと画面移動・session/app GET・runtime proofを確認する。認証後のホーム/ `GET /api/app` はworkspaceが0件なら個人workspace・OWNER membershipをINSERTし得るため、GETだけを根拠にDB無変更と扱わない。明細追加などの業務更新は別途依頼された範囲で、識別できるテストデータだけを対象にし、削除と残存件数まで確認する。
 
-Codexは現在HEADのCI、変更内容に必要な検証、差分の自己レビューと別Agentレビューを完了し、未解決の不具合・指摘・競合・検証不足がなくマージ可能と判断したら、追加確認を待たずPRをReadyにする。利用者がdraft維持を指定した場合は従う。Ready直前にHEADとレビュー記録・検証証拠を再照合し、完了後はこのチャットでPRリンク・判断理由・レビューと検証の結果・未実施項目・残る資源を日本語で通知し、PR本文も更新する。条件未達ならdraftを維持し、阻害要因を報告する。マージ・closeは依頼された範囲で別に判断する。
+Codexは現在HEADのCI、変更内容に必要な検証、差分の自己レビューと別Agentレビューを完了し、未解決の不具合・指摘・競合・検証不足がなくマージ可能と判断したら、追加確認を待たずPRをReadyにする。利用者がdraft維持を指定した場合は従う。Ready直前にHEADとレビュー記録・検証証拠を再照合し、完了後はこのチャットでPRリンク・判断理由・レビューと検証の結果・未実施項目・残る資源を日本語で通知し、PR本文も更新する。条件未達ならdraftを維持し、PRリンク・未完了の工程・阻害要因と必要な対応を報告する。マージ・closeは依頼された範囲で別に判断する。
 
 アプリ変更は現在HEADに対応する正式ブラウザ証拠を必要とする。Actions検証は `qa:verify:ci`、別checkoutからのReady管理は `task:pr --remote-proof ... --target-worktree ...` を使う。AGENTS.md・README.md・docs配下だけの文書変更は、差分・リンク・コマンド・現行実装との整合性をレビューし、現在HEADのCIと自動Preview/statusを確認したうえで、ブラウザ再検証を省略する理由を記録して `gh pr ready` を使える。CLIのブラウザ証拠チェックを省略するオプションは追加しない。詳細は開発手順を参照する。
