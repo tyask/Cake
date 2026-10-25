@@ -11,6 +11,9 @@ WSL2/Linux、Codex CloudまたはWindowsネイティブで開発し、
 ローカルの実行版を検証報告へ記録する。Vercelは `engines.node` の24系を選び、minor/patchを自動更新するため、
 ローカル/Actionsの完全版確認をbuild時には適用しない。
 
+GitHub CLIは`gh api --paginate --slurp`に対応する版を使う。
+機能の事前確認とCI照合の実行例は、[対象PRとCIの確認](development-commands.md#対象prとciの確認)に従う。
+
 - WSL2はLinux版ツールを使う。[WSL開発・ブラウザ検証](wsl-development.md)で環境・認証・実行方法を確認する。
 - Codex Cloudは[Cloud開発・ブラウザ検証](cloud-development.md)の`setup:cloud`で依存・公式Chromiumを準備し、
   `dev:cloud` / `qa:cloud`で外部DBなしのCake起動・画面操作を確認する。GitHubはCloudに連携された権限を使う。
@@ -62,6 +65,18 @@ npmコマンドとworkflowからの正式な運用経路、receipt・資格情�
 8. Ready。
 
 文書のみの変更にも別Agentレビューを適用する。
+
+各工程の実行場所・入力値の取得方法・成功条件は、[開発コマンド集](development-commands.md)にまとめる。
+
+| 工程 | 具体的な操作 |
+| --- | --- |
+| 比較元・完全SHA・clean状態の記録 | [レビュー対象の記録](development-commands.md#レビュー対象の記録) |
+| PR・remote SHA・現在HEADの両CI照合 | [対象PRとCIの確認](development-commands.md#対象prとciの確認) |
+| 信頼済みmainの別worktree準備 | [control checkoutの準備](development-commands.md#control-checkoutの準備) |
+| レビューコメントのID保存・同一コメントの再更新 | [レビューコメントの作成と更新](development-commands.md#レビューコメントの作成と更新) |
+| 文書のみのPR本文更新とReady | [文書のみのReady](development-commands.md#文書のみのready) |
+| Ready後の追加修正と再検証 | [Ready後の追加修正](development-commands.md#ready後の追加修正) |
+| 変更ごとに決める検証・業務操作・マージ判断 | [固定コマンドにしない判断](development-commands.md#固定コマンドにしない判断) |
 
 通常の変更依頼は、[AGENTS.mdの開発依頼の完了条件](../AGENTS.md#開発依頼の完了条件)に従い、
 当該PRの作成・更新と専用Preview/DBの自動処理を含めて進める。利用者に「PR作成まで」と付け加えてもらう必要はない。
@@ -187,6 +202,8 @@ npm run task:pr -- --draft --title '変更内容を日本語で記載' --changes
 
 CLIがpushしてdraft PRを作成/更新する。remoteとPRの完全SHAが検証commitに一致すること、
 現在HEADのpush/PR CIの最新attemptが成功したことを確認する。固定の過去テスト件数を報告へ流用しない。
+PR番号・完全SHAの取得、remoteとの一致、両イベントの最新attemptの照合は、
+[対象PRとCIの確認](development-commands.md#対象prとciの確認)のコマンドで行う。
 
 ### レビュー結果の掲載
 
@@ -204,6 +221,10 @@ CLIがpushしてdraft PRを作成/更新する。remoteとPRの完全SHAが検�
 初回は `.cake/review.md` に詳細を書き、次のように投稿する。
 投稿後に詳細コメントのURLを `.cake/report.md` へ追記し、同じHEADのdraft PRを `task:pr` で更新する。
 PR作成直後の本文には「詳細コメント掲載待ち」と記載できるが、Ready前にはリンクを揃える。
+
+初回投稿からID保存・同じコメントの再更新までの一連の操作は、
+[レビューコメントの作成と更新](development-commands.md#レビューコメントの作成と更新)に従う。
+次のコマンドで初回投稿する場合も、返されたURLとコメントIDを保存し、同じ手順で対象を確認してから再更新する。
 
 ```bash
 gh pr comment <PR番号> --repo tyask/Cake --body-file /absolute/path/review.md
@@ -441,27 +462,34 @@ Codexは次の条件をすべて確認し、マージ可能と判断したら、
 - 具体的な阻害要因と必要な対応。
 
 Ready直前にもPRのHEADとレビュー記録・検証証拠の一致を再確認し、更新後に過去SHAの成功を再利用しない。
+Ready後に追加修正する場合は、先に`gh pr ready <PR番号> --repo tyask/Cake --undo`でdraftへ戻す。
+その後のcommit・再レビュー・再検証・再Readyは、[Ready後の追加修正](development-commands.md#ready後の追加修正)に従う。
 
 `qa:cloud`のローカル結果・画像は正式Previewのブラウザ証拠を代替しない。Cloudで開発した場合も上記のReady条件と既存の証拠gateを維持する。
 
 **アプリ変更のReady操作：** ローカル証拠は対象worktreeの `task:pr` で再照合する。
 Actionsで検証する場合は、最新mainとHEADが一致するcleanなcontrol checkoutから既存対象を指定する。これはWSL上のブラウザ検証とは別の実行環境である。
+作成・更新と完全SHA照合は、[control checkoutの準備](development-commands.md#control-checkoutの準備)に従う。
+PR番号・完全SHA・Deployment IDは、対象worktreeで取得した正式statusから指定する。
 
 ```bash
 npm run qa:verify:ci -- --pr <PR番号> --sha <完全SHA> --deployment <Deployment ID>
-npm run task:pr -- --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md --remote-proof /absolute/path/proof.json
+npm run task:pr -- --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md --remote-proof /absolute/path/proof.json --target-worktree /absolute/path/target
 ```
 
 controlの `preview-verify.config.json` capabilityを照合し、成功証拠は `.cake/verify-<PR>.json` に保存する。
 検証CLI自体はReadyにしないため、Codexが上記条件を確認して `task:pr` まで続けて行う。
-対象checkoutに管理CLIがない場合は、
-最新main側で `task:pr --remote-proof ... --target-worktree /absolute/path/target` を使う。
+controlから別の対象worktreeを管理するときは、対象に管理CLIがあるかどうかにかかわらず、
+`task:pr --remote-proof ... --target-worktree /absolute/path/target` を使う。
 target指定はremote proof必須・非draft専用で、対象コードを管理資格情報付きで実行しない。
 
 **文書のみのReady操作：** mainとの差分がAGENTS.md・README.md・docs配下の文書だけで、
 アプリ・script・workflow・依存・設定を変更しない場合に限る。
 リンク・コマンド例・現行実装との整合性と差分全体をレビューし、上記のCI・自動Preview/statusを確認する。
-実行時の挙動を変えないためブラウザ再検証を省略したことをPR本文に明記し、次を実行する。この場合もブラウザ証拠の成功を作ったり、アプリ変更の `task:pr` の証拠チェックを弱めたりしない。
+PR本文の変更説明・Preview欄・検証結果を現在HEADの内容へ更新し、ブラウザ再検証を省略する理由を記載する。
+本文更新と最終照合の具体コマンドは、[文書のみのReady](development-commands.md#文書のみのready)に従う。
+条件が揃ったら次を実行する。
+この場合もブラウザ証拠の成功を作ったり、アプリ変更の`task:pr`の証拠チェックを弱めたりしない。
 
 ```bash
 gh pr ready <PR番号> --repo tyask/Cake

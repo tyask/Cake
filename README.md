@@ -243,6 +243,8 @@ Codexが現在HEADのレビュー・検証を揃えてマージ可能と判断�
 マージは依頼された範囲で別に行います。
 
 操作範囲とDB書込、実行前後の対象照合、PR close後の資源削除確認は[開発・QA運用手順](docs/development-workflow.md)にまとめています。
+工程ごとのコマンド、実行するworktree、引数の取得元と成功条件は
+[開発コマンド](docs/development-commands.md)を参照してください。
 WSLは[WSL手順](docs/wsl-development.md)、Codex Cloudは[Cloud手順](docs/cloud-development.md)、
 Windowsは[Windows QA手順](docs/windows-qa-credentials.md)を使います。
 ローカル自動テスト、CloudのCake操作、実Previewでの画面移動、明細の追加・編集・削除を分けて報告します。

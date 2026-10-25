@@ -44,6 +44,7 @@
 ## 開始と実行環境
 
 開発・PR操作・QAの前に[開発・QA運用手順](docs/development-workflow.md)を読む。
+工程別の具体コマンド・実行場所・成功条件は[開発コマンド集](docs/development-commands.md)を参照する。
 ローカルとActionsのNode版は [.node-version](.node-version) を正本とし、`npm run check:node` で一致を確認する。
 
 WSL2ではLinux版Node.js・npm・Git・gh・Playwright Chromiumを使う。
