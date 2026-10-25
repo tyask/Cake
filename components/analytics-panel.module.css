@@ -23,13 +23,16 @@
 .scopeNote { margin: .7rem 0 1rem; color: var(--muted); font-size: .65rem; line-height: 1.7; }
 .selectionLine { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 1rem; margin-bottom: .8rem; color: var(--muted); font-size: .66rem; line-height: 1.7; }
 .selectionLine b { color: var(--ink); font-weight: 500; }
-.stats { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: .9rem; margin-bottom: 1.25rem; }
-.stat { min-width: 0; padding: 1.1rem 1.2rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--paper); }
-.primaryStat { border-color: #ecd790; background: #fff1b8; }
-.stat > span { color: var(--muted); font-size: .72rem; }
-.stat strong { display: block; margin: .65rem 0 .4rem; font-size: clamp(1.25rem, 2.5vw, 1.9rem); font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.stat small { display: block; color: var(--muted); font-size: .64rem; line-height: 1.7; overflow-wrap: anywhere; }
-.chartGrid { display: grid; grid-template-columns: minmax(0,.9fr) minmax(0,1.1fr); gap: 1.1rem; align-items: start; }
+.summary { min-width: 0; margin-bottom: 1.25rem; padding: 1.1rem 1.25rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--paper); }
+.summaryTable { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
+.summaryTable caption { margin-bottom: .55rem; font-size: .95rem; font-weight: 700; text-align: left; }
+.summaryTable th,.summaryTable td { padding: .65rem 0; border-bottom: 1px solid var(--line); }
+.summaryTable th { width: 30%; color: var(--muted); font-size: .78rem; font-weight: 400; text-align: left; }
+.summaryTable td { font-size: clamp(1rem, 2vw, 1.35rem); font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+.summaryTable tr:last-child th,.summaryTable tr:last-child td { border-bottom: 0; }
+.summaryNote { margin: .7rem 0 0; color: var(--muted); font-size: .65rem; line-height: 1.8; }.summaryNote b { color: var(--ink); font-weight: 500; }
+.composition { margin-top: 1.1rem; }
+.compositionBody { display: grid; grid-template-columns: minmax(0,.8fr) minmax(0,1.2fr); align-items: center; gap: 1rem; }
 .card { min-width: 0; padding: 1.3rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--paper); }
 .cardHeading { display: flex; align-items: start; justify-content: space-between; gap: .6rem; }
 .cardHeading h2 { margin: 0; font-size: 1rem; font-weight: 700; line-height: 1.6; }
@@ -44,7 +47,8 @@
 .categoryName > i { flex: none; width: .55rem; height: .55rem; border-radius: .15rem; }
 .categoryName > span { min-width: 0; overflow-wrap: anywhere; }
 .miniNote,.comparisonNote { margin: .8rem 0 0; color: var(--muted); font-size: .6rem; line-height: 1.8; }
-.trendChart { height: 16.5rem; margin-top: 1.1rem; }
+.trendChart { height: 20rem; margin-top: 1.1rem; }
+.legend li { display: inline-flex; align-items: center; gap: .4rem; }.legend i { flex: none; width: .65rem; height: .65rem; border-radius: .12rem; }.legend .incomeKey { background: #2f6b48; }.legend .expenseKey { background: #ad433b; }.legend .balanceKey { width: 1.2rem; height: 2px; border-radius: 0; background: var(--ink); }
 .legend { display: flex; flex-wrap: wrap; gap: .6rem 1rem; padding: 0; margin: 1rem 0 0; color: var(--muted); font-size: .63rem; list-style: none; }
 .tableDetails { margin-top: 1rem; padding-top: .6rem; border-top: 1px solid var(--line); }
 .tableDetails summary { min-height: 2.75rem; padding: .7rem 0; color: var(--accent); font-size: .7rem; cursor: pointer; }
@@ -72,7 +76,6 @@
 .error p { margin: 0 0 .8rem; }.muted { color: var(--muted); font-size: .7rem; }
 .snapshot { margin: 1rem 0 0; color: var(--muted); font-size: .63rem; text-align: right; line-height: 1.8; }
 @media (max-width: 75rem) {
-  .chartGrid { grid-template-columns: minmax(0,1fr); }
   .compositionBody { display: grid; grid-template-columns: minmax(0,.8fr) minmax(0,1.2fr); align-items: center; gap: 1rem; }
   .comparisonBody { grid-template-columns: minmax(0,1fr); }
 }
@@ -96,10 +99,7 @@
   .customDates button { grid-column: 1 / -1; }.periodError { grid-column: 1 / -1; }
   .scopeNote { margin-top: .6rem; font-size: .61rem; }
   .selectionLine { font-size: .62rem; }
-  .stats { grid-template-columns: repeat(2,minmax(0,1fr)); gap: .65rem; }
-  .stat { padding: .95rem .85rem; }.primaryStat { grid-column: 1 / -1; }
-  .stat strong { font-size: 1.3rem; }.primaryStat strong { font-size: 2rem; }
-  .stat > span { font-size: .65rem; }.stat small { font-size: .58rem; }
+  .summary { padding: .95rem .85rem; }.summaryTable caption { font-size: .85rem; }.summaryTable td { font-size: 1.1rem; }.summaryNote { font-size: .6rem; }.trendChart { height: 18rem; }
   .card { padding: 1.1rem .95rem; }.cardHeading h2 { font-size: .95rem; }
   .compositionBody { display: block; }
   .categoryList li { gap: .4rem; font-size: .68rem; }.categoryList strong { font-size: .68rem; }

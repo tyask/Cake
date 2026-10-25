@@ -6,7 +6,7 @@ import { UserAccessError } from "../errors";
 
 type Row = Record<string, unknown>;
 
-/** Read one authorized snapshot, allocating each distinct payment before scope joins. */
+/** Read one authorized snapshot, allocating each distinct transaction before scope joins. */
 export async function findAnalytics(
   workspaceId: string, userId: string, periods: Record<AnalyticsScope, AnalyticsRange>,
 ): Promise<AnalyticsDataset> {
@@ -27,11 +27,11 @@ export async function findAnalytics(
       SELECT scope, "from"::timestamp AT TIME ZONE 'Asia/Tokyo' AS start_at,
         ("to" + 1)::timestamp AT TIME ZONE 'Asia/Tokyo' AS end_at
       FROM jsonb_to_recordset(${JSON.stringify(ranges)}::jsonb) AS p(scope text, "from" date, "to" date)
-    ), payments AS MATERIALIZED (
-      SELECT t.id, t.occurred_at, t.amount_yen, t.actor_user_id, t.expense_class,
+    ), entries AS MATERIALIZED (
+      SELECT t.id, t.type, t.occurred_at, t.amount_yen, t.actor_user_id, t.expense_class,
         t.category_id, t.split_weights
       FROM transactions t JOIN authorized a ON a.id = t.workspace_id
-      WHERE t.type = 'PAYMENT'
+      WHERE t.type IN ('PAYMENT', 'RECEIPT')
         AND t.occurred_at >= (SELECT min(start_at) FROM periods)
         AND t.occurred_at < (SELECT max(end_at) FROM periods)
         AND EXISTS (SELECT 1 FROM periods p WHERE t.occurred_at >= p.start_at AND t.occurred_at < p.end_at)
@@ -43,7 +43,7 @@ export async function findAnalytics(
             THEN entry.value::text::numeric END
         END AS weight,
         m.user_id IS NOT NULL AS known_member
-      FROM payments t CROSS JOIN LATERAL jsonb_each(t.split_weights) entry
+      FROM entries t CROSS JOIN LATERAL jsonb_each(t.split_weights) entry
       LEFT JOIN members m ON m.user_id = entry.key
     ), validated AS MATERIALIZED (
       SELECT t.id, COALESCE(
@@ -55,28 +55,28 @@ export async function findAnalytics(
           w.weight = CASE WHEN w.user_id = t.actor_user_id THEN 1 ELSE 0 END
         )), false) AS valid,
         sum(w.weight) AS total_weight
-      FROM payments t LEFT JOIN weights w ON w.id = t.id
+      FROM entries t LEFT JOIN weights w ON w.id = t.id
       GROUP BY t.id, t.actor_user_id, t.expense_class
     ), quotas AS (
-      SELECT t.id, t.occurred_at, t.amount_yen, t.expense_class, t.category_id,
+      SELECT t.id, t.type, t.occurred_at, t.amount_yen, t.expense_class, t.category_id,
         w.user_id, w.joined_at,
         div(t.amount_yen::numeric * w.weight, v.total_weight) AS whole_yen,
         mod(t.amount_yen::numeric * w.weight, v.total_weight) AS remainder
-      FROM payments t JOIN validated v ON v.id = t.id AND v.valid
+      FROM entries t JOIN validated v ON v.id = t.id AND v.valid
       JOIN weights w ON w.id = t.id
     ), ranked AS (
       SELECT *, amount_yen::numeric - sum(whole_yen) OVER (PARTITION BY id) AS leftover,
         row_number() OVER (PARTITION BY id ORDER BY remainder DESC, joined_at, user_id) AS priority
       FROM quotas
     ), allocations AS MATERIALIZED (
-      SELECT occurred_at, expense_class, category_id, user_id,
+      SELECT type, occurred_at, expense_class, category_id, user_id,
         whole_yen + CASE WHEN priority <= leftover THEN 1 ELSE 0 END AS burden_yen
       FROM ranked
     ), buckets AS (
-      SELECT p.scope, to_char(a.occurred_at AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM') AS month,
+      SELECT a.type, p.scope, to_char(a.occurred_at AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM') AS month,
         a.user_id, a.expense_class, a.category_id, sum(a.burden_yen)::text AS burden_yen
       FROM allocations a JOIN periods p ON a.occurred_at >= p.start_at AND a.occurred_at < p.end_at
-      GROUP BY p.scope, month, a.user_id, a.expense_class, a.category_id
+      GROUP BY a.type, p.scope, month, a.user_id, a.expense_class, a.category_id
       HAVING sum(a.burden_yen) <> 0
     )
     SELECT EXISTS(SELECT 1 FROM enabled_user) AS enabled,
@@ -93,7 +93,11 @@ export async function findAnalytics(
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'scope', scope, 'month', month, 'memberId', user_id, 'expenseClass', expense_class,
         'categoryId', category_id, 'burdenYen', burden_yen
-      ) ORDER BY scope, month, user_id, expense_class, category_id) FROM buckets), '[]'::jsonb) AS buckets
+      ) ORDER BY scope, month, user_id, expense_class, category_id) FROM buckets WHERE type = 'PAYMENT'), '[]'::jsonb) AS buckets,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'scope', scope, 'month', month, 'memberId', user_id, 'expenseClass', expense_class,
+        'categoryId', category_id, 'burdenYen', burden_yen
+      ) ORDER BY scope, month, user_id, expense_class, category_id) FROM buckets WHERE type = 'RECEIPT'), '[]'::jsonb) AS receipt_buckets
   `;
   if (!row || row.enabled !== true) throw new UserAccessError("ログインが必要です。", 401);
   if (row.authorized !== true) throw new UserAccessError("このワークスペースを操作する権限がありません。", 403);
@@ -103,5 +107,6 @@ export async function findAnalytics(
     members: (row.members as Row[]).map(member => ({ id: String(member.id), name: String(member.name) })),
     categories: (row.categories as Row[]).map(categoryRecord),
     buckets: row.buckets as AnalyticsDataset["buckets"],
+    receiptBuckets: row.receipt_buckets as AnalyticsDataset["receiptBuckets"],
   };
 }

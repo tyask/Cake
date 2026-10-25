@@ -9,7 +9,7 @@ const now = new Date("2026-10-23T00:00:00Z");
 const periods = resolveAnalyticsPeriods({ workspaceId, period: "month", month: "2026-10" }, now);
 const dataset: AnalyticsDataset = {
   workspaceId, snapshotAt: "2026-10-23T00:00:00.123456Z", timeZone: "Asia/Tokyo", periods,
-  members: [{ id: "a", name: "A" }], categories: [], buckets: [],
+  members: [{ id: "a", name: "A" }], categories: [], buckets: [], receiptBuckets: [],
 };
 const request = (query = `workspaceId=${workspaceId}&period=month&month=2026-10`) => new Request(`https://cake.example/api/analytics?${query}`);
 

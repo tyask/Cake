@@ -184,7 +184,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       const navigate = async (name: string) => {
         await navigation.getByRole('button', { name: new RegExp(name) }).click();
         if (name === 'ホーム') await page.getByRole('table', { name: '今月の収支', exact: true }).waitFor();
-        else await page.getByRole('heading', { name: name === '集計' ? '支出の集計' : name, exact: true }).waitFor();
+        else await page.getByRole('heading', { name: name === '集計' ? '収支の集計' : name, exact: true }).waitFor();
       };
       stage = 'navigation';
       const response = await page.goto(origin, { waitUntil: 'networkidle', timeout: 60_000 });

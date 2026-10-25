@@ -6,12 +6,12 @@ import { mkdir } from "node:fs/promises";
 import { build } from "esbuild";
 import { chromium, type Route } from "playwright";
 import { resolveAnalyticsPeriods, type AnalyticsDataset, type AnalyticsQuery } from "../../lib/shared/analytics";
-import { formatYen } from "../../lib/shared/display-formatters";
+import { formatCashflow, formatYen } from "../../lib/shared/display-formatters";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const otherWorkspaceId = "22222222-2222-4222-8222-222222222222";
 const now = new Date("2026-10-23T02:00:00Z");
-const description = "選んだ人の、明細ごとに割り当てられた支出額を合計します";
+const description = "選んだ人の、明細ごとに割り当てられた収入・支出額を合計します";
 function dataset(query: AnalyticsQuery = { workspaceId, period: "month", month: "2026-10" }): AnalyticsDataset {
   const periods = resolveAnalyticsPeriods(query, now);
   const month = periods.current.to.slice(0, 7), previousMonth = periods.comparison.to.slice(0, 7);
@@ -25,6 +25,7 @@ function dataset(query: AnalyticsQuery = { workspaceId, period: "month", month: 
       { id: "transport", parentId: null, name: "交通費", colorHex: "#3b82f6", sortOrder: 1, revision: 1, archivedAt: null },
       { id: "archived", parentId: null, name: "以前のカテゴリ", colorHex: "#94a3b8", sortOrder: 2, revision: 1, archivedAt: "2026-01-01T00:00:00Z" },
     ],
+    receiptBuckets: [],
     buckets: [
       bucket("current", "a", "SHARED", "grocery", "60"), bucket("current", "b", "SHARED", "grocery", "40"),
       bucket("current", "a", "PERSONAL", "food", "20"), bucket("current", "b", "PERSONAL", null, "30"),
@@ -78,7 +79,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
       return requests.shift()!;
     }
     async function reply(route: Route, body = dataset(queryFromRoute(route)), status = 200) { await route.fulfill({ json: body, status }); }
-    async function total(value: string) { await page.waitForFunction(expected => document.querySelector('[data-testid="analytics-total"]')?.textContent === expected, value); }
+    async function total(value: string) { value = value === "￥0" ? value : "−" + value; await page.waitForFunction(expected => document.querySelector('[data-testid="analytics-total"]')?.textContent === expected, value); }
     async function stable() { await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))); }
     return { context, page, requests, urls, errors, take, reply, total, stable };
   }
@@ -89,10 +90,10 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         const request = await f.take();
         assert.deepEqual([...new URL(request.request().url()).searchParams.keys()].sort(), ["month", "period", "workspaceId"]);
         await f.reply(request); await f.total("￥150");
-        assert.equal(await f.page.getByTestId("analytics-total").evaluate(element => getComputedStyle(element).color), "rgb(51, 42, 24)", "費用の集計額は通常色・無符号で表示する");
+        assert.equal(await f.page.getByTestId("analytics-total").evaluate(element => getComputedStyle(element).color), "rgb(173, 67, 59)", "収支の表では支出をマイナス・赤で表示する");
         assert.equal(await f.page.getByTestId("analytics-difference").textContent(), "+￥50", "支出の増加はプラスで表示する");
         assert.equal(await f.page.getByTestId("analytics-difference").evaluate(element => getComputedStyle(element).color), "rgb(51, 42, 24)", "差額も収支の色分けをしない");
-        await f.page.getByRole("heading", { name: "カテゴリ別の内訳" }).waitFor();
+        await f.page.getByRole("heading", { name: "支出の内訳" }).waitFor();
         const pie = f.page.getByRole("group", { name: "カテゴリ別の支出額。金額と割合は次の一覧でも確認できます。", exact: true });
         await pie.locator("path.recharts-sector").first().waitFor();
         const categoryAmounts = f.page.getByLabel("全カテゴリの支出額と割合").locator("strong");
@@ -135,7 +136,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         await f.page.keyboard.press("Escape");
         assert.equal(await f.page.getByRole("tooltip").count(), 0);
         if (width > 768) {
-          await f.page.getByRole("heading", { name: "支出の集計", exact: true }).hover();
+          await f.page.getByRole("heading", { name: "収支の集計", exact: true }).hover();
           await f.page.getByText("対象者", { exact: true }).focus();
           assert.equal(await f.page.getByRole("tooltip").innerText(), description);
           if (width === 1440) {
@@ -149,7 +150,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
           await f.page.getByText("対象者", { exact: true }).blur();
         } else {
           await info.tap();
-          await f.page.getByRole("heading", { name: "支出の集計", exact: true }).tap();
+          await f.page.getByRole("heading", { name: "収支の集計", exact: true }).tap();
           assert.equal(await f.page.getByRole("tooltip").count(), 0, "外側のタップで説明を閉じる");
         }
         await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck(); await f.total("￥80");
@@ -164,18 +165,18 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         await f.page.getByLabel("カテゴリの細かさ", { exact: true }).selectOption("all");
         await f.page.getByLabel("全カテゴリの支出額と割合").getByText("食費 › スーパー", { exact: true }).waitFor();
         await f.page.getByText("月ごとの金額を表で見る", { exact: true }).click();
-        await f.page.getByRole("table", { name: "月ごとの支出額（円）" }).waitFor();
-        const monthlyAmounts = f.page.getByRole("table", { name: "月ごとの支出額（円）" }).locator("td");
-        assert.ok((await monthlyAmounts.allTextContents()).every(text => /^￥[\d,]+$/.test(text)));
-        assert.ok((await monthlyAmounts.evaluateAll(elements => elements.map(element => getComputedStyle(element).color))).every(color => color === "rgb(51, 42, 24)"), "月別表の費用も通常色で表示する");
+        await f.page.getByRole("table", { name: "月ごとの収入・支出・収支（円）" }).waitFor();
+        const monthlyAmounts = f.page.getByRole("table", { name: "月ごとの収入・支出・収支（円）" }).locator("td");
+        assert.ok((await monthlyAmounts.allTextContents()).every(text => /^(?:[+−])?￥[\d,]+$/.test(text)));
+        assert.equal(await monthlyAmounts.count(), 18, "月次の3金額を6か月分表示する");
         await f.stable();
         assert.equal(f.urls.length, 1, "表示条件と表の変更はAPIを呼ばない");
         if (width === 1440) {
-          const trend = f.page.getByRole("group", { name: "月ごとのカテゴリ別支出額。下の表でも確認できます。", exact: true });
+          const trend = f.page.getByRole("group", { name: "月ごとの収入・支出・収支。棒は収入・支出、折れ線は収支。下の表でも確認できます。", exact: true });
           await trend.locator("svg.recharts-surface").focus();
-          await trend.getByText("2026-05", { exact: true }).waitFor();
+          await trend.getByText("2026/05", { exact: true }).waitFor();
           await f.page.keyboard.press("ArrowRight");
-          await trend.getByText("2026-06", { exact: true }).waitFor();
+          await trend.getByText("2026/06", { exact: true }).waitFor();
         }
         assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "ページ全体の横溢れなし");
         if (width <= 768) {
@@ -223,8 +224,8 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         const expectedValues = new Set(["￥250", "￥57", ...amounts.slice(0, 7).map(value => formatYen(value))]);
         const labels = await pie.locator('[data-analytics-amount="pie"]').allTextContents();
         assert.ok(labels.length > 0 && labels.every(label => expectedValues.has(label)), "図内の金額は正確な円表記");
-        const trend = f.page.getByRole("group", { name: "月ごとのカテゴリ別支出額。下の表でも確認できます。", exact: true });
-        await trend.locator('[data-analytics-amount="trend"]').first().waitFor();
+        const trend = f.page.getByRole("group", { name: "月ごとの収入・支出・収支。棒は収入・支出、折れ線は収支。下の表でも確認できます。", exact: true });
+        await trend.locator(".analytics-cashflow-expense .recharts-bar-rectangle path").first().waitFor();
         assert.equal(await trend.locator('[data-analytics-amount="trend"][data-category-id="c10"]').count(), 0);
         const difference = f.page.getByRole("group", { name: "カテゴリ別の支出額の増減。正は増加、負は減少。全カテゴリの金額は次の表に表示します。", exact: true });
         assert.equal(await difference.locator('[data-analytics-amount="difference"][data-category-id="c10"]').textContent(), "-￥499", "支出の減少額はマイナスで表示する");
@@ -292,8 +293,64 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         await f.reply(request, data); await f.total(formatYen(BigInt(exact)));
         await centerWithinHole(f.page, formatYen(BigInt(exact)));
         await f.page.locator('[data-analytics-amount="trend"]').first().waitFor();
-        assert.deepEqual(await f.page.locator('[data-analytics-amount="trend"]').allTextContents(), [formatYen(BigInt(exact))]);
+        assert.deepEqual(await f.page.locator('[data-analytics-amount="trend"]').allTextContents(), [formatCashflow(-BigInt(exact))]);
         assert.equal(f.urls.length, 1); assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
+    for (const width of [1440, 390]) await t.test(`${width}px: 収入・支出を単色棒、正負の収支を同じ軸の折れ線で表示する`, async () => {
+      const f = await fixture(width);
+      try {
+        const request = await f.take(), data = dataset(queryFromRoute(request));
+        const receipt = (scope: "current" | "comparison" | "trend", memberId: string, expenseClass: "SHARED" | "PERSONAL", amount: string, month = scope === "comparison" ? "2026-09" : "2026-10") => ({ scope, month, memberId, expenseClass, categoryId: null, burdenYen: amount });
+        data.receiptBuckets = [receipt("current", "a", "SHARED", "200"), receipt("current", "b", "SHARED", "100"), receipt("current", "a", "PERSONAL", "50"), receipt("current", "b", "PERSONAL", "25"),
+          receipt("trend", "a", "SHARED", "200"), receipt("trend", "b", "SHARED", "100"), receipt("trend", "a", "PERSONAL", "50"), receipt("trend", "b", "PERSONAL", "25"),
+          receipt("trend", "a", "SHARED", "100", "2026-09")];
+        data.buckets.push({ ...data.buckets[0], scope: "trend", month: "2026-09", burdenYen: "200" });
+        await f.reply(request, data); await f.total("￥150");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥375");
+        assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥225");
+        assert.equal(await f.page.getByRole("table", { name: "対象期間の収支" }).getByRole("row").count(), 3);
+        const chart = f.page.getByTestId("analytics-cashflow-chart");
+        await chart.locator(".analytics-cashflow-balance .recharts-line-curve").waitFor();
+        assert.equal(await chart.locator(".recharts-yAxis").count(), 1, "収入・支出・収支で円単位の縦軸を共有する");
+        assert.deepEqual(await chart.locator(".analytics-cashflow-income .recharts-bar-rectangle path").evaluateAll(paths => [...new Set(paths.map(path => path.getAttribute("fill")))]), ["#2f6b48"]);
+        assert.deepEqual(await chart.locator(".analytics-cashflow-expense .recharts-bar-rectangle path").evaluateAll(paths => [...new Set(paths.map(path => path.getAttribute("fill")))]), ["#ad433b"], "支出はカテゴリで色分けしない");
+        assert.equal(await chart.locator(".analytics-cashflow-balance .recharts-line-curve").getAttribute("stroke"), "var(--ink)");
+        await f.page.getByText("月ごとの金額を表で見る", { exact: true }).click();
+        const monthly = f.page.getByRole("table", { name: "月ごとの収入・支出・収支（円）" });
+        assert.deepEqual(await monthly.getByRole("row").filter({ has: f.page.getByRole("rowheader", { name: "2026/09", exact: true }) }).locator("td").allTextContents(), ["+￥100", "−￥200", "−￥100"]);
+        assert.deepEqual(await monthly.getByRole("row").filter({ has: f.page.getByRole("rowheader", { name: "2026/10", exact: true }) }).locator("td").allTextContents(), ["+￥375", "−￥150", "+￥225"]);
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck(); await f.total("￥80");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥250");
+        assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥170");
+        await f.page.getByLabel("カテゴリの細かさ", { exact: true }).selectOption("all");
+        assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥170", "カテゴリ粒度で収支は変化しない");
+        await f.page.getByRole("checkbox", { name: "個人", exact: true }).uncheck(); await f.total("￥60");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥200");
+        assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥140");
+        assert.equal(f.urls.length, 1, "対象者・区分・階層切替は収入を含めてもローカルで反映する");
+        assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
+    await t.test("収入のみの月も表示し、大きい収支の表・tooltipは元の整数を保持する", async () => {
+      const f = await fixture();
+      try {
+        const request = await f.take(), data = dataset(queryFromRoute(request)), exact = "9007199254740993";
+        data.buckets = [];
+        data.receiptBuckets = ["current", "trend"].map(scope => ({ scope: scope as "current" | "trend", month: "2026-10", memberId: "a", expenseClass: "SHARED", categoryId: null, burdenYen: exact }));
+        await f.reply(request, data); await f.total("￥0");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), formatCashflow(BigInt(exact)));
+        assert.equal(await f.page.getByTestId("analytics-balance").textContent(), formatCashflow(BigInt(exact)));
+        const chart = f.page.getByTestId("analytics-cashflow-chart");
+        await chart.locator(".analytics-cashflow-balance .recharts-line-curve").waitFor();
+        await chart.locator("svg.recharts-surface").focus();
+        for (let index = 0; index < 5; index++) await f.page.keyboard.press("ArrowRight");
+        await chart.getByText("2026/10", { exact: true }).waitFor();
+        assert.deepEqual(await chart.locator(".recharts-tooltip-wrapper strong").allTextContents(), [formatCashflow(BigInt(exact)), "￥0", formatCashflow(BigInt(exact))]);
+        await f.page.getByText("この期間の支出額はありません。", { exact: true }).waitFor();
+        assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
 
@@ -356,7 +413,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         await f.reply(request, empty); await f.total("￥0");
         assert.equal(await f.page.getByTestId("analytics-total").getAttribute("class"), null, "0円にも収入・支払いの色を付けない");
         await f.page.getByText("この期間の支出額はありません。", { exact: true }).waitFor();
-        await f.page.getByText("この6か月の支出額はありません。", { exact: true }).waitFor();
+        await f.page.getByText("この6か月の収入・支出はありません。", { exact: true }).waitFor();
         assert.equal(f.urls.length, 3); assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
