@@ -52,7 +52,7 @@ GIT_CONFIG_VALUE_0='!gh auth git-credential' \
 npm run task:pr -- --draft --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md
 ```
 
-PRの作成/更新は自動Preview・専用DB操作を起動するため、実行前にその影響が依頼範囲内か確認する。
+通常の変更依頼では、[既定の依頼範囲](../AGENTS.md#開発依頼の完了条件)に当該PRの作成/更新と自動Preview・専用DB操作を含める。利用者の明示した制限と対象を確認し、範囲内の操作は追加確認せず進める。
 
 VercelはWSL側の本人認証を使う。未認証・失効時は、本人がWSLターミナルで `npx --yes vercel@latest login` を実行し、ブラウザで公式のDevice Flowを承認する。Cakeを所有するteam/projectにアクセスできるアカウントを使う。Windowsの暗号化storeや他環境のtokenをコピーしない。
 
