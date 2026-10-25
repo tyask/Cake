@@ -335,6 +335,14 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥200");
         assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥140");
         assert.equal(f.urls.length, 1, "対象者・区分・階層切替は収入を含めてもローカルで反映する");
+        await f.page.evaluate(() => window.updateAnalytics({ revision: 1 }));
+        const boundaryRequest = await f.take(), boundary = dataset(queryFromRoute(boundaryRequest));
+        boundary.buckets = [{ ...data.buckets[0], scope: "trend", burdenYen: "654240" }];
+        boundary.receiptBuckets = [receipt("trend", "a", "SHARED", "609000")];
+        await f.reply(boundaryRequest, boundary);
+        await chart.getByText("66万", { exact: true }).waitFor();
+        const boundaryTicks = await chart.locator(".recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value").allTextContents();
+        assert.deepEqual([boundaryTicks[0], boundaryTicks.at(-1)], ["-5万", "66万"], "nice tickと一致しない上下端も整数万円で表示する");
         assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
