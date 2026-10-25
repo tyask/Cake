@@ -4,6 +4,8 @@
 承認範囲・レビュー・正式証拠・Ready条件は同手順に従う。
 以下のシェル例はBash用。WindowsのQA操作は[PowerShellの手順](windows-qa-credentials.md)を使う。
 `<...>`・`/absolute/path/...`・例のタイトルは、今回の対象へ置き換える。
+「対象worktreeで実行」は、そのworktreeのrootで実行することを指す。
+現在位置は`git rev-parse --show-toplevel`で確認する。
 
 Git/ghを使う操作にはprovider資格情報を渡さない。
 必要なら次の子シェル内で実行する。`exit`すると元のシェルへ戻る。
@@ -11,8 +13,11 @@ GitHub認証、proxy、CAの設定は引き継ぎ、global設定は変更しな�
 自動実行で子シェルを継続できない場合は、各コマンドへ同じ`env -u ...`の指定を付ける。
 
 ```bash
-env -u VERCEL_TOKEN -u NEON_API_KEY -u DATABASE_URL -u CAKE_TEST_DATABASE_URL bash
+env -u VERCEL_TOKEN -u VERCEL_OIDC_TOKEN -u NEON_API_KEY \
+  -u DATABASE_URL -u CAKE_TEST_DATABASE_URL bash --noprofile --norc
 ```
+
+ほかのprovider資格情報も設定されていれば除外する。値を表示して確認しない。
 
 依存は各worktreeの`npm ci`で準備する。
 `gh --version`と`gh api --help`を確認し、`gh api`が`--paginate --slurp`に対応する版を使う。
@@ -227,7 +232,7 @@ JS
 候補がない/複数ある場合は停止して状況を報告する。
 
 ```bash
-PR=$(gh pr view --repo tyask/Cake --json number --jq .number)
+PR=$(gh pr view "$(git branch --show-current)" --repo tyask/Cake --json number --jq .number)
 gh api --paginate "repos/tyask/Cake/issues/$PR/comments" \
   --jq '.[] | {id,html_url,author:.user.login,body}'
 gh api repos/tyask/Cake/issues/comments/<確認したID> > .cake/review-comment.json
@@ -299,7 +304,7 @@ JS
 最後に、PR本文・レビューコメント・検証記録が現在HEADを対象としていることを確認する。
 
 ```bash
-PR=$(gh pr view --repo tyask/Cake --json number --jq .number)
+PR=$(gh pr view "$(git branch --show-current)" --repo tyask/Cake --json number --jq .number)
 gh pr view "$PR" --repo tyask/Cake --json url,headRefOid,isDraft,body
 gh pr ready "$PR" --repo tyask/Cake
 gh pr view "$PR" --repo tyask/Cake --json url,headRefOid,isDraft,state,mergeable
@@ -314,7 +319,7 @@ mergeやcloseは行わず、Preview/DBなど残る資源を記録する。
 利用者がdraft維持を指定した場合は、そのまま維持する。
 
 ```bash
-PR=$(gh pr view --repo tyask/Cake --json number --jq .number)
+PR=$(gh pr view "$(git branch --show-current)" --repo tyask/Cake --json number --jq .number)
 gh pr view "$PR" --repo tyask/Cake --json url,state,headRefOid,isDraft
 gh pr ready "$PR" --repo tyask/Cake --undo
 gh pr view "$PR" --repo tyask/Cake --json headRefOid,isDraft
