@@ -61,7 +61,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           await assertMoney(month.getByRole("row", { name: /^支出 / }).getByRole("cell"), payment, red);
           await assertMoney(month.getByRole("row", { name: /^収支 / }).getByRole("cell"), expected, color);
           assert.equal(await month.getByRole("row", { name: /^取引件数 / }).getByRole("cell").textContent(), "5件");
-          const next = page.locator("#home .kpi.accent");
+          const next = page.locator("#home .settlement-hero");
           await assertMoney(next.locator(".unsettled-summary strong"), "−￥8,000", red);
           assert.match(await next.locator(".unsettled-summary").textContent() ?? "", /2件が対象/);
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
@@ -72,32 +72,37 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           await month.waitFor();
           await assertMoney(month.getByRole("row", { name: /^収支 / }).getByRole("cell"), balance, mode === "empty" ? normal : red);
           assert.equal(await month.getByRole("row", { name: /^取引件数 / }).getByRole("cell").textContent(), count + "件");
-          const next = page.locator("#home .kpi.accent");
-          assert.match(await next.textContent() ?? "", /清算なし/);
+          const next = page.locator("#home .settlement-hero");
+          assert.match(await next.textContent() ?? "", mode === "empty" ? /現在、清算対象の共有の支払い・収入はありません/ : /清算不要/);
+          assert.equal(await next.getByRole("button", { name: "清算を完了する", exact: true }).count(), mode === "empty" ? 0 : 1,
+            "対象がある場合は送金額が0円でも清算を完了できる");
           await assertMoney(next.locator(".unsettled-summary strong"), balance, mode === "empty" ? normal : red);
           assert.match(await next.locator(".unsettled-summary").textContent() ?? "", new RegExp(count + "件が対象"));
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
         }
         await page.goto(origin);
-        const home = page.locator("#home"), transactions = page.locator("#transactions"), settlement = page.locator("#settlement");
+        const home = page.locator("#home"), transactions = page.locator("#transactions");
         const payment = transactions.locator('[data-transaction-id="payment"]');
         const receipt = transactions.locator('[data-transaction-id="receipt"]');
         const settled = transactions.locator('[data-transaction-id="settled-receipt"]');
         await payment.waitFor();
-        await assertMoney(home.locator(".recent-row").filter({ has: page.locator("b", { hasText: /^payment$/ }) }).locator(":scope > strong"), "−￥10,000", red);
-        await assertMoney(home.locator(".recent-row").filter({ has: page.locator("b", { hasText: /^receipt$/ }) }).locator(":scope > strong"), "+￥2,000", green);
-        assert.deepEqual(await settlement.locator(".people-flow b").allTextContents(), ["B", "A"]);
-        assert.equal(await settlement.locator(".settlement-hero > strong").textContent(), "￥6,000");
-        const summary = settlement.locator(".summary-list dd");
-        await assertMoney(summary.nth(0), "−￥10,000", red);
-        await assertMoney(summary.nth(1), "+￥2,000", green);
-        await assertMoney(summary.nth(2), "−￥8,000", red);
-        const people = settlement.locator(".person-calc");
-        assert.deepEqual(await people.nth(0).locator("p").allTextContents(), ["実際の収支 −￥10,000", "配分後の収支 −￥4,000", "清算で受け取る額 +￥6,000"]);
-        assert.deepEqual(await people.nth(1).locator("p").allTextContents(), ["実際の収支 +￥2,000", "配分後の収支 −￥4,000", "清算で支払う額 −￥6,000"]);
-        await assertMoney(people.nth(0).locator("p b").nth(2), "+￥6,000", green);
-        await assertMoney(people.nth(1).locator("p b").nth(2), "−￥6,000", red);
-        assert.equal(await settlement.locator(".history strong").textContent(), "￥600", "双方に共通の送金指示・履歴は方向と絶対額を維持する");
+        assert.equal(await home.getByRole("heading", { name: "最近の取引", exact: true }).count(), 0);
+        assert.equal(await home.getByRole("heading", { name: "計算の内訳", exact: true }).count(), 0);
+        assert.deepEqual(await home.locator(".people-flow b").allTextContents(), ["B", "A"]);
+        assert.equal(await home.locator(".settlement-hero > strong").textContent(), "￥6,000");
+        const allocation = home.getByRole("table", { name: "共有費配分", exact: true });
+        assert.deepEqual(await allocation.getByRole("columnheader").allTextContents(), ["A", "B"]);
+        assert.deepEqual(await allocation.getByRole("rowheader").allTextContents(), ["現在の収支", "配分後の収支", "精算額"]);
+        const actual = allocation.getByRole("row", { name: /^現在の収支 / }).getByRole("cell");
+        const target = allocation.getByRole("row", { name: /^配分後の収支 / }).getByRole("cell");
+        const transfer = allocation.getByRole("row", { name: /^精算額 / }).getByRole("cell");
+        await assertMoney(actual.nth(0), "−￥10,000", red);
+        await assertMoney(actual.nth(1), "+￥2,000", green);
+        await assertMoney(target.nth(0), "−￥4,000", red);
+        await assertMoney(target.nth(1), "−￥4,000", red);
+        await assertMoney(transfer.nth(0), "+￥6,000", green);
+        await assertMoney(transfer.nth(1), "−￥6,000", red);
+        assert.equal(await home.locator(".history strong").textContent(), "￥600", "双方に共通の送金指示・履歴は方向と絶対額を維持する");
         assert.equal(writes.length, 0);
 
         if (width < 768) {
@@ -158,6 +163,45 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         assert.ok(input.x >= signed.x && input.x + input.width <= signed.x + signed.width + 1, "符号付きの金額入力をセル内へ収める");
         assert.equal(await amount.evaluate(element => getComputedStyle(element).color), green);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+
+        for (const [mode, message] of [["personal", "清算は共有ワークスペースで利用できます"],
+          ["single", "相手を招待すると清算計算を利用できます"]]) {
+          await page.goto(origin + "?balance=" + mode);
+          const hero = page.locator("#home .settlement-hero");
+          await hero.getByText(message, { exact: true }).waitFor();
+          assert.equal(await hero.getByRole("button", { name: "清算を完了する", exact: true }).count(), 0);
+          assert.equal(await page.getByRole("table", { name: "共有費配分", exact: true }).count(), 0);
+          await hero.getByText("未清算の共有収支", { exact: true }).waitFor();
+        }
+        await page.goto(origin + "?balance=overflow");
+        await page.getByRole("table", { name: "共有費配分", exact: true }).waitFor();
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true,
+          "長いユーザー名と上限額の共有明細もホームの幅に収める");
+        await page.goto(origin + "?balance=refreshing");
+        const complete = page.locator("#home").getByRole("button", { name: "清算を完了する", exact: true });
+        await complete.waitFor();
+        assert.equal(await complete.isDisabled(), true, "更新中は清算を実行しない");
+
+        await page.goto(origin + "?balance=balanced");
+        const completedWrites = writes.length;
+        const zeroTransfer = page.getByRole("table", { name: "共有費配分", exact: true })
+          .getByRole("row", { name: /^精算額 / }).getByRole("cell");
+        await assertMoney(zeroTransfer.nth(0), "￥0", normal);
+        await assertMoney(zeroTransfer.nth(1), "￥0", normal);
+        page.once("dialog", async dialog => {
+          assert.equal(dialog.type(), "confirm");
+          assert.match(dialog.message(), /実際の送金は別途/);
+          await dialog.dismiss();
+        });
+        await complete.click();
+        assert.equal(writes.length, completedWrites, "確認をキャンセルした場合は清算APIを呼ばない");
+        page.once("dialog", dialog => dialog.accept());
+        const completionResponse = page.waitForResponse(response => response.url().endsWith("/api/app")
+          && response.request().postDataJSON().action === "completeSettlement");
+        await complete.click();
+        await completionResponse;
+        assert.equal(writes.length, completedWrites + 1);
+        assert.deepEqual(writes.at(-1), { action: "completeSettlement", workspaceId: "cashflow-workspace" });
         assert.deepEqual(errors, []);
       } finally { await context.close(); }
     });

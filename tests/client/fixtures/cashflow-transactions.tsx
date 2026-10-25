@@ -2,7 +2,6 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { HomePanel } from "../../../components/home-panel";
 import { TransactionsPanel } from "../../../components/transactions-panel";
-import { SettlementPanel } from "../../../components/settlement-panel";
 import { postAction } from "../../../lib/client/app-client";
 import { calculateSettlement } from "../../../lib/shared/settlement";
 import type { RunAppAction } from "../../../lib/shared/schemas/app-input";
@@ -42,6 +41,17 @@ const workspace: WorkspaceData = {
     completedAt: "2026-10-01T03:00:00.000Z" }],
 };
 
+if (mode === "personal" || mode === "single") {
+  workspace.workspace.type = mode === "personal" ? "PERSONAL" : "SHARED";
+  workspace.members = workspace.members.slice(0, 1);
+  workspace.workspace.memberCount = 1;
+}
+if (mode === "overflow") {
+  workspace.members[0].name = "長い名前のユーザーＡ".repeat(6);
+  workspace.members[1].name = "長い名前のユーザーＢ".repeat(6);
+  workspace.transactions = Array.from({ length: 3 }, (_, i) => transaction(`limit-${i}`, { amountYen: 2147483647 }));
+}
+
 function Harness() {
   const [transactions, setTransactions] = useState(workspace.transactions);
   const selected = { ...workspace, transactions, settlement: calculateSettlement(workspace.members, transactions) };
@@ -53,10 +63,9 @@ function Harness() {
   };
   return <main style={{ padding: 12, maxWidth: 1600 }}>
     <section id="home"><HomePanel selected={selected} pending={0} setTab={() => {}} add={() => {}}
-      refreshAction={null} refreshing={false} /></section>
+      run={run} refreshAction={null} refreshing={mode === "refreshing"} /></section>
     <section id="transactions"><TransactionsPanel selected={selected} userId="a" add={() => {}} run={run}
       onRefresh={async prepare => { await prepare(); }} refreshing={false} /></section>
-    <section id="settlement"><SettlementPanel selected={selected} run={run} refreshAction={null} refreshing={false} /></section>
     <output id="saved-transactions" hidden>{JSON.stringify(transactions)}</output>
   </main>;
 }

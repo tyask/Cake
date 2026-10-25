@@ -1,5 +1,5 @@
 import type { ExpenseClass, TransactionSource, TransactionType, WorkspaceRole, WorkspaceType } from "./domain-values";
-export type DashboardTab = "home" | "transactions" | "import" | "analytics" | "settlement" | "settings";
+export type DashboardTab = "home" | "transactions" | "import" | "analytics" | "settings";
 export type { BootstrapScope, ExpenseClass, TransactionSource, TransactionType, WorkspaceRole, WorkspaceType } from "./domain-values";
 export type SplitWeights = Record<string, number>;
 

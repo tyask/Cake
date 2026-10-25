@@ -21,7 +21,7 @@ window.fetch = (input, options) => {
 function render() {
   root.render(<div className="app-shell"><main className="app-main"><header className="mobile-header"><b>Cake</b><span>テスト家計</span></header>
     <AnalyticsPanel key={window.analyticsProps.workspaceId} {...window.analyticsProps} />
-  </main><nav className="bottom-nav">{["ホーム", "取引明細", "取込", "集計", "清算", "設定"].map(label => <button type="button" key={label}><i>⌂</i><span>{label}</span></button>)}</nav></div>);
+  </main><nav className="bottom-nav">{["ホーム", "取引明細", "取込", "集計", "設定"].map(label => <button type="button" key={label}><i>⌂</i><span>{label}</span></button>)}</nav></div>);
 }
 window.updateAnalytics = props => { window.analyticsProps = { ...window.analyticsProps, ...props }; render(); };
 render();

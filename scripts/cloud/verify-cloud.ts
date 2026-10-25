@@ -183,7 +183,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       const navigation = page.locator(item.mobile ? '.bottom-nav' : '.app-nav');
       const navigate = async (name: string) => {
         await navigation.getByRole('button', { name: new RegExp(name) }).click();
-        if (name === 'ホーム') await page.getByRole('heading', { name: '最近の取引', exact: true }).waitFor();
+        if (name === 'ホーム') await page.getByRole('table', { name: '今月の収支', exact: true }).waitFor();
         else await page.getByRole('heading', { name: name === '集計' ? '支出の集計' : name, exact: true }).waitFor();
       };
       stage = 'navigation';
