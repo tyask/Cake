@@ -13,6 +13,8 @@
   box-shadow: 0 1rem 4rem #402b1926;
 }
 .dialog[open] { display: flex; flex-direction: column; }
+/* Keep the original overflow styles intact; the last open dialog owns the lock. */
+:global(html):has(.dialog[open]), :global(body):has(.dialog[open]) { overflow: hidden !important; }
 .dialog::backdrop { background: #30241666; }
 .header, .footer { flex-shrink: 0; padding: 1rem 1.2rem; }
 .header { display: flex; align-items: center; justify-content: space-between; gap: .6rem; border-bottom: 1px solid var(--line); }

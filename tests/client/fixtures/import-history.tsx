@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ImportHistoryPanel } from "../../../components/import-history-panel";
 import { ImportPanel } from "../../../components/import-panel";
@@ -42,7 +42,7 @@ function ControlledFixture() {
 
 function ReusableDialogFixture() {
   const [open, setOpen] = useState(false);
-  return <main style={{ padding: "16px" }}>
+  return <main style={{ padding: "16px", paddingTop: "100vh", minHeight: "300vh" }}>
     <h1>別画面の明細</h1>
     <button onClick={() => setOpen(true)}>取得済み明細を表示</button>
     {open && <TransactionListDialog title="共有用の明細" description={<p>別画面で取得済みの明細を表示しています。</p>}
@@ -52,4 +52,5 @@ function ReusableDialogFixture() {
 }
 
 const parameters = new URLSearchParams(window.location.search);
-createRoot(document.getElementById("root")!).render(parameters.has("controller") ? <ControlledFixture /> : parameters.has("generic") ? <ReusableDialogFixture /> : <Fixture />);
+const content = parameters.has("controller") ? <ControlledFixture /> : parameters.has("generic") ? <ReusableDialogFixture /> : <Fixture />;
+createRoot(document.getElementById("root")!).render(parameters.has("strict") ? <StrictMode>{content}</StrictMode> : content);

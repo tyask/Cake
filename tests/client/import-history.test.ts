@@ -38,7 +38,7 @@ const workspace: WorkspaceData = {
 };
 
 type Api = (route: Route, url: URL) => Promise<void>;
-async function openFixture(browser: Browser, origin: string, width: number, api: Api, mode: boolean | "controller" | "generic" = false) {
+async function openFixture(browser: Browser, origin: string, width: number, api: Api, mode: boolean | "controller" | "generic" | "generic&strict" = false) {
   const context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: "block", hasTouch: width <= 768 });
   const page = await context.newPage(), errors: string[] = [];
   page.setDefaultTimeout(10000);
@@ -51,7 +51,7 @@ async function openFixture(browser: Browser, origin: string, width: number, api:
 
 test("取込履歴は取込者ごとの履歴を一行の表で表示し、専用APIの状態と登録成功に追随する", async t => {
   const bundle = await build({ entryPoints: ["tests/client/fixtures/import-history.tsx"], bundle: true, write: false,
-    outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
+    outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"development"' } });
   const server = createServer((req, res) => {
     const output = bundle.outputFiles.find(file => file.path.endsWith(req.url === "/bundle.css" ? "/bundle.css" : "/bundle.js"));
     res.setHeader("Content-Type", req.url === "/bundle.js" ? "application/javascript" : req.url === "/bundle.css" ? "text/css" : "text/html");
@@ -198,6 +198,58 @@ test("取込履歴は取込者ごとの履歴を一行の表で表示し、専�
         await dialog.waitFor({ state: "hidden" });
         assert.equal(await open.evaluate(element => document.activeElement === element), true);
         assert.equal(apiRequests, 0);
+        assert.deepEqual(errors, []);
+      } finally { await context.close(); }
+    });
+
+    for (const [width, strict] of [[1440, false], [320, false], [1440, true], [320, true]] as const) await t.test(`幅${width}px${strict ? " StrictMode" : ""}: dialogは背景を固定し、本文だけスクロールして閉じると元の状態へ戻る`, async () => {
+      const { context, page, errors } = await openFixture(browser, origin, width, async route => { assert.fail(`unexpected API ${route.request().url()}`); }, strict ? "generic&strict" : "generic");
+      try {
+        await page.setViewportSize({ width, height: 700 });
+        await page.evaluate(items => {
+          window.importHistoryTransactions = items;
+          document.documentElement.style.overflow = "auto";
+          document.body.style.overflow = "scroll";
+        }, Array.from({ length: 100 }, (_, index) => ({ ...transactions[index % transactions.length], id: `scroll-${index}` })));
+        const trigger = page.getByRole("button", { name: "取得済み明細を表示", exact: true });
+        await trigger.scrollIntoViewIfNeeded();
+        const initialScrollY = await page.evaluate(() => window.scrollY);
+        const originalStyles = await page.evaluate(() => ({ html: document.documentElement.style.overflow, body: document.body.style.overflow }));
+        await trigger.click();
+        const dialog = page.getByRole("dialog", { name: "共有用の明細", exact: true });
+        await dialog.waitFor();
+        const body = dialog.locator(":scope > div");
+        const settle = () => page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+        await settle();
+        assert.equal(await page.evaluate(() => window.scrollY), initialScrollY);
+        assert.deepEqual(await page.evaluate(() => [getComputedStyle(document.documentElement).overflow, getComputedStyle(document.body).overflow]), ["hidden", "hidden"]);
+        for (const target of [dialog.locator("header"), dialog.locator("footer")]) {
+          const bounds = (await target.boundingBox())!;
+          await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+          await page.mouse.wheel(0, 450);
+          await settle();
+          assert.equal(await page.evaluate(() => window.scrollY), initialScrollY, "header/footer wheelでは背景を動かさない");
+          assert.equal(await body.evaluate(element => element.scrollTop), 0, "header/footer wheelで本文も動かさない");
+        }
+        await page.mouse.move(2, 350);
+        await page.mouse.wheel(0, 450);
+        await settle();
+        assert.equal(await page.evaluate(() => window.scrollY), initialScrollY, "backdrop wheelでも背景を動かさない");
+        const bounds = (await body.boundingBox())!;
+        await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+        await page.mouse.wheel(0, 450);
+        await page.waitForFunction(() => (document.querySelector("dialog[open] > div")?.scrollTop ?? 0) > 0);
+        assert.equal(await page.evaluate(() => window.scrollY), initialScrollY, "本文のスクロールは背景へ伝わらない");
+        if (strict) await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+        else await page.keyboard.press("Escape");
+        await dialog.waitFor({ state: "hidden" });
+        assert.equal(await trigger.evaluate(element => document.activeElement === element), true);
+        assert.equal(await page.evaluate(() => window.scrollY), initialScrollY);
+        assert.deepEqual(await page.evaluate(() => ({ html: document.documentElement.style.overflow, body: document.body.style.overflow })), originalStyles, "既存のinline overflow値を変更しない");
+        assert.deepEqual(await page.evaluate(() => [getComputedStyle(document.documentElement).overflow, getComputedStyle(document.body).overflow]), ["auto", "scroll"]);
+        await page.mouse.move(width - 20, 350);
+        await page.mouse.wheel(0, 450);
+        await page.waitForFunction(y => window.scrollY > y, initialScrollY);
         assert.deepEqual(errors, []);
       } finally { await context.close(); }
     });
