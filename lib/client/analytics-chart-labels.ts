@@ -39,8 +39,9 @@ export function barAmountPosition(geometry: unknown, label: ChartAmountLabel | n
   const box = geometry as Record<string, unknown>;
   if (![box.x, box.y, box.width, box.height].every(value => typeof value === "number" && Number.isFinite(value))) return null;
   const { x, y, width, height } = box as { x: number; y: number; width: number; height: number };
-  const availableWidth = Math.abs(width) - LABEL_PADDING * 2;
-  const availableHeight = Math.abs(height) - LABEL_PADDING * 2;
+  // Ignore subpixel arithmetic noise when a measured label fits exactly.
+  const availableWidth = Math.abs(width) - LABEL_PADDING * 2 + 1e-6;
+  const availableHeight = Math.abs(height) - LABEL_PADDING * 2 + 1e-6;
   const center = { x: x + width / 2, y: y + height / 2 };
   if (label.width <= availableWidth && label.height <= availableHeight) return { ...center, rotation: 0 };
   if (allowRotation && label.height <= availableWidth && label.width <= availableHeight) return { ...center, rotation: -90 };

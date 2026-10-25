@@ -123,11 +123,12 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
   const trendAxis = useMemo(() => {
     const values = trend.flatMap(row => [row.income, row.expense, row.balance]);
     const dataMinimum = Math.min(0, ...values);
-    const minimum = dataMinimum < 0 ? Math.min(-1, dataMinimum) : 0;
-    const maximum = Math.max(1, ...values);
-    // Keep the range close to the amounts so rounding ticks does not shrink the bars.
+    const minimum = Math.floor(dataMinimum);
+    const maximum = Math.max(1, Math.ceil(Math.max(...values)));
+    // Include both rounded bounds so the top and bottom of the scale have labels.
     return { domain: [minimum, maximum] as [number, number],
-      ticks: getNiceTickValues([minimum, maximum], 6, false, "snap125").filter(value => value >= minimum && value <= maximum) };
+      ticks: [minimum, ...getNiceTickValues([minimum, maximum], 6, false, "snap125")
+        .filter(value => value > minimum && value < maximum), maximum] };
   }, [trend]);
   const trendLabels = useMemo(() => {
     const measure = createChartAmountMeasurer();
@@ -151,7 +152,7 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
           <CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="3 4" />
           <XAxis dataKey="month" tickFormatter={monthLabel} axisLine={false} tickLine={false} tick={chartStyle} />
           <YAxis width={52} axisLine={false} tickLine={false} tick={chartStyle}
-            domain={trendAxis.domain} ticks={trendAxis.ticks} niceTicks="none"
+            domain={trendAxis.domain} ticks={trendAxis.ticks} niceTicks="none" interval="preserveStartEnd" minTickGap={4}
             tickFormatter={value => compactYen.format(Number(value) * yenPerMan)} />
           <ReferenceLine y={0} stroke="var(--muted)" />
           <Tooltip content={<CashflowTooltip />} />

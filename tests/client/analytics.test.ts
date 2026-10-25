@@ -317,6 +317,8 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         const ticks = await chart.locator(".recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value").allTextContents();
         assert.ok(ticks.includes("0") && ticks.some(tick => tick.startsWith("-")), `ゼロと負の収支の目盛りを残す: ${JSON.stringify(ticks)}`);
         assert.ok(ticks.length >= 3 && ticks.every(tick => tick === "0" || /^-?\d+万$/.test(tick)), "1万円未満の金額も目盛りは整数万円で表示する");
+        assert.equal(ticks[0], "-1万", "縦軸の下端にも値を表示する");
+        assert.equal(ticks.at(-1), "1万", "縦軸の上端にも値を表示する");
         assert.deepEqual(await chart.locator(".analytics-cashflow-income .recharts-bar-rectangle path").evaluateAll(paths => [...new Set(paths.map(path => path.getAttribute("fill")))]), ["#2f6b48"]);
         assert.deepEqual(await chart.locator(".analytics-cashflow-expense .recharts-bar-rectangle path").evaluateAll(paths => [...new Set(paths.map(path => path.getAttribute("fill")))]), ["#ad433b"], "支出はカテゴリで色分けしない");
         assert.equal(await chart.locator(".analytics-cashflow-balance .recharts-line-curve").getAttribute("stroke"), "var(--ink)");
