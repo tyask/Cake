@@ -347,8 +347,8 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
       } finally { await f.context.close(); }
     });
 
-    await t.test("収入のみの月も表示し、大きい収支の表・tooltipは元の整数を保持する", async () => {
-      const f = await fixture();
+    await t.test("mobileでも収入のみの月を表示し、大きい収支の表・tooltipは元の整数を保持する", async () => {
+      const f = await fixture(390);
       try {
         const request = await f.take(), data = dataset(queryFromRoute(request)), exact = "9007199254740993";
         data.buckets = [];
@@ -362,6 +362,8 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         for (let index = 0; index < 5; index++) await f.page.keyboard.press("ArrowRight");
         await chart.getByText("2026/10", { exact: true }).waitFor();
         assert.deepEqual(await chart.locator(".recharts-tooltip-wrapper strong").allTextContents(), [formatCashflow(BigInt(exact)), "￥0", formatCashflow(BigInt(exact))]);
+        await f.stable();
+        assert.deepEqual(await f.page.evaluate(() => ({ viewport: innerWidth, content: document.documentElement.scrollWidth })), { viewport: 390, content: 390 }, "巨大額のtooltipを開いても画面幅を広げない");
         await f.page.getByText("この期間の支出額はありません。", { exact: true }).waitFor();
         assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }

@@ -155,7 +155,7 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
             domain={trendAxis.domain} ticks={trendAxis.ticks} niceTicks="none" interval="preserveStartEnd" minTickGap={4}
             tickFormatter={value => compactYen.format(Number(value) * yenPerMan)} />
           <ReferenceLine y={0} stroke="var(--muted)" />
-          <Tooltip content={<CashflowTooltip />} />
+          <Tooltip content={<CashflowTooltip />} position={{ x: 0 }} />
           {(["income", "expense"] as const).map(series => <Bar key={series} dataKey={series} name={series === "income" ? "収入" : "支出"}
             className={`analytics-cashflow-${series}`} fill={series === "income" ? "#2f6b48" : "#ad433b"} maxBarSize={36} isAnimationActive={false}>
             <LabelList dataKey="month" content={geometry => {
