@@ -26,7 +26,10 @@ const workspace: WorkspaceData = {
     { id: "b", name: "B", email: "b@example.test", imageUrl: null, weight: 1, role: "MEMBER" },
   ],
   categories: [], rules: [],
-  transactions: [
+  transactions: mode === "empty" ? [] : mode === "balanced" ? [
+    transaction("balanced-a", { amountYen: 1_000 }),
+    transaction("balanced-b", { amountYen: 1_000, actorUserId: "b", actorName: "B" }),
+  ] : [
     transaction("payment"),
     transaction("receipt", { type: "RECEIPT", amountYen: 2_000, actorUserId: "b", actorName: "B" }),
     transaction("settled-receipt", { type: "RECEIPT", amountYen: 5_000, settledAt: "2026-10-11T03:00:00.000Z" }),

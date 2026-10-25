@@ -54,14 +54,28 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           ["zero", "￥0", normal, "−￥17,000"],
         ]) {
           await page.goto(origin + "?balance=" + mode);
-          const month = page.locator("#home .kpi").nth(0);
-          await month.locator("strong").waitFor();
-          await assertMoney(month.locator(":scope > strong"), expected, color);
-          assert.equal(await month.locator(":scope > span").textContent(), "今月の収支（月全体）");
-          assert.match(await month.locator("small").textContent() ?? "", /5件の取引/);
-          await assertMoney(month.locator("small span").nth(0), "+￥17,000", green);
-          await assertMoney(month.locator("small span").nth(1), payment, red);
-          await assertMoney(page.locator("#home .kpi").nth(1).locator(":scope > strong"), "−￥8,000", red);
+          const month = page.getByRole("table", { name: "今月の収支", exact: true });
+          await month.waitFor();
+          assert.deepEqual(await month.getByRole("rowheader").allTextContents(), ["収入", "支出", "収支", "取引件数"]);
+          await assertMoney(month.getByRole("row", { name: /^収入 / }).getByRole("cell"), "+￥17,000", green);
+          await assertMoney(month.getByRole("row", { name: /^支出 / }).getByRole("cell"), payment, red);
+          await assertMoney(month.getByRole("row", { name: /^収支 / }).getByRole("cell"), expected, color);
+          assert.equal(await month.getByRole("row", { name: /^取引件数 / }).getByRole("cell").textContent(), "5件");
+          const next = page.locator("#home .kpi.accent");
+          await assertMoney(next.locator(".unsettled-summary strong"), "−￥8,000", red);
+          assert.match(await next.locator(".unsettled-summary").textContent() ?? "", /2件が対象/);
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+        }
+        for (const [mode, balance, count] of [["empty", "￥0", "0"], ["balanced", "−￥2,000", "2"]]) {
+          await page.goto(origin + "?balance=" + mode);
+          const month = page.getByRole("table", { name: "今月の収支", exact: true });
+          await month.waitFor();
+          await assertMoney(month.getByRole("row", { name: /^収支 / }).getByRole("cell"), balance, mode === "empty" ? normal : red);
+          assert.equal(await month.getByRole("row", { name: /^取引件数 / }).getByRole("cell").textContent(), count + "件");
+          const next = page.locator("#home .kpi.accent");
+          assert.match(await next.textContent() ?? "", /清算なし/);
+          await assertMoney(next.locator(".unsettled-summary strong"), balance, mode === "empty" ? normal : red);
+          assert.match(await next.locator(".unsettled-summary").textContent() ?? "", new RegExp(count + "件が対象"));
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
         }
         await page.goto(origin);

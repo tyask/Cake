@@ -16,9 +16,26 @@ export function HomePanel({ selected, pending, setTab, add, refreshAction, refre
     <div className="home-actions page-actions">{refreshAction}<button className="primary" disabled={refreshing} onClick={add}>＋ 明細を追加</button></div>
     {pending > 0 && <button className="invite-alert" onClick={() => setTab("settings")}>あなた宛ての招待が{pending}件あります <span>確認する →</span></button>}
     <div className="kpi-grid">
-      <article className="kpi"><span>今月の収支（月全体）</span><strong className={cashflowClass(month.balanceYen)}>{formatCashflow(month.balanceYen)}</strong><small>収入 <span className={cashflowClass(month.receiptTotal)}>{formatCashflow(month.receiptTotal)}</span> ／ 支払い <span className={cashflowClass(-month.paymentTotal)}>{formatCashflow(-month.paymentTotal)}</span><br />{monthTransactions.length}件の取引</small></article>
-      <article className="kpi"><span>未清算の共有収支</span><strong className={cashflowClass(shared.balanceYen)}>{formatCashflow(shared.balanceYen)}</strong><small>{unsettledShared.length}件が対象</small></article>
-      <article className="kpi accent"><span>次の清算</span>{selected.settlement?.payerName && selected.settlement.payeeName ? <div className="next-settlement"><div className="settlement-person"><span className="settlement-avatar" aria-hidden="true">{Array.from(selected.settlement.payerName)[0]}</span><div><small>支払う人</small><b>{selected.settlement.payerName}</b></div></div><div className="settlement-transfer"><span className="settlement-arrow" aria-hidden="true">↓</span><strong>{selected.settlement.amountYen.toLocaleString("ja-JP")}<small>円</small></strong></div><div className="settlement-person"><span className="settlement-avatar payee" aria-hidden="true">{Array.from(selected.settlement.payeeName)[0]}</span><div><small>受け取る人</small><b>{selected.settlement.payeeName}</b></div></div></div> : <><strong>清算なし</strong><small>現在差額はありません</small></>}</article>
+      <article className="kpi">
+        <table className="home-summary-table">
+          <caption>今月の収支</caption>
+          <tbody>
+            <tr><th scope="row">収入</th><td className={cashflowClass(month.receiptTotal)}>{formatCashflow(month.receiptTotal)}</td></tr>
+            <tr><th scope="row">支出</th><td className={cashflowClass(-month.paymentTotal)}>{formatCashflow(-month.paymentTotal)}</td></tr>
+            <tr><th scope="row">収支</th><td className={cashflowClass(month.balanceYen)}>{formatCashflow(month.balanceYen)}</td></tr>
+            <tr><th scope="row">取引件数</th><td>{monthTransactions.length.toLocaleString("ja-JP")}件</td></tr>
+          </tbody>
+        </table>
+      </article>
+      <article className="kpi accent">
+        <span>次の清算</span>
+        {selected.settlement?.payerName && selected.settlement.payeeName ? <div className="next-settlement"><div className="settlement-person"><span className="settlement-avatar" aria-hidden="true">{Array.from(selected.settlement.payerName)[0]}</span><div><small>支払う人</small><b>{selected.settlement.payerName}</b></div></div><div className="settlement-transfer"><span className="settlement-arrow" aria-hidden="true">↓</span><strong>{selected.settlement.amountYen.toLocaleString("ja-JP")}<small>円</small></strong></div><div className="settlement-person"><span className="settlement-avatar payee" aria-hidden="true">{Array.from(selected.settlement.payeeName)[0]}</span><div><small>受け取る人</small><b>{selected.settlement.payeeName}</b></div></div></div> : <><strong>清算なし</strong><small>現在差額はありません</small></>}
+        <div className="unsettled-summary">
+          <span>未清算の共有収支</span>
+          <strong className={cashflowClass(shared.balanceYen)}>{formatCashflow(shared.balanceYen)}</strong>
+          <small>{unsettledShared.length.toLocaleString("ja-JP")}件が対象</small>
+        </div>
+      </article>
     </div>
     <div className="content-grid">
       <section className="panel recent"><div className="panel-head"><div><span>RECENT</span><h2>最近の取引</h2></div><button className="text-button" onClick={() => setTab("transactions")}>すべて見る →</button></div>

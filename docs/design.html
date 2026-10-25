@@ -328,7 +328,7 @@
       .screen-main { padding: 1.1rem; }
       .screen-head { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
       .mock-button { padding: 0.42rem 0.65rem; border-radius: 0.5rem; color: #fff; background: var(--green); font-size: 0.68rem; }
-      .mock-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.55rem; margin: 1rem 0; }
+      .mock-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem; margin: 1rem 0; }
       .mock-kpi { padding: 0.65rem; border: 1px solid var(--line); border-radius: 0.55rem; font-size: 0.64rem; }
       .mock-kpi strong { display: block; margin-top: 0.3rem; font-size: 0.9rem; }
       .mock-table { height: 7rem; border: 1px solid var(--line); border-radius: 0.55rem; background: repeating-linear-gradient(to bottom, #fff 0, #fff 1.65rem, #edf0eb 1.7rem); }
@@ -581,12 +581,12 @@
           <p>ホームの指標・次の清算は桁数の多い金額をカード内で折り返し、上限額の明細があっても画面全体の横幅を広げず、下部ナビゲーションを操作できるようにする。</p>
           <h3>収支と金額の表示</h3>
           <p>支出のみを扱う集計画面を除き、支払いは「−¥5,000」の赤字、収入は「+¥5,000」の緑字で表示し、収支も正を緑、負を赤、0円は符号なしの通常色とする。入力欄は正の整数を扱い、支払い・収入の符号を欄の横に表示する。配分金額にも種別の符号を付けるが、割合（%）は符号を付けない。種別名は「支払い／収入」、区分は「個人／共有」、割合は「配分割合」に統一し、支払者・受取者は種別に応じて区別する。</p>
-          <p>「今月の収支（月全体）」は選択中のワークスペースについて、日本時間の当月1日から月末までの登録明細を抽出し、収入合計−支払い合計で求める。個人・共有、清算済み・未清算を含め、当月の未来日付で登録済みの明細も含む。割合では分割しない。「未清算の共有収支」は全期間の未清算かつ共有の明細について同じ計算を行う。清算操作自体は新しい収支明細を追加せず、ホームの月間収支を変えない。</p>
+          <p>「今月の収支」は収入・支出・収支・取引件数の4行の表で表示する。収支は選択中のワークスペースについて、日本時間の当月1日から月末までの登録明細を抽出し、収入合計−支払い合計で求める。個人・共有、清算済み・未清算を含め、当月の未来日付で登録済みの明細も含む。割合では分割しない。「次の清算」内には、送金情報とともに「未清算の共有収支」の金額と対象件数を表示し、清算差額がない場合も省略しない。未清算の共有収支は全期間の未清算かつ共有の明細について同じ計算を行う。清算操作自体は新しい収支明細を追加せず、ホームの月間収支を変えない。</p>
           <div class="screen" aria-label="PC版ホーム画面の概略図">
             <div class="screen-nav"><b>Cake</b><div>ホーム</div><div>取引明細</div><div>取込</div><div>集計</div><div>清算</div><div>設定</div></div>
             <div class="screen-main">
               <div class="screen-head"><strong>ふたりの家計 ▾</strong><span class="mock-button">＋ 明細を追加</span></div>
-              <div class="mock-kpis"><div class="mock-kpi">今月の収支（月全体）<strong style="color: #a33737">−¥84,320</strong></div><div class="mock-kpi">未清算の共有収支<strong style="color: #a33737">−¥31,240</strong></div><div class="mock-kpi">次の清算<strong>B → A ¥5,200</strong></div></div>
+              <div class="mock-kpis"><div class="mock-kpi"><table><caption>今月の収支</caption><tbody><tr><th scope="row">収入</th><td>+¥100,000</td></tr><tr><th scope="row">支出</th><td>−¥184,320</td></tr><tr><th scope="row">収支</th><td>−¥84,320</td></tr><tr><th scope="row">取引件数</th><td>20件</td></tr></tbody></table></div><div class="mock-kpi">次の清算<strong>B → A ¥5,200</strong><p>未清算の共有収支<strong style="color: #a33737">−¥31,240</strong>8件が対象</p></div></div>
               <div class="mock-table"></div>
             </div>
           </div>
@@ -594,7 +594,7 @@
             <thead><tr><th>画面ID</th><th>画面</th><th>主な内容</th><th>スマートフォン対応</th></tr></thead>
             <tbody>
               <tr><td>SC-01</td><td>ログイン</td><td>Cakeロゴ、Googleログイン、同意文、認証エラー。テスト認証時はA/Bの選択ボタン。</td><td>一画面中央配置。</td></tr>
-              <tr><td>SC-02</td><td>ホーム</td><td>今月の収支（月全体）と収入・支払いの内訳、未清算の共有収支、次の清算、最近6件の明細、招待件数、主要操作。</td><td>指標を縦積み。</td></tr>
+              <tr><td>SC-02</td><td>ホーム</td><td>今月の収支の表（収入・支出・収支・取引件数）、次の清算（未清算の共有収支と対象件数を含む）、最近6件の明細、招待件数、主要操作。</td><td>指標を縦積み。</td></tr>
               <tr><td>SC-03</td><td>取引明細</td><td>列フィルタ、追加、直接編集・自動保存、割合・金額、メモ、選択明細の一括削除・ルール適用。</td><td>取引先・日時・金額等の概要をカード表示し、編集欄を展開。</td></tr>
               <tr><td>SC-04</td><td>明細追加モーダル</td><td>種別（支払い／収入）、日時、取引先、方法、金額、支払者／受取者、区分、配分割合・金額、メモ。IDは自動発行。</td><td>幅を画面内に収め、モーダル内を縦スクロール。</td></tr>
               <tr><td>SC-05</td><td>CSV取込</td><td>PayPay形式、ファイル選択・ドロップ、重複確認、支払者指定、選択行の区分・カテゴリ変更、行ごとの割合・カテゴリ調整、履歴からのカテゴリ補完、確認して登録。</td><td>明細カードの詳細を展開する。カテゴリ操作を先頭の枠にまとめ、上部の一括操作欄・下部の登録操作欄とも画面に固定せずスクロールする。補完ボタン横の小さい「ⓘ」タップで説明を表示する。</td></tr>
