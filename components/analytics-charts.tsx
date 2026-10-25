@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { Bar, BarChart, ComposedChart, Line, CartesianGrid, Cell, Label, LabelList, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, type LabelProps } from "recharts";
+import { Bar, BarChart, ComposedChart, Line, CartesianGrid, Cell, Label, LabelList, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, getNiceTickValues, type LabelProps } from "recharts";
 import { barAmountPosition, CHART_AMOUNT_FONT_FAMILY, CHART_AMOUNT_FONT_SIZE, CHART_AMOUNT_FONT_WEIGHT, createChartAmountMeasurer, pieAmountPosition, type ChartAmountLabel, type ChartAmountPosition } from "@/lib/client/analytics-chart-labels";
 import { analyticsChangeRate, type AnalyticsDataset, type AnalyticsRow, type AnalyticsView } from "@/lib/shared/analytics";
 import { cashflowClass, formatCashflow, formatYen } from "@/lib/shared/display-formatters";
 import styles from "./analytics-panel.module.css";
 
 const compactYen = new Intl.NumberFormat("ja-JP", { notation: "compact", maximumFractionDigits: 1 });
+const yenPerMan = 10_000;
 const chartStyle = { fontSize: 11, fontFamily: "inherit", fill: "var(--muted)" };
 function analyticsRangeLabel(range: { from: string; to: string }) { return `${range.from.replaceAll("-", "/")} ～ ${range.to.replaceAll("-", "/")}`; }
 
@@ -117,8 +118,17 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
     .map(row => ({ row, value: Number(row.currentYen) }))
     .sort((a, b) => a.row.currentYen === b.row.currentYen ? 0 : a.row.currentYen > b.row.currentYen ? -1 : 1), [view]);
   const trend = useMemo(() => view.cashflow.months.map(row => ({ ...row,
-    income: Number(row.incomeYen), expense: Number(row.expenseYen), balance: Number(row.balanceYen),
+    income: Number(row.incomeYen) / yenPerMan, expense: Number(row.expenseYen) / yenPerMan, balance: Number(row.balanceYen) / yenPerMan,
   })), [view.cashflow.months]);
+  const trendAxis = useMemo(() => {
+    const values = trend.flatMap(row => [row.income, row.expense, row.balance]);
+    const dataMinimum = Math.min(0, ...values);
+    const minimum = dataMinimum < 0 ? Math.min(-1, dataMinimum) : 0;
+    const maximum = Math.max(1, ...values);
+    // Keep the range close to the amounts so rounding ticks does not shrink the bars.
+    return { domain: [minimum, maximum] as [number, number],
+      ticks: getNiceTickValues([minimum, maximum], 6, false, "snap125").filter(value => value >= minimum && value <= maximum) };
+  }, [trend]);
   const trendLabels = useMemo(() => {
     const measure = createChartAmountMeasurer();
     return view.cashflow.months.map(row => ({
@@ -141,8 +151,8 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
           <CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="3 4" />
           <XAxis dataKey="month" tickFormatter={monthLabel} axisLine={false} tickLine={false} tick={chartStyle} />
           <YAxis width={52} axisLine={false} tickLine={false} tick={chartStyle}
-            domain={[(minimum: number) => Math.min(0, minimum), (maximum: number) => Math.max(0, maximum)]}
-            tickFormatter={value => compactYen.format(Number(value))} />
+            domain={trendAxis.domain} ticks={trendAxis.ticks} niceTicks="none"
+            tickFormatter={value => compactYen.format(Number(value) * yenPerMan)} />
           <ReferenceLine y={0} stroke="var(--muted)" />
           <Tooltip content={<CashflowTooltip />} />
           {(["income", "expense"] as const).map(series => <Bar key={series} dataKey={series} name={series === "income" ? "収入" : "支出"}
