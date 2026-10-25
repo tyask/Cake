@@ -23,7 +23,12 @@ npm.cmd run qa:windows -- preflight
 
 `status` は保存有無と本人だけのACL等の状態を確認し、tokenの平文を表示しない。`preflight` は本人のDPAPI CurrentUserで復号し、`preview.config.json` のCake project/teamに固定した正規development env取得APIからOIDCをメモリ内だけへ取得する。project・owner/team・development・有効期限を検査し、公開結果には成否と検査結果だけを含める。token自体の全権限や有効期限を証明する検査ではない。
 
-保存先は `%LOCALAPPDATA%\CakeQa\vercel-token.dpapi.json`。暗号化ファイルと保存フォルダーはWindows本人だけのACLを持ち、既存ファイルは上書きしない。別ユーザーや別PCからファイルをコピーして使う手順ではない。保存状態が確認できないことだけを根拠にtoken未保存と判断せず、通常の本人Windowsコンテキストで `status` を再確認する。そこで未保存と確認できた場合だけ次節へ進む。失効・復号失敗・不正ACL・アクセス拒否なら停止する。自動でACLを緩めたり、別認証で再試行したりしない。
+保存先は `%LOCALAPPDATA%\CakeQa\vercel-token.dpapi.json`。暗号化ファイルと保存フォルダーはWindows本人だけのACLを持ち、既存ファイルは上書きしない。別ユーザーや別PCからファイルをコピーして使う手順ではない。
+
+保存状態は次の順で判断する。
+
+1. 保存状態が確認できないことだけを根拠にtoken未保存と判断せず、通常の本人Windowsコンテキストで `status` を再確認する。
+2. そこで未保存と確認できた場合だけ次節へ進む。失効・復号失敗・不正ACL・アクセス拒否なら停止する。自動でACLを緩めたり、別認証で再試行したりしない。
 
 Windowsの保存先がサンドボックスの `Packages/.../AC` 等へ仮想化されている場合は、`WINDOWS_PROFILE_CONTEXT_REJECTED` で停止する。利用可能な通常Windows実行経路で確認できるまで、入力やQAを進めない。別プロファイルを探索したり、既存storeをコピーしたり、権限を回避したりしない。通常の本人コンテキストを利用できなければ、保存状態を未確認として報告する。
 
@@ -35,7 +40,7 @@ Windowsの保存先がサンドボックスの `Packages/.../AC` 等へ仮想化
 2. `npm.cmd run qa:windows -- input` でローカルの伏字入力画面を開く。
 3. 本人がtokenを入力し、scope・期限の確認にチェックして「保存する」を押す。最終確認の「はい」も本人が選ぶ。
 4. チャットには保存完了だけを伝える。token値はチャット、スクリーンショット、ログ、コマンド引数、`.env`、Gitへ残さない。
-5. `status` → `preflight` を実行する。保存だけでは接続や権限の成功を意味しない。
+5. `status` に続いて `preflight` を実行する。保存だけでは接続や権限の成功を意味しない。
 
 このtokenはCakeへの読み書きを許可し、Production操作も権限に含み得る。DPAPI CurrentUserと本人ACLは他ユーザーから保護するが、**同じWindowsユーザーとして実行されるプログラムは復号できる**。Previewだけの読み取り専用資格情報とは扱わない。
 
@@ -57,7 +62,14 @@ npm.cmd run qa:windows -- verify --pr <PR番号> --sha <40桁の完全SHA> --dep
 
 実装側checkoutの完全SHAとruntime対象の完全SHAは別々に記録する。旧PRに存在しないCLIを実行させることなく、共通の正式ブラウザ検証を使う。いずれも対象worktreeが指定SHAと一致するcleanな専用branchであることを検査する。
 
-検証は対象PR・HEAD照合 → status前照合 → PC/mobile × A/Bのブラウザ操作 → status後照合の順。前後でDeployment・URL・DB branch・endpoint・generation等を照合し、不一致なら失敗にする。16クリック、session/app GET、runtime proofを確認し、許可した認証callback以外の業務更新は行わない。初回workspace作成の有無を示すSQL差分や、全スクロール範囲の目視確認を行ったとは扱わない。
+検証は次の順で行う。
+
+1. 対象PR・HEAD照合。
+2. status前照合。
+3. PC/mobile × A/Bのブラウザ操作。
+4. status後照合。
+
+前後でDeployment・URL・DB branch・endpoint・generation等を照合し、不一致なら失敗にする。16クリック、session/app GET、runtime proofを確認し、許可した認証callback以外の業務更新は行わない。初回workspace作成の有無を示すSQL差分や、全スクロール範囲の目視確認を行ったとは扱わない。
 
 Vercel tokenを供給するのは専用preflight/QA子プロセスだけ。Git/ghの管理処理には渡さず、親シェルへexportしたり環境ファイルへ保存したりしない。OIDCも対象originだけに使い、秘密値・Cookie・生のprovider/browser例外は公開結果に含めない。ブラウザの場所はPlaywrightが解決するため、個別PCのキャッシュpathを指定しない。
 
@@ -68,7 +80,21 @@ Vercel tokenを供給するのは専用preflight/QA子プロセスだけ。Git/g
 - 対象worktreeの `.cake/windows-qa-progress-<UUID>.json`：同じ操作の進捗と停止段階を示す公開結果。
 - 実行checkoutの `.cake/windows-tools/run-<一意ID>/`：構築した実行ファイル、公開request metadata、`result.json`。tokenやOIDCは保存しない。
 
-失敗時に以前の成功を再利用しない。QA成功に加えて、現在HEADのpush/PR CIの最新attempt成功、現在のPreview/DBと証跡の一致、変更箇所固有の検証、差分の自己レビューと現在HEADを対象とする別Agentレビューを確認する。QA中に修正した場合も追加差分と影響範囲を再レビューし、PR本文の要約と詳細コメントを更新する。Codexがマージ可能と判断したら、追加のReady依頼を待たず、通常の対象branchではそのworktreeの `task:pr` でローカル証跡を再照合してReadyにし、このチャットで日本語で通知する。利用者がdraft維持を指定している場合は従う。文書のみの変更は開発手順の検証範囲とReady操作に従う。
+失敗時に以前の成功を再利用しない。QA成功に加えて、次を確認する。
+
+- 現在HEADのpush/PR CIの最新attempt成功。
+- 現在のPreview/DBと証跡の一致。
+- 変更箇所固有の検証。
+- 差分の自己レビューと現在HEADを対象とする別Agentレビュー。
+
+QA中に修正した場合も追加差分と影響範囲を再レビューし、PR本文の要約と詳細コメントを更新する。
+
+Codexがマージ可能と判断したら、追加のReady依頼を待たず、次の順で進める。利用者がdraft維持を指定している場合は従う。
+
+1. 通常の対象branchではそのworktreeの `task:pr` でローカル証跡を再照合してReadyにする。
+2. このチャットで日本語で通知する。
+
+文書のみの変更は開発手順の検証範囲とReady操作に従う。
 
 ```powershell
 # QA・最新CI・対象照合・自己レビュー・別Agentレビューを完了し、マージ可能と判断したら実行する

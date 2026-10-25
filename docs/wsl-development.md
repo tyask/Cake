@@ -14,13 +14,22 @@ gh --version
 gh auth status --hostname github.com
 ```
 
-カーネルがWSL2で、Nodeのplatformが `linux` であることを確認し、`npm run check:node` で版の一致を確認する。npmがWindows側を参照する場合はそのまま続けない。ツールがなければLinux公式配布を確認し、承認された作業用の場所へ導入する。PATHの補完はそのターミナル/プロセスだけに限定する。
+実行環境は次を確認する。
+
+- カーネルがWSL2で、Nodeのplatformが `linux` であること。
+- `npm run check:node` で版が一致すること。npmがWindows側を参照する場合はそのまま続けない。
+
+ツールがなければLinux公式配布を確認し、承認された作業用の場所へ導入する。PATHの補完はそのターミナル/プロセスだけに限定する。
 
 DNS失敗やlocalhost待受のEPERMは、WSLの設定と実行環境の制限を切り分ける。制限が原因なら、許可された実行経路で同じ操作を行う。DNS・CA・proxy・権限を勝手に変更して回避しない。通常実行と承認された実行で結果が異なった場合も報告する。
 
 ## 基本検証
 
-[開発手順](development-workflow.md)に従い、最新mainから専用worktreeを作る。 `task:start` が依存を導入済みなら `npm ci` の再実行は不要。公式Chromiumの準備後、commit済みのcleanな対象で実行する。
+基本検証は次の順で準備し、実行する。
+
+1. [開発手順](development-workflow.md)に従い、最新mainから専用worktreeを作る。 `task:start` が依存を導入済みなら `npm ci` の再実行は不要。
+2. 公式Chromiumを準備する。
+3. commit済みのcleanな対象で次を実行する。
 
 ```bash
 npx --no-install playwright install chromium
@@ -62,7 +71,11 @@ VercelはWSL側の本人認証を使う。未認証・失効時は、本人がWS
 
 ## 実Previewの正式ブラウザ検証
 
-自動deploy成功後、対象worktreeで `npm run qa:status` を実行し、PR番号・完全SHA・Deployment ID・固有URL・DB branch/endpoint・generationを確認する。確認したPR番号・SHA・Deploymentを、以下の `PR` ・ `TESTED_SHA` ・ `DEPLOYMENT` に設定する。ブラウザ前後に同じ資源を再照合する。
+自動deploy成功後、正式ブラウザ検証は次の順で進める。
+
+1. 対象worktreeで `npm run qa:status` を実行し、PR番号・完全SHA・Deployment ID・固有URL・DB branch/endpoint・generationを確認する。
+2. 確認したPR番号・SHA・Deploymentを、以下の `PR` ・ `TESTED_SHA` ・ `DEPLOYMENT` に設定する。
+3. ブラウザ前後に同じ資源を再照合する。
 
 この例は標準Linux Vercel CLI保存先の本人認証をメモリ内だけで読む。独自の保存先を使う場合は、本人が確認したWSL内の保存先を明示する。別プロファイルやWindows storeを探索しない。親shellへVercel tokenをexportしない。
 
@@ -127,7 +140,10 @@ JS
 
 ## close後のstatus再照合
 
-close前に全Deployment・DB branch/endpoint・generationを保存し、close後の自動cleanup成功と、記録したIDの直接GET不在を確認する。Neon側の直接GETは既存Actions資格情報で実行されるcleanup内の照合を利用できる。ローカルへNeon tokenを持ち込まない。
+close前後は次の順で確認する。
+
+1. close前に全Deployment・DB branch/endpoint・generationを保存する。
+2. close後の自動cleanup成功と、記録したIDの直接GET不在を確認する。Neon側の直接GETは既存Actions資格情報で実行されるcleanup内の照合を利用できる。ローカルへNeon tokenを持ち込まない。
 
 次はclosed PRに対してprovider一覧を再照合する例。 `PR` に対象番号を指定する。statusは管理APIのGETだけであり、cleanupの再実行ではない。
 
@@ -157,4 +173,8 @@ try {
 JS
 ```
 
-正式statusの不在だけで、削除前に記録した各IDの直接GET確認を省略しない。ローカルでのVercel直接GETも、本人認証をメモリ内で読み、固定teamの `/v13/deployments/<記録済みID>` にGETして404だけを記録する。資格情報・レスポンス本文は表示しない。Neonについては「Actions内で確認」と「WSLから直接確認」を区別して報告する。
+削除後の確認と報告では次を守る。
+
+- 正式statusの不在だけで、削除前に記録した各IDの直接GET確認を省略しない。
+- ローカルでのVercel直接GETも、本人認証をメモリ内で読み、固定teamの `/v13/deployments/<記録済みID>` にGETして404だけを記録する。資格情報・レスポンス本文は表示しない。
+- Neonについては「Actions内で確認」と「WSLから直接確認」を区別して報告する。

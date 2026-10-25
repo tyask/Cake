@@ -22,17 +22,49 @@ npm run task:start -- feature-name
 
 同じCloud環境内の並列タスクもworktree・ポートを分ける。Cloud用CakeはNode + PGliteのオンメモリDBに全migration・非管理者A/B・共有workspace・架空サンプルを設定し、停止時にDBを破棄する。Google/Vercelや外部DBの秘密値は不要で、他環境からコピーしない。CloudブラウザQAの結果は`.cake/cloud/`に保存し、正式Preview証拠とは区別する。
 
-実装前に[設計・実装原則](design-principles.md)を読み、変更する操作のデータ経路・共有する規則・保存と取得の順序・処理量・更新の整合性を確認する。関係する判断と分岐は基本/詳細設計へ反映し、同じ観点を自己レビュー・別Agentレビューでも確認する。
+実装前に[設計・実装原則](design-principles.md)を読み、次の観点を確認する。
+
+- 変更する操作のデータ経路。
+- 共有する規則。
+- 保存と取得の順序。
+- 処理量。
+- 更新の整合性。
+
+関係する判断と分岐は基本/詳細設計へ反映し、同じ観点を自己レビュー・別Agentレビューでも確認する。
 
 新しいライブラリは実行場所に応じて `lib/client/`・`lib/server/`・`lib/shared/` へ配置する。スクリプトは `scripts/` の用途別ディレクトリ、テストは `tests/` の対象領域別ディレクトリへ追加する。配置表、依存方向、既存サービスとDB storeの境界は[詳細設計の実装構成](detail-design.html#architecture)を参照する。npmコマンドとworkflowからの正式な運用経路、receipt・資格情報・資源照合の契約は維持する。
 
 ## 2. ローカル検証と日本語のdraft PR
 
-開発は、実装・関連テスト・自己レビュー → commit → 別Agentレビュー → 指摘への対応・必要な再レビュー → 最終SHAでのローカル検証 → draft PR → 現在HEADのCI・自動Preview・変更に必要な検証 → Readyの順に進める。文書のみの変更にも別Agentレビューを適用する。
+開発は次の順に進める。
+
+1. 実装・関連テスト・自己レビュー。
+2. commit。
+3. 別Agentレビュー。
+4. 指摘への対応・必要な再レビュー。
+5. 最終SHAでのローカル検証。
+6. draft PR。
+7. 現在HEADのCI・自動Preview・変更に必要な検証。
+8. Ready。
+
+文書のみの変更にも別Agentレビューを適用する。
 
 通常の変更依頼は、[AGENTS.mdの開発依頼の完了条件](../AGENTS.md#開発依頼の完了条件)に従い、当該PRの作成・更新と専用Preview/DBの自動処理を含めて進める。利用者に「PR作成まで」と付け加えてもらう必要はない。利用者が明示した範囲の制限を優先し、ローカル検証の成功やcommitだけで開発全体を完了扱いにしない。
 
-利用者が範囲を限定していない通常の変更依頼では、最終報告の前に、現在HEADのPRがReadyであり、PRリンク・レビューと検証結果・未実施項目・残る資源を報告できることを確認する。阻害時は、PR未作成ならその事実、作成済みならURLとdraft/Ready、未完了の工程、具体的な理由と必要な対応を記載する。Ready条件や利用者の制限を省略して進めない。
+利用者が範囲を限定していない通常の変更依頼では、最終報告の前に、現在HEADのPRがReadyであり、次を報告できることを確認する。
+
+- PRリンク。
+- レビューと検証結果。
+- 未実施項目。
+- 残る資源。
+
+阻害時は次を記載する。
+
+- PR未作成ならその事実、作成済みならURLとdraft/Ready。
+- 未完了の工程。
+- 具体的な理由と必要な対応。
+
+Ready条件や利用者の制限を省略して進めない。
 
 ### 日常の高速確認と文書参照チェック
 
@@ -91,7 +123,15 @@ Git外の `.cake/changes.md` に「変更内容」の本文をMarkdownで保存�
 
 変更説明・検証結果・remote proofのpathはCLIを実行するCWD基準で、絶対pathを推奨する。`--target-worktree`で別の対象を管理するときも、説明と報告はcontrol側で用意する。
 
-報告をGit外の `.cake/report.md` に保存する。環境・ツール版・完全SHA、コマンド別の成否/所要時間、件数、実画面で確認した内容、未実施項目を記載する。既定の依頼範囲と利用者の明示した制限に照らして対象を確認し、次を実行する。通常の変更依頼では、当該PRの専用Preview/DB操作について追加確認を求めない。
+報告をGit外の `.cake/report.md` に保存し、次を記載する。
+
+- 環境・ツール版・完全SHA。
+- コマンド別の成否/所要時間。
+- 件数。
+- 実画面で確認した内容。
+- 未実施項目。
+
+既定の依頼範囲と利用者の明示した制限に照らして対象を確認し、次を実行する。通常の変更依頼では、当該PRの専用Preview/DB操作について追加確認を求めない。
 
 ```bash
 npm run task:pr -- --draft --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md
@@ -159,11 +199,25 @@ CSVカテゴリの実DB並行検証は、対象DBへのテストデータ作成�
 git commit -m '[cake-db-qa:csv-categories]' -m 'CSVカテゴリの実DB並行検証を有効にする'
 ```
 
-`build:vercel` はVercelの `VERCEL_GIT_COMMIT_MESSAGE` をそのbuildの完全SHA・branchと照合された環境で読み、PR用のPreview/test/applicationに限って `db:setup` → `db:seed:test` → `qa:db:csv-categories` → Next buildの順に実行する。検証は `node --import tsx scripts/qa/db/verify-csv-category-concurrency.ts` を子プロセスとして起動し、失敗時はbuildと公開を止める。次のcommitにmarkerがなければ検証しない。Production・準備用・常設Preview・Development・ローカルではmarkerによる実DB検証を実行しない。
+`build:vercel` はVercelの `VERCEL_GIT_COMMIT_MESSAGE` をそのbuildの完全SHA・branchと照合された環境で読み、PR用のPreview/test/applicationに限って次の順に実行する。
+
+1. `db:setup`。
+2. `db:seed:test`。
+3. `qa:db:csv-categories`。
+4. Next build。
+
+検証は `node --import tsx scripts/qa/db/verify-csv-category-concurrency.ts` を子プロセスとして起動し、失敗時はbuildと公開を止める。次のcommitにmarkerがなければ検証しない。Production・準備用・常設Preview・Development・ローカルではmarkerによる実DB検証を実行しない。
 
 検証にはNative連携が当該buildへ供給した専用接続だけを使う。子プロセスには `CAKE_TEST_DATABASE_URL`、PR・完全SHA・Deployment・DB branch/endpoint・generationと本番分離の照合情報、Node実行・TLSに必要な明示allowlistだけを渡し、provider token・アプリ認証secret・共通 `DATABASE_URL` は渡さない。WSLへの資格情報コピーや環境ファイルの生成は行わない。接続前と各独立sessionで既存のDB所有権を照合し、二つの実DB sessionと監視sessionでロック待機・確定結果・全体rollbackを確認する。
 
-buildログの `cake-csv-category-db-qa/v1` 結果で対象identity、検証成否、ロック待機、後片付け件数と既存データ保持を確認し、前後の正式statusとも照合する。長い集約結果はVercelの1イベント4KiB制限を避け、`cake-csv-category-db-qa-result-part/v1`のbase64分割行で出す。同一runId・SHAの全partを番号順に揃え、総数・総byte数・SHA-256一致を確認してから元のJSONを復元し、欠落・重複・順序不正・不一致では受理しない。業務DTO・接続文字列・生例外はログやartifactへ保存しない。通常のmigration・初回seedによる更新と、検証用fixtureの残存0件は区別して報告する。この実DB検証は `npm test`、Actionsのprovider照合receipt、現在HEADの正式ブラウザ証拠とはそれぞれ別の検証である。
+buildログの `cake-csv-category-db-qa/v1` 結果で次を確認し、前後の正式statusとも照合する。
+
+- 対象identity。
+- 検証成否。
+- ロック待機。
+- 後片付け件数と既存データ保持。
+
+長い集約結果はVercelの1イベント4KiB制限を避け、`cake-csv-category-db-qa-result-part/v1`のbase64分割行で出す。同一runId・SHAの全partを番号順に揃え、総数・総byte数・SHA-256一致を確認してから元のJSONを復元し、欠落・重複・順序不正・不一致では受理しない。業務DTO・接続文字列・生例外はログやartifactへ保存しない。通常のmigration・初回seedによる更新と、検証用fixtureの残存0件は区別して報告する。この実DB検証は `npm test`、Actionsのprovider照合receipt、現在HEADの正式ブラウザ証拠とはそれぞれ別の検証である。
 
 取引先正規化の実DB検証は、現在commitの独立行 `[cake-db-qa:merchant-normalization]` で要求する。同じ隔離環境・所有権・TLS検査を使い、`qa:db:merchant-normalization` として上記のCSVカテゴリ競合回帰に続けて、全保存経路の共通正規化、2000行のCSV、旧版互換、完全一致Indexの利用可能性を確認する。正規化fixtureは専用workspaceだけに作成して削除する。019のバックフィル・DDLの全体rollback・ACCESS EXCLUSIVEによる更新待機は、同じ専用DB内の新規scratch schemaで実SQLを適用して検証する。既存public schemaの適用済みmigrationを戻さず、scratchのschema・table・function・Indexの残存0件を確認する。両markerがある場合も正規化を含むQAを一度だけ実行し、同じ`cake-csv-category-db-qa/v1`結果の`normalization`・`normalizationMigration`に追加結果を記録する。通常migration/seed後のpublic各表を前後照合し、scratch検証と実public migrationの適用時間・影響を区別する。
 
@@ -185,7 +239,17 @@ buildログの `cake-csv-category-db-qa/v1` 結果で対象identity、検証成�
 npm run qa:status
 ```
 
-OPEN PR・branch・完全SHA・READY application Deployment ID・固有URL・DB branch/endpoint・generationを揃える。branch aliasや過去のURLから対象を推測しない。 `.cake/preview.json` は照合結果であり、資源の正本はVercel/Neonにある。
+次の照合項目を揃える。
+
+- OPEN PR。
+- branch。
+- 完全SHA。
+- READY application Deployment ID。
+- 固有URL。
+- DB branch/endpoint。
+- generation。
+
+branch aliasや過去のURLから対象を推測しない。 `.cake/preview.json` は照合結果であり、資源の正本はVercel/Neonにある。
 
 | 認証 | 使用先 |
 | --- | --- |
@@ -200,7 +264,13 @@ Vercelはproject読取とOIDC取得で確認し、 `whoami` の結果だけでpr
 
 WSLでは[WSL手順](wsl-development.md#実previewの正式ブラウザ検証)、Windowsでは[Windows QA手順](windows-qa-credentials.md)を使う。Cloudでは[Cloud手順](cloud-development.md#5-pr自動preview本人確認)から既存の`qa:verify:ci`とremote proofを使える。公式Playwright Chromiumを一時プロファイルで起動し、終了時にセッションを破棄する。OIDCは同一project/team・development・有効期限を確認し、redirect各hopを含めて対象originだけへ付ける。TLS/CA/権限の問題を保護や証明書検証の無効化で回避しない。
 
-標準helperはPC/mobile × A/Bでログイン、ホーム・取引明細・設定への16クリック、session/app GETとruntime proofの12観測を検証する。通常はGET/HEAD/OPTIONSとテスト認証callback POSTだけを許可する。前後のstatusで同じPR/SHA/Deployment/DB/generationを確認し、 `.cake/verification.json` と画面画像を保存する。検証実装のSHAとruntime対象のSHAも区別する。既存Chromeでの目視確認だけを正式証跡と扱わない。
+標準helperはPC/mobile × A/Bで次を検証する。
+
+- ログイン。
+- ホーム・取引明細・設定への16クリック。
+- session/app GETとruntime proofの12観測。
+
+通常はGET/HEAD/OPTIONSとテスト認証callback POSTだけを許可する。前後のstatusで同じPR/SHA/Deployment/DB/generationを確認し、 `.cake/verification.json` と画面画像を保存する。検証実装のSHAとruntime対象のSHAも区別する。既存Chromeでの目視確認だけを正式証跡と扱わない。
 
 ### 明細の追加・編集・削除
 
@@ -223,7 +293,13 @@ Codexは次の条件をすべて確認し、マージ可能と判断したら、
 3. 自動Previewが成功し、現在HEADのPR・Deployment・固有URL・DB branch/endpoint・generationが正式statusと一致している。
 4. PR本文に最終変更内容と、今回の成功・失敗・未実施、根拠・制約・残る資源、最新の別Agentレビュー要約と詳細コメントへのリンクを日本語で記載している。詳細コメントの対象SHA・指摘への対応・再レビュー結果と本文が一致している。
 
-条件未達ならdraftを維持し、PRリンク・未完了の工程・具体的な阻害要因と必要な対応を報告する。Ready直前にもPRのHEADとレビュー記録・検証証拠の一致を再確認し、更新後に過去SHAの成功を再利用しない。
+条件未達ならdraftを維持し、次を報告する。
+
+- PRリンク。
+- 未完了の工程。
+- 具体的な阻害要因と必要な対応。
+
+Ready直前にもPRのHEADとレビュー記録・検証証拠の一致を再確認し、更新後に過去SHAの成功を再利用しない。
 
 `qa:cloud`のローカル結果・画像は正式Previewのブラウザ証拠を代替しない。Cloudで開発した場合も上記のReady条件と既存の証拠gateを維持する。
 
@@ -242,7 +318,14 @@ controlの `preview-verify.config.json` capabilityを照合し、成功証拠は
 gh pr ready <PR番号> --repo tyask/Cake
 ```
 
-Ready完了後、このチャットで「Codexとしてマージ可能と判断し、Readyにした」と日本語で通知する。PRリンク、判断理由、検証の要点、未実施項目と残る資源を添える。ReadyはCodex側の検証完了を示すもので、GitHubの必須レビュー・branch保護や利用者によるマージ判断は維持する。
+Ready完了後、このチャットで「Codexとしてマージ可能と判断し、Readyにした」と日本語で通知し、次を添える。
+
+- PRリンク。
+- 判断理由。
+- 検証の要点。
+- 未実施項目と残る資源。
+
+ReadyはCodex側の検証完了を示すもので、GitHubの必須レビュー・branch保護や利用者によるマージ判断は維持する。
 
 main mergeはProduction deployと本番buildのDB更新を起動し得る。PR merge/closeは専用DBと入力データの削除を起動する。実行前に対象と影響を提示し、既に承認された範囲なら再承認を求めず進める。
 

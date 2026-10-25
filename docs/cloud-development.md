@@ -1,6 +1,14 @@
 # Codex Cloud開発・ブラウザ検証
 
-Codex Cloudでは、専用branch/worktreeで実装し、自動テストとオンメモリDB付きCakeのブラウザ操作を確認してからPRを作る。PR作成後は既存のmainのActionsがVercel Previewと専用Neon Native DBを作成する。正式Previewの検証とレビューを揃えたCodexがReadyにし、本人がPreviewと必須CI・レビューを確認してmergeする。[開発・QA運用手順](development-workflow.md)の承認範囲・Ready条件・資源照合を共用し、[WSL手順](wsl-development.md)は引き続きWSLで使う。
+Codex Cloudでは、次の順に進める。
+
+1. 専用branch/worktreeで実装する。
+2. 自動テストとオンメモリDB付きCakeのブラウザ操作を確認する。
+3. PRを作る。PR作成後は既存のmainのActionsがVercel Previewと専用Neon Native DBを作成する。
+4. 正式Previewの検証とレビューを揃えたCodexがReadyにする。
+5. 本人がPreviewと必須CI・レビューを確認してmergeする。
+
+[開発・QA運用手順](development-workflow.md)の承認範囲・Ready条件・資源照合を共用し、[WSL手順](wsl-development.md)は引き続きWSLで使う。
 
 ## 1. Cloud環境の準備
 
@@ -58,7 +66,12 @@ Cloud専用worktreeには`.env`・`.env.local`・`.env.development`・`.env.deve
 
 ## 4. 自動テストとCloudブラウザQA
 
-編集中は`npm run check:fast`や対象領域の回帰を使う。実装・関連テスト・自己レビュー・commit・別Agentレビューと必要な修正を終え、最終SHAのcleanなworktreeで次を実行する。
+編集中は`npm run check:fast`や対象領域の回帰を使う。最終検証は次の順に進める。
+
+1. 実装・関連テスト・自己レビューを終える。
+2. commitする。
+3. 別Agentレビューと必要な修正を終える。
+4. 最終SHAのcleanなworktreeで次を実行する。
 
 ```bash
 set -e
@@ -83,7 +96,16 @@ npm run qa:cloud
 npm run qa:cloud -- --port 3001
 ```
 
-結果と画面画像はGit外の`.cake/cloud/`へ保存する。報告には今回の環境・Node/npm/Chromium版・完全SHA・コマンド別の成否と所要時間・実際の検証件数・残ったプロセスやデータを記載する。失敗や未実施を成功へ含めず、実行後にHEADが進んだ場合は必要な確認を新しいSHAで揃える。
+結果と画面画像はGit外の`.cake/cloud/`へ保存する。報告には今回の次の項目を記載する。
+
+- 実行環境
+- Node/npm/Chromium版
+- 完全SHA
+- コマンド別の成否と所要時間
+- 実際の検証件数
+- 残ったプロセスやデータ
+
+失敗や未実施を成功へ含めず、実行後にHEADが進んだ場合は必要な確認を新しいSHAで揃える。
 
 | 確認 | 対象と限界 |
 | --- | --- |
@@ -95,13 +117,23 @@ Cloudのスモークテストは管理者機能、Google OAuth、Vercel/Neonな�
 
 ## 5. PR・自動Preview・本人確認
 
-変更説明をGit外の`.cake/changes.md`へ、今回の検証結果と別Agentレビュー要約を`.cake/report.md`へ日本語で用意する。通常の変更依頼では[既定の依頼範囲](../AGENTS.md#開発依頼の完了条件)に当該PRと専用Preview/DBの自動処理を含める。利用者の明示した制限と対象を確認したうえで、追加のPR作成依頼を待たず、既存コマンドでdraft PRを作成・更新する。
+次の文書をGit外へ日本語で用意する。
+
+- `.cake/changes.md`：変更説明
+- `.cake/report.md`：今回の検証結果と別Agentレビュー要約
+
+通常の変更依頼では[既定の依頼範囲](../AGENTS.md#開発依頼の完了条件)に当該PRと専用Preview/DBの自動処理を含める。利用者の明示した制限と対象を確認したうえで、追加のPR作成依頼を待たず、既存コマンドでdraft PRを作成・更新する。
 
 ```bash
 npm run task:pr -- --draft --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md
 ```
 
-同一repositoryの`codex/*`からmainへのPR作成・更新・再openが既存Actionsの自動Previewを起動する。PR未作成のpushだけでは作成しない。CloudからVercel/Neonの秘密値を渡したり、新しいdeploy経路を作ったりせず、mainのActionsが発行する正式receiptと`qa:status`で現在HEADのDeployment・固有URL・DB・generationを確認する。
+同一repositoryの`codex/*`からmainへのPR作成・更新・再openが既存Actionsの自動Previewを起動する。PR未作成のpushだけでは作成しない。CloudからVercel/Neonの秘密値を渡したり、新しいdeploy経路を作ったりせず、mainのActionsが発行する正式receiptと`qa:status`で現在HEADの次の項目を確認する。
+
+- Deployment
+- 固有URL
+- DB
+- generation
 
 CloudにVercel資格情報を置かずに正式ブラウザ検証を行う場合は、[既存のActions検証](development-workflow.md#6-readymergecloseと削除確認)を使う。最新mainと一致するcleanなcontrol checkoutで実行し、証拠と説明・報告のpathはcontrol側の絶対pathで指定する。
 
@@ -110,6 +142,20 @@ npm run qa:verify:ci -- --pr <PR番号> --sha <完全SHA> --deployment <Deployme
 npm run task:pr -- --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md --remote-proof /absolute/path/verify-<PR番号>.json --target-worktree /absolute/path/target-worktree
 ```
 
-成功証拠の保存先はcontrol側の`.cake/verify-<PR番号>.json`。`--target-worktree`は別の対象worktreeを管理する場合に使い、remote proof必須・非draft専用である。最新HEADのCI・レビュー・必要な検証・正式Preview証拠が揃えばCodexがReadyにし、PRリンク・結果・未実施項目・残る資源を日本語で通知する。条件未達ならdraftを維持する。
+成功証拠の保存先はcontrol側の`.cake/verify-<PR番号>.json`。`--target-worktree`は別の対象worktreeを管理する場合に使い、remote proof必須・非draft専用である。
+
+最新HEADの次の条件が揃えばCodexがReadyにする。条件未達ならdraftを維持する。
+
+- CI
+- レビュー
+- 必要な検証
+- 正式Preview証拠
+
+Readyにしたら、次の項目を日本語で通知する。
+
+- PRリンク
+- 結果
+- 未実施項目
+- 残る資源
 
 本人はPRの必須CI・レビューと自動Previewを確認してmergeする。main mergeはProduction deploy、PR merge/closeは専用Preview/DBのcleanupを起動するため、対象と影響を含む依頼範囲に従う。削除確認が必要な場合も、[既存の直接GET・provider一覧の再照合](development-workflow.md#6-readymergecloseと削除確認)を使う。Cloud用のローカルプロセス・オンメモリDBの破棄と、外部Preview資源の削除は別に記録する。
