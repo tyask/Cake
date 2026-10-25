@@ -15,7 +15,6 @@ const panels: Record<DashboardTab, { navigation: string; heading: string | null 
   settings: { navigation: "設定", heading: "設定" },
   analytics: { navigation: "集計", heading: "支出の集計" },
   import: { navigation: "取込", heading: "明細を取込" },
-  settlement: { navigation: "清算", heading: "共有の収支を清算" },
 };
 
 function bootstrap(): BootstrapData {
@@ -55,7 +54,7 @@ async function stable(page: Page) {
 async function assertPanel(page: Page, tab: DashboardTab, loading = false) {
   const main = page.locator(".app-main"), expected = panels[tab].heading;
   if (expected) await main.getByRole("heading", { name: expected, level: 1, exact: true }).waitFor();
-  else await main.getByRole("heading", { name: "最近の取引", exact: true }).waitFor();
+  else await main.getByRole("table", { name: "今月の収支", exact: true }).waitFor();
   if (!loading) await page.waitForFunction(() => !document.querySelector(".loading-line"));
   if (tab === "analytics") await main.getByTestId("analytics-total").waitFor();
   await stable(page);
@@ -122,8 +121,10 @@ test("実DashboardのPC・mobileタブ移動で見出しとパネルが重複・
         await page.goto(origin);
         await assertPanel(page, "home");
         const nav = page.locator(width < 768 ? ".bottom-nav" : ".app-nav");
-        const sequence: DashboardTab[] = ["transactions", "settings", "home", "analytics", "import", "settlement", "transactions",
-          "analytics", "transactions", "import", "home", "settlement", "settings", "transactions", "home"];
+        assert.equal(await nav.getByRole("button").count(), 5);
+        assert.equal(await nav.getByRole("button", { name: /清算$/ }).count(), 0, "清算操作はホームへ統合する");
+        const sequence: DashboardTab[] = ["transactions", "settings", "home", "analytics", "import", "home", "transactions",
+          "analytics", "transactions", "import", "home", "settings", "transactions", "home"];
         for (const tab of sequence) {
           await nav.getByRole("button", { name: new RegExp(`${panels[tab].navigation}$`) }).click();
           await page.locator(".loading-line").waitFor({ state: "visible" });

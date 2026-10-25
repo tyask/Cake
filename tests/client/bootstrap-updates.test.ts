@@ -86,11 +86,11 @@ test("選択先がなくなった場合は取得済みの明細も外し、最�
   assert.equal(current.selected?.transactions.length, 1);
 });
 
-test("取込・設定・集計を軽量取得にし、ホーム・明細・清算には全データを要求する", () => {
+test("取込・設定・集計を軽量取得にし、ホーム・明細には全データを要求する", () => {
   for (const tab of ["import", "settings", "analytics"] satisfies DashboardTab[]) {
     assert.equal(bootstrapScopeForTab(tab), "metadata");
   }
-  for (const tab of ["home", "transactions", "settlement"] satisfies DashboardTab[]) {
+  for (const tab of ["home", "transactions"] satisfies DashboardTab[]) {
     assert.equal(bootstrapScopeForTab(tab), "full");
   }
 });

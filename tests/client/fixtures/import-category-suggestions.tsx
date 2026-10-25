@@ -21,7 +21,7 @@ function render(workspace: WorkspaceData) {
       <div className="demo-banner">テストログインで使用中です（A）</div>
       {panel}
     </main>
-    <nav className="bottom-nav">{["ホーム", "取引明細", "取込", "清算", "設定"].map(label => <button type="button" key={label}><i>⌂</i><span>{label}</span></button>)}</nav>
+    <nav className="bottom-nav">{["ホーム", "取引明細", "取込", "集計", "設定"].map(label => <button type="button" key={label}><i>⌂</i><span>{label}</span></button>)}</nav>
   </div> : panel);
 }
 window.updateImportSuggestionWorkspace = render;

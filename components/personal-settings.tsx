@@ -30,7 +30,7 @@ export function PersonalSettings({ user, run }: {
         finally { setSaving(false); }
       }}>
         <label htmlFor="profile-name">ユーザー名<input id="profile-name" required maxLength={PROFILE_NAME_MAX_LENGTH} value={name} disabled={saving || loggingOut} onChange={event => setName(event.target.value)} autoComplete="nickname" /></label>
-        <p>支払者や清算画面に表示する名前です。</p>
+        <p>支払者やホームの共有費配分に表示する名前です。</p>
         <div className="personal-account-email"><span>メールアドレス</span><b>{user.email}</b></div>
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="secondary" disabled={saving || loggingOut || !name.trim() || name.trim() === user.name}>{saving ? "保存中…" : "変更を保存"}</button>
