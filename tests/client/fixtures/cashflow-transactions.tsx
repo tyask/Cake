@@ -45,6 +45,8 @@ if (mode === "personal" || mode === "single") {
   workspace.workspace.type = mode === "personal" ? "PERSONAL" : "SHARED";
   workspace.members = workspace.members.slice(0, 1);
   workspace.workspace.memberCount = 1;
+  workspace.transactions = workspace.transactions.map(item => ({ ...item, actorUserId: "a", actorName: "A",
+    splitWeights: { a: 1 }, expenseClass: mode === "personal" ? "PERSONAL" : "SHARED" }));
 }
 if (mode === "overflow") {
   workspace.members[0].name = "長い名前のユーザーＡ".repeat(6);
