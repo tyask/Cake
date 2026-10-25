@@ -84,6 +84,36 @@ Previewだけの読み取り専用資格情報とは扱わない。
 npm.cmd run qa:windows -- verify --pr <PR番号> --sha <40桁の完全SHA> --deployment <Deployment ID> --database <Native branch ID> --generation <DB generation UUID>
 ```
 
+5項目は、対象worktreeで正式statusを取得してから、公開結果の`.cake/preview.json`から読み取る。
+次の例は現在HEADとREADY applicationを確認し、取得した値をそのまま指定する。
+`qa:status`が失敗した場合は、残っている過去の結果ファイルへ進まない。
+
+```powershell
+npm.cmd run qa:status
+if ($LASTEXITCODE -ne 0) { throw '正式statusを取得できませんでした。' }
+$preview = Get-Content -LiteralPath '.cake\preview.json' -Raw -ErrorAction Stop |
+  ConvertFrom-Json -ErrorAction Stop
+$testedSha = git rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw '現在HEADを取得できませんでした。' }
+$testedSha = $testedSha.Trim()
+if ($preview.success -ne $true -or $preview.action -ne 'status' -or
+    $preview.source.state -ne 'open' -or $preview.source.sha -ne $testedSha -or
+    $preview.deployment.phase -ne 'application' -or $preview.deployment.state -ne 'READY' -or
+    $preview.deployment.sha -ne $testedSha) {
+  throw '現在HEADのREADY applicationと正式statusが一致しません。'
+}
+npm.cmd run qa:windows -- verify `
+  --pr $preview.source.pr `
+  --sha $testedSha `
+  --deployment $preview.deployment.id `
+  --database $preview.database.branchId `
+  --generation $preview.deployment.generation
+if ($LASTEXITCODE -ne 0) { throw '正式QAは完了していません。公開結果の停止段階を確認してください。' }
+```
+
+成功は終了コード0と公開結果の`success: true`・`code: OK`で確認する。
+この引数取得は事前の固定に使い、verify自身によるPR・資源・証拠の前後照合を省略しない。
+
 既定の対象worktreeは現在のworktree。対象と検証実装のcheckoutを分ける場合は、共通ランチャーを持つcleanなcheckoutから次を実行する。
 
 ```powershell
@@ -144,6 +174,29 @@ npm.cmd run task:pr -- --title '変更内容' --changes-file '.cake\changes.md' 
 この共通ランチャーのローカル証跡は `qa:verify:ci` のremote proofではなく、代用できない。
 別checkoutからのReady手順は[Readyと別checkout管理の条件](development-workflow.md#6-readymergecloseと削除確認)に従う。
 merge/closeと資源cleanupの承認も別途確認する。
+
+## 最終SHAのローカル検証
+
+実装・関連テストのcommitと別Agentレビューを終え、対象worktreeで実行する。
+文書のみの変更では、開発手順の例外に従って必要な検証と省略理由を記録する。
+
+```powershell
+$qaSha = git rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw '現在HEADを取得できませんでした。' }
+$qaStatus = git status --porcelain=v1
+if ($LASTEXITCODE -ne 0 -or $qaStatus) { throw '対象worktreeがcleanではありません。' }
+foreach ($check in 'check:node', 'lint', 'typecheck', 'check:docs', 'test', 'build') {
+  npm.cmd run $check
+  if ($LASTEXITCODE -ne 0) { throw "検証が失敗しました: $check" }
+}
+$qaAfterSha = git rev-parse HEAD
+if ($LASTEXITCODE -ne 0 -or $qaAfterSha -ne $qaSha) { throw '検証中にHEADが変わりました。' }
+$qaAfterStatus = git status --porcelain=v1
+if ($LASTEXITCODE -ne 0 -or $qaAfterStatus) { throw '検証後のworktreeがcleanではありません。' }
+```
+
+各native commandの終了コードを確認し、最初の失敗で停止する。
+PowerShellでは`$ErrorActionPreference`の設定だけでnative commandの失敗を止められると扱わない。
 
 ## 再構築とダミー試験
 

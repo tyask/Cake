@@ -14,6 +14,8 @@ Codex Cloudでは、次の順に進める。
 
 [.node-version](../.node-version) と同じ完全版のLinux版Node.js・npm・Gitを使う。
 Docker、外部DB、Google OAuth、Vercelの資格情報はCloud内のCake起動とブラウザ検証に不要。
+先に[次節](#2-branchworktree並列実行)で対象worktreeを用意し、表示された作業先へ移動する。
+以下のsetup・起動・検証コマンドは、その対象worktreeで実行する。
 依存と公式Playwright Chromiumを導入する。
 
 ```bash
@@ -21,6 +23,9 @@ npm run setup:cloud
 ```
 
 `setup:cloud`はNode版の一致を確認し、`npm ci`と公式Playwright Chromiumのインストールを行う。
+導入先は、実行した`setup-cloud.mjs`が属するrepositoryのrootである。
+元checkoutでのsetup成功だけでは、別worktreeの依存導入を完了したことにならない。
+終了コード0と「Cake Cloud: 依存関係とPlaywright Chromiumを準備しました。」を成功条件とする。
 Codex Cloudの環境設定にあるsetup script欄にも、このコマンドを指定できる。
 Chromiumのシステム依存が環境に不足し、システムパッケージを導入できる環境では次を使う。
 
@@ -47,10 +52,15 @@ npm_config_cache=/workspace/.npm-cache npm run setup:cloud
 元のcheckoutで次を実行し、表示された作業先へ移動する。
 `task:start`は最新`origin/main`から`codex/<task-name>`と専用worktreeを作り、そこで`npm ci`を行う。
 Cloudが既に対象タスク専用branch/worktreeを用意している場合は、そのbranch・比較元・既存変更を確認し、同じタスクを重複作成しない。
+初回cloneなどで依存がない場合の準備と、作業先・比較元の確認は[開発コマンド](development-commands.md)に従う。
 
 ```bash
 npm run task:start -- feature-name
 ```
+
+`task:start`が表示する`cd`を実行してから、前節の`setup:cloud`へ進む。
+`npm ci`の途中失敗では作成済みworktreeを保持するため、同じタスクを作り直さない。
+原因を解消したら、表示された既存worktreeへ移動し、そこで`npm ci`を再実行する。
 
 同一Cloud環境で並列作業する場合も、タスクごとにworktreeを分け、`node_modules`・`.next`・`.cake`・環境ファイルを分離する。
 Next.jsのポートも分ける。
@@ -92,6 +102,7 @@ Previewのデータや編集内容とは同期しない。
 Cloud専用worktreeには`.env`・`.env.local`・`.env.development`・`.env.development.local`を置かない。
 Next.jsによる外部接続設定の自動読込を防ぐため、これらがある場合は起動前に停止する。
 WSL側の環境ファイルを削除・コピーせず、環境ファイルのない専用worktreeを使う。
+対象worktreeに既存の環境ファイルがある場合も、削除・退避して起動せず、別のCloud専用worktreeを用意する。
 外部DB接続文字列、Google/Vercel等の秘密値を設定した`.env.local`は不要。
 
 Cloud runnerは外部接続・provider認証の値を子プロセスへ渡さず、Cloud用DBとテスト認証を使う。
@@ -135,6 +146,40 @@ Cloudでのローカル結果に加えて、PRの現在HEADのCI結果を確認�
 ```bash
 npm run qa:cloud -- --port 3001
 ```
+
+直前のQAが終了コード0で終わり、`CLOUD_BROWSER_PASSED cases=4 resources=0`を表示したことを確認する。
+対象worktreeで、今回の公開結果を次のコマンドで読み取る。
+これは結果の確認だけを行い、サーバーやブラウザを起動しない。
+
+```bash
+node --input-type=module <<'JS'
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+const proof = JSON.parse(readFileSync('.cake/cloud/verification.json', 'utf8'));
+const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+const branch = execFileSync('git', ['branch', '--show-current'], { encoding: 'utf8' }).trim();
+const status = execFileSync('git', ['status', '--porcelain=v1'], { encoding: 'utf8' }).trim();
+console.log(JSON.stringify({
+  success: proof.success, sha: proof.source.after?.sha, unchanged: proof.source.unchanged,
+  cases: proof.cases.map(item => ({ name: item.name, success: item.success, checks: item.checks.length })),
+  resources: proof.resources, failure: proof.failure,
+}, null, 2));
+assert.equal(proof.protocol, 'cake-cloud-browser/v1');
+assert.equal(proof.success, true);
+assert.equal(proof.source.after?.sha, head);
+assert.equal(proof.source.after?.branch, branch);
+assert.equal(status, '');
+assert.equal(proof.source.unchanged, true);
+assert.equal(proof.cases.length, 4);
+assert.ok(proof.cases.every(item => item.success));
+assert.ok(Object.values(proof.resources).every(count => count === 0));
+JS
+```
+
+`source.unchanged`は前後のSHA・branch一致とclean状態、`resources`の0はこのQAが起動した資源の後片付けを表す。
+失敗時は`failure.stage`・対象case・`resources`を確認し、0以外や`null`を残存なしと報告しない。
+HEADが進んでいれば、結果ファイルが成功でも現在HEADの検証済み証拠には使わない。
 
 結果と画面画像はGit外の`.cake/cloud/`へ保存する。報告には今回の次の項目を記載する。
 
