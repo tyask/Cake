@@ -9,6 +9,7 @@ const dateTimeOptions: Intl.DateTimeFormatOptions = {
   hour: "2-digit", minute: "2-digit", hour12: false,
 };
 const minuteFormatter = new Intl.DateTimeFormat("ja-JP", dateTimeOptions);
+const shortMinuteFormatter = new Intl.DateTimeFormat("ja-JP", { ...dateTimeOptions, year: undefined });
 const secondFormatter = new Intl.DateTimeFormat("ja-JP", { ...dateTimeOptions, second: "2-digit" });
 
 export function formatYen(value: number | bigint): string {
@@ -32,4 +33,9 @@ export function cashflowClass(value: number | bigint): "positive" | "negative" |
 /** Display only. datetime-local values must use the input conversion functions. */
 export function formatJstDateTime(value: string, precision: DateTimePrecision = DateTimePrecision.Second): string {
   return (precision === DateTimePrecision.Minute ? minuteFormatter : secondFormatter).format(new Date(value));
+}
+
+/** Compact display; retain the complete date in the accessible label or detail. */
+export function formatJstShortDateTime(value: string): string {
+  return shortMinuteFormatter.format(new Date(value));
 }

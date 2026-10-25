@@ -46,6 +46,7 @@ test("割合の単位は共通の3択で、CSV取込と定期支払いの保存�
             const url = new URL(route.request().url());
             if (url.origin !== origin) { errors.push("unexpected origin"); await route.abort(); return; }
             if (!url.pathname.startsWith("/api/")) { await route.continue(); return; }
+            if (url.pathname === "/api/import/history" && route.request().method() === "GET") { await route.fulfill({ json: { history: [] } }); return; }
             const payload = route.request().postDataJSON();requests.push({ path: url.pathname, payload });
             if (url.pathname === "/api/import/duplicates") await route.fulfill({ json: { externalIds: [], transactions: [{
               externalId: payPayExternalId("2026-10-18T03:00:42.000Z", "duplicate"), merchant: "duplicate", amountYen: 101, source: "PAYPAY",

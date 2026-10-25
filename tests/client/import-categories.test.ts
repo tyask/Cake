@@ -42,6 +42,7 @@ async function openFixture(browser: Browser, origin: string, width: number, sele
     const url = new URL(route.request().url());
     if (url.origin !== origin) { errors.push("unexpected origin"); await route.abort(); return; }
     if (!url.pathname.startsWith("/api/")) { await route.continue(); return; }
+    if (url.pathname === "/api/import/history" && route.request().method() === "GET") { await route.fulfill({ json: { history: [] } }); return; }
     assert.equal(route.request().method(), "POST");
     const payload = route.request().postDataJSON() as Record<string, unknown>;
     requests.push({ path: url.pathname, payload });
