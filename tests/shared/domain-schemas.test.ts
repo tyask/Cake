@@ -170,3 +170,15 @@ test("選択IDの大小文字と既存の重複・空配列ポリシーを維持
   assert.equal(appActionInputSchema.safeParse({ action: "deleteTransactions", workspaceId, transactionIds: [] }).success, false);
   assert.equal(appActionInputSchema.safeParse({ action: "reorderRules", workspaceId, ruleIds: [] }).success, true);
 });
+
+
+test("CSVのメモは2000文字・空文字・改行を受け付け、省略互換を保ち不正入力を拒否する", () => {
+  for (const memo of [undefined, "", "  メモ\n2行目  ", "あ".repeat(2000)]) {
+    const parsed = parseAppActionInput({ ...bulk, items: [{ ...imported, memo }] });
+    assert.equal(parsed.action, "bulkImport");
+    if (parsed.action === "bulkImport") assert.equal(parsed.items[0].memo, memo);
+  }
+  for (const memo of [null, 1, {}, "あ".repeat(2001)]) {
+    assert.equal(appActionInputSchema.safeParse({ ...bulk, items: [{ ...imported, memo }] }).success, false);
+  }
+});

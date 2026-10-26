@@ -59,7 +59,7 @@ async function openFixture(browser: Browser, origin: string, width: number, api:
     await page.getByRole("button", { name: "確認して登録", exact: true }).waitFor();
   };
   await upload(source);
-  const row = (merchant: string) => page.locator("[data-import-key]").filter({ has: page.locator('td[data-label="取引先"] b', { hasText: new RegExp(`^${merchant}$`) }) });
+  const row = (merchant: string) => page.locator("[data-import-key]").filter({ has: page.locator(`td[data-label="取引先"] input[value="${merchant}"]`) });
   if (width <= 768) for (const merchant of [...new Set(merchants)]) {
     const rows = row(merchant);
     for (let index = 0; index < await rows.count(); index++) await rows.nth(index).getByRole("button", { name: `${merchant}の詳細を開く`, exact: true }).tap();
@@ -82,6 +82,26 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
   try {
     if (process.env.CAKE_IMPORT_SCREENSHOTS) await mkdir(".cake/output/playwright", { recursive: true });
     for (const [name, width] of [["PC", 1440], ["mobile", 390]] as const) {
+      await t.test(`${name}: 編集後の取引先で補完し、前後空白を除いた候補を反映する`, async () => {
+        const { context, page, requests, errors, row } = await openFixture(browser, origin, width, async (route, request) => {
+          assert.equal(request.path, "/api/import/category-suggestions");
+          await route.fulfill({ json: { suggestions: [{ merchant: "編集した店舗", categoryId: "food" }] } });
+        });
+        try {
+          const key = await row("selected").getAttribute("data-import-key");
+          const edited = page.locator(`[data-import-key="${key}"]`);
+          await edited.getByLabel("取引先", { exact: true }).fill("  編集した店舗  ");
+          await edited.getByLabel("メモ", { exact: true }).fill("補完後も保持");
+          await page.getByRole("button", { name: "カテゴリ自動補完", exact: true }).click();
+          await page.getByRole("status").filter({ hasText: "1件のカテゴリを補完しました。" }).waitFor();
+          assert.ok((requests[1].payload.merchants as string[]).includes("編集した店舗"));
+          assert.equal((requests[1].payload.merchants as string[]).includes("selected"), false);
+          assert.equal(await edited.getByLabel("カテゴリ", { exact: true }).inputValue(), "food");
+          assert.equal(await edited.getByLabel("メモ", { exact: true }).inputValue(), "補完後も保持");
+          assert.deepEqual(errors, []);
+        } finally { await context.close(); }
+      });
+
       await t.test(`${name}: 短い説明・操作中無効化・選択状態と入力の保持・再試行・保存payload`, async () => {
         let releaseSuggestion: (() => Promise<void>) | undefined, saveAttempts = 0;
         const fixture = await openFixture(browser, origin, width, async (route, request) => {
@@ -164,6 +184,8 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
           }
           assert.equal(await page.locator(".import-summary select").isDisabled(), true);
           assert.equal(await category("unchecked").isDisabled(), true);
+          assert.equal(await row("unchecked").first().getByLabel("取引先", { exact: true }).isDisabled(), true);
+          assert.equal(await row("unchecked").first().getByLabel("メモ", { exact: true }).isDisabled(), true);
           assert.equal(await row("selected").getByRole("checkbox").isDisabled(), true);
           assert.ok(releaseSuggestion);
           assert.deepEqual(requests[1], { path: "/api/import/category-suggestions", payload: { workspaceId: "workspace", merchants: ["unchecked", "selected", "personal", "none", "archived", "gone"] } });

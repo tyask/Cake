@@ -13,6 +13,7 @@ export interface PayPayImportItem {
   expenseClass: ExpenseClass;
   splitWeights: SplitWeights;
   categoryId?: string | null;
+  memo?: string;
 }
 
 export interface PayPayImportInput {
@@ -58,14 +59,14 @@ export async function persistPayPayImport(input: PayPayImportInput) {
     sql`
       INSERT INTO transactions (workspace_id, occurred_at, merchant, method, type, amount_yen, actor_user_id,
         expense_class, split_weights, external_id, source, import_batch_id, created_by, updated_by,
-        category_id, category_confirmed)
+        category_id, category_confirmed, memo)
       SELECT ${input.workspaceId}::uuid, item."occurredAt", item.merchant, item.method, 'PAYMENT',
         item."amountYen", item."actorUserId", item."expenseClass", item."splitWeights",
         item."externalId", 'PAYPAY', ${batchId}::uuid, ${input.userId}, ${input.userId},
-        item."categoryId", item."categoryId" IS NOT NULL
+        item."categoryId", item."categoryId" IS NOT NULL, COALESCE(item.memo, '')
       FROM jsonb_to_recordset(${JSON.stringify([...firstByExternalId.values()])}::jsonb) AS item(
         "occurredAt" timestamptz, merchant text, method text, "amountYen" integer, "actorUserId" text,
-        "expenseClass" text, "splitWeights" jsonb, "externalId" text, "categoryId" uuid
+        "expenseClass" text, "splitWeights" jsonb, "externalId" text, "categoryId" uuid, memo text
       ) ORDER BY item."externalId"
       ON CONFLICT (workspace_id, external_id) DO UPDATE
         SET external_id = transactions.external_id

@@ -3,10 +3,11 @@
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { RunAppAction } from "@/lib/shared/schemas/app-input";
 import { defaultSplitWeights, personalSplitWeights, validateSplitWeights } from "@/lib/shared/expense-splits";
-import { isPayPayRowImportable, parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/shared/paypay";
+import { isPayPayRowImportable, payPayPreviewEditError, parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/shared/paypay";
 import { applyPayPayDuplicateChecks, MAX_DUPLICATE_CHECK_IDS, type ExistingPayPayTransaction } from "@/lib/shared/import-duplicates";
 import { MAX_IMPORT_CATEGORY_SUGGESTION_MERCHANTS, type ImportCategorySuggestionsResponse } from "@/lib/shared/import-category-suggestions";
 import type { ExpenseClass, WorkspaceData } from "@/lib/shared/types";
+import { merchantSchema } from "@/lib/shared/schemas/domain-schemas";
 import { IMPORT_FORMATS, type ImportFormat } from "@/lib/shared/import-history";
 import { ImportPreviewTable } from "./import-preview-table";
 import { PageHeading } from "./dashboard-ui";
@@ -81,6 +82,7 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
   const suggestionController = useRef<AbortController | null>(null);
   const latestWorkspace = useRef(selected);
   const importableRows = rows.filter(isPayPayRowImportable);
+  const editError = importableRows.map(payPayPreviewEditError).find(Boolean);
   const personalActorInvalid = actorId !== currentUserId && importableRows.some(row => row.expenseClass === "PERSONAL");
   const selectedCount = importableRows.filter(row => row.selected).length;
   const busy = reading || saving || suggesting;
@@ -181,14 +183,14 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
   }
 
   async function suggestCategories() {
-    if (busy || suggestionController.current || unclassifiedCount === 0) return;
+    if (busy || editError || suggestionController.current || unclassifiedCount === 0) return;
     const controller = new AbortController();
     suggestionController.current = controller;
     const workspaceId = selected.workspace.id;
     const requestId = fileRequest.current;
     const isCurrent = () => !controller.signal.aborted && suggestionController.current === controller
       && requestId === fileRequest.current && latestWorkspace.current.workspace.id === workspaceId;
-    const merchants = [...new Set(importableRows.filter(row => row.categoryId === null).map(row => row.merchant))];
+    const merchants = [...new Set(importableRows.filter(row => row.categoryId === null).map(row => row.merchant.trim()))];
     setSuggesting(true);
     setError(null);
     setSuggestionStatus(null);
@@ -207,7 +209,7 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
       if (!isCurrent()) return;
       const availableCategories = new Set(latestWorkspace.current.categories.filter(category => category.archivedAt === null).map(category => category.id));
       const suggestedCategory = (row: PayPayPreviewRow) => {
-        const categoryId = suggestions.get(row.merchant);
+        const categoryId = suggestions.get(row.merchant.trim());
         return isPayPayRowImportable(row) && row.categoryId === null && categoryId && availableCategories.has(categoryId) ? categoryId : null;
       };
       const count = rows.filter(row => suggestedCategory(row) !== null).length;
@@ -231,9 +233,10 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
     setError(null);
     setSaving(true);
     try {
+      if (editError) throw new Error(editError);
       if (personalActorInvalid) throw new Error("個人の明細は本人だけが登録できます。支払者を自分に変更するか、区分を共有に変更してください。");
       const items = importableRows.map((row) => ({
-        occurredAt: payPayDateToIso(row.occurredAt), merchant: row.merchant, method: row.method,
+        occurredAt: payPayDateToIso(row.occurredAt), merchant: merchantSchema.parse(row.merchant), memo: row.memo, method: row.method,
         amountYen: row.amountYen, externalId: row.externalId, expenseClass: row.expenseClass, actorUserId: actorId,
         splitWeights: validateSplitWeights(row.splitWeights, selected.members, row.expenseClass, actorId),
         categoryId: row.categoryId,
@@ -291,7 +294,7 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
                 label="選択行のカテゴリ" disabled={busy || selectedCount === 0} onChange={setBulkCategoryId} /></div>
               <button disabled={busy || selectedCount === 0} onClick={bulkCategory}>カテゴリを設定</button>
             </div>
-            <CategorySuggestionButton disabled={busy || unclassifiedCount === 0} working={suggesting} onClick={() => void suggestCategories()} />
+            <CategorySuggestionButton disabled={busy || !!editError || unclassifiedCount === 0} working={suggesting} onClick={() => void suggestCategories()} />
           </div>
         </div>
         <div className={styles.selectionGroup} role="group" aria-label="選択行の操作">
@@ -308,14 +311,19 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
       <ImportPreviewTable onDelete={removePreviewRow} rows={rows} members={selected.members} actorId={actorId} currentUserId={currentUserId} saving={busy} categoryChoices={categoryChoices}
         onSelect={(key, checked) => setRows(current => current.map(row => row.key === key ? { ...row, selected: checked } : row))}
         onSelectAll={checked => setRows(current => current.map(row => isPayPayRowImportable(row) ? { ...row, selected: checked } : row))}
+        onChangeText={(key, field, value) => {
+          if (busy) return;
+          setSuggestionStatus(null);
+          setRows(current => current.map(row => row.key === key && isPayPayRowImportable(row) ? { ...row, [field]: value } : row));
+        }}
         onChangeClass={(key, expenseClass) => setRows(current => current.map(row => row.key === key ? changeClass(row, expenseClass) : row))}
         onChangeSplit={(key, splitWeights) => setRows(current => current.map(row => row.key === key ? { ...row, splitWeights } : row))}
         onChangeCategory={(key, categoryId) => setRows(current => current.map(row => row.key === key && isPayPayRowImportable(row) && !busy ? { ...row, categoryId } : row))} />
-      {error && <p className="import-error form-error" role="alert">{error}</p>}
+      {(error || editError) && <p className="import-error form-error" role="alert">{error || editError}</p>}
       <div className={`sticky-actions ${styles.confirmActions}`}>
         <small className={styles.confirmation}>表示中のカテゴリを確定し、次回のカテゴリ補完に利用します。</small>
         <button className="secondary" disabled={busy} onClick={() => { setRows([]); setFileName(""); setSuggestionStatus(null); }}>キャンセル</button>
-        <button className="primary" disabled={busy || importableRows.length === 0 || personalActorInvalid} onClick={submit}>{saving ? "登録中…" : "確認して登録"}</button>
+        <button className="primary" disabled={busy || !!editError || importableRows.length === 0 || personalActorInvalid} onClick={submit}>{saving ? "登録中…" : "確認して登録"}</button>
       </div>
     </section>}
     <ImportHistoryPanel key={`${selected.workspace.id}:${format}`} workspaceId={selected.workspace.id} format={format} refreshKey={importHistoryRevision} />

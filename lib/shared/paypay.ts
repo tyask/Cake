@@ -1,6 +1,7 @@
 import Papa from "papaparse";
 import { MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "./domain-values";
 import { amountYenSchema, merchantSchema, methodSchema } from "./schemas/domain-schemas";
+import { transactionMemoSchema } from "./schemas/transaction-memo";
 import { prepareDefaultRuleMatcher, transactionDefaults } from "./expense-splits";
 import { applyPayPayDuplicateChecks } from "./import-duplicates";
 import { payPayDateToIso, payPayExternalId } from "./paypay-id";
@@ -13,6 +14,7 @@ export interface PayPayPreviewRow {
   selected: boolean;
   occurredAt: string;
   merchant: string;
+  memo: string;
   method: string;
   amountYen: number;
   externalId: string;
@@ -25,6 +27,12 @@ export interface PayPayPreviewRow {
 
 export function isPayPayRowImportable(row: PayPayPreviewRow): boolean {
   return !row.error && !row.duplicate;
+}
+
+export function payPayPreviewEditError(row: Pick<PayPayPreviewRow, "merchant" | "memo">): string | null {
+  if (!merchantSchema.safeParse(row.merchant).success) return `取引先は1〜${MAX_MERCHANT_LENGTH}文字で入力してください。`;
+  const memo = transactionMemoSchema.safeParse(row.memo);
+  return memo.success ? null : memo.error.issues[0].message;
 }
 
 const REQUIRED_HEADERS = [
@@ -96,6 +104,7 @@ export function parsePayPayCsv(
         selected: false,
         occurredAt,
         merchant,
+        memo: "",
         method,
         amountYen,
         externalId,
