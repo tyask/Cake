@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { build } from "esbuild";
 import { chromium, type Route } from "playwright";
 import { resolveAnalyticsPeriods, type AnalyticsDataset, type AnalyticsQuery } from "../../lib/shared/analytics";
@@ -168,15 +168,64 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         if (width === 1440) {
           const trend = f.page.getByRole("group", { name: "月ごとのカテゴリ別支出額。下の表でも確認できます。", exact: true });
           const surface = trend.locator("svg.recharts-surface");
-          await surface.scrollIntoViewIfNeeded();
-          // Recharts gives an active mouse hover priority over keyboard focus.
-          // Finish the pointer interaction before checking keyboard-only navigation.
-          await f.page.mouse.move(0, 0); await f.stable();
-          await surface.focus();
-          assert.equal(await surface.evaluate(element => element === document.activeElement), true, "月次グラフへキーボードfocusを移す");
-          await trend.getByText("2026-05", { exact: true }).waitFor();
-          await f.page.keyboard.press("ArrowRight");
-          await trend.getByText("2026-06", { exact: true }).waitFor();
+          await trend.evaluate(group => {
+            const chart = group as HTMLElement & { keyboardTrace?: Record<string, string | number | null>[] };
+            chart.keyboardTrace = [];
+            for (const type of ["focusin", "focusout", "mouseenter", "mouseleave", "mousemove", "keydown"]) group.addEventListener(type, event => {
+              const tooltip = group.querySelector(".recharts-tooltip-wrapper");
+              chart.keyboardTrace!.push({ type, at: performance.now(), key: event instanceof KeyboardEvent ? event.key : null,
+                x: event instanceof MouseEvent ? event.clientX : null, y: event instanceof MouseEvent ? event.clientY : null,
+                activeElement: document.activeElement?.tagName ?? null, label: tooltip?.querySelector("b")?.textContent ?? null,
+                visibility: tooltip ? getComputedStyle(tooltip).visibility : null });
+              if (chart.keyboardTrace!.length > 100) chart.keyboardTrace!.shift();
+            }, true);
+          });
+          let keyboardStage = "focus";
+          try {
+            await surface.scrollIntoViewIfNeeded();
+            // Recharts gives an active mouse hover priority over keyboard focus.
+            // Enter this chart's plot-free margin before leaving, so its own
+            // hover state ends even when the pointer was over another chart.
+            const box = (await surface.boundingBox())!;
+            await f.page.mouse.move(box.x + 1, box.y + 1); await f.stable();
+            await f.page.mouse.move(0, 0); await f.stable();
+            await surface.focus();
+            assert.equal(await surface.evaluate(element => element === document.activeElement), true, "月次グラフへキーボードfocusを移す");
+            const months = ["2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"];
+            // Focus may retain an inactive keyboard index after blur. Navigate to
+            // a known endpoint instead of assuming focus selects the first month.
+            await f.page.keyboard.press("ArrowLeft"); await f.stable();
+            for (let step = 0; step < months.length; step++) {
+              keyboardStage = `reach-last-${step}`;
+              await f.page.keyboard.press("ArrowRight"); await f.stable();
+            }
+            keyboardStage = "last-month";
+            await trend.getByText(months.at(-1)!, { exact: true }).waitFor();
+            for (const month of months.slice(0, -1).reverse()) {
+              keyboardStage = `left-${month}`;
+              await f.page.keyboard.press("ArrowLeft");
+              await trend.getByText(month, { exact: true }).waitFor();
+            }
+            for (const month of months.slice(1)) {
+              keyboardStage = `right-${month}`;
+              await f.page.keyboard.press("ArrowRight");
+              await trend.getByText(month, { exact: true }).waitFor();
+            }
+          } catch (error) {
+            try {
+              const diagnostic = await trend.evaluate(group => {
+                const tooltip = group.querySelector(".recharts-tooltip-wrapper");
+                return { activeElement: { tag: document.activeElement?.tagName, role: document.activeElement?.getAttribute("role") },
+                  label: tooltip?.querySelector("b")?.textContent ?? null, visibility: tooltip ? getComputedStyle(tooltip).visibility : null,
+                  scrollY, trace: (group as HTMLElement & { keyboardTrace?: unknown[] }).keyboardTrace ?? [] };
+              });
+              const record = { recordedAt: new Date().toISOString(), keyboardStage, ...diagnostic };
+              console.error("ANALYTICS_KEYBOARD_FAILURE", JSON.stringify(record));
+              await mkdir(".cake/output/playwright", { recursive: true });
+              await writeFile(".cake/output/playwright/analytics-keyboard-failure.json", JSON.stringify(record, null, 2));
+            } catch { /* Keep the original keyboard assertion failure. */ }
+            throw error;
+          }
         }
         assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "ページ全体の横溢れなし");
         if (width <= 768) {
