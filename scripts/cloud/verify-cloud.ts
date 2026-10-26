@@ -164,6 +164,8 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       contexts.add(context); proof.resources.browserContexts = contexts.size;
       let routeFailed = false;
       const page = await context.newPage(); activePage = page; page.setDefaultTimeout(30_000);
+      let analyticsRequestCount = 0;
+      page.on('request', request => { if (new URL(request.url()).pathname === '/api/analytics') analyticsRequestCount++; });
       stage = 'boundary';
       // Playwright routes only the first URL in a redirect chain; CDP checks every hop.
       const interception = await context.newCDPSession(page);
@@ -232,32 +234,60 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
         .reduce((total, bucket) => total + BigInt(bucket.burdenYen), BigInt(0));
       const sharedTotal = dataset.buckets.filter(bucket => bucket.scope === 'current' && bucket.expenseClass === 'SHARED')
         .reduce((total, bucket) => total + BigInt(bucket.burdenYen), BigInt(0));
-      const assertOwnCashflow = async (classes: readonly string[]) => {
-        const sum = (buckets: AnalyticsDataset['buckets']) => buckets
-          .filter(bucket => bucket.scope === 'current' && bucket.memberId === `test-user-${item.user}` && classes.includes(bucket.expenseClass))
-          .reduce((total, bucket) => total + BigInt(bucket.burdenYen), BigInt(0));
-        const income = sum(dataset.receiptBuckets), expense = sum(dataset.buckets);
+      const categoriesById = new Map(dataset.categories.map(category => [category.id, category]));
+      const months: string[] = [];
+      const firstMonth = new Date(`${dataset.periods.trend.from.slice(0, 7)}-01T00:00:00Z`);
+      for (let offset = 0; offset < 6; offset++) {
+        const month = new Date(firstMonth); month.setUTCMonth(month.getUTCMonth() + offset);
+        months.push(month.toISOString().slice(0, 7));
+      }
+      requireCondition(months.at(-1) === dataset.periods.trend.to.slice(0, 7));
+      type CategorySelection = ReadonlySet<string | null> | undefined;
+      const sumAnalytics = (buckets: AnalyticsDataset['buckets'], scope: 'current' | 'comparison' | 'trend',
+        classes: readonly string[], categoryIds: CategorySelection, own: boolean, month?: string) => buckets
+        .filter(bucket => bucket.scope === scope && classes.includes(bucket.expenseClass)
+          && (!own || bucket.memberId === `test-user-${item.user}`) && (!month || bucket.month === month)
+          && (!categoryIds || categoryIds.has(bucket.categoryId && categoriesById.has(bucket.categoryId) ? bucket.categoryId : null)))
+        .reduce((total, bucket) => total + BigInt(bucket.burdenYen), BigInt(0));
+      const assertOwnCashflow = async (classes: readonly string[], categoryIds?: CategorySelection, extraIncome = BigInt(0)) => {
+        const income = sumAnalytics(dataset.receiptBuckets, 'current', classes, categoryIds, true) + extraIncome;
+        const expense = sumAnalytics(dataset.buckets, 'current', classes, categoryIds, true);
+        const difference = expense - sumAnalytics(dataset.buckets, 'comparison', classes, categoryIds, true);
         requireCondition(await page.getByTestId('analytics-income').textContent() === formatCashflow(income)
           && await page.getByTestId('analytics-total').textContent() === formatCashflow(-expense)
-          && await page.getByTestId('analytics-balance').textContent() === formatCashflow(income - expense));
+          && await page.getByTestId('analytics-balance').textContent() === formatCashflow(income - expense)
+          && await page.getByTestId('analytics-difference').textContent() === `${difference > BigInt(0) ? '+' : ''}${formatYen(difference)}`);
       };
-      const assertOwnTrend = async (extraIncome = BigInt(0)) => {
-        const chart = page.getByTestId('analytics-cashflow-chart');
-        await chart.locator('.analytics-cashflow-balance .recharts-line-curve').waitFor();
-        const month = dataset.periods.current.to.slice(0, 7);
-        const sum = (buckets: AnalyticsDataset['buckets']) => buckets
-          .filter(bucket => bucket.scope === 'trend' && bucket.month === month && bucket.memberId === `test-user-${item.user}`)
-          .reduce((total, bucket) => total + BigInt(bucket.burdenYen), BigInt(0));
-        const income = sum(dataset.receiptBuckets) + extraIncome, expense = sum(dataset.buckets);
+      const assertOwnTrend = async (extraIncome = BigInt(0), classes: readonly string[] = ['SHARED', 'PERSONAL'], categoryIds?: CategorySelection) => {
         const section = page.locator('section[aria-labelledby="analytics-trend-heading"]');
         const details = section.locator('details');
         if (!await details.evaluate(element => (element as HTMLDetailsElement).open)) await details.locator('summary').click();
         const table = section.getByRole('table', { name: '月ごとの収入・支出・収支（円）', exact: true });
-        const cells = await table.getByRole('row', { name: new RegExp(`^${month.replace('-', '/')} `) }).getByRole('cell').allTextContents();
-        requireCondition(cells.length === 3 && cells[0] === formatCashflow(income)
-          && cells[1] === formatCashflow(-expense) && cells[2] === formatCashflow(income - expense));
+        requireCondition(await table.locator('tbody tr').count() === months.length);
+        let hasAmounts = false;
+        for (const month of months) {
+          const income = sumAnalytics(dataset.receiptBuckets, 'trend', classes, categoryIds, true, month)
+            + (month === dataset.periods.current.to.slice(0, 7) ? extraIncome : BigInt(0));
+          const expense = sumAnalytics(dataset.buckets, 'trend', classes, categoryIds, true, month);
+          hasAmounts ||= income > BigInt(0) || expense > BigInt(0);
+          const cells = await table.getByRole('row', { name: new RegExp(`^${month.replace('-', '/')} `) }).getByRole('cell').allTextContents();
+          requireCondition(cells.length === 3 && cells[0] === formatCashflow(income)
+            && cells[1] === formatCashflow(-expense) && cells[2] === formatCashflow(income - expense));
+        }
+        if (hasAmounts) await page.getByTestId('analytics-cashflow-chart').locator('.analytics-cashflow-balance .recharts-line-curve').waitFor();
         requireCondition(await page.locator('#analytics-trend-heading').evaluate(element =>
           Boolean(element.compareDocumentPosition(document.getElementById('analytics-composition-heading')!) & Node.DOCUMENT_POSITION_FOLLOWING)));
+      };
+      const assertSharedCashflow = async (categoryIds?: CategorySelection) => {
+        const expense = sumAnalytics(dataset.buckets, 'current', ['SHARED'], categoryIds, false);
+        requireCondition(await page.getByTestId('analytics-total').textContent() === formatYen(expense));
+        const section = page.locator('section[aria-labelledby="analytics-trend-heading"]');
+        const details = section.locator('details');
+        if (!await details.evaluate(element => (element as HTMLDetailsElement).open)) await details.locator('summary').click();
+        const table = section.getByRole('table', { name: '月ごとの支出額（円）', exact: true });
+        const cells = await table.getByRole('row', { name: /^合計 / }).getByRole('cell').allTextContents();
+        requireCondition(cells.length === months.length && cells.every((cell, index) => cell === formatYen(
+          sumAnalytics(dataset.buckets, 'trend', ['SHARED'], categoryIds, false, months[index]))));
       };
       requireCondition(await page.getByTestId('analytics-total').textContent() === formatCashflow(-ownTotal));
       await assertOwnCashflow(['SHARED', 'PERSONAL']);
@@ -279,6 +309,79 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       await assertOwnCashflow(['SHARED', 'PERSONAL']);
       await assertOwnTrend();
       await screenshot('analytics'); check('analytics-self-cashflow-class-filters-and-shared-api-totals');
+      const categorySummary = page.locator('summary').filter({ hasText: /^集計に含めるカテゴリ/ });
+      await categorySummary.click();
+      const categoryGroup = page.getByRole('group', { name: '集計に含めるカテゴリ', exact: true });
+      const openCategories = async () => {
+        if (!await categoryGroup.isVisible()) await categorySummary.click();
+        await categoryGroup.waitFor();
+      };
+      const chooseAllCategories = async () => {
+        await openCategories(); await categoryGroup.getByRole('button', { name: 'すべて選択', exact: true }).click();
+      };
+      const clearCategories = async () => {
+        await openCategories(); await categoryGroup.getByRole('button', { name: 'すべて解除', exact: true }).click();
+      };
+      requireCondition(await categoryGroup.getByRole('checkbox').count() === dataset.categories.length + 1
+        && await categoryGroup.getByRole('checkbox').evaluateAll(elements => elements.every(element => (element as HTMLInputElement).checked)));
+      const categoryRequests = analyticsRequestCount;
+      await clearCategories();
+      await page.getByText('集計に含めるカテゴリを1つ以上選んでください。', { exact: true }).waitFor();
+      requireCondition(await page.getByTestId('analytics-total').count() === 0);
+      const food = dataset.categories.find(category => category.name === '食費' && category.parentId === null);
+      requireCondition(food);
+      const foodIds = new Set<string | null>([food.id]);
+      for (const category of dataset.categories) {
+        let ancestor = category.parentId;
+        while (ancestor && ancestor !== food.id) ancestor = categoriesById.get(ancestor)?.parentId ?? null;
+        if (ancestor === food.id) foodIds.add(category.id);
+      }
+      requireCondition(foodIds.size > 1);
+      const foodCheckbox = categoryGroup.getByRole('checkbox', { name: food.name, exact: true });
+      await foodCheckbox.check();
+      await assertOwnCashflow(['SHARED', 'PERSONAL'], foodIds);
+      await assertOwnTrend(BigInt(0), ['SHARED', 'PERSONAL'], foodIds);
+      await page.getByRole('combobox', { name: 'カテゴリの細かさ', exact: true }).selectOption('all');
+      await assertOwnCashflow(['SHARED', 'PERSONAL'], foodIds);
+      const leaf = dataset.categories.find(category => foodIds.has(category.id)
+        && !dataset.categories.some(child => child.parentId === category.id));
+      requireCondition(leaf);
+      const leafPath = [leaf.name];
+      let ancestor = leaf.parentId;
+      while (ancestor) {
+        const category = categoriesById.get(ancestor); requireCondition(category);
+        leafPath.unshift(category.name); ancestor = category.parentId;
+      }
+      const leafCheckbox = categoryGroup.getByRole('checkbox', { name: leafPath.join(' › '), exact: true });
+      await leafCheckbox.uncheck();
+      const partialFoodIds = new Set(foodIds); partialFoodIds.delete(leaf.id);
+      requireCondition(await foodCheckbox.evaluate(element => (element as HTMLInputElement).indeterminate));
+      await assertOwnCashflow(['SHARED', 'PERSONAL'], partialFoodIds);
+      await assertOwnTrend(BigInt(0), ['SHARED', 'PERSONAL'], partialFoodIds);
+      await page.getByRole('radio', { name: '共有費全体', exact: true }).check();
+      await assertSharedCashflow(partialFoodIds);
+      await page.getByRole('radio', { name: '自分の収支', exact: true }).check();
+      await assertOwnCashflow(['SHARED', 'PERSONAL'], partialFoodIds);
+      await clearCategories();
+      await categoryGroup.getByRole('checkbox', { name: '未分類', exact: true }).check();
+      const unclassified = new Set<string | null>([null]);
+      await assertOwnCashflow(['SHARED', 'PERSONAL'], unclassified);
+      await assertOwnTrend(BigInt(0), ['SHARED', 'PERSONAL'], unclassified);
+      requireCondition(analyticsRequestCount === categoryRequests);
+      await screenshot('analytics-categories');
+      check('analytics-category-parent-child-unclassified-six-month-api-totals-without-fetch');
+      await navigate('設定');
+      await navigate('集計');
+      await page.getByTestId('analytics-total').waitFor();
+      await openCategories();
+      requireCondition(await categoryGroup.getByRole('checkbox', { name: '未分類', exact: true }).isChecked()
+        && !await foodCheckbox.isChecked());
+      await assertOwnCashflow(['SHARED', 'PERSONAL'], unclassified);
+      await assertOwnTrend(BigInt(0), ['SHARED', 'PERSONAL'], unclassified);
+      await chooseAllCategories();
+      await page.getByRole('combobox', { name: 'カテゴリの細かさ', exact: true }).selectOption('1');
+      await assertOwnCashflow(['SHARED', 'PERSONAL']);
+      check('analytics-category-selection-preserved-between-tabs');
       stage = 'settings'; await navigate('設定'); await screenshot('settings'); check('settings-navigation');
       stage = 'transactions'; await navigate('取引明細');
       stage = 'create';
@@ -302,6 +405,18 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       requireCondition(await page.getByTestId('analytics-total').textContent() === formatCashflow(-ownTotal));
       await assertOwnTrend(BigInt(1234));
       check('personal-income-ui-create-to-analytics-cashflow');
+      requireCondition(matches[0].categoryId === null);
+      await clearCategories();
+      await categoryGroup.getByRole('checkbox', { name: '未分類', exact: true }).check();
+      await assertOwnCashflow(['SHARED', 'PERSONAL'], unclassified, BigInt(1234));
+      await assertOwnTrend(BigInt(1234), ['SHARED', 'PERSONAL'], unclassified);
+      await clearCategories();
+      await foodCheckbox.check();
+      await assertOwnCashflow(['SHARED', 'PERSONAL'], foodIds);
+      await assertOwnTrend(BigInt(0), ['SHARED', 'PERSONAL'], foodIds);
+      await chooseAllCategories();
+      await assertOwnCashflow(['SHARED', 'PERSONAL'], undefined, BigInt(1234));
+      check('personal-income-category-filter-includes-and-excludes-created-receipt');
       stage = 'transactions'; await navigate('取引明細');
       stage = 'privacy';
       const otherUser = item.user === 'a' ? 'b' : 'a';

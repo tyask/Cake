@@ -30,7 +30,13 @@ export type AnalyticsDataset = {
   buckets: AnalyticsBucket[];
   receiptBuckets: AnalyticsBucket[];
 };
-export type AnalyticsFilters = { memberIds: string[]; expenseClasses: ExpenseClass[]; depth: number | "all" };
+export type AnalyticsFilters = {
+  memberIds: string[];
+  expenseClasses: ExpenseClass[];
+  depth: number | "all";
+  /** Exact assigned categories; omitted means all, while an empty array includes none. */
+  categoryIds?: readonly string[];
+};
 export type AnalyticsRow = {
   id: string; name: string; path: string; label: string; colorHex: string;
   currentYen: bigint; comparisonYen: bigint; monthlyYen: bigint[];

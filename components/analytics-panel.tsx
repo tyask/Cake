@@ -2,10 +2,11 @@
 
 import { lazy, Suspense, useId, useMemo, useState } from "react";
 import { analyticsQuerySchema, analyticsToday, type AnalyticsQuery, type AnalyticsRange } from "@/lib/shared/analytics";
-import { buildAnalyticsView, prepareAnalyticsDataset } from "@/lib/shared/analytics-view";
+import { ANALYTICS_UNCLASSIFIED_ID, buildAnalyticsView, prepareAnalyticsDataset } from "@/lib/shared/analytics-view";
 import { cashflowClass, formatCashflow, formatYen, formatJstDateTime } from "@/lib/shared/display-formatters";
 import type { ExpenseClass } from "@/lib/shared/types";
 import { PageHeading } from "./dashboard-ui";
+import { AnalyticsCategoryFilter } from "./analytics-category-filter";
 import { useAnalytics } from "./use-analytics";
 import styles from "./analytics-panel.module.css";
 
@@ -27,14 +28,18 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
   const [periodError, setPeriodError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"self" | "shared">("self");
   const [selfClasses, setSelfClasses] = useState<ExpenseClass[]>(["SHARED", "PERSONAL"]);
+  const [categoryIds, setCategoryIds] = useState<string[] | null>(null);
+  const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
   const [depth, setDepth] = useState<number | "all">(1);
   const { data, loading, error, refresh } = useAnalytics(query, revision, active);
   const prepared = useMemo(() => data ? prepareAnalyticsDataset(data) : null, [data]);
-  const selectionEmpty = viewMode === "self" && selfClasses.length === 0;
-  const view = useMemo(() => prepared && data && !selectionEmpty ? buildAnalyticsView(prepared, {
+  const classSelectionEmpty = viewMode === "self" && selfClasses.length === 0;
+  const categorySelectionEmpty = prepared !== null && categoryIds !== null
+    && !categoryIds.some(id => id === ANALYTICS_UNCLASSIFIED_ID || prepared.categories.has(id));
+  const view = useMemo(() => prepared && data && !classSelectionEmpty && !categorySelectionEmpty ? buildAnalyticsView(prepared, {
     memberIds: viewMode === "self" ? [currentUserId] : data.members.map(member => member.id),
-    expenseClasses: viewMode === "self" ? selfClasses : ["SHARED"], depth,
-  }) : null, [prepared, data, viewMode, currentUserId, selfClasses, depth, selectionEmpty]);
+    expenseClasses: viewMode === "self" ? selfClasses : ["SHARED"], depth, categoryIds: categoryIds ?? undefined,
+  }) : null, [prepared, data, viewMode, currentUserId, selfClasses, depth, categoryIds, classSelectionEmpty, categorySelectionEmpty]);
   const viewDescription = viewMode === "self"
     ? "チェックした共有費の自分の配分と個人費を、収入・支出それぞれで合計します。収支は収入から支出を引いた金額です。"
     : "共有費を支払者にかかわらず全額で集計します。個人費は含めません。収入は集計対象外です。";
@@ -77,6 +82,7 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
         <label><input type="checkbox" checked={selfClasses.includes("SHARED")} onChange={event => toggleClass("SHARED", event.target.checked)} />共有費</label>
         <label><input type="checkbox" checked={selfClasses.includes("PERSONAL")} onChange={event => toggleClass("PERSONAL", event.target.checked)} />個人費</label>
       </div></fieldset>}
+      {prepared && <AnalyticsCategoryFilter prepared={prepared} selectedIds={categoryIds} onChange={setCategoryIds} open={categoryFilterOpen} onOpenChange={setCategoryFilterOpen} />}
       {periodMode === "range" && <form className={styles.customDates} onSubmit={event => { event.preventDefault(); applyPeriod({ workspaceId, period: "range", from: draftFrom, to: draftTo }); }}>
         <label className={styles.field}>開始日<input type="date" max={today} value={draftFrom} onChange={event => setDraftFrom(event.target.value)} required /></label>
         <span aria-hidden="true">～</span><label className={styles.field}>終了日<input type="date" max={today} value={draftTo} onChange={event => setDraftTo(event.target.value)} required /></label>
@@ -84,10 +90,11 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
       </form>}
       {periodError && <p className={styles.periodError} role="alert">{periodError}</p>}
     </section>
-    <p className={styles.scopeNote}>{viewDescription} 清算済みの明細を含みます。</p>
+    <p className={styles.scopeNote}>{viewDescription} 選択したカテゴリの金額が対象です。清算済みの明細を含みます。</p>
     {loading && <div role="status" className={styles.empty}>集計を読み込んでいます…</div>}
     {error && <div role="alert" className={styles.error}><p>{error}</p><button type="button" onClick={refresh}>再試行</button></div>}
-    {selectionEmpty && data && !loading && !error && <div role="status" className={styles.empty}>収支に含める内容を1つ以上選んでください。</div>}
+    {classSelectionEmpty && data && !loading && !error && <div role="status" className={styles.empty}>収支に含める内容を1つ以上選んでください。</div>}
+    {categorySelectionEmpty && data && !loading && !error && <div role="status" className={styles.empty}>集計に含めるカテゴリを1つ以上選んでください。</div>}
     {view && data && !loading && !error && <>
       <div className={styles.selectionLine}><span>対象期間 <b>{analyticsRangeLabel(data.periods.current)}</b></span><span>比較期間 <b>{analyticsRangeLabel(data.periods.comparison)}</b></span></div>
       {viewMode === "self" ? <section className={styles.summary} aria-label="収支の概要">
