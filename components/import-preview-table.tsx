@@ -2,10 +2,11 @@
 
 import { cashflowClass, formatTransactionAmount } from "@/lib/shared/display-formatters";
 
-import { expenseClassLabels, expenseClasses } from "@/lib/shared/domain-values";
+import { MAX_MERCHANT_LENGTH, expenseClassLabels, expenseClasses } from "@/lib/shared/domain-values";
 
+import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/shared/schemas/transaction-memo";
 import { useState, type CSSProperties } from "react";
-import { isPayPayRowImportable, type PayPayPreviewRow } from "@/lib/shared/paypay";
+import { isPayPayRowImportable, payPayPreviewEditError, type PayPayPreviewRow } from "@/lib/shared/paypay";
 import type { ExpenseClass, SplitWeights, WorkspaceMember } from "@/lib/shared/types";
 import { SelectionCheckbox } from "./selection-checkbox";
 import { SplitEditor } from "./split-editor";
@@ -16,7 +17,7 @@ import styles from "./transactions-panel.module.css";
 const money = (value: number) => Number.isFinite(value)
   ? formatTransactionAmount("PAYMENT", value) : "—";
 
-export function ImportPreviewTable({ rows, members, actorId, currentUserId, saving, categoryChoices, onSelect, onSelectAll, onChangeClass, onChangeSplit, onChangeCategory, onDelete }: {
+export function ImportPreviewTable({ rows, members, actorId, currentUserId, saving, categoryChoices, onSelect, onSelectAll, onChangeClass, onChangeSplit, onChangeCategory, onChangeText, onDelete }: {
   rows: PayPayPreviewRow[];
   members: WorkspaceMember[];
   actorId: string;
@@ -28,6 +29,7 @@ export function ImportPreviewTable({ rows, members, actorId, currentUserId, savi
   onChangeClass: (key: string, expenseClass: ExpenseClass) => void;
   onChangeSplit: (key: string, splitWeights: SplitWeights) => void;
   onChangeCategory: (key: string, categoryId: string | null) => void;
+  onChangeText: (key: string, field: "merchant" | "memo", value: string) => void;
   onDelete: (key: string) => void;
 }) {
   const eligible = rows.filter(isPayPayRowImportable);
@@ -38,7 +40,7 @@ export function ImportPreviewTable({ rows, members, actorId, currentUserId, savi
     { id: "merchant", label: "取引先" }, { id: "method", label: "方法" },
     { id: "amountYen", label: "金額（円）" }, { id: "actorUserId", label: "支払者" },
     { id: "expenseClass", label: "区分" }, { id: "splitWeights", label: transactionSplitLabel(members) },
-    { id: "category", label: "カテゴリ" }, { id: "status", label: "状態" },
+    { id: "category", label: "カテゴリ" }, { id: "memo", label: "メモ" }, { id: "status", label: "状態" },
   ] as const;
   return <TransactionTable columns={columns} label="取り込み明細" header={<tr>
     {columns.map(column => <th key={column.id} className={column.id === "selection" ? styles.selectionCell : undefined}>
@@ -46,11 +48,11 @@ export function ImportPreviewTable({ rows, members, actorId, currentUserId, savi
     </th>)}
   </tr>}>
     {rows.map(row => <ImportPreviewRow key={row.key} row={row} members={members} actorId={actorId} currentUserId={currentUserId} saving={saving} categoryChoices={categoryChoices}
-      onSelect={onSelect} onChangeClass={onChangeClass} onChangeSplit={onChangeSplit} onChangeCategory={onChangeCategory} onDelete={onDelete} columnCount={columns.length} />)}
+      onSelect={onSelect} onChangeClass={onChangeClass} onChangeSplit={onChangeSplit} onChangeCategory={onChangeCategory} onChangeText={onChangeText} onDelete={onDelete} columnCount={columns.length} />)}
   </TransactionTable>;
 }
 
-function ImportPreviewRow({ row, members, actorId, currentUserId, saving, categoryChoices, onSelect, onChangeClass, onChangeSplit, onChangeCategory, onDelete, columnCount }: {
+function ImportPreviewRow({ row, members, actorId, currentUserId, saving, categoryChoices, onSelect, onChangeClass, onChangeSplit, onChangeCategory, onChangeText, onDelete, columnCount }: {
   row: PayPayPreviewRow;
   members: WorkspaceMember[];
   actorId: string;
@@ -61,6 +63,7 @@ function ImportPreviewRow({ row, members, actorId, currentUserId, saving, catego
   onChangeClass: (key: string, expenseClass: ExpenseClass) => void;
   onChangeSplit: (key: string, splitWeights: SplitWeights) => void;
   onChangeCategory: (key: string, categoryId: string | null) => void;
+  onChangeText: (key: string, field: "merchant" | "memo", value: string) => void;
   onDelete: (key: string) => void;
   columnCount: number;
 }) {
@@ -68,14 +71,15 @@ function ImportPreviewRow({ row, members, actorId, currentUserId, saving, catego
   const actorName = members.find(member => member.id === actorId)?.name ?? "";
   const invalid = !!row.error || row.duplicate;
   const disabled = saving || invalid;
-  const status = row.error ?? (row.duplicate ? "登録済み" : "登録可能");
+  const editError = invalid ? null : payPayPreviewEditError(row);
+  const status = row.error ?? editError ?? (row.duplicate ? "登録済み" : "登録可能");
   const selectionLabel = `${row.merchant || "取引先未設定"}を選択`;
   const category = categoryChoices.byId.get(row.categoryId ?? "");
   const rowStyle = category ? { "--transaction-category-color": category.colorHex } as CSSProperties : undefined;
   return <tr className={`${styles.transactionRow}${row.duplicate ? ` ${styles.importDuplicate}` : ""}`} style={rowStyle} data-expanded={expanded} data-import-key={row.key}>
     <MobileTransactionSummary item={{ ...row, actorName }} expanded={expanded} onToggle={() => setExpanded(value => !value)}
       checked={row.selected} disabled={disabled} onSelect={() => onSelect(row.key, !row.selected)}
-      status={<span className={row.error ? styles.error : undefined}>{status}</span>}
+      status={<span className={row.error || editError ? styles.error : undefined}>{status}</span>}
       selectionLabel={selectionLabel} columnCount={columnCount} onDelete={() => onDelete(row.key)} deleteDisabled={saving}
       categoryLabel={category ? category.label + (category.archived ? "（使用停止）" : "") : row.categoryId ? "利用できないカテゴリ" : "未分類"}
       dateLabel={row.occurredAt.replace(/:\d{2}$/, "") || "日時未設定"} amountLabel={money(row.amountYen)} />
@@ -83,7 +87,9 @@ function ImportPreviewRow({ row, members, actorId, currentUserId, saving, catego
       <input className={styles.checkbox} type="checkbox" aria-label={selectionLabel} checked={row.selected} disabled={disabled} onChange={event => onSelect(row.key, event.target.checked)} />
     </td>
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell}>{row.occurredAt || "—"}</td>
-    <td data-label="取引先"><b>{row.merchant || "—"}</b></td>
+    <td data-label="取引先"><input aria-label="取引先" value={row.merchant} maxLength={MAX_MERCHANT_LENGTH}
+      disabled={disabled} aria-invalid={!invalid && !row.merchant.trim() || undefined}
+      onChange={event => onChangeText(row.key, "merchant", event.target.value)} /></td>
     <td data-label="方法">{row.method}</td>
     <td data-label="金額（円）" className={Number.isFinite(row.amountYen) ? cashflowClass(-row.amountYen) : undefined}>{money(row.amountYen)}</td>
     <td data-label="支払者">{actorName}</td>
@@ -97,6 +103,10 @@ function ImportPreviewRow({ row, members, actorId, currentUserId, saving, catego
     <td data-label="カテゴリ" className={styles.categoryCell + " " + styles.fullCell}>
       <CategorySelect choices={categoryChoices} value={row.categoryId} disabled={disabled} onChange={categoryId => onChangeCategory(row.key, categoryId)} />
     </td>
-    <td data-label="状態"><span className={row.error ? styles.error : styles.muted}>{status}</span></td>
+    <td data-label="メモ" className={styles.memoEditor + " " + styles.fullCell}>
+      <textarea aria-label="メモ" value={row.memo} maxLength={MAX_TRANSACTION_MEMO_LENGTH} rows={2} disabled={disabled}
+        onChange={event => onChangeText(row.key, "memo", event.target.value)} />
+    </td>
+    <td data-label="状態"><span className={row.error || editError ? styles.error : styles.muted}>{status}</span></td>
   </tr>;
 }

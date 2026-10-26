@@ -24,7 +24,7 @@ export const saveTransactionInputSchema = z.object({
 // CSV imports are always PAYMENT; retain the existing policy of stripping type.
 export const payPayImportItemSchema = z.object(transactionFields).omit({ type: true }).extend({
   externalId: z.string().trim().min(1).max(MAX_PAYPAY_EXTERNAL_ID_LENGTH), ...optionalSplitShape,
-  categoryId: categoryIdSchema.optional(),
+  categoryId: categoryIdSchema.optional(), memo: transactionMemoSchema.optional(),
 });
 
 // Keep the existing strip/strict policy of each action. Do not strictify the app API.

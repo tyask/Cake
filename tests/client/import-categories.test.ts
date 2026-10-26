@@ -59,7 +59,7 @@ async function openFixture(browser: Browser, origin: string, width: number, sele
   await page.goto(origin);
   await page.locator("input[type=file]").setInputFiles({ name: "categories.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
   await page.getByRole("button", { name: "確認して登録", exact: true }).waitFor();
-  const row = (merchant: string) => page.locator("[data-import-key]").filter({ has: page.locator('td[data-label="取引先"] b', { hasText: new RegExp(`^${merchant}$`) }) });
+  const row = (merchant: string) => page.locator("[data-import-key]").filter({ has: page.locator(`td[data-label="取引先"] input[value="${merchant}"]`) });
   if (width < 700) for (const merchant of merchants) await row(merchant).getByRole("button", { name: `${merchant}の詳細を開く`, exact: true }).click();
   return { context, page, requests, errors, row, completeSave: async () => { assert.ok(releaseSave); await releaseSave(); } };
 }
@@ -184,6 +184,53 @@ test("CSVカテゴリはプレビュー内で個別・選択行へ設定し、�
           await completeSave();
           await page.getByRole("button", { name: "ファイルを選択", exact: true }).waitFor();
           assert.equal(await page.locator("[data-import-key]").count(), 0);
+          assert.deepEqual(errors, []);
+        } finally { await context.close(); }
+      });
+
+      await t.test(`${name}: 取引先・メモを編集し、検証と保存失敗後の再試行でも保持する`, async () => {
+        const { context, page, requests, errors, row, completeSave } = await openFixture(browser, origin, width);
+        try {
+          const key = await row("first").getAttribute("data-import-key");
+          const edited = page.locator(`[data-import-key="${key}"]`);
+          const merchant = edited.getByLabel("取引先", { exact: true });
+          const memo = edited.getByLabel("メモ", { exact: true });
+          const confirm = page.getByRole("button", { name: "確認して登録", exact: true });
+          assert.equal(await memo.inputValue(), "");
+          assert.equal(await merchant.getAttribute("maxlength"), "240");
+          assert.equal(await memo.getAttribute("maxlength"), "2000");
+          for (const name of ["invalid", "duplicate"]) {
+            assert.equal(await row(name).getByLabel("取引先", { exact: true }).isDisabled(), true);
+            assert.equal(await row(name).getByLabel("メモ", { exact: true }).isDisabled(), true);
+          }
+          await edited.getByLabel("カテゴリ", { exact: true }).selectOption("food");
+          await merchant.fill("   ");
+          assert.equal(await confirm.isDisabled(), true);
+          assert.equal(await merchant.getAttribute("aria-invalid"), "true");
+          await page.getByRole("alert").filter({ hasText: "取引先は1〜240文字" }).waitFor();
+          await merchant.fill("  編集した店舗  ");
+          await memo.fill("  食材のまとめ買い\n来客分も含む  ");
+          assert.equal(await confirm.isEnabled(), true);
+          assert.equal(await edited.getByLabel("カテゴリ", { exact: true }).inputValue(), "food");
+          assert.equal(await edited.getByLabel("  編集した店舗  の区分", { exact: true }).inputValue(), "SHARED");
+          assert.equal(await edited.getByRole("checkbox", { name: "  編集した店舗  を選択", exact: true }).first().isChecked(), false);
+          assert.equal(requests.length, 1, "テキスト編集では通信しない");
+          await confirm.click();
+          await page.getByRole("alert").filter({ hasText: "検証用のカテゴリ登録失敗" }).waitFor();
+          assert.equal(await merchant.inputValue(), "  編集した店舗  ");
+          assert.equal(await memo.inputValue(), "  食材のまとめ買い\n来客分も含む  ");
+          const items = requests[1].payload.items as Array<{ merchant: string; memo: string; externalId: string; categoryId: string }>;
+          assert.equal(items.length, 5, "未選択の編集行も登録する");
+          assert.deepEqual(items[0], { ...items[0], merchant: "編集した店舗", memo: "  食材のまとめ買い\n来客分も含む  ",
+            externalId: payPayExternalId("2026-10-18T03:00:42.000Z", "first"), categoryId: "food" });
+          assert.equal(items[1].memo, "");
+          await confirm.click();
+          await page.getByRole("button", { name: "登録中…", exact: true }).waitFor();
+          assert.equal(await merchant.isDisabled(), true);
+          assert.equal(await memo.isDisabled(), true);
+          assert.deepEqual(requests[2], requests[1]);
+          await completeSave();
+          await page.getByRole("button", { name: "ファイルを選択", exact: true }).waitFor();
           assert.deepEqual(errors, []);
         } finally { await context.close(); }
       });
