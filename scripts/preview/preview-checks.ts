@@ -9,6 +9,7 @@ export type ReceiptRequest = {
 };
 export type VerifyReadRequest = Omit<VerifyReceiptRequest, 'runId' | 'runAttempt' | 'notBefore' | 'notAfter'> & { workflowId: number };
 type RunRequest = ReceiptRequest | VerifyReadRequest;
+type OperationJobs = { job: Record<string, unknown>; peer?: Record<string, unknown> };
 const workflowPath = '.github/workflows/preview.yml';
 const apiUrl = (path: string) => `https://api.github.com/repos/${config.repository}/${path}`;
 const positiveId = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) > 0;
@@ -52,7 +53,13 @@ function checkRunId(value: unknown): number {
   return Number(suffix);
 }
 
-async function operationJob(get: PreviewGet, run: Record<string, unknown>, expected: RunRequest, conclusion: 'success' | 'failure' = 'success'): Promise<Record<string, unknown>> {
+function assertJobIdentity(job: Record<string, unknown>, run: Record<string, unknown>, expected: RunRequest): void {
+  if (job.run_id !== run.id || job.run_attempt !== 1 || job.head_sha !== expected.controlSha || job.head_branch !== 'main'
+    || job.url !== apiUrl(`actions/jobs/${job.id}`) || job.run_url !== run.url) throw new Error('PREVIEW_JOB_CHANGED');
+  checkRunId(job.check_run_url);
+}
+
+async function operationJob(get: PreviewGet, run: Record<string, unknown>, expected: RunRequest, conclusion: 'success' | 'failure' = 'success'): Promise<OperationJobs> {
   const jobs: Record<string, unknown>[] = [];
   let count: number | undefined;
   for (let page = 1; ; page++) {
@@ -66,16 +73,21 @@ async function operationJob(get: PreviewGet, run: Record<string, unknown>, expec
   }
   if (jobs.some(job => !positiveId(job.id)) || new Set(jobs.map(job => job.id)).size !== jobs.length
     || new Set(jobs.map(job => job.check_run_url)).size !== jobs.length) throw new Error('PREVIEW_JOBS_INCOMPLETE');
-  const candidates = jobs.filter(job => job.name === 'preview');
-  if (candidates.length !== 1) throw new Error('PREVIEW_JOB_AMBIGUOUS');
-  const job = candidates[0];
-  if (job.run_id !== run.id || job.run_attempt !== 1 || job.head_sha !== expected.controlSha || job.head_branch !== 'main'
-    || !completedWith(job, conclusion) || job.url !== apiUrl(`actions/jobs/${job.id}`) || job.run_url !== run.url
+  const previews = jobs.filter(job => job.name === 'preview'), verifies = jobs.filter(job => job.name === 'preview-verify');
+  if (previews.length !== 1 || verifies.length > 1) throw new Error('PREVIEW_JOB_AMBIGUOUS');
+  // Old runs have one preview job for every action; a split run must retain both known jobs.
+  const job = verifies.length && expected.action === 'verify' ? verifies[0] : previews[0];
+  const peer = verifies.length ? expected.action === 'verify' ? previews[0] : verifies[0] : undefined;
+  assertJobIdentity(job, run, expected);
+  if (!completedWith(job, conclusion)
     || !timestamp(job.started_at) || !timestamp(job.completed_at) || Date.parse(job.started_at) > Date.parse(job.completed_at)
     || Date.parse(job.started_at) < Date.parse(String(run.created_at)) - 60_000
     || Date.parse(job.completed_at) > Date.parse(String(run.updated_at)) + 60_000) throw new Error('PREVIEW_JOB_CHANGED');
-  checkRunId(job.check_run_url);
-  return job;
+  if (peer) {
+    assertJobIdentity(peer, run, expected);
+    if (peer.status !== 'completed' || peer.conclusion !== 'skipped') throw new Error('PREVIEW_JOB_CHANGED');
+  }
+  return { job, peer };
 }
 
 function assertCheck(value: unknown, run: Record<string, unknown>, job: Record<string, unknown>, app: Record<string, unknown>, conclusion: 'success' | 'failure' = 'success'): Record<string, unknown> {
@@ -117,7 +129,7 @@ function checkSnapshot(check: Record<string, unknown>): string {
 export async function readPreviewReceipt(get: PreviewGet, runId: number, expected: ReceiptRequest): Promise<OperationReceipt> {
   const runPath = `actions/runs/${runId}`, run = assertPreviewRun(await get(runPath), expected, true);
   if (run.id !== runId) throw new Error('PREVIEW_RUN_CHANGED');
-  const job = await operationJob(get, run, expected);
+  const jobs = await operationJob(get, run, expected), { job } = jobs;
   const suite = object(await get(`check-suites/${run.check_suite_id}`)), app = actionsApp(suite.app);
   if (suite.id !== run.check_suite_id || suite.url !== run.check_suite_url || suite.head_sha !== expected.controlSha
     || suite.head_branch !== 'main' || !repository(suite.repository) || !successful(suite)) throw new Error('PREVIEW_SUITE_CHANGED');
@@ -129,6 +141,7 @@ export async function readPreviewReceipt(get: PreviewGet, runId: number, expecte
     notAfter: new Date(Date.parse(String(job.completed_at)) + 60_000).toISOString() });
   const afterCheck = assertCheck(await get(checkPath), run, job, app);
   if (checkSnapshot(afterCheck) !== checkSnapshot(check)) throw new Error('PREVIEW_CHECK_CHANGED');
+  if (operationJobsSnapshot(await operationJob(get, run, expected)) !== operationJobsSnapshot(jobs)) throw new Error('PREVIEW_JOB_CHANGED');
   const afterRun = assertPreviewRun(await get(runPath), expected, true);
   if (afterRun.id !== run.id || afterRun.check_suite_id !== run.check_suite_id || afterRun.created_at !== run.created_at
     || afterRun.updated_at !== run.updated_at) throw new Error('PREVIEW_RUN_CHANGED');
@@ -140,10 +153,14 @@ function assertNoticeStep(job: Record<string, unknown>): void {
   const steps = job.steps.map(object).filter(step => step.name === 'Publish public operation receipt notice');
   if (steps.length !== 1 || !positiveId(steps[0].number) || !successful(steps[0])) throw new Error('PREVIEW_VERIFY_NOTICE_STEP');
 }
-function jobSnapshot(job: Record<string, unknown>): string {
+function jobSnapshot(job: Record<string, unknown>, skipped = false): string {
   return JSON.stringify({ id: job.id, name: job.name, run_id: job.run_id, run_attempt: job.run_attempt, head_sha: job.head_sha,
     head_branch: job.head_branch, status: job.status, conclusion: job.conclusion, url: job.url, run_url: job.run_url,
-    check_run_url: job.check_run_url, started_at: job.started_at, completed_at: job.completed_at, steps: job.steps });
+    check_run_url: job.check_run_url,
+    ...(!skipped ? { started_at: job.started_at, completed_at: job.completed_at, steps: job.steps } : {}) });
+}
+function operationJobsSnapshot({ job, peer }: OperationJobs): string {
+  return JSON.stringify({ job: jobSnapshot(job), peer: peer && jobSnapshot(peer, true) });
 }
 function suiteSnapshot(suite: Record<string, unknown>): string {
   return JSON.stringify({ id: suite.id, url: suite.url, head_sha: suite.head_sha, head_branch: suite.head_branch,
@@ -154,7 +171,7 @@ export async function readVerifyReceipt(get: PreviewGet, runId: number, expected
   const runPath = `actions/runs/${runId}`, run = assertPreviewRun(await get(runPath), expected);
   if (run.id !== runId || run.status !== 'completed' || !['success', 'failure'].includes(String(run.conclusion))) throw new Error('PREVIEW_RUN_CHANGED');
   const conclusion = run.conclusion as 'success' | 'failure';
-  const job = await operationJob(get, run, expected, conclusion);
+  const jobs = await operationJob(get, run, expected, conclusion), { job } = jobs;
   assertNoticeStep(job);
   const suitePath = `check-suites/${run.check_suite_id}`, suite = object(await get(suitePath)), app = actionsApp(suite.app);
   const assertSuite = (value: Record<string, unknown>): void => {
@@ -173,8 +190,8 @@ export async function readVerifyReceipt(get: PreviewGet, runId: number, expected
   if (checkSnapshot(afterCheck) !== checkSnapshot(check)) throw new Error('PREVIEW_CHECK_CHANGED');
   const afterSuite = object(await get(suitePath)); assertSuite(afterSuite);
   if (suiteSnapshot(afterSuite) !== suiteSnapshot(suite)) throw new Error('PREVIEW_SUITE_CHANGED');
-  const afterJob = await operationJob(get, run, expected, conclusion); assertNoticeStep(afterJob);
-  if (jobSnapshot(afterJob) !== jobSnapshot(job)) throw new Error('PREVIEW_JOB_CHANGED');
+  const afterJobs = await operationJob(get, run, expected, conclusion); assertNoticeStep(afterJobs.job);
+  if (operationJobsSnapshot(afterJobs) !== operationJobsSnapshot(jobs)) throw new Error('PREVIEW_JOB_CHANGED');
   const afterRun = assertPreviewRun(await get(runPath), expected);
   if (afterRun.id !== run.id || afterRun.status !== 'completed' || afterRun.conclusion !== conclusion
     || afterRun.check_suite_id !== run.check_suite_id || afterRun.created_at !== run.created_at || afterRun.updated_at !== run.updated_at) throw new Error('PREVIEW_RUN_CHANGED');

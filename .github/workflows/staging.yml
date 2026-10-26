@@ -13,6 +13,15 @@ jobs:
     if: github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    container:
+      # Keep the Playwright version aligned with package-lock.json; update the digest with the tag.
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+      options: --init --user 1001:1001
+    defaults:
+      run:
+        shell: bash
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
     permissions:
       contents: write # Fast-forward only the reserved mirror; never update main.
     steps:
@@ -29,8 +38,6 @@ jobs:
       - name: Check Node.js version
         run: npm run check:node
       - run: npm ci --ignore-scripts
-      - name: Install official Chromium
-        run: npx playwright install --with-deps --only-shell chromium
       - name: Deploy and verify persistent Preview
         env:
           GH_TOKEN: ${{ github.token }}
