@@ -58,7 +58,7 @@ test("割合の単位は共通の3択で、CSV取込と定期支払いの保存�
           await page.goto(origin);
           await page.locator("input[type=file]").setInputFiles({ name: "equal.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
           await page.getByRole("button", { name: "確認して登録", exact: true }).waitFor();
-          const row = (merchant: string) => page.locator("[data-import-key]").filter({ has: page.locator('td[data-label="取引先"] b', { hasText: new RegExp(`^${merchant}$`) }) });
+          const row = (merchant: string) => page.locator("[data-import-key]").filter({ has: page.locator(`td[data-label="取引先"] input[value="${merchant}"]`) });
           for (const merchant of ["odd", "even", "unchecked", "personal", "invalid", "duplicate"]) {
             const item = row(merchant); if (width < 700) await item.getByRole("button", { name: /の詳細を開く$/ }).click();
           }
