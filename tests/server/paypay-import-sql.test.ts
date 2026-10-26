@@ -34,7 +34,9 @@ test("CSVカテゴリの実SQLは互換性・集合検証・重複保持・全�
   [workspaceId, externalId, category, source]);
   const beforeMigration = (await insertManual(categoryId, "manual-before")).rows[0];
   await memory.exec(await readFile(new URL("018_import_categories.sql", directory), "utf8"));
-  await memory.exec(await readFile(new URL("022_import_history.sql", directory), "utf8"));
+  for (const name of (await readdir(directory)).filter(name => name.endsWith(".sql") && name >= "019").sort()) {
+    await memory.exec(await readFile(new URL(name, directory), "utf8"));
+  }
   const previous = { url: process.env.DATABASE_URL, logging: process.env.DB_QUERY_LOG, fetch: neonConfig.fetchFunction };
   const fixtureUrl = "postgresql://fixture:fixture@mock.neon.tech/import_category_test";
   process.env.DATABASE_URL = fixtureUrl;
@@ -153,6 +155,26 @@ test("CSVカテゴリの実SQLは互換性・集合検証・重複保持・全�
       await assert.rejects(run([item(childId), { ...existing, categoryId: invalid }]), /カテゴリが存在しないか/);
       assert.deepEqual(await snapshot(), before);
     }
+  });
+
+  await t.test("相手の個人費への取込衝突は一致・不一致を区別せず固定エラーで全体rollbackする", async () => {
+    const personal = { ...item(categoryId), actorUserId: "b", expenseClass: "PERSONAL" as const, splitWeights: { a: 0, b: 1 } };
+    assert.deepEqual(await run([personal], "b"), { imported: 1, skipped: 0 });
+    const before = await snapshot();
+    for (const incoming of [
+      { ...personal, actorUserId: "a", splitWeights: { a: 1, b: 0 } },
+      { ...personal, actorUserId: "a", splitWeights: { a: 1, b: 0 }, merchant: "別店舗", amountYen: 999 },
+    ]) {
+      await assert.rejects(run([item(childId), incoming]), {
+        message: "明細を取り込めませんでした。入力内容を確認してください。",
+      });
+      assert.deepEqual(await snapshot(), before);
+    }
+    await assert.rejects(run([personal]), /個人費は本人/);
+    assert.deepEqual(await snapshot(), before);
+    await assert.rejects(memory.query("SELECT cake_assert_private_import($1,'a',$2::jsonb,$3::jsonb)",
+      [workspaceId, JSON.stringify([personal]), JSON.stringify([{ workspaceId, userId: "a", categoryId }])]), /個人費は本人/);
+    assert.deepEqual(await snapshot(), before);
   });
 
   await t.test("DB衝突と途中のINSERT失敗も履歴・workspace更新を含め全体rollbackする", async () => {

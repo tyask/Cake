@@ -40,7 +40,7 @@ export function ImportHistoryPanel({ workspaceId, format, refreshKey }: { worksp
 
   return <section className={`panel ${styles.panel}`} aria-labelledby={titleId} aria-busy={current === null}>
     <header className={styles.header}>
-      <div><h2 id={titleId}>最近の取込履歴</h2><p>取込者ごとに最新{IMPORT_HISTORY_PER_USER_LIMIT}件 · 新しい順</p></div>
+      <div><h2 id={titleId}>最近の取込履歴</h2><p>自分の取込履歴・最新{IMPORT_HISTORY_PER_USER_LIMIT}件 · 新しい順</p></div>
       <span className={styles.format}>{formatLabel}</span>
     </header>
     {current === null ? <p className={styles.message} role="status">取込履歴を読み込んでいます…</p>

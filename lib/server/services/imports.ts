@@ -10,6 +10,9 @@ export async function importsService(store: AppStore, user: AppUser, input: Acti
   const matchRule = input.items.some(transactionNeedsRules) ? prepareDefaultRuleMatcher(rules) : () => undefined;
   const context = { members, matchRule };
   const items = input.items.map((item) => ({ ...item, ...resolveTransactionSplit(item, context, "SHARED") }));
+  if (items.some(item => item.expenseClass === "PERSONAL" && item.actorUserId !== user.id)) {
+    throw new Error("個人費は本人の明細だけ登録・変更できます。");
+  }
   const result = await store.persistPayPayImport({ ...input, items, userId: user.id });
   return { ok: true, ...result };
 }

@@ -413,7 +413,7 @@
               <tr><td>lib/shared/expense-splits.ts / split-allocations.ts / settlement.ts</td><td>参加者別保存割合・デフォルトルール、整数円への配分・円入力からの割合、正確な分数集計による清算。</td></tr>
               <tr><td>lib/shared/paypay.ts / paypay-id.ts / import-duplicates.ts<br />lib/server/stores/import-duplicates-store.ts / paypay-import.ts</td><td>CSV解析、JST外部ID生成・正規化、既存/CSV内重複・衝突の検出、所属確認と既存明細の最小照合情報の取得、DB Transactionでの登録。</td></tr>
               <tr><td>lib/shared/import-category-suggestions.ts<br />lib/server/handlers/import-category-suggestions-handler.ts<br />lib/server/stores/import-category-suggestions-store.ts</td><td>カテゴリ候補の共有schema・型・上限、認証と入力・所属の検証、正規化後の取引先に一致する最新30件からの集合集計。候補APIはDBを更新せず、ImportPanelが全応答成功後に未分類行へ反映する。</td></tr>
-              <tr><td>components/import-history-panel.tsx<br />lib/shared/import-history.ts<br />lib/server/handlers/import-history-handler.ts<br />lib/server/stores/import-history-store.ts</td><td>取込履歴の共有形式・schema・DTO・一人5件の上限、専用GETの認証・入力検証・所属認可、取込者ごとの最新履歴取得、履歴一覧の取得状態・一行の表を担当する。BootstrapDataへ履歴を追加しない。</td></tr>
+              <tr><td>components/import-history-panel.tsx<br />lib/shared/import-history.ts<br />lib/server/handlers/import-history-handler.ts<br />lib/server/stores/import-history-store.ts</td><td>取込履歴の共有形式・schema・DTO・一人5件の上限、専用GETの認証・入力検証・所属認可、本人の最新履歴取得、履歴一覧の取得状態・一行の表を担当する。BootstrapDataへ履歴を追加しない。</td></tr>
               <tr><td>components/import-transactions-dialog.tsx</td><td>選択batch・workspace・形式に対する明細の遅延取得・再試行・中止を管理し、取込の説明と取得状態を共通明細ダイアログへ渡す。</td></tr>
               <tr><td>components/transaction-list-dialog.tsx</td><td>明細・カテゴリと呼出元の取得状態、見出し・説明・再試行・閉じる操作を受け取る共通の参照用明細ダイアログ。取込の型・ID・専用APIや通信処理には依存しない。</td></tr>
               <tr><td>lib/server/handlers/import-transactions-handler.ts<br />lib/server/stores/import-transactions-store.ts</td><td>取込明細GETの認証・query検証、workspaceの所属と対象batchの照合、現在の明細・カテゴリの集合取得を担当する。</td></tr>
@@ -441,7 +441,7 @@
               <tr><td><code>/api/import/duplicates</code> POST</td><td>Node.js Route Handler。workspace UUID、外部ID配列1〜2000件。</td><td>所属を確認し、指定IDに一致するexternalIdsと既存明細の最小照合情報を返す。</td></tr>
               <tr><td><code>/api/analytics</code> GET</td><td>Node.js。workspaceIdと月または指定期間。</td><td>認証・入力・所属を検証し、参加者・カテゴリと3範囲の負担額集約を返す。no-store、業務DB更新なし。</td></tr>
               <tr><td><code>/api/import/transactions</code> GET</td><td>Node.js Route Handler。queryはworkspace UUID・batch UUID・format=PAYPAY。</td><td>本人の現在の所属と対象batchを確認し、その取り込みに紐づく現在のtransactions・カテゴリ全件を返す。対象なしは404、既存batchの明細0件は200。Cache-Control: no-store。</td></tr>
-              <tr><td><code>/api/import/history</code> GET</td><td>Node.js Route Handler。queryはworkspace UUIDとformat=PAYPAY。</td><td>認証・入力・現在の所属を確認し、取込者IDごと最新5件のhistory配列を全体の新しい順で返す。Cache-Control: no-store。</td></tr>
+              <tr><td><code>/api/import/history</code> GET</td><td>Node.js Route Handler。queryはworkspace UUIDとformat=PAYPAY。</td><td>認証・入力・現在の所属を確認し、本人の最新5件のhistory配列を新しい順で返す。Cache-Control: no-store。</td></tr>
               <tr><td><code>/api/import/category-suggestions</code> POST</td><td>Node.js Route Handler。workspace UUID、取引先配列1〜2000件。</td><td>認証・入力・所属を確認し、取引先ごとの候補カテゴリIDまたはnullを返す。DB更新なし。</td></tr>
               <tr><td><code>/api/admin/users</code> GET / POST / DELETE</td><td>Node.js、<code>force-dynamic</code>。管理者権限。</td><td>一覧、登録/再有効化、停止。成功は利用者一覧と<code>Cache-Control: no-store</code>。</td></tr>
             </tbody>
@@ -527,12 +527,12 @@
           <p>取引先集合を一度展開し、正規化キーを重複除去してから最新履歴・カテゴリ別件数・採用候補を集合SQLで求める。元文字列と正規化キーの対応と、正規化キーごとの候補は<code>MATERIALIZED</code>なCTEで再利用し、同じキーの別表記も最新30件の探索を共有する。storeは所属確認1回と候補SQL1回の固定2往復とし、明細行や取引先ごとのアプリDB呼出し・SQL関数内のループは増やさず、全履歴をアプリへ取得しない。応答は元の取引先とカテゴリIDだけに限定し、候補照会では明細・確認状態・監査列・取込履歴を更新しない。登録時の候補再集計や新しい未確認明細UIは設けず、通常の明細編集の確認状態処理は維持する。</p>
           <h3>取込履歴API</h3>
           <p><code>GET /api/import/history?workspaceId=UUID&amp;format=PAYPAY</code>は<code>{ history: ImportHistoryEntry[] }</code>を返す。<code>importHistoryQuerySchema</code>が共通workspace UUIDと共有形式定義を検証する。未認証は401、入力・所属・DBエラーは400。応答は<code>Cache-Control: no-store</code>とし、現在の利用者の所属範囲を超えた履歴を返さない。</p>
-          <p><code>findImportHistory()</code>は<code>requireWorkspaceMember()</code>で現在の所属を確認し、履歴の取得SQLにも本人のmembershipの存在条件を含める。選択workspace・formatの<code>import_batches</code>について、<code>row_number() OVER (PARTITION BY imported_by ORDER BY created_at DESC, id DESC)</code>の5件以内を選び、結果全体も<code>created_at DESC, id DESC</code>で並べる。同じ取込日時の順序をIDで固定し、アプリへ全履歴を取得しない。件数は取込者IDごとに数えるため、同名の別ユーザーを合算せず、全体を5件には制限しない。</p>
-          <p>取込者名は<code>app_users</code>から取得し、現在のworkspace参加者だけには絞らない。取込者の脱退後も履歴を表示し、登録件数0件も対象とする。<code>createdAt</code>は保存済み日時の精度を保持したUTC ISO文字列で返し、日本時間への変換と表示の省略はブラウザ側で行う。履歴照会は読取専用で、CSV本文・明細本文・メールアドレスは返さない。</p>
+          <p><code>findImportHistory()</code>は現在の所属を確認し、履歴SQLもmembership存在を照合する。選択workspace・formatに加え<code>imported_by = 本人ID</code>で絞り、<code>created_at DESC, id DESC</code>の最新5件を返す。相手のファイル名・総件数・登録件数を返さない。</p>
+          <p>取込者名は<code>app_users</code>から取得する。本人の登録0件の履歴も対象とする。<code>createdAt</code>は保存済み精度のUTC ISO文字列で返し、日本時間への変換は表示境界で行う。履歴照会は読取専用で、CSV本文・明細本文・メールアドレスは返さない。</p>
           <h3>取込明細API</h3>
           <p><code>GET /api/import/transactions?workspaceId=UUID&amp;batchId=UUID&amp;format=PAYPAY</code>は<code>{ transactions: TransactionRecord[], categories: Category[] }</code>を返す。<code>importTransactionsQuerySchema</code>は履歴queryの共通workspace・形式検証へbatch UUIDを追加する。未認証は401、query不正・事前所属確認の拒否・DBエラーは400。batchの不在・指定workspaceや形式の不一致・認可後の所属解除は404「取込履歴が見つかりません。」とし、全応答を<code>Cache-Control: no-store</code>にする。</p>
-          <p><code>findImportTransactions()</code>は所属を一度確認し、続く1回のSQLで対象batchの存在、現在の明細、同workspaceのカテゴリを同じsnapshotから取得する。対象batchの選択にも本人の現在のmembershipの存在条件を含める。固定2往復とし、対象明細ごとのDB呼出しや全workspace明細の取得を行わない。</p>
-          <p>明細は<code>workspace_id</code>と<code>import_batch_id</code>の両方を対象batchへ結び付け、<code>occurred_at DESC, created_at DESC, id DESC</code>で並べる。同名ファイルでもbatch UUIDで区別する。重複再取込は元のbatchとの関連を保持し、後のbatchへ移さない。編集済みの明細は現在の保存値、削除済みの明細は対象外とする。batchが存在し現在の明細が0件の場合は200で空配列を返す。</p>
+          <p><code>findImportTransactions()</code>は所属を一度確認し、続く1回のSQLで対象batchの存在、現在の明細、同workspaceのカテゴリを同じsnapshotから取得する。対象batchの選択にも本人の現在のmembershipとimported_by本人の条件を含める。他人のbatchは不存在と同じ404を返す。固定2往復とし、対象明細ごとのDB呼出しや全workspace明細の取得を行わない。</p>
+          <p>明細は<code>workspace_id</code>と<code>import_batch_id</code>の両方を対象batchへ結び付け、<code>occurred_at DESC, created_at DESC, id DESC</code>で並べる。同名ファイルでもbatch UUIDで区別する。現在の明細はSHAREDまたはactor_user_id本人だけを返す。重複再取込は元のbatchとの関連を保持し、後のbatchへ移さない。編集済みの明細は現在の保存値、削除済みの明細は対象外とする。batchが存在し現在の明細が0件の場合は200で空配列を返す。</p>
           <p>カテゴリは旧停止済みを含め全件を返して全階層のパスを解決し、既存の<code>transactionRecord()</code>・<code>categoryRecord()</code>でDTOへ変換する。取込時の登録件数・スキップ件数とAPIの互換性は保持する。履歴一覧・明細ポップアップにはスキップ件数を表示せず、現在の明細件数と取込時の登録件数は区別する。</p>
           <h3>利用者管理API</h3>
           <div class="table-wrap"><table>
@@ -688,7 +688,7 @@
             <tbody>
               <tr><td>workspaceの「完全に削除」</td><td>SettingsPanel → 確認 → postAction(deleteWorkspace) → /api/app → DB削除 → afterDeleteからhookのrefresh。共通runの保存後分岐は経由しない。</td></tr>
               <tr><td>定期支払いの更新・追加・編集・停止・再開・削除</td><td>RecurringPaymentsPanel → /api/recurring-paymentsのGET/POST → 専用サービス・DB。結果を同パネルのStateへ反映し、保存成功後は専用GETも行う。1:1の選択だけでは通信せず、フォーム保存時に重み1:1を送る。DashboardのBootstrapDataとは別に保持。</td></tr>
-              <tr><td>取込履歴の表示・更新・再試行</td><td>ImportHistoryPanel → GET /api/import/history → 認証・入力検証・workspace所属照合・取込者ごとの最新5件SQL → 同パネルのState。controllerがbulkImport POST成功時に対象家計のrevisionを進め、Dashboard → ImportPanel → ImportHistoryPanelへ渡す更新キーで履歴だけを再取得する。</td></tr>
+              <tr><td>取込履歴の表示・更新・再試行</td><td>ImportHistoryPanel → GET /api/import/history → 認証・入力検証・workspace所属照合・本人の最新5件SQL → 同パネルのState。controllerがbulkImport POST成功時に対象家計のrevisionを進め、Dashboard → ImportPanel → ImportHistoryPanelへ渡す更新キーで履歴だけを再取得する。</td></tr>
               <tr><td>履歴のファイル名から明細を開く</td><td>ImportTransactionsDialog → GET /api/import/transactions → 認証・所属とbatch照合 → 現在の明細とカテゴリ。ImportTransactionsDialogが取得状態を共通TransactionListDialogへ渡す。履歴一覧とは独立し、開いたときだけ取得する。</td></tr>
               <tr><td>利用者管理</td><td>UserManagement → /api/admin/usersのGET/POST/DELETE → 管理者認可・DB。応答一覧は同コンポーネントのStateへ反映。</td></tr>
               <tr><td>絞り込み・選択・コピー・ログアウト</td><td>絞り込み・行選択はブラウザ内の表示State（列条件はlocalStorageにも保存）。招待リンクのコピーはClipboard API。ログアウトはAuth.jsのsignOut。これらはrunから業務DB更新へ流れない。</td></tr>
@@ -735,8 +735,8 @@
           <div class="table-wrap"><table>
             <thead><tr><th>タブ</th><th>参照・操作</th></tr></thead>
             <tbody>
-              <tr><td>ホーム</td><td>今月の収支の表（caption付きtable、収入・支出・収支・取引件数の4行、行見出しはth scope="row"）、次の清算（送金情報・確認付き完了・下部の未清算の共有収支と対象件数）、共有費配分の表、最新20件の清算履歴、保留招待数、登録/取込/集計への導線。lib/shared/home-summary.tsで日本時間の年・月が一致する明細を抽出し、BigIntで収入合計−支払い合計を求める。個人/共有・清算状態に関係なく当月の全登録明細を含め、未来日付も月末まで含める。未清算の共有収支は全期間の未清算SHAREDだけを同じ方式で合計し、次の清算内に金額と対象件数を表示する。清算差額がない場合もこの情報を表示する。PCでは月次表と次の清算を2列、スマートフォンでは1列で表示する。</td></tr>
-              <tr><td>取引明細</td><td>全明細の列フィルタ、未清算行のインライン保存、清算済みもメモ・カテゴリ保存、選択削除/ルール適用。</td></tr>
+              <tr><td>ホーム</td><td>今月の自分の収支の表（caption付きtable、収入・支出・収支・取引件数の4行、行見出しはth scope="row"）、次の清算（送金情報・確認付き完了・下部の未清算の共有収支と対象件数）、共有費配分の表、最新20件の清算履歴、保留招待数、登録/取込/集計への導線。lib/shared/home-summary.tsで日本時間の年・月が一致する明細を抽出し、BigIntで収入合計−支払い合計を求める。本人の個人収支と共有収支の本人配分額を合算し、清算状態にかかわらず当月全体の未来日付も含める。共有費は全額と本人の配分を別の表へ表示する。明細単位の整数円配分はsplitAmountsを使い支出集計と一致させる。未清算の共有収支は全期間の未清算SHAREDだけを同じ方式で合計し、次の清算内に金額と対象件数を表示する。清算差額がない場合もこの情報を表示する。PCでは月次表と次の清算を2列、スマートフォンでは1列で表示する。</td></tr>
+              <tr><td>取引明細</td><td>共有と本人の個人明細の列フィルタ、未清算行のインライン保存、清算済みもメモ・カテゴリ保存、選択削除/ルール適用。</td></tr>
               <tr><td>CSV取込</td><td>ファイルまたは貼り付け本文を、metadataのルール・参加者で共通解析し、外部IDを専用APIで照合。カテゴリ補完はボタン押下時に未分類行の取引先だけを候補APIへ送る。選択行の区分・カテゴリの一括変更、行ごとの割合・カテゴリの編集を経て、最終値を確認してbulkImport。</td></tr>
               <tr><td>設定</td><td>本人表示名、workspace名・デフォルト割合・招待・削除、共有ルール、定期支払い、管理者だけの利用者登録/停止。</td></tr>
             </tbody>
@@ -930,10 +930,10 @@
           <p>ファイル名を押すと取込明細のポップアップを開き、取込単位の現在の明細を表示する。<code>ImportTransactionsDialog</code>がworkspace・format・batch IDを指定して明細APIを呼び、共通の<code>TransactionListDialog</code>へ表示用の取得状態を渡す。見出しは「取り込んだ明細」とし、ファイル名・取込者名の全文、日本時間の取込日時、「取込時N件・現在M件」と現在値を表示している説明を添える。取込時の登録件数は完了時の保存値であり、その後の編集・削除で再集計しない。現在の件数と異なる場合だけ削除等により件数が異なることを説明する。現在0件で取込時の登録件数が正なら「現在残っていません」、取込時も0件なら「登録された明細はありません」と区別する。</p>
           <p><code>TransactionListDialog</code>は取込の型・batch ID・APIへ依存せず、タイトル・説明・loading/error/successの状態、成功時の明細・カテゴリ、再試行・閉じる操作を受け取る。通信・認可・batch選択は呼出元が所有する。共通部品はPCで取引日時・取引先・方法・種別・金額・支払者/受取者・区分・カテゴリ・清算状態・メモの表を表示する。スマートフォンでは取引先・日時・担当者・金額・区分・カテゴリの要約カードから詳細を開く。カテゴリの全階層・使用停止表示、金額の符号と色は既存の共通処理を使う。編集・選択・保存は行わない。</p>
           <p>native dialogを<code>showModal()</code>で開き、focus trap・Escape・閉じる操作とトリガーへのfocus復帰を保つ。取得中・失敗と再試行・現在明細なしを区別し、本文だけをスクロールする。<code>ImportTransactionsDialog</code>は閉じる・対象変更・unmount時に通信を中止し、古いbatch・workspaceの応答を反映しない。CSV原本の保存・ダウンロードは行わない。</p>
-          <div class="dfd-track" role="img" aria-label="取込画面の表示、形式と家計の切替、登録成功後に専用GETで取込者ごとの最新5件を取得し、現在の要求に一致する結果だけを履歴の表へ反映する">
+          <div class="dfd-track" role="img" aria-label="取込画面の表示、形式と家計の切替、登録成功後に専用GETで本人の最新5件を取得し、現在の要求に一致する結果だけを履歴の表へ反映する">
             <div class="dfd-node source"><strong>表示・条件切替・再試行</strong><small>workspaceId / format<br />controllerの家計別revisionをrefreshKeyへ</small></div>
             <div class="dfd-arrow"><b>→</b><small>GET /api/import/history</small></div>
-            <div class="dfd-node store"><strong>認証・所属・履歴SQL</strong><small>形式・workspaceで限定<br />取込者IDごと最新5件</small></div>
+            <div class="dfd-node store"><strong>認証・所属・履歴SQL</strong><small>形式・workspaceで限定<br />本人の最新5件</small></div>
             <div class="dfd-arrow"><b>→</b><small>ImportHistoryResponse</small></div>
             <div class="dfd-node output"><strong>現在の要求だけ反映</strong><small>一行の表 / 履歴なし<br />失敗は再試行、古い応答は破棄</small></div>
           </div>
@@ -991,7 +991,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>rules</td><td>sort_order ASC、created_at ASC、id ASC。無効ルールも返す。</td><td>full / metadata</td></tr>
               <tr><td>pendingInvitations</td><td>本人メール宛、PENDING、expires_at &gt; now()、created_at DESC。</td><td>full / metadata</td></tr>
               <tr><td>categories</td><td>選択workspaceの全カテゴリ。旧停止済みと祖先も含め、全パス・色を解決する。</td><td>full / metadata</td></tr>
-              <tr><td>transactions</td><td>全明細、actor userをJOIN、occurred_at DESC、created_at DESC。memo、カテゴリID・確認状態と保存割合を含む。</td><td>fullのみ</td></tr>
+              <tr><td>transactions</td><td>共有と本人担当の個人明細、actor userをJOIN、occurred_at DESC、created_at DESC。memo、カテゴリID・確認状態と保存割合を含む。</td><td>fullのみ</td></tr>
               <tr><td>settlementHistory</td><td>payer/payeeをLEFT JOIN、completed_at DESC、最新20件。</td><td>fullのみ</td></tr>
             </tbody>
           </table></div>
@@ -1001,6 +1001,8 @@ amountYen         = abs(payer.balance)</div>
           <h3>アプリAPIの処理境界</h3>
           <p><code>app/api/app/route.ts</code>は実装を配線し、<code>appHandlers()</code>が認証、共有schemaによるparse、サービス呼出し、HTTP応答を担当する。<code>createAppService(store)</code>はactionを用途別サービスへ振り分け、所属・担当者・割合・招待条件・清算Snapshotを検証する。DB依存はstoreから注入し、SQLは<code>createAppStore()</code>と既存のrepository・user-access・paypay-importが実行する。サービスはRequest/ResponseやSQL clientを扱わない。</p>
           <p>GETの通常2 SQL、各操作の所属確認、表示名更新時の有効利用者再確認、DB関数内の最新権限・清算Snapshot照合を維持する。明細保存のworkspace更新と明細更新、ルール更新/再採番、清算のSnapshot照合・履歴・関連・明細更新は従来のTransaction境界で実行する。単件・複数ルール削除は共通storeから<code>cake_delete_default_rules</code>を一回呼び、workspace行更新ロック→actorのmember行FOR SHARE→対象ID順FOR UPDATE→全対象確認→削除→残存順序再採番を同じTransactionで行う。全対象不足や後続エラーはworkspace更新も含めてrollbackする。単件不存在だけは0件成功とする。workspace削除は、対象清算の関連行を先に除去するCTEの結果を消費してからworkspaceを削除し、明細・清算などのCASCADEを同じ一回のSQLで完了する。途中で制約違反が起きれば関連行の削除もrollbackする。</p>
+          <h3>個人費のアクセス境界</h3>
+          <p>PERSONALの所有者はactor_user_idであり、workspace所有者・作成者でも他人の個人費は参照・操作不可。Bootstrap・集計・取込重複照合・カテゴリ候補・取込明細のSQLでSHAREDまたは本人を条件にする。取込履歴はimported_by本人に限定する。単件保存・メモ・削除・カテゴリ割当・一括操作はworkspaceロックと最新の所属・全対象の可視性を同じTransactionで検証する。保存後PERSONALはactor本人だけを許可し、相手の共有明細を個人化するルール適用も全体拒否する。定期支払いは一覧と変更関数で同じ権限を確認し、非公開設定の識別子やrevisionをエラーへ含めない。取込は全行のPERSONAL担当者を集合で検証し、非公開外部IDとの衝突は金額比較せず固定の汎用エラーで全体をロールバックする。外部IDのworkspace内一意制約は維持する。</p>
           <h3>清算専用取得</h3>
           <p><code>settlement-store.ts</code>の<code>settlementContext(workspaceId, userId)</code>は所属確認を含む1 SQLで対象workspaceの種別、参加者のID・名前・現在の重み、未清算SHARED明細のID・担当者・種別・金額・区分・保存割合だけを取得する。参加者順はjoined_at・user_id、明細順はoccurred_at DESC・created_at DESCでfull取得と揃える。ルール・招待・履歴・他workspace一覧・個人費・清算済み明細を転送せず、初期workspaceも作成しない。</p>
           <p>清算POSTは利用可否確認1 SQL、専用取得1 SQL、固定4 SQLのNeon Transactionという3回の通信で完了する。サービスは同じ<code>calculateSettlement()</code>を再利用し、対象IDをSetで照合してSnapshotをID順に固定する。保存時のworkspaceロック・最新の所属確認・Snapshot照合と一明細一清算のUNIQUE制約を維持する。通常の画面/<code>GET /api/app</code>の2 SQL契約は変えない。</p>
@@ -1016,10 +1018,10 @@ amountYen         = abs(payer.balance)</div>
           <h3>取得条件と表示条件</h3>
           <p>幅48rem以下の条件欄では期間選択と月入力を2列に配置する。月・開始日・終了日の入力は固有幅で列を押し広げず、各列の内側に収める。</p>
           <p>GETのqueryは<code>workspaceId</code>と<code>period=month&amp;month=YYYY-MM</code>または<code>period=range&amp;from=YYYY-MM-DD&amp;to=YYYY-MM-DD</code>。実在する日付・未来不可・開始終了順・最大24暦月を共有schemaで検証し、サーバーの現在日時から今回・比較元・月次の3範囲を確定する。各範囲は日本時間の開始日・終了日を含む。今月は本日まで、過去月は月全体、指定期間は入力どおりで、比較元は前月同日まで／前暦月全体／直前の同日数。月次は終了月を含む6暦月で、今月だけ本日を上限とする。</p>
-          <p>対象者集合・区分集合・カテゴリ深さは画面Stateで所有し、APIのqueryに含めない。全員・共有と個人の両方・大分類を初期値とし、全OFFとONへの復帰も通信しない。入力途中の指定日付と取得に適用した期間を分け、適用操作でのみ取得条件を変更する。</p>
+          <p>表示対象（自分の支出／共有費全体）とカテゴリ深さは画面Stateで所有し、APIのqueryに含めない。初期表示は本人の共有費負担＋本人個人費とし、共有費全体では全員のSHARED bucketだけを合算する。切替と階層変更は通信しない。入力途中の指定日付と取得に適用した期間を分け、適用操作でのみ取得条件を変更する。</p>
           <div class="data-flow">
             <div class="data-flow-head"><h3>集計取得とローカル切替</h3><small>取得キーと表示条件を分離</small></div>
-            <div class="dfd-track" role="img" aria-label="期間変更で全員分の集約を取得し、チェック変更は保持した集計済みデータから表示値だけを合成する">
+            <div class="dfd-track" role="img" aria-label="期間変更で全員分の集約を取得し、表示対象変更は保持した集計済みデータから表示値だけを合成する">
               <div class="dfd-node source"><strong>期間確定 / 再入場 / 更新</strong><small>workspaceId・期間・保存後世代</small></div>
               <div class="dfd-arrow"><b>→</b><small>GET /api/analytics</small></div>
               <div class="dfd-node process"><strong>HTTP境界</strong><small>本人認証・共有schema・JST範囲</small></div>
@@ -1028,8 +1030,8 @@ amountYen         = abs(payer.balance)</div>
               <div class="dfd-arrow"><b>→</b><small>AnalyticsDataset</small></div>
               <div class="dfd-node output"><strong>集計hook</strong><small>1 snapshotの金額・参加者・カテゴリ</small></div>
             </div>
-            <div class="dfd-track" role="img" aria-label="対象者・区分・階層の操作はAPIを呼ばず、集計済みbucketから3グラフと表を更新する">
-              <div class="dfd-node source"><strong>チェック / 階層</strong><small>画面の表示条件</small></div>
+            <div class="dfd-track" role="img" aria-label="表示対象・階層の操作はAPIを呼ばず、集計済みbucketから3グラフと表を更新する">
+              <div class="dfd-node source"><strong>表示対象 / 階層</strong><small>画面の表示条件</small></div>
               <div class="dfd-arrow"><b>→</b><small>通信なし</small></div>
               <div class="dfd-node process"><strong>buildAnalyticsView</strong><small>選択bucketをBigIntで合算</small></div>
               <div class="dfd-arrow"><b>→</b><small>同じ条件</small></div>
@@ -1038,23 +1040,23 @@ amountYen         = abs(payer.balance)</div>
           </div>
           <h3>集約SQLと整数配分</h3>
           <p>本人の有効性確認1 SQLの後、集計storeは本人有効性・現在のworkspace所属・参加者・カテゴリ・集約を同じ1 statementで取得する。通常2 DB往復で、明細や人数に比例する通信を増やさない。GETは初期workspaceも作成せず、未認証401・未所属403・不正入力400・保存データ不整合や取得失敗500を返す。</p>
-          <p>対象は3範囲のいずれかに入る一意な<code>PAYMENT</code>。清算状態・source・カテゴリ確認状態にかかわらず取得し、<code>RECEIPT</code>は除く。保存<code>split_weights</code>から各人の整数商と剰余を求め、余り円を剰余降順・<code>joined_at ASC, user_id ASC</code>の順に配分する。全員の配分を確定してから範囲へJOINし、重なった範囲でも配分前の明細が増えないようにする。個人費は担当者100%、不正な保存割合や担当者を黙って補正しない。</p>
+          <p>対象は3範囲のいずれかに入る一意な<code>PAYMENT</code>で、SHAREDまたはactor_user_id本人に限定する。相手のPERSONALは保存割合検証・配分・集約より前に除外し、金額・件数・不正割合のエラーを漏らさない。清算状態・source・カテゴリ確認状態にかかわらず取得し、<code>RECEIPT</code>は除く。保存<code>split_weights</code>から各人の整数商と剰余を求め、余り円を剰余降順・<code>joined_at ASC, user_id ASC</code>の順に配分する。全員の配分を確定してから範囲へJOINし、重なった範囲でも配分前の明細が増えないようにする。個人費は担当者100%、不正な保存割合や担当者を黙って補正しない。</p>
           <p>現行の<code>splitAmounts</code>と同じ明細ごとの整数円を合計するため、全員の負担額は支払総額に一致する。清算の「分数を全件合算して最後に丸める」計算とは目的・丸めの単位が異なる。清算の対象や保存結果は変更しない。TSとSQLの配分を共通fixtureで照合する。</p>
           <p>SQLはUTCへ換算した境界に対する<code>occurred_at &gt;= start AND occurred_at &lt; endExclusive</code>を使い、workspace/date indexを利用できる形にする。金額と重みの積・除算・最終SUMは整数精度を保ち、集計額をSQL内でtext化する。取引先・明細ID・保存割合などの生データは返さない。事前集計テーブルや用途未検証のindexは設けない。</p>
           <h3>DTOと表示計算</h3>
           <p><code>AnalyticsDataset</code>は<code>workspaceId / snapshotAt / timeZone / periods / members / categories / buckets</code>。bucketは<code>scope(current|comparison|trend) / month / memberId / expenseClass / categoryId / burdenYen</code>で、burdenYenは非負10進整数文字列。0円のみの組合せは省略でき、欠落を0円として扱う。scopeごとに合計し、別scopeを合算しない。月次の欠落月は範囲から0円を補う。</p>
           <p>参加者・カテゴリは金額と同じsnapshotの情報を使い、metadataの別応答を後から混ぜない。停止中の参加者、旧使用停止カテゴリ、未分類も集計に含む。現在の名称・階層・色で表示し、カテゴリの削除で参照解除された明細は未分類とする。親やrootへの対応表はdatasetの更新時に準備し、フィルタ変更時の祖先探索を繰り返さない。</p>
           <p>カテゴリ粒度は最上位、任意の途中階層、全階層。深い設定は祖先へ集約し、浅い親に直接設定された額を失わず、親集計と子を二重計上しない。全階層で親への直接設定は「直接設定」と表示する。比較元だけのカテゴリも差分に残す。図の共通系列は今回・比較元・各月の最大額順の上位8件＋その他＋未分類、同額はカテゴリ表示順・IDで固定する。一覧・表は全カテゴリ。</p>
-          <p>円の描画時は共通系列のうち対象期間が正の項目を取り出し、その他・未分類も含め対象期間の整数金額の降順へ安定整列する。同額は共通系列の順を保つ。開始角90度・終了角−270度とし、12時から時計回りに表示する。他の図と一覧の系列順は変えない。円と棒の金額は領域内へ重ね、描画領域に収まらなければ省略する。月次棒は横置きを優先し、長辺方向に収まる場合は回転して表示する。金額ラベルは背景カテゴリ色に応じた白または黒の文字色で判読性を確保し、金額ラベルは操作を遮らない。中央合計も実際の内円へ収め、文字サイズと改行を調整する。12px以上で全桁を表示できない場合は中央の金額を省略し、画面上部の負担額で全桁を確認できる。円のコンテナは中間幅のgrid配置でも幅を確保する。対象者の説明は開く時とリサイズ時に左右の画面端へ収まるよう補正する。</p>
+          <p>円の描画時は共通系列のうち対象期間が正の項目を取り出し、その他・未分類も含め対象期間の整数金額の降順へ安定整列する。同額は共通系列の順を保つ。開始角90度・終了角−270度とし、12時から時計回りに表示する。他の図と一覧の系列順は変えない。円と棒の金額は領域内へ重ね、描画領域に収まらなければ省略する。月次棒は横置きを優先し、長辺方向に収まる場合は回転して表示する。金額ラベルは背景カテゴリ色に応じた白または黒の文字色で判読性を確保し、金額ラベルは操作を遮らない。中央合計も実際の内円へ収め、文字サイズと改行を調整する。12px以上で全桁を表示できない場合は中央の金額を省略し、画面上部の負担額で全桁を確認できる。円のコンテナは中間幅のgrid配置でも幅を確保する。</p>
           <p>加算・差額・率計算はBigIntを使う。構成比・増減率は小数1桁で表示し、比較元0円は0÷0も含め率を算出しない。Rechartsへ渡すNumberは座標用だけとし、金額はグラフ内のラベルも含め元の整数値からformatYenで表示する。支出額は負へ変換せず、合計・表・ツールチップ・中央合計を符号なしの通常色で表示する。グラフ内の金額も符号なしとし、背景との可読性で文字色を選ぶ。面積・積上げの座標と構成比は非負の金額を使う。前期間との差額は<code>totalYen - comparisonYen</code>とし、支出増を正、支出減を負として通常色で表示する。差額に限って正は＋、負は−を付け、増減がない場合は無符号とする。API/表示計算の非負金額と差額の内部契約は保持し、率は支出の増減として説明する。ラベルが省略されても一覧・表とツールチップで全額を確認できる。複数人の個別件数を足した取引件数は表示しない。</p>
           <h3>取得・保存・遅延応答</h3>
           <p>集計panelは同じworkspace内のタブ切替でStateを保持する。同階層の条件付きpanelと識別子が衝突しないよう、Reactのkeyには画面種別とworkspace IDを組み合わせる。初回表示・再入場・期間変更・明示更新・保存後の無効化で取得する。未選択でも期間取得は行い、その後ONへ戻して追加通信しない。取得中にcheckboxを変えても応答は保持し、最新の表示条件で描画する。workspace・期間・保存後世代・要求順が古い応答は破棄する。workspace切替中は旧グラフを非表示とし、切替先で条件を初期化する。切替後の別タブ取得により元の要求を破棄しても切替中を保持し、最新の取得が採用されたときだけ解除する。最新の取得が失敗した場合は以前のworkspaceへ戻して解除し、遅い旧応答を採用しない。</p>
-          <p>期間変更中は読込表示とし、旧期間のグラフを新条件の結果として見せない。取得失敗は選択を保持して再試行を表示し、0円の成功へ置き換えない。明細の未保存入力は含めず、保存成功後に世代を進める。グラフは遅延importし、未訪問タブでRechartsを読み込まない。PCホバー・キーボード、mobileタップと対象者の小さいⓘ、全カテゴリの表を用意する。</p>
+          <p>期間変更中は読込表示とし、旧期間のグラフを新条件の結果として見せない。取得失敗は選択を保持して再試行を表示し、0円の成功へ置き換えない。明細の未保存入力は含めず、保存成功後に世代を進める。グラフは遅延importし、未訪問タブでRechartsを読み込まない。PCホバー・キーボード、mobileタップ、全カテゴリの表を用意する。</p>
         </section>
 
         <section id="database">
           <h2>10. データベース物理設計</h2>
-          <p class="lead">PostgreSQL 18以上・UTF8を使用する。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜020の順次適用後を指す。</p>
+          <p class="lead">PostgreSQL 18以上・UTF8を使用する。UUID生成にpgcrypto、日時にtimestamptz、金額・重みにinteger、保存割合と清算SnapshotにJSONBを使用する。現行スキーマは001〜026の順次適用後を指す。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>テーブル</th><th>主キー</th><th>主要列・制約・Index</th><th>参照・削除</th></tr></thead>
             <tbody>
@@ -1136,6 +1138,9 @@ amountYen         = abs(payer.balance)</div>
               <tr><td>021_payment_rules_only.sql</td><td>cake_bulk_transactionsの署名・SQL本数・DELETE・全件ロック・確定DTOを維持し、APPLY_RULESでロック済みの対象にPAYMENT以外を含む場合に全体を失敗させる。既存明細と過去migrationは変更しない。</td></tr>
               <tr><td>022_import_history.sql</td><td>import_batchesへformatをNOT NULL・DEFAULT PAYPAY・形式CHECK付きで追加する。既存履歴と形式未指定の旧版保存をPAYPAYとして扱い、workspace_id・format・imported_by・created_at DESC・id DESCの履歴検索用Indexを追加する。取込時の件数・日時・関連明細は保持する。</td></tr>
               <tr><td>023_import_transactions.sql</td><td>import_batch_idがある明細に、workspace_id・import_batch_id・occurred_at DESC・created_at DESC・id DESCの部分複合Indexを追加する。取込明細ポップアップの対象取得・並び順を支え、既存明細とbatchの関連は変更しない。</td></tr>
+              <tr><td>024_personal_transaction_access.sql</td><td>単件明細の認可helperを追加し、一括操作・カテゴリ割当の本人可視性と個人化の本人条件を再検証する。カテゴリ削除時は非公開明細のIDを返さない。</td></tr>
+              <tr><td>025_private_recurring_payments.sql</td><td>定期支払いの個人設定を担当者本人に限定し、手動実行の生成直前にも再認可する。</td></tr>
+              <tr><td>026_private_imports.sql</td><td>取込全体の個人担当者を同じTransactionで検証し、非公開外部IDとの衝突を固定エラーで拒否する。</td></tr>
             </tbody>
           </table></div>
           <p>019のSTORED生成列追加は<code>transactions</code>の<code>ACCESS EXCLUSIVE</code>ロックと全テーブル・Indexの書換えを伴い、適用中の明細参照・更新は待機する。現在のデータ規模では関数・生成列・Index・既存行の計算を単一の原子的なmigrationで確定する。アプリ側でUPDATEして補完する方式は使わず、既存の金額・カテゴリ・確認状態・revision・監査列を変更しない。旧版アプリも生成列を指定せずに保存できる。</p>
@@ -1238,7 +1243,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>tests/shared/paypay.test.ts / tests/shared/paypay-id.test.ts / tests/shared/import-duplicates.test.ts / tests/server/paypay-import.test.ts</td><td>支払い抽出、JST日時・外部ID・先頭ゼロ、旧ID正規化、行/既存重複・内容衝突、保存順、Transactionと実挿入件数。</td></tr>
               <tr><td>tests/server/import-duplicates-store.test.ts</td><td>所属確認後に指定外部IDだけを照会し、既存明細の最小照合情報を返すことを確認する。</td></tr>
               <tr><td>tests/client/import-paste.test.ts</td><td>PC/mobileの実ImportPanelで初期チェックOFF・チェックによらない全登録・選択行の削除と取消・元のtotalRows保持・対象0件/登録中の無効化・登録済み行のグレー表示、見出し・ボタン・Safari注記、ヘルプの内容・安全なURL・明示コピーと拒否時案内・開閉時の通信/読取なし・閉じ方とfocus復帰・モバイルスクロール、CSV本文・手動入力UIの不在、タップ時だけのclipboard読取とファイル選択の共通処理、拒否・非対応・空/不正CSV・照会失敗からの再コピー/再選択と再試行、原本不送信、本人・ルール・重複、登録失敗時の確認表保持と成功時解除、読み込み中の入口抑止、workspace切替後の遅延読取・照会結果破棄を検証する。</td></tr>
-              <tr><td>tests/shared/import-history.test.ts<br />tests/server/import-history-handler.test.ts / import-history-store.test.ts<br />tests/client/import-history.test.ts</td><td>query入力と形式・一人5件の上限、認証と現在所属の境界、取込者ごとの最新5件と全体順、同名ユーザー・同時刻・脱退済み取込者・登録0件、過去履歴の形式と旧保存互換を確認する。画面ではPC/mobileの4列一行表示とスキップ非表示、ファイル名から現在の明細を開く共通ポップアップ、取込時と現在件数の差、履歴やAPIから独立した共通部品の利用、取得中・空・失敗と再試行、登録成功後の再取得、条件変更と遅延応答の破棄、保存中にタブ・家計を切り替えて戻った際の履歴更新、POST成功後のmetadata取得失敗で保存済みの確認表を解除することを確認する。storeの実SQLはPGliteで検証する。</td></tr>
+              <tr><td>tests/shared/import-history.test.ts<br />tests/server/import-history-handler.test.ts / import-history-store.test.ts<br />tests/client/import-history.test.ts</td><td>query入力と形式・一人5件の上限、認証と現在所属の境界、本人の最新5件と全体順、同名ユーザー・同時刻・脱退済み取込者・登録0件、過去履歴の形式と旧保存互換を確認する。画面ではPC/mobileの4列一行表示とスキップ非表示、ファイル名から現在の明細を開く共通ポップアップ、取込時と現在件数の差、履歴やAPIから独立した共通部品の利用、取得中・空・失敗と再試行、登録成功後の再取得、条件変更と遅延応答の破棄、保存中にタブ・家計を切り替えて戻った際の履歴更新、POST成功後のmetadata取得失敗で保存済みの確認表を解除することを確認する。storeの実SQLはPGliteで検証する。</td></tr>
               <tr><td>tests/server/import-transactions-handler.test.ts / import-transactions-store.test.ts</td><td>明細query・認証と現在所属、batchの不在・別workspace・形式違いの404、存在する空batchの200、同名ファイルのbatch別取得、編集済み・削除済み明細、重複再取込で元のbatchとの関連を保持すること、全カテゴリの取得と階層表示に必要なDTO、固定2往復と読取専用を確認する。</td></tr>
               <tr><td>tests/client/home-navigation.test.ts</td><td>取込直リンクとworkspace指定の安全な内部URL化、未知・複数tabのhomeへのフォールバック、Google/テストログイン双方への復帰先引き渡しを確認する。実認証後の復帰はPreviewで別途確認する。</td></tr>
               <tr><td>tests/shared/settlement.test.ts / tests/shared/expense-splits.test.ts / tests/shared/split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、収入、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>

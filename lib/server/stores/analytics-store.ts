@@ -32,6 +32,7 @@ export async function findAnalytics(
         t.category_id, t.split_weights
       FROM transactions t JOIN authorized a ON a.id = t.workspace_id
       WHERE t.type = 'PAYMENT'
+        AND (t.expense_class = 'SHARED' OR t.actor_user_id = ${userId})
         AND t.occurred_at >= (SELECT min(start_at) FROM periods)
         AND t.occurred_at < (SELECT max(end_at) FROM periods)
         AND EXISTS (SELECT 1 FROM periods p WHERE t.occurred_at >= p.start_at AND t.occurred_at < p.end_at)

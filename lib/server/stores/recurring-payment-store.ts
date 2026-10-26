@@ -16,7 +16,8 @@ export const recurringPaymentStore: RecurringPaymentStore = {
       )
       SELECT EXISTS(SELECT 1 FROM authorized) AS authorized,
         COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.created_at,p.id) FROM recurring_payments p
-          JOIN authorized a ON a.id = p.workspace_id WHERE p.state <> 'ARCHIVED'),'[]'::jsonb) AS payments,
+          JOIN authorized a ON a.id = p.workspace_id WHERE p.state <> 'ARCHIVED'
+          AND (p.expense_class = 'SHARED' OR p.actor_user_id = ${userId})),'[]'::jsonb) AS payments,
         COALESCE((SELECT jsonb_agg(m.user_id ORDER BY m.user_id) FROM workspace_members m JOIN authorized a ON a.id = m.workspace_id
           WHERE cake_recurring_user_allowed(m.user_id,${testMode})),'[]'::jsonb) AS eligible_actor_user_ids
     `;
@@ -35,7 +36,7 @@ export const recurringPaymentStore: RecurringPaymentStore = {
     if (!rows[0]?.result) throw new Error("Unavailable result");
     return rows[0].result as SavedMutation;
   },
-  async candidates(workspaceId, testMode, now) {
+  async candidates(workspaceId, testMode, now, authorizedUserId) {
     const today = jstToday(now);
     const thisMonth = monthOf(today);
     const rows = await db()`SELECT id,workspace_id FROM recurring_payments p
@@ -44,11 +45,20 @@ export const recurringPaymentStore: RecurringPaymentStore = {
         AND cake_recurring_scheduled_on(${thisMonth}::date,day_of_month) = ${today}::date
         AND (${today}::date + TIME '09:00') AT TIME ZONE 'Asia/Tokyo' <= ${now.toISOString()}::timestamptz
         AND cake_recurring_identity_matches(authorized_by,${testMode})
+        AND (${authorizedUserId ?? null}::text IS NULL OR (
+          (p.expense_class = 'SHARED' OR p.actor_user_id = ${authorizedUserId ?? null})
+          AND cake_recurring_user_allowed(${authorizedUserId ?? null},${testMode})
+          AND EXISTS (SELECT 1 FROM workspace_members m WHERE m.workspace_id = p.workspace_id
+            AND m.user_id = ${authorizedUserId ?? null})
+        ))
       ORDER BY workspace_id,id`;
     return rows.map(row => ({ id: String(row.id), workspaceId: String(row.workspace_id) }));
   },
-  async generate(candidate, testMode, now) {
-    const rows = await db()`SELECT cake_generate_recurring_payment(${candidate.workspaceId}::uuid,${candidate.id}::uuid,
+  async generate(candidate, testMode, now, authorizedUserId) {
+    const rows = authorizedUserId ? await db()`SELECT cake_generate_visible_recurring_payment(
+      ${candidate.workspaceId}::uuid,${candidate.id}::uuid,${authorizedUserId},
+      ${testMode},${now.toISOString()}::timestamptz) AS result`
+      : await db()`SELECT cake_generate_recurring_payment(${candidate.workspaceId}::uuid,${candidate.id}::uuid,
       ${testMode},${now.toISOString()}::timestamptz) AS result`;
     if (!rows[0]?.result) throw new Error("Unavailable result");
     return rows[0].result as GenerationResult;

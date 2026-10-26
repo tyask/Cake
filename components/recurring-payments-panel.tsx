@@ -192,6 +192,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
   const [conflict, setConflict] = useState(false);
   const eligible = selected.members.filter(member => data.eligibleActorUserIds.includes(member.id));
   const unavailableActor = !eligible.some(member => member.id === config.actorUserId);
+  const personalActorInvalid = config.expenseClass === "PERSONAL" && config.actorUserId !== currentUserId;
   let splitValid = true;
   try { validateSplitWeights(config.splitWeights, selected.members, config.expenseClass, config.actorUserId); } catch { splitValid = false; }
   let preview: ReturnType<typeof recurringFormPreview> | null = null;
@@ -202,6 +203,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
     <form onSubmit={async event => {
       event.preventDefault(); if (savingRef.current) return; savingRef.current = true; setError(null); setSaving(true);
       try {
+        if (personalActorInvalid) throw new Error("個人の定期支払いは本人だけが登録できます。支払者を自分に変更してください。");
         validateSplitWeights(config.splitWeights, selected.members, config.expenseClass, config.actorUserId);
         if (unavailableActor) throw new Error("有効な参加者を支払者として選んでください。");
         await save(payment
@@ -224,11 +226,12 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
         <label>支払者<select required value={config.actorUserId} onChange={event => {
           const actorUserId = event.target.value;
           patch({ actorUserId, ...(config.expenseClass === "PERSONAL" ? { splitWeights: personalSplitWeights(selected.members, actorUserId) } : {}) });
-        }}>{unavailableActor && <option value={config.actorUserId} disabled>支払者を選択してください</option>}{eligible.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+        }}>{unavailableActor && <option value={config.actorUserId} disabled>支払者を選択してください</option>}{eligible.map(member => <option key={member.id} value={member.id} disabled={config.expenseClass === "PERSONAL" && member.id !== currentUserId}>{member.name}</option>)}</select></label>
         <label>区分<select value={config.expenseClass} disabled={selected.workspace.type === "PERSONAL"} onChange={event => {
           const expenseClass = event.target.value as ExpenseClass;
           patch({ expenseClass, splitWeights: expenseClass === "PERSONAL" ? personalSplitWeights(selected.members, config.actorUserId) : defaultSplitWeights(selected.members) }); setCustomized(true);
-        }}>{expenseClasses.map(value => <option key={value} value={value}>{commonExpenseClassLabels[value]}</option>)}</select></label>
+        }}>{expenseClasses.map(value => <option key={value} value={value} disabled={value === "PERSONAL" && config.actorUserId !== currentUserId}>{commonExpenseClassLabels[value]}</option>)}</select></label>
+        {config.actorUserId !== currentUserId && <p className="ratio-note full">個人の定期支払いを登録する場合は、支払者を自分に変更してください。</p>}
         <div className="full"><SplitEditor inline label={`配分割合（${selected.members.map(member => member.name).join(", ")}）`} amountYen={config.amountYen} members={selected.members} value={config.splitWeights}
           disabled={saving || config.expenseClass === "PERSONAL" || !splitValid} onChange={splitWeights => { patch({ splitWeights }); setCustomized(true); }} />
           {!splitValid && <p className="form-error">配分割合の参加者を確認してください。「取引先のルールを適用」で現在の参加者の割合に設定し直せます。</p>}
@@ -242,7 +245,7 @@ function RecurringPaymentForm({ selected, currentUserId, data, payment, close, s
       {conflict && payment && <button type="button" className="text-button" disabled={saving} onClick={() => {
         if (window.confirm("入力中の内容を破棄して、最新の設定を読み込みますか？")) void reloadLatest(payment);
       }}>最新の設定で開き直す</button>}
-      <div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={close}>キャンセル</button><button type="submit" className="primary" disabled={saving || conflict || unavailableActor || !preview || !splitValid}>{saving ? "保存中…" : payment ? "変更を保存" : "追加する"}</button></div>
+      <div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={close}>キャンセル</button><button type="submit" className="primary" disabled={saving || conflict || unavailableActor || personalActorInvalid || !preview || !splitValid}>{saving ? "保存中…" : payment ? "変更を保存" : "追加する"}</button></div>
     </form>
   </RecurringDialog>;
 }

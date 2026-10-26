@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import { AnalyticsPanel } from "../../../components/analytics-panel";
 import "../../../app/globals.css";
 
-type PanelProps = { workspaceId: string; revision: number; active: boolean };
+type PanelProps = { workspaceId: string; currentUserId: string; revision: number; active: boolean };
 declare global {
   interface Window {
     analyticsProps: PanelProps;

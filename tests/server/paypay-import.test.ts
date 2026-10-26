@@ -16,7 +16,7 @@ function item(overrides: Partial<PayPayImportItem> = {}): PayPayImportItem {
 }
 
 function input(items: PayPayImportItem[], totalRows = items.length): PayPayImportInput {
-  return { workspaceId, userId: "member-b", fileName: "paypay.csv", totalRows, items };
+  return { workspaceId, userId: "member-a", fileName: "paypay.csv", totalRows, items };
 }
 
 interface Query { query: string; params: unknown[] }
@@ -101,7 +101,7 @@ test("同時取込で重複が増えても、取込履歴と戻り値は実際�
   ], 4)), { imported: 1, skipped: 3 });
   assert.equal(requests.length, 1);
   const batch = requests[0].batch;
-  assert.match(batch.queries[0].query, /cake_assert_transaction_categories/);
+  assert.match(batch.queries[0].query, /cake_assert_private_import/);
   const history = batch.queries[1];
   assert.match(history.query, /INSERT INTO import_batches/);
   assert.equal(history.params[4], "4");
@@ -115,7 +115,7 @@ test("同時取込で重複が増えても、取込履歴と戻り値は実際�
     assert.equal(insert.params[1], batchId);
     assert.match(insert.query, /ON CONFLICT \(workspace_id, external_id\) DO UPDATE/);
     assert.match(insert.query, /SET external_id = transactions\.external_id/);
-    assert.match(insert.query, /WHERE cake_assert_paypay_duplicate\(transactions\.source, transactions\.merchant, transactions\.amount_yen,\s*EXCLUDED\.merchant, EXCLUDED\.amount_yen\)/);
+    assert.match(insert.query, /WHERE cake_assert_visible_paypay_duplicate\(transactions\.expense_class, transactions\.actor_user_id, \$\d+,\s*transactions\.source, transactions\.merchant, transactions\.amount_yen, EXCLUDED\.merchant, EXCLUDED\.amount_yen\)/);
     assert.match(insert.query, /RETURNING id/);
   }
 });
@@ -157,7 +157,7 @@ test("カテゴリは全入力の一意なIDを保存と同じTransactionで検�
   assert.equal(requests.length, 2);
   for (const { batch } of requests) {
     assert.equal(batch.queries.length, 4);
-    assert.deepEqual(JSON.parse(String(batch.queries[0].params[0])), [{ workspaceId, userId: "member-b", categoryId }]);
+    assert.deepEqual(JSON.parse(String(batch.queries[0].params[3])), [{ workspaceId, userId: "member-a", categoryId }]);
     assert.ok(insertedValues(batch).every(item => item.categoryId === categoryId));
     assert.match(insertedItems(batch)[0].query, /category_id, category_confirmed/);
   }
@@ -168,7 +168,7 @@ test("同一入力内の一致重複は最初の値だけ登録し、カテゴ�
   const categoryId = "00000000-0000-4000-8000-000000000003";
   await persistPayPayImport(input([item({ categoryId: null }), item({ categoryId })]));
   assert.deepEqual(insertedValues(requests[0].batch).map(item => item.categoryId), [null]);
-  assert.equal(JSON.parse(String(requests[0].batch.queries[0].params[0])).length, 2);
+  assert.equal(JSON.parse(String(requests[0].batch.queries[0].params[3])).length, 2);
   await assert.rejects(persistPayPayImport(input([item(), item({ amountYen: 999 })])), { message: collisionMessage });
   assert.equal(requests.length, 1);
 });

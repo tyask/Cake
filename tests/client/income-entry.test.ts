@@ -44,6 +44,16 @@ test("収入入力は種別に応じた初期配分を使い、入力保持・�
         assert.equal(await classification.inputValue(), "SHARED");
         assert.deepEqual(await type.locator("option").allTextContents(), ["支払い", "収入"]);
         assert.equal(await modal.getByLabel("支払者", { exact: true }).inputValue(), "a");
+        const paymentActor = modal.getByLabel("支払者", { exact: true });
+        await paymentActor.selectOption("b");
+        await modal.getByText("個人の取引を登録する場合は、担当者を自分に変更してください。", { exact: true }).waitFor();
+        assert.equal(await classification.locator('option[value="PERSONAL"]').evaluate(element => (element as HTMLOptionElement).disabled), true);
+        await modal.getByLabel("取引先", { exact: true }).fill("個人専用");
+        assert.equal(await classification.inputValue(), "PERSONAL", "相手の担当者でも自動ルールの入力を保持する");
+        assert.equal(await modal.getByRole("button", { name: "追加する", exact: true }).isDisabled(), true, "ルール経由でも相手の個人費は登録しない");
+        await paymentActor.selectOption("a");
+        await modal.getByText("個人の取引を登録する場合は、担当者を自分に変更してください。", { exact: true }).waitFor({ state: "hidden" });
+        assert.equal(await paymentActor.locator('option[value="b"]').evaluate(element => (element as HTMLOptionElement).disabled), true, "個人の明細は相手を担当者にできない");
         assert.equal(await modal.locator(".signed-amount-input > span").textContent(), "", "空欄は無符号で表示する");
         assert.equal(await amount.getAttribute("class"), "", "空欄は中立色で表示する");
         await modal.getByLabel("取引日時", { exact: true }).fill("2026-10-18T12:34");
@@ -88,6 +98,8 @@ test("収入入力は種別に応じた初期配分を使い、入力保持・�
         await unit.selectOption("AMOUNT");
         await modal.getByLabel("受取者", { exact: true }).selectOption("b");
         assert.equal(await modal.getByLabel("Aの配分金額（円）", { exact: true }).inputValue(), "300", "共有時に受取者を変えても配分を維持する");
+        assert.equal(await classification.locator('option[value="PERSONAL"]').evaluate(element => (element as HTMLOptionElement).disabled), true, "相手の個人収入へは変更できない");
+        await modal.getByText("個人の取引を登録する場合は、担当者を自分に変更してください。", { exact: true }).waitFor();
         assert.equal(writes.length, 0, "入力操作では登録APIを呼ばない");
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width);
 

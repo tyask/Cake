@@ -28,6 +28,9 @@ export async function findImportCategorySuggestions(
             JOIN categories c ON c.workspace_id = t.workspace_id AND c.id = t.category_id
               AND c.archived_at IS NULL
             WHERE t.workspace_id = ${workspaceId}::uuid
+              AND (t.expense_class = 'SHARED' OR t.actor_user_id = ${userId})
+              AND EXISTS (SELECT 1 FROM workspace_members
+                WHERE workspace_id = ${workspaceId}::uuid AND user_id = ${userId})
               AND t.merchant_normalized = normalized.merchant_normalized
               AND t.type = 'PAYMENT' AND t.category_confirmed AND t.category_id IS NOT NULL
             ORDER BY t.occurred_at DESC, t.created_at DESC, t.id DESC

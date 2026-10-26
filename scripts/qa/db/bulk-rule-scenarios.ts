@@ -89,16 +89,17 @@ export async function verifyBulkRuleScenarios(sql: BulkRuleDatabase, options: Bu
       const ids = await f.insert([{ merchant: fixture.merchant, actorUserId: "b" }]);
       const expected = fixture.bulkDefaults ?? { expenseClass: fixture.expenseClass, splitWeights: fixture.splitWeights };
       assert.deepEqual(transactionDefaults(fixture.merchant, prepareDefaultRuleMatcher(savedRules), ruleMembers, "b"), expected);
-      const result = await f.apply(ids), row = result.transactions![0];
+      const requester = expected.expenseClass === "PERSONAL" ? "b" : "a";
+      const result = await f.apply(ids, "APPLY_RULES", sql, requester), row = result.transactions![0];
       assert.equal(result.affected, 1); assert.equal(row.expenseClass, expected.expenseClass); assert.deepEqual(row.splitWeights, expected.splitWeights);
       assert.equal(row.merchant, fixture.merchant); assert.equal(row.type, "PAYMENT"); assert.equal(row.amountYen, 101);
       assert.equal(new Date(row.occurredAt).toISOString(), "2026-10-18T00:00:00.123Z");
       const stored = (await sql.query("SELECT expense_class,split_weights,updated_by,memo,method FROM transactions WHERE id=$1::uuid", ids)).rows[0];
-      assert.deepEqual(stored, { expense_class: row.expenseClass, split_weights: row.splitWeights, updated_by: "a", memo: "fixture", method: "QA" });
+      assert.deepEqual(stored, { expense_class: row.expenseClass, split_weights: row.splitWeights, updated_by: requester, memo: "fixture", method: "QA" });
     });
     await check("最大5000件の支払いを一括更新し、交互の支払者・確定DTOのID順を維持する", async () => {
       await f.reset(); const rules = await f.setRules([sampleRule]);
-      const values = Array.from({ length: 5000 }, (_, i) => ({ merchant: i % 3 ? "スーパー本店" : "未一致", actorUserId: i % 2 ? "a" : "b", type: "PAYMENT", amountYen: 101 + i % 3 }));
+      const values = Array.from({ length: 5000 }, (_, i) => ({ merchant: i % 3 ? "スーパー本店" : "未一致", actorUserId: i % 3 && i % 2 === 0 ? "b" : "a", type: "PAYMENT", amountYen: 101 + i % 3 }));
       const ids = await f.insert(values), result = await f.apply([...ids].reverse());
       assert.equal(result.affected, 5000); assert.equal(result.transactions!.length, 5000);
       assert.deepEqual(result.transactions!.map(t => t.id), [...ids].sort());
@@ -112,7 +113,8 @@ export async function verifyBulkRuleScenarios(sql: BulkRuleDatabase, options: Bu
       await rejected(() => f.apply([ids[1]]), /ルールを適用できるのは支払い明細だけ/);
       await rejected(() => f.apply(ids), /ルールを適用できるのは支払い明細だけ/);
       await sql.query("UPDATE transactions SET expense_class='PERSONAL', split_weights='{\"a\":0,\"b\":1}'::jsonb WHERE id=$1::uuid", [ids[1]]);
-      await rejected(() => f.apply(ids), /ルールを適用できるのは支払い明細だけ/);
+      await rejected(() => f.apply(ids), /選択した明細が見つかりません/);
+      await sql.query("UPDATE transactions SET expense_class='SHARED',split_weights='{\"a\":1,\"b\":1}'::jsonb WHERE id=$1::uuid", [ids[1]]);
       await sql.query("UPDATE transactions SET type='PAYMENT' WHERE id=$1::uuid", [ids[1]]);
       assert.equal((await f.apply(ids)).affected, 2);
       await sql.query("UPDATE transactions SET type='RECEIPT' WHERE id=$1::uuid", [ids[0]]);
@@ -128,7 +130,7 @@ export async function verifyBulkRuleScenarios(sql: BulkRuleDatabase, options: Bu
         assert.equal((await f.apply([ids[0]])).affected, 1);
         await rejected(() => f.apply(ids), /支払いルールの割合が不正/);
         await sql.query("UPDATE default_rules SET enabled=false WHERE workspace_id=$1::uuid AND merchant_contains='不正'", [f.workspaceId]);
-        assert.equal((await f.apply(ids)).transactions!.find(t => t.id === ids[1])!.expenseClass, "PERSONAL");
+        assert.equal((await f.apply(ids, "APPLY_RULES", sql, "b")).transactions!.find(t => t.id === ids[1])!.expenseClass, "PERSONAL");
       }
     });
     await check("null割合要素は0、不要な参加者キーは除外し、既定割合0:0は拒否する", async () => {

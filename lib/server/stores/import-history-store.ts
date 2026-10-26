@@ -13,6 +13,7 @@ export async function findImportHistory(
         row_number() OVER (PARTITION BY imported_by ORDER BY created_at DESC, id DESC) AS recency
       FROM import_batches
       WHERE workspace_id = ${workspaceId}::uuid AND format = ${format}
+        AND imported_by = ${userId}
         AND EXISTS (
           SELECT 1 FROM workspace_members
           WHERE workspace_id = ${workspaceId}::uuid AND user_id = ${userId}

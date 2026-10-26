@@ -11,7 +11,6 @@ import { formatYen } from "../../lib/shared/display-formatters";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const otherWorkspaceId = "22222222-2222-4222-8222-222222222222";
 const now = new Date("2026-10-23T02:00:00Z");
-const description = "選んだ人の、明細ごとに割り当てられた支出額を合計します";
 function dataset(query: AnalyticsQuery = { workspaceId, period: "month", month: "2026-10" }): AnalyticsDataset {
   const periods = resolveAnalyticsPeriods(query, now);
   const month = periods.current.to.slice(0, 7), previousMonth = periods.comparison.to.slice(0, 7);
@@ -41,7 +40,7 @@ function queryFromRoute(route: Route): AnalyticsQuery {
     : { workspaceId: id, period: "month", month: params.get("month")! };
 }
 
-test("集計はチェックをローカルで反映し、期間と取得世代だけをAPIへ送る", async t => {
+test("集計は自分の支出と共有費全体をローカルで切り替え、期間と取得世代だけをAPIへ送る", async t => {
   const bundle = await build({ entryPoints: ["tests/client/fixtures/analytics.tsx"], bundle: true, write: false,
     outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
   const server = createServer((req, res) => {
@@ -55,7 +54,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(done => server.close(() => done())); throw error; });
 
-  async function fixture(width = 1440, initialActive = true) {
+  async function fixture(width = 1440, initialActive = true, currentUserId = "a") {
     const context = await browser.newContext({ viewport: { width, height: width <= 768 ? 844 : 1000 }, isMobile: width <= 768, hasTouch: width <= 768, reducedMotion: "reduce", serviceWorkers: "block" });
     const page = await context.newPage(), requests: Route[] = [], urls: string[] = [], errors: string[] = [];
     page.setDefaultTimeout(10000);
@@ -69,7 +68,7 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         urls.push(route.request().url()); requests.push(route);
       } else await route.continue();
     });
-    await page.addInitScript(({ workspaceId, active }) => { window.analyticsProps = { workspaceId, revision: 0, active }; window.ignoreAnalyticsAbort = true; }, { workspaceId, active: initialActive });
+    await page.addInitScript(({ workspaceId, active, currentUserId }) => { window.analyticsProps = { workspaceId, currentUserId, revision: 0, active }; window.ignoreAnalyticsAbort = true; }, { workspaceId, active: initialActive, currentUserId });
     await page.goto(origin);
     await page.waitForFunction(() => !!window.updateAnalytics);
     async function take() {
@@ -83,14 +82,14 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
     return { context, page, requests, urls, errors, take, reply, total, stable };
   }
   try {
-    for (const width of [1440, 1000, 850, 800, 769, 390, 320]) await t.test(`${width}px: 対象者・区分・階層・表・説明を変えても再通信しない`, async () => {
+    for (const width of [1440, 1000, 850, 800, 769, 390, 320]) await t.test(`${width}px: 自分と共有全体・階層・表を変えても再通信しない`, async () => {
       const f = await fixture(width);
       try {
         const request = await f.take();
         assert.deepEqual([...new URL(request.request().url()).searchParams.keys()].sort(), ["month", "period", "workspaceId"]);
-        await f.reply(request); await f.total("￥150");
+        await f.reply(request); await f.total("￥80");
         assert.equal(await f.page.getByTestId("analytics-total").evaluate(element => getComputedStyle(element).color), "rgb(51, 42, 24)", "費用の集計額は通常色・無符号で表示する");
-        assert.equal(await f.page.getByTestId("analytics-difference").textContent(), "+￥50", "支出の増加はプラスで表示する");
+        assert.equal(await f.page.getByTestId("analytics-difference").textContent(), "+￥30", "支出の増加はプラスで表示する");
         assert.equal(await f.page.getByTestId("analytics-difference").evaluate(element => getComputedStyle(element).color), "rgb(51, 42, 24)", "差額も収支の色分けをしない");
         await f.page.getByRole("heading", { name: "カテゴリ別の内訳" }).waitFor();
         const pie = f.page.getByRole("group", { name: "カテゴリ別の支出額。金額と割合は次の一覧でも確認できます。", exact: true });
@@ -119,48 +118,13 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
         const pieBounds = (await pie.locator("svg").first().boundingBox())!;
         assert.ok(pieBounds.width > 100 && pieBounds.height > 100, "中間幅でも円グラフが消えない");
         assert.equal(await f.page.getByRole("combobox", { name: "集計の基準" }).count(), 0);
-        const info = f.page.getByRole("button", { name: "対象者の説明", exact: true });
-        if (width > 768) {
-          assert.equal(await info.count(), 0);
-          await f.page.getByText("対象者", { exact: true }).hover();
-        } else {
-          const bounds = (await info.boundingBox())!;
-          assert.ok(bounds.width <= 28 && bounds.height <= 28);
-          assert.deepEqual(await info.evaluate(element => ({ border: getComputedStyle(element).borderStyle, background: getComputedStyle(element).backgroundColor })), { border: "none", background: "rgba(0, 0, 0, 0)" });
-          await info.tap();
-        }
-        assert.equal(await f.page.getByRole("tooltip").innerText(), description);
-        const tooltip = (await f.page.getByRole("tooltip").boundingBox())!;
-        assert.ok(tooltip.x >= 0 && tooltip.x + tooltip.width <= width);
-        await f.page.keyboard.press("Escape");
-        assert.equal(await f.page.getByRole("tooltip").count(), 0);
-        if (width > 768) {
-          await f.page.getByRole("heading", { name: "支出の集計", exact: true }).hover();
-          await f.page.getByText("対象者", { exact: true }).focus();
-          assert.equal(await f.page.getByRole("tooltip").innerText(), description);
-          if (width === 1440) {
-            await f.page.setViewportSize({ width: 769, height: 1000 });
-            await f.stable();
-            const resized = (await f.page.getByRole("tooltip").boundingBox())!;
-            assert.ok(resized.x >= 16 && resized.x + resized.width <= 769 - 16, "開いた説明もリサイズ時に画面内へ補正する");
-            await f.page.setViewportSize({ width, height: 1000 });
-          }
-          await f.page.keyboard.press("Escape");
-          await f.page.getByText("対象者", { exact: true }).blur();
-        } else {
-          await info.tap();
-          await f.page.getByRole("heading", { name: "支出の集計", exact: true }).tap();
-          assert.equal(await f.page.getByRole("tooltip").count(), 0, "外側のタップで説明を閉じる");
-        }
-        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck(); await f.total("￥80");
-        await f.page.getByRole("checkbox", { name: "共有", exact: true }).uncheck(); await f.total("￥20");
-        await f.page.getByRole("checkbox", { name: "個人", exact: true }).uncheck();
-        await f.page.getByRole("status").filter({ hasText: "それぞれ1つ以上" }).waitFor();
-        assert.equal(await f.page.getByTestId("analytics-total").count(), 0);
-        await f.page.getByRole("checkbox", { name: "共有", exact: true }).check(); await f.total("￥60");
-        await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).uncheck();
-        await f.page.getByRole("status").filter({ hasText: "それぞれ1つ以上" }).waitFor();
-        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).check(); await f.total("￥40");
+        assert.equal(await f.page.getByRole("checkbox").count(), 0, "全共有費と個人費を混在させる組合せは提供しない");
+        assert.equal(await f.page.getByRole("radio", { name: "自分の支出", exact: true }).isChecked(), true);
+        await f.page.getByText("共有費の自分の負担額と、自分の個人費を合計します。", { exact: false }).waitFor();
+        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥100");
+        await f.page.getByText("共有費を支払者にかかわらず全額で集計します。個人費は含めません。", { exact: false }).waitFor();
+        await f.page.getByRole("radio", { name: "自分の支出", exact: true }).check(); await f.total("￥80");
+        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥100");
         await f.page.getByLabel("カテゴリの細かさ", { exact: true }).selectOption("all");
         await f.page.getByLabel("全カテゴリの支出額と割合").getByText("食費 › スーパー", { exact: true }).waitFor();
         await f.page.getByText("月ごとの金額を表で見る", { exact: true }).click();
@@ -297,14 +261,24 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
       } finally { await f.context.close(); }
     });
 
-    await t.test("取得中にチェックを変更したら、最新の選択で応答を描画する", async () => {
+    await t.test("相手のアカウントでも自分の配分と個人費を初期表示する", async () => {
+      const f = await fixture(390, true, "b");
+      try {
+        await f.reply(await f.take()); await f.total("￥70");
+        assert.equal(await f.page.getByRole("radio", { name: "自分の支出", exact: true }).isChecked(), true);
+        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥100");
+        await f.page.getByRole("radio", { name: "自分の支出", exact: true }).check(); await f.total("￥70");
+        assert.equal(f.urls.length, 1); assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
+    await t.test("取得中に表示対象を変更したら、最新の選択で応答を描画する", async () => {
       const f = await fixture();
       try {
-        await f.reply(await f.take()); await f.total("￥150");
+        await f.reply(await f.take()); await f.total("￥80");
         await f.page.getByRole("button", { name: "更新", exact: false }).click(); const refreshing = await f.take();
-        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck();
-        await f.page.getByRole("checkbox", { name: "個人", exact: true }).uncheck();
-        await f.reply(refreshing); await f.total("￥60");
+        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check();
+        await f.reply(refreshing); await f.total("￥100");
         assert.equal(f.urls.length, 2); assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
@@ -313,43 +287,43 @@ test("集計はチェックをローカルで反映し、期間と取得世代�
       const f = await fixture(1440, false);
       try {
         await f.stable(); assert.equal(f.urls.length, 0, "未訪問の画面は取得しない");
-        await f.page.evaluate(() => window.updateAnalytics({ active: true })); await f.reply(await f.take()); await f.total("￥150");
+        await f.page.evaluate(() => window.updateAnalytics({ active: true })); await f.reply(await f.take()); await f.total("￥80");
         await f.page.getByLabel("集計する月", { exact: true }).fill("2026-09"); const older = await f.take();
         assert.equal(await f.page.getByTestId("analytics-total").count(), 0, "別期間の古いグラフを表示しない");
         await f.page.getByLabel("集計する月", { exact: true }).fill("2026-08"); const newer = await f.take();
         const latest = dataset(queryFromRoute(newer)); latest.buckets[0].burdenYen = "560";
-        await f.reply(newer, latest); await f.total("￥650");
-        await f.reply(older); await f.stable(); await f.total("￥650");
-        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck(); await f.total("￥580");
+        await f.reply(newer, latest); await f.total("￥580");
+        await f.reply(older); await f.stable(); await f.total("￥580");
+        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥600");
         await f.page.getByLabel("集計する期間", { exact: true }).selectOption("range");
         await f.page.getByLabel("開始日", { exact: true }).fill("2026-07-10");
         await f.page.getByLabel("終了日", { exact: true }).fill("2026-07-20");
         await f.stable(); assert.equal(f.urls.length, 3, "日付入力中は通信しない");
         await f.page.getByRole("button", { name: "この期間で表示" }).click(); const custom = await f.take();
         assert.deepEqual(queryFromRoute(custom), { workspaceId, period: "range", from: "2026-07-10", to: "2026-07-20" });
-        await f.reply(custom); await f.total("￥80");
-        await f.page.evaluate(() => window.updateAnalytics({ revision: 1 })); await f.reply(await f.take()); await f.total("￥80");
+        await f.reply(custom); await f.total("￥100");
+        await f.page.evaluate(() => window.updateAnalytics({ revision: 1 })); await f.reply(await f.take()); await f.total("￥100");
         await f.page.evaluate(() => window.updateAnalytics({ active: false, revision: 2 })); await f.stable(); assert.equal(f.urls.length, 5);
-        await f.page.evaluate(() => window.updateAnalytics({ active: true })); await f.reply(await f.take()); await f.total("￥80");
+        await f.page.evaluate(() => window.updateAnalytics({ active: true })); await f.reply(await f.take()); await f.total("￥100");
         assert.equal(await f.page.getByLabel("開始日", { exact: true }).inputValue(), "2026-07-10");
-        assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), false);
+        assert.equal(await f.page.getByRole("radio", { name: "共有費全体", exact: true }).isChecked(), true);
         await f.page.evaluate(id => window.updateAnalytics({ workspaceId: id }), otherWorkspaceId); const other = await f.take();
         assert.equal(queryFromRoute(other).workspaceId, otherWorkspaceId);
-        await f.reply(other); await f.total("￥150");
-        assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), true);
+        await f.reply(other); await f.total("￥80");
+        assert.equal(await f.page.getByRole("radio", { name: "自分の支出", exact: true }).isChecked(), true);
         assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
 
-    await t.test("取得失敗でも選択を保持して再試行でき、正しい0円と未選択を分ける", async () => {
+    await t.test("取得失敗でも表示対象を保持して再試行でき、支出のない期間は0円を表示する", async () => {
       const f = await fixture();
       try {
-        await f.reply(await f.take()); await f.total("￥150");
-        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck();
+        await f.reply(await f.take()); await f.total("￥80");
+        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check();
         await f.page.getByRole("button", { name: "更新", exact: false }).click();
         await (await f.take()).fulfill({ status: 503, json: { error: "集計を再取得してください。" } });
         await f.page.getByRole("alert").filter({ hasText: "集計を再取得してください。" }).waitFor();
-        assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), false);
+        assert.equal(await f.page.getByRole("radio", { name: "共有費全体", exact: true }).isChecked(), true);
         assert.equal(await f.page.getByTestId("analytics-total").count(), 0);
         await f.page.getByRole("button", { name: "再試行", exact: true }).click();
         const request = await f.take(), empty = dataset(queryFromRoute(request)); empty.buckets = [];

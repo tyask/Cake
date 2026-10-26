@@ -13,7 +13,10 @@ const workspace: WorkspaceData = {
     { id: "b", name: "B", email: "b@example.test", imageUrl: null, weight: 4, role: "MEMBER" },
   ],
   categories: [{ id: "income", name: "収入", parentId: null, revision: 1, colorHex: "#16a34a", sortOrder: 0, archivedAt: null }],
-  rules: [{ id: "rule", merchantContains: "ルール店", expenseClass: "SHARED", splitWeights: { a: 3, b: 1 }, enabled: true, sortOrder: 0 }],
+  rules: [
+    { id: "rule", merchantContains: "ルール店", expenseClass: "SHARED", splitWeights: { a: 3, b: 1 }, enabled: true, sortOrder: 0 },
+    { id: "personal", merchantContains: "個人専用", expenseClass: "PERSONAL", splitWeights: null, enabled: true, sortOrder: 1 },
+  ],
   transactions: [], settlement: null, settlementHistory: [],
 };
 

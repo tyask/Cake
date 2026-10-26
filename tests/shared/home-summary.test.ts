@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cashflowSummary, currentMonthTransactions } from "../../lib/shared/home-summary";
+import { cashflowSummary, currentMonthTransactions, personalCashflowSummary } from "../../lib/shared/home-summary";
 import type { TransactionRecord } from "../../lib/shared/types";
 
 function transaction(id: string, occurredAt: string): TransactionRecord {
@@ -57,4 +57,35 @@ test("未清算の共有収支は収入から支払いを引き、個人と清�
   assert.deepEqual(cashflowSummary(entries.filter(item => item.expenseClass === "SHARED" && !item.settledAt)), {
     paymentTotal: BigInt(4_000), receiptTotal: BigInt(10_000), balanceYen: BigInt(6_000),
   });
+});
+
+test("自分の支出は立替額に依存せず共有費の本人負担と個人費を合算する", () => {
+  const shared = { ...transaction("shared", "2026-10-01T00:00:00+09:00"),
+    expenseClass: "SHARED" as const, splitWeights: { a: 3, b: 2 } };
+  const entries = [shared,
+    { ...transaction("personal", shared.occurredAt), amountYen: 20_000, splitWeights: { a: 1, b: 0 } },
+    { ...transaction("hidden", shared.occurredAt), actorUserId: "b", amountYen: 99_999, splitWeights: { a: 0, b: 1 } },
+  ];
+  const members = [{ id: "a" }, { id: "b" }];
+  assert.deepEqual(personalCashflowSummary(entries, members, "a"), {
+    paymentTotal: BigInt(80_000), receiptTotal: BigInt(0), balanceYen: BigInt(-80_000),
+  });
+  assert.deepEqual(personalCashflowSummary(entries.map(item => item.id === shared.id
+    ? { ...item, actorUserId: "b", settledAt: "2026-10-02T00:00:00Z" } : item), members, "a"),
+  personalCashflowSummary(entries, members, "a"));
+  assert.deepEqual(personalCashflowSummary(entries, members, "b"), {
+    paymentTotal: BigInt(139_999), receiptTotal: BigInt(0), balanceYen: BigInt(-139_999),
+  });
+});
+
+test("共有の収入も保存割合で整数円配分し、個人収入と合わせて収支を計算する", () => {
+  const members = [{ id: "a" }, { id: "b" }];
+  const entries: TransactionRecord[] = [
+    { ...transaction("shared", "2026-10-01T00:00:00+09:00"), expenseClass: "SHARED", amountYen: 101, splitWeights: { a: 1, b: 1 } },
+    { ...transaction("refund", "2026-10-02T00:00:00+09:00"), type: "RECEIPT", expenseClass: "SHARED", actorUserId: "b", amountYen: 31, splitWeights: { a: 1, b: 1 } },
+    { ...transaction("salary", "2026-10-03T00:00:00+09:00"), type: "RECEIPT", amountYen: 1_000, splitWeights: { a: 1, b: 0 } },
+  ];
+  assert.deepEqual(personalCashflowSummary(entries, members, "a"), { paymentTotal: BigInt(51), receiptTotal: BigInt(1_016), balanceYen: BigInt(965) });
+  assert.deepEqual(personalCashflowSummary(entries, members, "b"), { paymentTotal: BigInt(50), receiptTotal: BigInt(15), balanceYen: BigInt(-35) });
+  assert.deepEqual(personalCashflowSummary([], members, "a"), { paymentTotal: BigInt(0), receiptTotal: BigInt(0), balanceYen: BigInt(0) });
 });

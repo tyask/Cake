@@ -7,7 +7,7 @@ import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { neonConfig } from "@neondatabase/serverless";
 import { findImportHistory } from "../../lib/server/stores/import-history-store";
 
-test("取込履歴の実SQLは形式・家計を限定し取込者ごとの最新5件と所属境界を保証する", async t => {
+test("取込履歴の実SQLは形式・家計を限定し本人の最新5件と所属境界を保証する", async t => {
   const memory = new PGlite({ extensions: { pgcrypto } });
   t.after(() => memory.close());
   const directory = new URL("../../db/migrations/", import.meta.url);
@@ -66,12 +66,10 @@ test("取込履歴の実SQLは形式・家計を限定し取込者ごとの最�
     return id;
   };
 
-  await t.test("移行前の履歴と旧INSERTをPayPayとして保持し、元取込者・0件登録・日時精度を返す", async () => {
+  await t.test("移行前の履歴と旧INSERTを保持し、他の取込者のファイル名・件数を公開しない", async () => {
     const saved = await history();
-    assert.deepEqual(saved, [{
-      id: legacyId, format: "PAYPAY", importedBy: "former", importedByName: "以前の取込者", fileName: "移行前.csv",
-      totalRows: 4, importedRows: 0, skippedRows: 4, createdAt: "2026-10-01T00:00:00.123456Z",
-    }]);
+    assert.deepEqual(saved, [], "以前の取込者のファイル名・件数を公開しない");
+    assert.equal((await memory.query<{ format: string }>("SELECT format FROM import_batches WHERE id=$1", [legacyId])).rows[0].format, "PAYPAY");
     const oldInsert = (await memory.query<{ format: string }>(`INSERT INTO import_batches(workspace_id,imported_by,file_name,total_rows,imported_rows,skipped_rows)
       VALUES ($1,'a','旧アプリ.csv',1,1,0) RETURNING format`, [workspaceId])).rows[0];
     assert.equal(oldInsert.format, "PAYPAY");
@@ -80,22 +78,22 @@ test("取込履歴の実SQLは形式・家計を限定し取込者ごとの最�
   });
 
   const aIds: string[] = [], bIds: string[] = [];
-  await t.test("同名の取込者もID別に最新5件を選び、全体を日時・UUID降順に並べる", async () => {
+  await t.test("同名の相手と区別して本人の最新5件を日時・UUID降順に並べる", async () => {
     for (let index = 1; index <= 7; index++) {
       aIds.push(await insert("a", `2026-10-${String(index + 10).padStart(2, "0")}T00:00:00Z`, { imported: index === 7 ? 0 : 1 }));
       bIds.push(await insert("b", "2026-10-20T00:00:00.123456Z", { id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}` }));
     }
     await insert("outside", "2026-10-30T00:00:00Z", { workspace: otherWorkspaceId });
     const saved = await history();
-    assert.equal(saved.length, 11, "現在の取込者2人をそれぞれ5件＋元取込者1件");
+    assert.equal(saved.length, 5, "本人の最新5件だけを返す");
     assert.deepEqual(saved.filter(row => row.importedBy === "a").map(row => row.id), aIds.slice(-5).reverse());
-    assert.deepEqual(saved.filter(row => row.importedBy === "b").map(row => row.id), bIds.slice(-5).reverse());
-    assert.deepEqual(saved.map(row => row.id), [...bIds.slice(-5).reverse(), ...aIds.slice(-5).reverse(), legacyId]);
+    assert.deepEqual(saved.filter(row => row.importedBy === "b"), []);
+    assert.deepEqual(saved.map(row => row.id), aIds.slice(-5).reverse());
     assert.equal(saved.find(row => row.id === aIds.at(-1))!.importedRows, 0);
     assert.equal(saved.find(row => row.id === aIds.at(-1))!.skippedRows, 4);
     assert.ok(saved.filter(row => ["a", "b"].includes(row.importedBy)).every(row => row.importedByName === "同じ名前"));
     assert.ok(saved.every(row => row.importedBy !== "outside"));
-    assert.equal((await history("b")).length, 11, "ログインユーザー本人だけに絞らない");
+    assert.deepEqual((await history("b")).map(row => row.id), bIds.slice(-5).reverse(), "同名の相手でも本人の履歴だけを返す");
   });
 
   await t.test("形式で絞ってから5件を選び、他形式の新しい履歴に枠を消費させない", async () => {
@@ -104,7 +102,7 @@ test("取込履歴の実SQLは形式・家計を限定し取込者ごとの最�
     try {
       for (let index = 0; index < 6; index++) await insert("a", "2026-10-30T00:00:00Z", { format: "OTHER" });
       const saved = await history();
-      assert.equal(saved.length, 11);
+      assert.equal(saved.length, 5);
       assert.ok(saved.every(row => row.format === "PAYPAY"));
       assert.deepEqual(saved.filter(row => row.importedBy === "a").map(row => row.id), aIds.slice(-5).reverse());
     } finally {
