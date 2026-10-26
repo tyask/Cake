@@ -54,7 +54,7 @@ async function stable(page: Page) {
 async function assertPanel(page: Page, tab: DashboardTab, loading = false) {
   const main = page.locator(".app-main"), expected = panels[tab].heading;
   if (expected) await main.getByRole("heading", { name: expected, level: 1, exact: true }).waitFor();
-  else await main.getByRole("table", { name: "今月の収支", exact: true }).waitFor();
+  else await main.getByRole("table", { name: "今月の自分の収支", exact: true }).waitFor();
   if (!loading) await page.waitForFunction(() => !document.querySelector(".loading-line"));
   if (tab === "analytics") await main.getByTestId("analytics-total").waitFor();
   await stable(page);

@@ -38,7 +38,7 @@ test("取込回の明細SQLは現在値・家計とbatch境界・空履歴・安
 
   const insert = async (options: { id?: string; workspace?: string; batch?: string | null; actor?: string;
     occurredAt?: string; createdAt?: string; category?: string | null } = {}) => {
-    const id = options.id ?? randomUUID(), actor = options.actor ?? "b";
+    const id = options.id ?? randomUUID(), actor = options.actor ?? "a";
     await memory.query(`INSERT INTO transactions(id,workspace_id,import_batch_id,occurred_at,created_at,merchant,
       method,type,amount_yen,actor_user_id,expense_class,split_weights,external_id,source,created_by,updated_by,category_id,memo)
       VALUES ($1::uuid,$2,$3,$4,$5,'取込先','PayPay残高','PAYMENT',1200,$6,'PERSONAL',jsonb_build_object($6::text,1),
@@ -54,7 +54,8 @@ test("取込回の明細SQLは現在値・家計とbatch境界・空履歴・安
   ids.push(await insert({ id: "00000000-0000-4000-8000-000000000001" }));
   ids.push(await insert({ id: "00000000-0000-4000-8000-000000000002" }));
   ids.push(await insert({ occurredAt: "2026-10-26T00:00:00.123Z" }));
-  const sameFileId = await insert({ batch: sameFileBatchId });
+  const sameFileId = await insert({ batch: sameFileBatchId, actor: "b" });
+  await insert({ actor: "b" }); // 本人の取込回に旧版が保存した相手個人費も非公開。
   await insert({ batch: null });
   await insert({ workspace: otherWorkspaceId, batch: otherBatchId, actor: "outside", category: foreignCategoryId });
   // The existing FK references only the batch ID. Defend against legacy/corrupt
@@ -94,12 +95,13 @@ test("取込回の明細SQLは現在値・家計とbatch境界・空履歴・安
   await t.test("filenameではなくbatch IDで照会し、日時精度・UUIDまで使って安定順を決める", async () => {
     const result = (await details())!;
     assert.deepEqual(result.transactions.map(row => row.id), [...ids].reverse());
-    assert.ok(result.transactions.every(row => row.actorUserId === "b" && row.actorName === "B"));
+    assert.ok(result.transactions.every(row => row.actorUserId === "a" && row.actorName === "A"));
     assert.equal(result.transactions[0].occurredAt, "2026-10-26T00:00:00.123Z");
-    assert.deepEqual(result.transactions[0].splitWeights, { a: 0, b: 1 });
+    assert.deepEqual(result.transactions[0].splitWeights, { a: 1, b: 0 });
     assert.equal(result.transactions[0].source, "PAYPAY");
-    assert.deepEqual((await details(sameFileBatchId))!.transactions.map(row => row.id), [sameFileId]);
-    assert.equal((await details(batchId, "b"))!.transactions.length, ids.length, "取込者本人だけに制限しない");
+    assert.equal(await details(sameFileBatchId), null, "相手の取込回をIDで指定しても取得できない");
+    assert.deepEqual((await details(sameFileBatchId, "b"))!.transactions.map(row => row.id), [sameFileId]);
+    assert.equal(await details(batchId, "b"), null, "本人以外には取込回の存在を公開しない");
     assert.deepEqual(result.categories.map(category => category.id), [parentId, childId, archivedId]);
     assert.equal(result.categories.find(category => category.id === archivedId)!.archivedAt, "2026-10-01T00:00:00.123Z");
     assert.ok(result.categories.every(category => category.id !== foreignCategoryId));
@@ -109,7 +111,7 @@ test("取込回の明細SQLは現在値・家計とbatch境界・空履歴・安
     const id = ids.at(-1)!;
     await memory.query(`UPDATE transactions SET amount_yen=3456,memo='編集後メモ',method='編集後の方法',
       merchant='編集後の取引先',settled_at='2026-10-27T03:04:05.678Z' WHERE id=$1`, [id]);
-    await memory.query("UPDATE app_users SET name='現在のB' WHERE id='b'");
+    await memory.query("UPDATE app_users SET name='現在のA' WHERE id='a'");
     await memory.query("UPDATE categories SET name='現在の食品',archived_at='2026-10-27T00:00:00Z' WHERE id=$1", [childId]);
     const result = (await details())!, current = result.transactions.find(row => row.id === id)!;
     assert.equal(current.amountYen, 3456);
@@ -117,7 +119,7 @@ test("取込回の明細SQLは現在値・家計とbatch境界・空履歴・安
     assert.equal(current.method, "編集後の方法");
     assert.equal(current.merchant, "編集後の取引先");
     assert.equal(current.settledAt, "2026-10-27T03:04:05.678Z");
-    assert.equal(current.actorName, "現在のB");
+    assert.equal(current.actorName, "現在のA");
     assert.equal(current.categoryId, childId);
     assert.equal(current.categoryConfirmed, true);
     assert.equal(current.categoryRevision, 1);
@@ -165,7 +167,7 @@ test("取込回の明細SQLは現在値・家計とbatch境界・空履歴・安
       'categories',(SELECT jsonb_agg(c ORDER BY id) FROM categories c),
       'workspaces',(SELECT jsonb_agg(w ORDER BY id) FROM workspaces w)) AS data`)).rows;
     const before = await snapshot();
-    await details(sameFileBatchId);
+    await details();
     assert.deepEqual(await snapshot(), before);
     const query = queries.at(-1)!;
     await memory.exec("SET enable_seqscan=off");

@@ -33,7 +33,7 @@ const workspace: WorkspaceData = {
     transaction("receipt", { type: "RECEIPT", amountYen: 2_000, actorUserId: "b", actorName: "B" }),
     transaction("settled-receipt", { type: "RECEIPT", amountYen: 5_000, settledAt: "2026-10-11T03:00:00.000Z" }),
     transaction("past", { amountYen: 9_000, occurredAt: "2026-09-30T14:59:59.000Z", expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } }),
-    transaction("future", { amountYen: mode === "negative" ? 8_000 : mode === "zero" ? 7_000 : 1_000,
+    transaction("future", { amountYen: mode === "negative" ? 9_500 : mode === "zero" ? 8_500 : 2_500,
       occurredAt: "2026-10-31T03:00:00.000Z", expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } }),
     transaction("same-amount-receipt", { type: "RECEIPT", expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } }),
   ],
@@ -64,7 +64,7 @@ function Harness() {
     return result;
   };
   return <main style={{ padding: 12, maxWidth: 1600 }}>
-    <section id="home"><HomePanel selected={selected} pending={0} setTab={() => {}} add={() => {}}
+    <section id="home"><HomePanel selected={selected} userId="a" pending={0} setTab={() => {}} add={() => {}}
       run={run} refreshAction={null} refreshing={mode === "refreshing"} /></section>
     <section id="transactions"><TransactionsPanel selected={selected} userId="a" add={() => {}} run={run}
       onRefresh={async prepare => { await prepare(); }} refreshing={false} /></section>

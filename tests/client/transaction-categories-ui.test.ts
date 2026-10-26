@@ -155,6 +155,34 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         assert.deepEqual(errors, []);
       } finally { release?.(); await context.close(); }
     });
+    for (const width of [1440, 390]) await t.test(`${width}px: 個人費の担当者は本人に限定する`, async () => {
+      const context = await browser.newContext({ viewport: { width, height: 900 } });
+      const page = await context.newPage();
+      const writes: Record<string, unknown>[] = [];
+      await page.route("**/api/app", async route => {
+        const payload = route.request().postDataJSON();
+        writes.push(payload);
+        await route.fulfill({ json: { transaction: { ...payload, id: payload.transactionId, actorName: payload.actorUserId === "a" ? "A" : "B", source: "MANUAL", externalId: "first", settledAt: null, memo: "", categoryId: null, categoryConfirmed: false, categoryRevision: 0 } } });
+      });
+      try {
+        await page.goto(origin);
+        const first = page.locator('[data-transaction-id="first"]');
+        if (width < 768) await first.getByRole("button", { name: "firstの詳細を開く", exact: true }).click();
+        const actor = first.getByLabel("支払者", { exact: true });
+        const classification = first.getByLabel("区分", { exact: true });
+        await actor.selectOption("b");
+        await page.waitForFunction(() => JSON.parse(document.getElementById("saved-transactions")!.textContent!)[0].actorUserId === "b");
+        assert.equal(await classification.locator('option[value="PERSONAL"]').isDisabled(), true);
+        await first.getByText("個人に変更する場合は、担当者を自分に変更してください。", { exact: true }).waitFor();
+        await actor.selectOption("a");
+        await page.waitForFunction(() => JSON.parse(document.getElementById("saved-transactions")!.textContent!)[0].actorUserId === "a");
+        await classification.selectOption("PERSONAL");
+        await page.waitForFunction(() => JSON.parse(document.getElementById("saved-transactions")!.textContent!)[0].expenseClass === "PERSONAL");
+        assert.equal(await actor.locator('option[value="b"]').isDisabled(), true);
+        assert.equal(writes.length, 3);
+        assert.ok(writes.every(payload => payload.expenseClass !== "PERSONAL" || payload.actorUserId === "a"));
+      } finally { await context.close(); }
+    });
     await t.test("保存中に新しいカテゴリを取得した場合、旧応答を入力欄でも承認しない", async () => {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
       const page = await context.newPage();

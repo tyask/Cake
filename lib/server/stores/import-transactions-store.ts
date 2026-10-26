@@ -15,6 +15,7 @@ export async function findImportTransactions(
     WITH selected_batch AS MATERIALIZED (
       SELECT id, workspace_id FROM import_batches
       WHERE id = ${batchId}::uuid AND workspace_id = ${workspaceId}::uuid AND format = ${format}
+        AND imported_by = ${userId}
         AND EXISTS (
           SELECT 1 FROM workspace_members
           WHERE workspace_id = ${workspaceId}::uuid AND user_id = ${userId}
@@ -34,6 +35,7 @@ export async function findImportTransactions(
       FROM transactions t
       JOIN selected_batch b ON t.workspace_id = b.workspace_id AND t.import_batch_id = b.id
       JOIN app_users u ON u.id = t.actor_user_id
+      WHERE t.expense_class = 'SHARED' OR t.actor_user_id = ${userId}
     ), '[]'::jsonb) AS transactions,
     COALESCE((
       SELECT jsonb_agg(jsonb_build_object(

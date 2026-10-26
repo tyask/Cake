@@ -7,9 +7,9 @@ import { chromium, type Browser, type Route } from "playwright";
 import type { ImportHistoryEntry } from "../../lib/shared/import-history";
 import type { Category, TransactionRecord, WorkspaceData } from "../../lib/shared/types";
 
-const history: ImportHistoryEntry[] = Array.from({ length: 10 }, (_, index) => ({
-  id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, format: "PAYPAY", importedBy: index % 2 ? "b" : "a",
-  importedByName: index === 0 ? "長い取込者名でも一行を保つ名前" : index % 2 ? "太郎" : "花子",
+const history: ImportHistoryEntry[] = Array.from({ length: 5 }, (_, index) => ({
+  id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, format: "PAYPAY", importedBy: "a",
+  importedByName: index === 0 ? "長い取込者名でも一行を保つ名前" : "花子",
   fileName: index === 0 ? "非常に長いファイル名".repeat(20) + ".csv" : `PayPay_${index}.csv`,
   totalRows: 2000, importedRows: index === 0 ? 2000 : index, skippedRows: index === 0 ? 0 : 2000 - index,
   createdAt: new Date(Date.UTC(2026, 9, 25, 5, 32 - index, 42, 123)).toISOString(),
@@ -23,7 +23,7 @@ const transactions: TransactionRecord[] = [
     type: "PAYMENT", amountYen: 1200, actorUserId: "a", actorName: "更新後の支払者", expenseClass: "SHARED", splitWeights: { a: 1, b: 1 },
     settledAt: null, externalId: "paypay-1", source: "PAYPAY", categoryId: "groceries", categoryConfirmed: true, categoryRevision: 1 },
   { id: "transaction-2", occurredAt: "2026-10-24T05:00:00.000Z", merchant: "返金の受取", method: "現金", memo: "",
-    type: "RECEIPT", amountYen: 500, actorUserId: "b", actorName: "太郎", expenseClass: "PERSONAL", splitWeights: { b: 1 },
+    type: "RECEIPT", amountYen: 500, actorUserId: "a", actorName: "花子", expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 },
     settledAt: null, externalId: "receipt-2", source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0 },
   { id: "transaction-3", occurredAt: "2026-10-23T04:00:00.000Z", merchant: "清算済みの支払い", method: "現金", memo: "長いメモ".repeat(30),
     type: "PAYMENT", amountYen: 300, actorUserId: "a", actorName: "花子", expenseClass: "SHARED", splitWeights: { a: 1, b: 1 },
@@ -49,7 +49,7 @@ async function openFixture(browser: Browser, origin: string, width: number, api:
   return { context, page, errors };
 }
 
-test("取込履歴は取込者ごとの履歴を一行の表で表示し、専用APIの状態と登録成功に追随する", async t => {
+test("取込履歴は本人の取込履歴を一行の表で表示し、専用APIの状態と登録成功に追随する", async t => {
   const bundle = await build({ entryPoints: ["tests/client/fixtures/import-history.tsx"], bundle: true, write: false,
     outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"development"' } });
   const server = createServer((req, res) => {
@@ -62,7 +62,7 @@ test("取込履歴は取込者ごとの履歴を一行の表で表示し、専�
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(done => server.close(() => done())); throw error; });
   try {
-    for (const width of [1440, 390, 320]) await t.test(`幅${width}px: 2人分10件を1履歴1行に保ち、詳細とキーボード操作で全文を確認する`, async () => {
+    for (const width of [1440, 390, 320]) await t.test(`幅${width}px: 自分の5件を1履歴1行に保ち、詳細とキーボード操作で全文を確認する`, async () => {
       let detailRequests = 0;
       const { context, page, errors } = await openFixture(browser, origin, width, async (route, url) => {
         assert.equal(route.request().method(), "GET");
@@ -79,11 +79,11 @@ test("取込履歴は取込者ごとの履歴を一行の表で表示し、専�
       try {
         const table = page.getByRole("table", { name: "PayPayの取込履歴", exact: true });
         await table.waitFor();
-        assert.equal(await table.locator("tbody tr").count(), 10, "合計5件には切り詰めない");
+        assert.equal(await table.locator("tbody tr").count(), 5, "本人の最新5件を表示する");
         assert.deepEqual(await table.locator("thead th").allTextContents(), ["日時", "ファイル名", "取込者", "登録"]);
         assert.equal((await page.locator("body").innerText()).includes("スキップ"), false);
         assert.equal(detailRequests, 0, "明細はファイル名を押した時だけ取得する");
-        assert.equal(await page.getByText("取込者ごとに最新5件 · 新しい順", { exact: true }).count(), 1);
+        assert.equal(await page.getByText("自分の取込履歴・最新5件 · 新しい順", { exact: true }).count(), 1);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
         assert.equal(await table.locator("tbody tr").evaluateAll(rows => rows.every(row => row.getBoundingClientRect().height <= 45
           && [...row.children].every(cell => Math.abs(cell.getBoundingClientRect().y - row.getBoundingClientRect().y) < 1))), true);

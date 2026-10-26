@@ -127,11 +127,12 @@ test("集計の実SQLは保存割合の整数配分・対象期間・認可を�
     assert.deepEqual((await read(workspaceId, a, separate)).buckets.filter(bucket => bucket.categoryId === id).map(bucket => bucket.burdenYen), ["50"]);
   });
 
-  await t.test("全source・清算済・個人費・未確認と使用停止カテゴリを含め、RECEIPTと別workspaceは除外する", async () => {
+  await t.test("全source・清算済・本人個人費・未確認と使用停止カテゴリを含め、RECEIPTと別workspaceは除外する", async () => {
     const id = await category("全source"), archived = await category("使用停止"), foreign = await category("別家計カテゴリ", otherWorkspaceId);
     for (const source of ["MANUAL", "PAYPAY", "RECURRING"]) await insert(101, { [a]: 1, [b]: 2 }, id, { source, settled: true });
     await insert(97, { [a]: 1, [b]: 0 }, archived);
     await insert(31, { [a]: 0, [b]: 1 }, null, { expenseClass: "PERSONAL", actor: b });
+    await insert(23, { [a]: 1, [b]: 0 }, null, { expenseClass: "PERSONAL", actor: a });
     await insert(1000, { [a]: 1, [b]: 0 }, id, { type: "RECEIPT" });
     await insert(2000, { [outside]: 1 }, foreign, { workspace: otherWorkspaceId, actor: outside, expenseClass: "PERSONAL" });
     await memory.query("UPDATE categories SET archived_at='2026-10-11T00:00Z' WHERE id=$1", [archived]);
@@ -142,7 +143,11 @@ test("集計の実SQLは保存割合の整数配分・対象期間・認可を�
     const current = result.buckets.filter(bucket => bucket.scope === "current");
     assert.deepEqual(current.filter(bucket => bucket.categoryId === id).map(bucket => [bucket.memberId, bucket.burdenYen]), [[a, "102"], [b, "201"]]);
     assert.equal(current.find(bucket => bucket.categoryId === archived)?.burdenYen, "97");
-    assert.equal(current.find(bucket => bucket.categoryId === null && bucket.expenseClass === "PERSONAL" && bucket.memberId === b)?.burdenYen, "31");
+    assert.ok(!current.some(bucket => bucket.expenseClass === "PERSONAL" && bucket.memberId === b));
+    assert.equal(current.find(bucket => bucket.categoryId === null && bucket.expenseClass === "PERSONAL" && bucket.memberId === a)?.burdenYen, "23");
+    const partner = await read(workspaceId, b);
+    assert.ok(!partner.buckets.some(bucket => bucket.expenseClass === "PERSONAL" && bucket.memberId === a));
+    assert.equal(partner.buckets.find(bucket => bucket.scope === "current" && bucket.expenseClass === "PERSONAL" && bucket.memberId === b)?.burdenYen, "31");
     assert.ok(result.categories.find(item => item.id === archived)?.archivedAt);
     assert.ok(!result.categories.some(item => item.id === foreign));
     assert.doesNotMatch(JSON.stringify(result), /非公開の取引先|splitWeights|actorUserId|externalId|memo/);
@@ -164,6 +169,18 @@ test("集計の実SQLは保存割合の整数配分・対象期間・認可を�
     const before = (await memory.query("SELECT count(*)::text AS count FROM workspaces")).rows;
     assert.deepEqual((await read(empty)).buckets, []);
     assert.deepEqual((await memory.query("SELECT count(*)::text AS count FROM workspaces")).rows, before);
+  });
+
+  await t.test("相手の個人費は不正な保存割合でも集計とエラーに影響しない", async () => {
+    const before = await read();
+    const hidden = await insert(987654, { [a]: 0, [b]: 1 }, null, { expenseClass: "PERSONAL", actor: b });
+    await memory.exec("ALTER TABLE transactions DISABLE TRIGGER transactions_complete_split");
+    try {
+      await memory.query("UPDATE transactions SET split_weights='{}'::jsonb WHERE id=$1", [hidden]);
+      assert.deepEqual((await read()).buckets, before.buckets);
+      await assert.rejects(read(workspaceId, b), /保存済み負担割合が不正/);
+      await memory.query("DELETE FROM transactions WHERE id=$1", [hidden]);
+    } finally { await memory.exec("ALTER TABLE transactions ENABLE TRIGGER transactions_complete_split"); }
   });
 
   await t.test("無効な保存割合・未知参加者・不在の支払者は黙って補正せず集計全体を失敗させる", async () => {

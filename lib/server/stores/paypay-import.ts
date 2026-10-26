@@ -24,6 +24,9 @@ export interface PayPayImportInput {
 }
 
 export async function persistPayPayImport(input: PayPayImportInput) {
+  if (input.items.some(item => item.expenseClass === "PERSONAL" && item.actorUserId !== input.userId)) {
+    throw new Error("個人費は本人の明細だけ登録・変更できます。");
+  }
   // Use the same order in concurrent batches while locking duplicate keys.
   const items = input.items.map((item) => ({
     ...item, externalId: normalizePayPayExternalId(item.occurredAt, item.externalId),
@@ -45,7 +48,9 @@ export async function persistPayPayImport(input: PayPayImportInput) {
     workspaceId: input.workspaceId, userId: input.userId, categoryId,
   }));
   const results = await sql.transaction([
-    sql`SELECT cake_assert_transaction_categories(${JSON.stringify(categoryTargets)}::jsonb)`,
+    sql`SELECT cake_assert_private_import(${input.workspaceId}::uuid, ${input.userId},
+      ${JSON.stringify([...firstByExternalId.values()])}::jsonb,
+      ${JSON.stringify(categoryTargets)}::jsonb)`,
     sql`
       INSERT INTO import_batches (id, workspace_id, imported_by, file_name, total_rows, imported_rows, skipped_rows, format)
       VALUES (${batchId}::uuid, ${input.workspaceId}::uuid, ${input.userId}, ${input.fileName}, ${input.totalRows}, 0, ${input.totalRows}, 'PAYPAY')
@@ -64,8 +69,8 @@ export async function persistPayPayImport(input: PayPayImportInput) {
       ) ORDER BY item."externalId"
       ON CONFLICT (workspace_id, external_id) DO UPDATE
         SET external_id = transactions.external_id
-        WHERE cake_assert_paypay_duplicate(transactions.source, transactions.merchant, transactions.amount_yen,
-          EXCLUDED.merchant, EXCLUDED.amount_yen)
+        WHERE cake_assert_visible_paypay_duplicate(transactions.expense_class, transactions.actor_user_id, ${input.userId},
+          transactions.source, transactions.merchant, transactions.amount_yen, EXCLUDED.merchant, EXCLUDED.amount_yen)
       RETURNING id
     `,
     sql`

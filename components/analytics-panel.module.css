@@ -10,12 +10,6 @@
 .checks { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1rem; min-height: 2.75rem; }
 .checks label { display: inline-flex; align-items: center; gap: .45rem; min-height: 2.75rem; max-width: 100%; color: var(--ink); font-size: .76rem; cursor: pointer; overflow-wrap: anywhere; }
 .checks input { flex: none; width: 1rem; height: 1rem; margin: 0; }
-.memberHelp { position: relative; display: inline-flex; align-items: center; gap: .15rem; }
-.helpLabel { border-bottom: 1px dotted var(--muted); cursor: help; }
-.helpLabel:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.helpInfo { display: none; }
-.helpTooltip { position: absolute; z-index: 7; top: calc(100% + .45rem); right: 0; width: max-content; max-width: min(20rem, calc(100vw - 4rem)); padding: .65rem .8rem; border-radius: .5rem; color: #fff; background: var(--ink); box-shadow: 0 .25rem .8rem #0002; font-size: .75rem; line-height: 1.6; }
-.helpTooltip::before { content: ""; position: absolute; right: 0; bottom: 100%; left: 0; height: .45rem; }
 .customDates { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: flex-end; gap: .65rem; padding-top: .9rem; border-top: 1px solid var(--line); }
 .customDates > span { padding-bottom: .75rem; color: var(--muted); font-size: .7rem; }
 .customDates button { background: var(--surface-muted); }
@@ -84,12 +78,8 @@
   /* 日付系入力の固有幅でグリッド列を押し広げない。 */
   .field input[type="month"],.field input[type="date"] { display: block; width: 0; min-width: 100%; max-width: 100%; }
   .field input::-webkit-datetime-edit { min-width: 0; padding: 0; }
-  .checkGroup { position: relative; padding-top: .75rem; border-top: 1px solid var(--line); }
+  .checkGroup { grid-column: 1 / -1; position: relative; padding-top: .75rem; border-top: 1px solid var(--line); }
   .checkGroup legend { min-height: 1.5rem; line-height: 1.5rem; }
-  .memberHelp { position: static; }
-  .helpLabel { border-bottom: 0; }
-  .helpInfo { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: .2rem; background: transparent; color: var(--muted); font-size: .85rem; line-height: 1; }
-  .helpTooltip { top: 1.6rem; right: auto; left: 0; max-width: min(20rem, calc(100vw - 4rem)); }
   .checks { align-items: flex-start; gap: .2rem .7rem; }
   .checks label { font-size: .72rem; }
   .customDates { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: .5rem; }

@@ -6,13 +6,15 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { chromium, type Browser, type BrowserContext, type LaunchOptions, type Page } from 'playwright';
 import type { BootstrapData, TransactionRecord } from '../../lib/shared/types';
+import { analyticsToday, type AnalyticsDataset } from '../../lib/shared/analytics';
+import { formatYen } from '../../lib/shared/display-formatters';
 import { CloudStartupError, startCloudServer } from './dev-cloud';
 
 const executeFile = promisify(execFile);
 const workspaceId = '00000000-0000-4000-8000-000000000001';
 export const cloudBrowserStages = ['arguments', 'source-before', 'server', 'launch', 'context', 'navigation', 'login', 'session-app', 'workspace',
   'home', 'transactions', 'analytics', 'settings', 'create', 'edit', 'autosave', 'reload', 'delete', 'preservation', 'boundary',
-  'cleanup', 'source-after', 'proof', 'interrupted'] as const;
+  'privacy', 'cleanup', 'source-after', 'proof', 'interrupted'] as const;
 type Stage = typeof cloudBrowserStages[number];
 type Source = { sha: string; branch: string; clean: boolean };
 type Check = { name: string; at: string };
@@ -109,7 +111,9 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
   };
   let stage: Stage = 'proof', currentCase: Case | undefined, caseStarted = 0;
   let browser: Browser | undefined, server: Awaited<ReturnType<typeof startCloudServer>> | undefined;
-  let interrupted = false, baselineIds: string[] | undefined;
+  let interrupted = false;
+  const baselineIds = new Map<'a' | 'b', string[]>();
+  let sharedBaseline: string[] | undefined;
   let activePage: Page | undefined;
   const contexts = new Set<BrowserContext>();
   const interrupt = () => {
@@ -183,7 +187,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       const navigation = page.locator(item.mobile ? '.bottom-nav' : '.app-nav');
       const navigate = async (name: string) => {
         await navigation.getByRole('button', { name: new RegExp(name) }).click();
-        if (name === 'ホーム') await page.getByRole('table', { name: '今月の収支', exact: true }).waitFor();
+        if (name === 'ホーム') await page.getByRole('table', { name: '今月の自分の収支', exact: true }).waitFor();
         else await page.getByRole('heading', { name: name === '集計' ? '支出の集計' : name, exact: true }).waitFor();
       };
       stage = 'navigation';
@@ -202,12 +206,36 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       item.initialTransactionCount = initial.selected!.transactions.length; item.initialCategoryCount = initial.selected!.categories.length;
       requireCondition(item.initialTransactionCount > 0 && item.initialCategoryCount > 0);
       const existingIds = ids(initial.selected!.transactions);
-      if (baselineIds) requireCondition(sameIds(existingIds, baselineIds)); else baselineIds = existingIds;
+      const baseline = baselineIds.get(item.user);
+      if (baseline) requireCondition(sameIds(existingIds, baseline)); else baselineIds.set(item.user, existingIds);
+      requireCondition(initial.selected!.transactions.every(transaction => transaction.expenseClass === 'SHARED'
+        || transaction.actorUserId === `test-user-${item.user}`));
+      const sharedIds = ids(initial.selected!.transactions.filter(transaction => transaction.expenseClass === 'SHARED'));
+      if (sharedBaseline) requireCondition(sameIds(sharedIds, sharedBaseline)); else sharedBaseline = sharedIds;
       stage = 'workspace';
       await page.locator(item.mobile ? '.mobile-header select' : '.workspace-picker select').selectOption(workspaceId);
       stage = 'home'; await navigate('ホーム'); await screenshot('home'); check('home-navigation');
       stage = 'transactions'; await navigate('取引明細'); await screenshot('transactions'); check('transactions-navigation');
-      stage = 'analytics'; await navigate('集計'); await screenshot('analytics'); check('analytics-navigation');
+      stage = 'analytics'; await navigate('集計');
+      await page.getByTestId('analytics-total').waitFor();
+      requireCondition(await page.getByRole('radio', { name: '自分の支出', exact: true }).isChecked());
+      const analyticsResponse = await page.evaluate(async ({ workspaceId, month }) => {
+        const response = await fetch(`/api/analytics?workspaceId=${workspaceId}&period=month&month=${month}`, { cache: 'no-store' });
+        return { status: response.status, data: await response.json() };
+      }, { workspaceId, month: analyticsToday().slice(0, 7) });
+      const dataset = analyticsResponse.data as AnalyticsDataset;
+      requireCondition(analyticsResponse.status === 200 && Array.isArray(dataset.buckets)
+        && dataset.buckets.every(bucket => bucket.expenseClass === 'SHARED' || bucket.memberId === `test-user-${item.user}`));
+      const ownTotal = dataset.buckets.filter(bucket => bucket.scope === 'current' && bucket.memberId === `test-user-${item.user}`)
+        .reduce((total, bucket) => total + BigInt(bucket.burdenYen), BigInt(0));
+      const sharedTotal = dataset.buckets.filter(bucket => bucket.scope === 'current' && bucket.expenseClass === 'SHARED')
+        .reduce((total, bucket) => total + BigInt(bucket.burdenYen), BigInt(0));
+      requireCondition(await page.getByTestId('analytics-total').textContent() === formatYen(ownTotal));
+      await page.getByRole('radio', { name: '共有費全体', exact: true }).check();
+      requireCondition(await page.getByTestId('analytics-total').textContent() === formatYen(sharedTotal));
+      await screenshot('analytics-shared');
+      await page.getByRole('radio', { name: '自分の支出', exact: true }).check();
+      await screenshot('analytics'); check('analytics-self-and-shared-api-totals');
       stage = 'settings'; await navigate('設定'); await screenshot('settings'); check('settings-navigation');
       stage = 'transactions'; await navigate('取引明細');
       stage = 'create';
@@ -225,6 +253,34 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       requireCondition(matches.length === 1 && matches[0].amountYen === 1234 && matches[0].type === 'RECEIPT'
         && matches[0].expenseClass === 'PERSONAL' && matches[0].actorUserId === `test-user-${item.user}`);
       item.createdTransactionId = matches[0].id; proof.resources.testTransactions = 1; check('transaction-ui-create-api-read');
+      stage = 'privacy';
+      const otherUser = item.user === 'a' ? 'b' : 'a';
+      const otherContext = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: false });
+      contexts.add(otherContext); proof.resources.browserContexts = contexts.size;
+      try {
+        await otherContext.route('**/*', route => new URL(route.request().url()).origin === origin
+          ? route.continue() : route.abort());
+        const otherPage = await otherContext.newPage();
+        await otherPage.goto(origin, { waitUntil: 'networkidle' });
+        await otherPage.getByRole('button', { name: new RegExp(`テストユーザー${otherUser.toUpperCase()}`) }).click();
+        await otherPage.locator('.app-shell').waitFor();
+        const otherApp = await readApp(otherPage, otherUser);
+        requireCondition(!otherApp.selected!.transactions.some(transaction => transaction.id === item.createdTransactionId
+          || transaction.merchant === merchant));
+        requireCondition(otherApp.selected!.transactions.every(transaction => transaction.expenseClass === 'SHARED'
+          || transaction.actorUserId === `test-user-${otherUser}`));
+        const denied = await otherPage.evaluate(async ({ workspaceId, transactionId }) => {
+          const response = await fetch('/api/app', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'saveTransactionMemo', workspaceId, transactionId, memo: 'PRIVATE_ACCESS_DENIED' }) });
+          return response.status;
+        }, { workspaceId, transactionId: item.createdTransactionId });
+        requireCondition(denied >= 400);
+        const ownApp = await readApp(page, item.user);
+        requireCondition(ownApp.selected!.transactions.find(transaction => transaction.id === item.createdTransactionId)?.memo === '');
+        check('personal-transaction-hidden-and-mutation-denied-for-other-member');
+      } finally {
+        await otherContext.close(); contexts.delete(otherContext); proof.resources.browserContexts = contexts.size;
+      }
       const row = page.locator(`tr[data-transaction-id="${item.createdTransactionId}"]`);
       const expand = async (name: string) => {
         await row.waitFor();

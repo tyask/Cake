@@ -18,7 +18,7 @@ export async function transactionsService(store: AppStore, user: AppUser, input:
   if (input.action === "saveTransaction") {
     await store.requireWorkspaceMember(input.workspaceId, user.id);
     const previous = input.transactionId && input.splitWeights === undefined
-      ? await store.previousTransaction(input)
+      ? await store.previousTransaction(input, user)
       : null;
     const splitInput = {
       ...input,
@@ -34,6 +34,9 @@ export async function transactionsService(store: AppStore, user: AppUser, input:
     ]);
     const matchRule = needsRules ? prepareDefaultRuleMatcher(rules) : () => undefined;
     const split = resolveTransactionSplit(splitInput, { members, matchRule });
+    if (split.expenseClass === "PERSONAL" && input.actorUserId !== user.id) {
+      throw new Error("個人費は本人の明細だけ登録・変更できます。");
+    }
     let saved: Record<string, unknown>;
     if (input.transactionId) {
       const updated = await store.updateTransaction(input, user, split);
@@ -48,7 +51,7 @@ export async function transactionsService(store: AppStore, user: AppUser, input:
 
   if (input.action === "deleteTransaction") {
     await store.requireWorkspaceMember(input.workspaceId, user.id);
-    const deleted = await store.deleteTransaction(input);
+    const deleted = await store.deleteTransaction(input, user);
     if (!deleted) throw new Error("清算済み、または存在しない明細は削除できません。");
     return { ok: true };
   }

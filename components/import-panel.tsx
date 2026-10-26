@@ -81,6 +81,7 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
   const suggestionController = useRef<AbortController | null>(null);
   const latestWorkspace = useRef(selected);
   const importableRows = rows.filter(isPayPayRowImportable);
+  const personalActorInvalid = actorId !== currentUserId && importableRows.some(row => row.expenseClass === "PERSONAL");
   const selectedCount = importableRows.filter(row => row.selected).length;
   const busy = reading || saving || suggesting;
   const unclassifiedCount = importableRows.filter(row => row.categoryId === null).length;
@@ -230,6 +231,7 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
     setError(null);
     setSaving(true);
     try {
+      if (personalActorInvalid) throw new Error("個人の明細は本人だけが登録できます。支払者を自分に変更するか、区分を共有に変更してください。");
       const items = importableRows.map((row) => ({
         occurredAt: payPayDateToIso(row.occurredAt), merchant: row.merchant, method: row.method,
         amountYen: row.amountYen, externalId: row.externalId, expenseClass: row.expenseClass, actorUserId: actorId,
@@ -279,6 +281,7 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
         <div><span>取込先の家計</span><b>{selected.workspace.name}</b></div><div><span>取込元</span><b>{fileName}</b></div><div><span>取込対象</span><b>{importableRows.length} / {rows.length}件</b></div>
         <label>支払者<select disabled={busy} value={actorId} onChange={(event) => changeActor(event.target.value)}>{selected.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
       </div>
+      {actorId !== currentUserId && <p className="ratio-note">個人の明細を登録する場合は、支払者を自分に変更してください。相手の支払いは共有の明細として登録できます。</p>}
       <div className={`bulk-bar ${styles.bulkBar}`}>
         <div className={styles.categoryGroup} role="group" aria-label="カテゴリ">
           <span className={styles.groupHeading}>カテゴリ</span>
@@ -294,7 +297,7 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
         <div className={styles.selectionGroup} role="group" aria-label="選択行の操作">
           <div className={styles.selectionHeading}><span className={styles.groupHeading}>選択行の操作</span><span className={styles.selectedCount}>{selectedCount}件を選択中</span></div>
           <div className={styles.selectionControls}>
-            <button disabled={busy || selectedCount === 0} onClick={() => bulk("PERSONAL")}>個人に変更</button><button disabled={busy || selectedCount === 0} onClick={() => bulk("SHARED")}>共有に変更</button>
+            <button disabled={busy || selectedCount === 0 || actorId !== currentUserId} onClick={() => bulk("PERSONAL")}>個人に変更</button><button disabled={busy || selectedCount === 0} onClick={() => bulk("SHARED")}>共有に変更</button>
             <button disabled={busy || selectedCount === 0} onClick={removeSelectedPreviewRows}>削除</button>
           </div>
         </div>
@@ -302,7 +305,7 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
       </div>
       {suggesting && <p className={styles.suggestionStatus} role="status">カテゴリを補完しています…</p>}
       {suggestionStatus && <p className={styles.suggestionStatus} role="status">{suggestionStatus}</p>}
-      <ImportPreviewTable onDelete={removePreviewRow} rows={rows} members={selected.members} actorId={actorId} saving={busy} categoryChoices={categoryChoices}
+      <ImportPreviewTable onDelete={removePreviewRow} rows={rows} members={selected.members} actorId={actorId} currentUserId={currentUserId} saving={busy} categoryChoices={categoryChoices}
         onSelect={(key, checked) => setRows(current => current.map(row => row.key === key ? { ...row, selected: checked } : row))}
         onSelectAll={checked => setRows(current => current.map(row => isPayPayRowImportable(row) ? { ...row, selected: checked } : row))}
         onChangeClass={(key, expenseClass) => setRows(current => current.map(row => row.key === key ? changeClass(row, expenseClass) : row))}
@@ -312,7 +315,7 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
       <div className={`sticky-actions ${styles.confirmActions}`}>
         <small className={styles.confirmation}>表示中のカテゴリを確定し、次回のカテゴリ補完に利用します。</small>
         <button className="secondary" disabled={busy} onClick={() => { setRows([]); setFileName(""); setSuggestionStatus(null); }}>キャンセル</button>
-        <button className="primary" disabled={busy || importableRows.length === 0} onClick={submit}>{saving ? "登録中…" : "確認して登録"}</button>
+        <button className="primary" disabled={busy || importableRows.length === 0 || personalActorInvalid} onClick={submit}>{saving ? "登録中…" : "確認して登録"}</button>
       </div>
     </section>}
     <ImportHistoryPanel key={`${selected.workspace.id}:${format}`} workspaceId={selected.workspace.id} format={format} refreshKey={importHistoryRevision} />

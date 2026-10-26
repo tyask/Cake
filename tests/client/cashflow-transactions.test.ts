@@ -49,26 +49,31 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
       });
       try {
         for (const [mode, expected, color, payment] of [
-          ["positive", "+￥6,000", green, "−￥11,000"],
-          ["negative", "−￥1,000", red, "−￥18,000"],
-          ["zero", "￥0", normal, "−￥17,000"],
+          ["positive", "+￥6,000", green, "−￥7,500"],
+          ["negative", "−￥1,000", red, "−￥14,500"],
+          ["zero", "￥0", normal, "−￥13,500"],
         ]) {
           await page.goto(origin + "?balance=" + mode);
-          const month = page.getByRole("table", { name: "今月の収支", exact: true });
+          const month = page.getByRole("table", { name: "今月の自分の収支", exact: true });
           await month.waitFor();
           assert.deepEqual(await month.getByRole("rowheader").allTextContents(), ["収入", "支出", "収支", "取引件数"]);
-          await assertMoney(month.getByRole("row", { name: /^収入 / }).getByRole("cell"), "+￥17,000", green);
+          await assertMoney(month.getByRole("row", { name: /^収入 / }).getByRole("cell"), "+￥13,500", green);
           await assertMoney(month.getByRole("row", { name: /^支出 / }).getByRole("cell"), payment, red);
           await assertMoney(month.getByRole("row", { name: /^収支 / }).getByRole("cell"), expected, color);
           assert.equal(await month.getByRole("row", { name: /^取引件数 / }).getByRole("cell").textContent(), "5件");
+          const shared = page.getByRole("table", { name: "今月の共有費", exact: true });
+          await assertMoney(shared.getByRole("row", { name: /^共有の支出 / }).getByRole("cell"), "−￥10,000", red);
+          await assertMoney(shared.getByRole("row", { name: /^うち自分の負担 / }).getByRole("cell"), "−￥5,000", red);
+          await assertMoney(shared.getByRole("row", { name: /^共有の収入 / }).getByRole("cell"), "+￥7,000", green);
+          await assertMoney(shared.getByRole("row", { name: /^うち自分の配分 / }).getByRole("cell"), "+￥3,500", green);
           const next = page.locator("#home .settlement-hero");
           await assertMoney(next.locator(".unsettled-summary strong"), "−￥8,000", red);
           assert.match(await next.locator(".unsettled-summary").textContent() ?? "", /2件が対象/);
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
         }
-        for (const [mode, balance, count] of [["empty", "￥0", "0"], ["balanced", "−￥2,000", "2"]]) {
+        for (const [mode, balance, count] of [["empty", "￥0", "0"], ["balanced", "−￥1,000", "2"]]) {
           await page.goto(origin + "?balance=" + mode);
-          const month = page.getByRole("table", { name: "今月の収支", exact: true });
+          const month = page.getByRole("table", { name: "今月の自分の収支", exact: true });
           await month.waitFor();
           await assertMoney(month.getByRole("row", { name: /^収支 / }).getByRole("cell"), balance, mode === "empty" ? normal : red);
           assert.equal(await month.getByRole("row", { name: /^取引件数 / }).getByRole("cell").textContent(), count + "件");
@@ -76,7 +81,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           assert.match(await next.textContent() ?? "", mode === "empty" ? /現在、清算対象の共有の支払い・収入はありません/ : /清算不要/);
           assert.equal(await next.getByRole("button", { name: "清算を完了する", exact: true }).count(), mode === "empty" ? 0 : 1,
             "対象がある場合は送金額が0円でも清算を完了できる");
-          await assertMoney(next.locator(".unsettled-summary strong"), balance, mode === "empty" ? normal : red);
+          await assertMoney(next.locator(".unsettled-summary strong"), mode === "empty" ? "￥0" : "−￥2,000", mode === "empty" ? normal : red);
           assert.match(await next.locator(".unsettled-summary").textContent() ?? "", new RegExp(count + "件が対象"));
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
         }

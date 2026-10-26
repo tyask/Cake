@@ -127,6 +127,9 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
   }
 
   const save: SaveTransaction = (transactionId, getValues, accept) => enqueue(() => saveChanged(getValues, async values => {
+    if (values.expenseClass === "PERSONAL" && values.actorUserId !== userId) {
+      throw new Error("個人の取引は本人だけが保存できます。担当者を自分に変更してください。");
+    }
     const result = await run({ action: "saveTransaction", workspaceId: selected.workspace.id, transactionId, ...values }, "") as { transaction: TransactionRecord };
     return transactionValues(result.transaction);
   }, accept));
@@ -228,7 +231,7 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
       {bulkNotice && <p role="status" className={styles.bulkNotice}>{bulkNotice}</p>}
       <p className={styles.note}>区分のルールは支払いのみが対象です。清算済みの明細もカテゴリとメモを編集できます。カテゴリは選択時、メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。全選択チェックを外すと非表示の選択も解除します。編集中の明細は編集を終えるまで表示します。</p>
       <TransactionTable wrap columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => <Fragment key={column.id}>{column.id === "memo" && <th>カテゴリ</th>}<th><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th></Fragment>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
-        {visible.map((item) => <EditableTransaction key={item.id} item={item} members={selected.members} categoryChoices={categoryChoices} categoryDisplay={categoryDisplay} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} onDelete={() => { void performBulk("deleteTransactions", [item.id]); }} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} onSaveCategory={saveCategory} onCategoryPin={onCategoryPin} />)}
+        {visible.map((item) => <EditableTransaction key={item.id} item={item} currentUserId={userId} members={selected.members} categoryChoices={categoryChoices} categoryDisplay={categoryDisplay} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} onDelete={() => { void performBulk("deleteTransactions", [item.id]); }} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} onSaveCategory={saveCategory} onCategoryPin={onCategoryPin} />)}
       </TransactionTable>
       {visible.length === 0 && <p className={styles.empty}>条件に一致する明細がありません。</p>}
     </section>
@@ -239,8 +242,9 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
   </>;
 }
 
-function EditableTransaction({ item, members, categoryChoices, categoryDisplay, pinnedOutsideFilter, checked, busy, applyingRules, onSelect, onDelete, register, onPin, onSave, onSaveMemo, onMemoPin, onSaveCategory, onCategoryPin }: {
+function EditableTransaction({ item, currentUserId, members, categoryChoices, categoryDisplay, pinnedOutsideFilter, checked, busy, applyingRules, onSelect, onDelete, register, onPin, onSave, onSaveMemo, onMemoPin, onSaveCategory, onCategoryPin }: {
   item: TransactionRecord;
+  currentUserId: string;
   members: WorkspaceMember[];
   categoryChoices: CategoryChoices;
   categoryDisplay: "root" | "full";
@@ -444,8 +448,8 @@ function EditableTransaction({ item, members, categoryChoices, categoryDisplay, 
     <td data-label="方法"><input aria-label="取引方法" required maxLength={MAX_METHOD_LENGTH} value={draft.method} disabled={busy} onChange={(event) => change({ method: event.target.value })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></td>
     <td data-label="種別"><select aria-label="種別" value={draft.type} disabled={busy} onChange={event => change({ type: event.target.value as TransactionType }, true)}>{transactionTypes.map(type => <option key={type} value={type}>{transactionTypeLabels[type]}</option>)}</select></td>
     <td data-label="金額（円）"><span className="signed-amount-input"><span className={cashflowClass(draft.type === "PAYMENT" ? -draft.amountYen : draft.amountYen)} aria-hidden="true">{draft.amountYen === 0 ? "" : draft.type === "PAYMENT" ? "−" : "+"}</span><input aria-label="金額（円）" className={cashflowClass(draft.type === "PAYMENT" ? -draft.amountYen : draft.amountYen)} type="number" required min="1" max={MAX_AMOUNT_YEN} step="1" value={draft.amountYen} disabled={busy} onChange={(event) => change({ amountYen: Number(event.target.value) })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></span></td>
-    <td data-label={transactionActorLabels[draft.type]}><select aria-label={transactionActorLabels[draft.type]} value={draft.actorUserId} disabled={busy} onChange={(event) => change(transactionActorPatch(currentValues(), event.target.value, members), true)}>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></td>
-    <td data-label="区分"><select aria-label="区分" value={draft.expenseClass} disabled={busy} onChange={(event) => change(transactionExpensePatch(currentValues(), event.target.value as ExpenseClass, members), true)}>{expenseClasses.map(value => <option key={value} value={value}>{expenseClassLabels[value]}</option>)}</select></td>
+    <td data-label={transactionActorLabels[draft.type]}><select aria-label={transactionActorLabels[draft.type]} value={draft.actorUserId} disabled={busy} onChange={(event) => change(transactionActorPatch(currentValues(), event.target.value, members), true)}>{members.map((member) => <option key={member.id} value={member.id} disabled={draft.expenseClass === "PERSONAL" && member.id !== currentUserId}>{member.name}</option>)}</select></td>
+    <td data-label="区分"><select aria-label="区分" value={draft.expenseClass} disabled={busy} onChange={(event) => change(transactionExpensePatch(currentValues(), event.target.value as ExpenseClass, members), true)}>{expenseClasses.map(value => <option key={value} value={value} disabled={value === "PERSONAL" && draft.actorUserId !== currentUserId}>{expenseClassLabels[value]}</option>)}</select>{draft.actorUserId !== currentUserId && <small className="ratio-note">個人に変更する場合は、担当者を自分に変更してください。</small>}</td>
     <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}>
       <SplitEditor compact inline label="配分割合" members={members} value={draft.splitWeights} amountYen={draft.amountYen} type={draft.type}
         disabled={busy || draft.expenseClass === "PERSONAL"} onChange={(splitWeights) => change({ splitWeights })} onCommit={requestCommit} />

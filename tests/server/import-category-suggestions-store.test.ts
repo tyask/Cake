@@ -5,6 +5,7 @@ import test from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { neonConfig } from "@neondatabase/serverless";
+import { findImportDuplicates } from "../../lib/server/stores/import-duplicates-store";
 import { findImportCategorySuggestions } from "../../lib/server/stores/import-category-suggestions-store";
 
 test("カテゴリ補完の実SQLは取引先別30件・最多と最新順・所属境界・一括照会を保証する", async t => {
@@ -42,15 +43,15 @@ test("カテゴリ補完の実SQLは取引先別30件・最多と最新順・所
     })) });
   };
   type History = { id?: string; occurredAt?: string; createdAt?: string; actor?: string; source?: string; settled?: boolean;
-    workspace?: string; type?: string; confirmed?: boolean };
+    workspace?: string; type?: string; confirmed?: boolean; expenseClass?: string };
   const insert = async (merchant: string, category: string | null, options: History = {}) => {
     const id = options.id ?? randomUUID(), actor = options.actor ?? "a";
     const workspace = options.workspace ?? workspaceId;
     await memory.query(`INSERT INTO transactions(id,workspace_id,occurred_at,created_at,merchant,method,type,amount_yen,
       actor_user_id,expense_class,split_weights,external_id,source,created_by,updated_by,category_id,settled_at)
-      VALUES ($1::uuid,$2,$3,$4,$5,'現金',$6,100,$7,'PERSONAL',jsonb_build_object($7::text,1),$1::text,$8,$7,$7,$9,$10)`,
+      VALUES ($1::uuid,$2,$3,$4,$5,'現金',$6,100,$7,$11,jsonb_build_object($7::text,1),$1::text,$8,$7,$7,$9,$10)`,
     [id, workspace, options.occurredAt ?? "2026-10-01T00:00:00Z", options.createdAt ?? "2026-10-01T00:00:00Z", merchant,
-      options.type ?? "PAYMENT", actor, options.source ?? "MANUAL", category, options.settled ? "2026-10-02T00:00:00Z" : null]);
+      options.type ?? "PAYMENT", actor, options.source ?? "MANUAL", category, options.settled ? "2026-10-02T00:00:00Z" : null, options.expenseClass ?? "PERSONAL"]);
     if (options.confirmed === false) {
       // Existing/legacy unconfirmed categories must not become evidence. The
       // ordinary current assignment trigger confirms categories on write.
@@ -103,14 +104,14 @@ test("カテゴリ補完の実SQLは取引先別30件・最多と最新順・所
     assert.match(query.query, /SELECT DISTINCT merchant_normalized/);
   });
 
-  await t.test("全参加者・全source・清算済みを含め、不正な履歴と別workspaceを除外してから30件を抽出する", async () => {
+  await t.test("可視範囲の全source・清算済みを含め、不正な履歴と別workspaceを除外してから30件を抽出する", async () => {
     await insert("対象範囲", categoryA, { actor: "a", source: "MANUAL" });
-    await insert("対象範囲", categoryA, { actor: "b", source: "PAYPAY", settled: true });
-    await insert("対象範囲", categoryA, { actor: "b", source: "RECURRING" });
+    await insert("対象範囲", categoryA, { actor: "b", source: "PAYPAY", settled: true, expenseClass: "SHARED" });
+    await insert("対象範囲", categoryA, { actor: "b", source: "RECURRING", expenseClass: "SHARED" });
     await insert("対象範囲", categoryB, { occurredAt: "2026-10-10T00:00:00Z" });
     await insert("手動履歴だけ", categoryA, { source: "MANUAL" });
-    await insert("清算済CSV履歴だけ", categoryB, { actor: "b", source: "PAYPAY", settled: true });
-    await insert("定期履歴だけ", categoryA, { actor: "b", source: "RECURRING" });
+    await insert("清算済CSV履歴だけ", categoryB, { actor: "b", source: "PAYPAY", settled: true, expenseClass: "SHARED" });
+    await insert("定期履歴だけ", categoryA, { actor: "b", source: "RECURRING", expenseClass: "SHARED" });
     for (let index = 0; index < 31; index++) {
       await insert("対象範囲", index % 2 ? categoryB : null, { occurredAt: "2026-10-11T00:00:00Z", confirmed: false });
       await insert("対象範囲", categoryB, { occurredAt: "2026-10-11T00:00:00Z", type: "RECEIPT" });
@@ -122,6 +123,26 @@ test("カテゴリ補完の実SQLは取引先別30件・最多と最新順・所
       { merchant: "対象範囲", categoryId: categoryA }, { merchant: "手動履歴だけ", categoryId: categoryA },
       { merchant: "清算済CSV履歴だけ", categoryId: categoryB }, { merchant: "定期履歴だけ", categoryId: categoryA },
     ]);
+  });
+
+  await t.test("相手の個人費は重複照合・カテゴリ候補・最新30件の枠に含めない", async () => {
+    const privateId = await insert("相手の個人費", categoryB, { actor: "b" });
+    const sharedId = await insert("共有の履歴", categoryA, { actor: "b", expenseClass: "SHARED" });
+    const ownId = await insert("自分の個人費", categoryA);
+    await insert("非公開の多数履歴", categoryA);
+    for (let index = 0; index < 31; index++) {
+      await insert("非公開の多数履歴", categoryB, { actor: "b", occurredAt: "2026-10-20T00:00Z" });
+    }
+    assert.deepEqual(await suggest(["相手の個人費", "共有の履歴", "自分の個人費", "非公開の多数履歴"]), [
+      { merchant: "相手の個人費", categoryId: null }, { merchant: "共有の履歴", categoryId: categoryA },
+      { merchant: "自分の個人費", categoryId: categoryA }, { merchant: "非公開の多数履歴", categoryId: categoryA },
+    ]);
+    assert.deepEqual(await suggest(["相手の個人費"], "b"), [{ merchant: "相手の個人費", categoryId: categoryB }]);
+    const keys = [privateId, sharedId, ownId];
+    const found = await findImportDuplicates(workspaceId, "a", keys);
+    assert.deepEqual(new Set(found.externalIds), new Set([sharedId, ownId]));
+    assert.ok(!JSON.stringify(found).includes("相手の個人費"));
+    assert.deepEqual(new Set((await findImportDuplicates(workspaceId, "b", keys)).externalIds), new Set([privateId, sharedId]));
   });
 
   await t.test("非所属・所属削除済み利用者は履歴照会前に拒否し、他の家計の履歴を公開しない", async () => {

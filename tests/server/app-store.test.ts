@@ -119,7 +119,7 @@ test("カテゴリ付き手動登録は先頭で同じ集合検証を行い、�
   assert.equal(write.transaction, true);
   assert.equal(write.queries.length, 2);
   assert.match(write.queries[0].query, /cake_assert_transaction_categories/);
-  assert.deepEqual(JSON.parse(String(write.queries[0].params[0])), [{ workspaceId, userId: user.id, categoryId: ruleId }]);
+  assert.deepEqual(JSON.parse(String(write.queries[0].params.at(-1))), [{ workspaceId, userId: user.id, categoryId: ruleId }]);
   assert.match(write.queries[1].query, /category_id, category_confirmed/);
 });
 
@@ -135,7 +135,7 @@ for (const [index, scenario] of cases.entries()) {
     assert.deepEqual(f.trips.flatMap((trip, i) => trip.transaction ? [i] : []), scenario.transactions ?? []);
     if (scenario.input.action === "saveTransaction") {
       const write = f.trips.at(-1)!;
-      assert.match(write.queries[0].query, /UPDATE workspaces/);
+      assert.match(write.queries[0].query, /cake_assert_transaction_access/);
       assert.match(write.queries[1].query, scenario.input.transactionId ? /AND settled_at IS NULL\s+RETURNING \*/ : /'MANUAL'/);
       assert.equal(body.transaction.id, transactionId);
     }

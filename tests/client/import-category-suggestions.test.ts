@@ -178,6 +178,9 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
           assert.equal(await row("unchecked").first().getByLabel("Aの配分割合", { exact: true }).inputValue(), "70");
           assert.equal(requests.filter(request => request.path === "/api/app").length, 0, "補完はDBへ登録しない");
           await category("unchecked").selectOption("transport");
+          assert.equal(await page.locator(".import-summary select").inputValue(), "b", "補完では支払者を変更しない");
+          assert.equal(await page.getByRole("button", { name: "確認して登録", exact: true }).isDisabled(), true, "相手の個人費を含む場合は登録しない");
+          await page.locator(".import-summary select").selectOption("a");
           await page.getByRole("button", { name: "確認して登録", exact: true }).click();
           await page.getByRole("alert").filter({ hasText: "検証用の登録失敗" }).waitFor();
           assert.equal(await category("unchecked").inputValue(), "transport");
@@ -186,9 +189,9 @@ test("CSVカテゴリ補完は明示実行し、未分類全行だけを一括�
           assert.deepEqual(items.map(item => [item.merchant, item.categoryId]), [
             ["classified", "transport"], ["unchecked", "transport"], ["selected", "food"], ["personal", "food"], ["none", null], ["archived", null], ["gone", null], ["unchecked", "food"],
           ]);
-          assert.ok(items.every(item => item.actorUserId === "b"));
+          assert.ok(items.every(item => item.actorUserId === "a"));
           assert.deepEqual(items[1].splitWeights, { a: 700, b: 300 });
-          assert.deepEqual(items[3].splitWeights, { a: 0, b: 1 });
+          assert.deepEqual(items[3].splitWeights, { a: 1, b: 0 });
           assert.equal(items[3].expenseClass, "PERSONAL");
           await page.getByRole("button", { name: "確認して登録", exact: true }).click();
           await page.getByRole("button", { name: "ファイルを選択", exact: true }).waitFor();

@@ -59,8 +59,8 @@ interface GenerationResult { status: "created" | "skipped" | "blocked"; errorCod
 export interface RecurringPaymentStore {
   list(workspaceId: string, userId: string, testMode: boolean): Promise<{ authorized: boolean; payments: Row[]; eligibleActorUserIds: string[] }>;
   mutate(userId: string, input: RecurringPaymentMutation, testMode: boolean, now: Date): Promise<SavedMutation>;
-  candidates(workspaceId: string | undefined, testMode: boolean, now: Date): Promise<RecurringCandidate[]>;
-  generate(candidate: RecurringCandidate, testMode: boolean, now: Date): Promise<GenerationResult>;
+  candidates(workspaceId: string | undefined, testMode: boolean, now: Date, authorizedUserId?: string): Promise<RecurringCandidate[]>;
+  generate(candidate: RecurringCandidate, testMode: boolean, now: Date, authorizedUserId?: string): Promise<GenerationResult>;
 }
 
 function fixedServiceError(error: unknown): RecurringPaymentError {
@@ -131,7 +131,7 @@ export function createRecurringPaymentService(store: RecurringPaymentStore, opti
     };
     log({ event: "recurring.run.started", status: "started" });
     let candidates: RecurringCandidate[];
-    try { candidates = await store.candidates(input.workspaceId, testMode, now); }
+    try { candidates = await store.candidates(input.workspaceId, testMode, now, input.authorizedUserId); }
     catch {
       log({ event: "recurring.run.completed", status: "failed", errorCode: "DATABASE_UNAVAILABLE", durationMs: Math.round(monotonicNow() - started) });
       throw new RecurringPaymentError("定期支払いの処理に失敗しました。", 503, "DATABASE_UNAVAILABLE");
@@ -149,7 +149,7 @@ export function createRecurringPaymentService(store: RecurringPaymentStore, opti
       let status: RecurringLogStatus;
       let errorCode: RecurringLogErrorCode | undefined;
       try {
-        const generated = await store.generate(candidate, testMode, now);
+        const generated = await store.generate(candidate, testMode, now, input.authorizedUserId);
         if (generated.status === "created") { result.created++; status = "created"; }
         else if (generated.status === "skipped") { result.skipped++; status = "skipped"; }
         else { result.failed++; status = "failed"; errorCode = isRecurringBlockedReason(generated.errorCode)

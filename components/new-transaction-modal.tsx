@@ -39,6 +39,7 @@ export function NewTransactionModal({ selected, currentUserId, close, run }: { s
   const [customized, setCustomized] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const personalActorInvalid = expenseClass === "PERSONAL" && actorUserId !== currentUserId;
 
   function applyDefaults(nextMerchant = merchant, nextActor = actorUserId) {
     const defaults = transactionDefaults(nextMerchant, matchRule, selected.members, nextActor, "SHARED");
@@ -61,6 +62,7 @@ export function NewTransactionModal({ selected, currentUserId, close, run }: { s
       setError(null);
       setSaving(true);
       try {
+        if (personalActorInvalid) throw new Error("個人の取引は本人だけが登録できます。担当者を自分に変更してください。");
         validateSplitWeights(splitWeights, selected.members, expenseClass, actorUserId);
         await run({ action: "saveTransaction", workspaceId: selected.workspace.id,
           occurredAt: jstInputToIso(occurredAt), merchant, method, type, amountYen, actorUserId, expenseClass, splitWeights, memo, categoryId },
@@ -83,13 +85,14 @@ export function NewTransactionModal({ selected, currentUserId, close, run }: { s
           const nextActor = event.target.value;
           setActorUserId(nextActor);
           if (expenseClass === "PERSONAL") setSplitWeights(personalSplitWeights(selected.members, nextActor));
-        }}>{selected.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+        }}>{selected.members.map((member) => <option key={member.id} value={member.id} disabled={expenseClass === "PERSONAL" && member.id !== currentUserId}>{member.name}</option>)}</select></label>
         <label>区分<select aria-label="区分" value={expenseClass} disabled={saving} onChange={(event) => {
           const nextClass = event.target.value as ExpenseClass;
           setExpenseClass(nextClass);
           setSplitWeights(nextClass === "PERSONAL" ? personalSplitWeights(selected.members, actorUserId) : defaultSplitWeights(selected.members));
           setCustomized(true);
-        }}>{expenseClasses.map(value => <option key={value} value={value}>{commonExpenseClassLabels[value]}</option>)}</select></label>
+        }}>{expenseClasses.map(value => <option key={value} value={value} disabled={value === "PERSONAL" && actorUserId !== currentUserId}>{commonExpenseClassLabels[value]}</option>)}</select></label>
+        {actorUserId !== currentUserId && <p className="ratio-note full">個人の取引を登録する場合は、担当者を自分に変更してください。</p>}
         <label className="full">カテゴリ<CategorySelect choices={categoryChoices} value={categoryId} onChange={setCategoryId} disabled={saving} /></label>
         <div className="full">
           <SplitEditor inline label={`配分割合（${selected.members.map((member) => member.name).join(", ")}）`} type={type} amountYen={amountYen} members={selected.members} value={splitWeights}
@@ -100,7 +103,7 @@ export function NewTransactionModal({ selected, currentUserId, close, run }: { s
       </div>
       <label className="new-transaction-memo">メモ<textarea aria-label="メモ" maxLength={MAX_TRANSACTION_MEMO_LENGTH} value={memo} disabled={saving} onChange={(event) => setMemo(event.target.value)} rows={2} /></label>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={close}>キャンセル</button><button className="primary" disabled={saving}>{saving ? "保存中…" : "追加する"}</button></div>
+      <div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={close}>キャンセル</button><button className="primary" disabled={saving || personalActorInvalid}>{saving ? "保存中…" : "追加する"}</button></div>
     </form>
   </Modal>;
 }

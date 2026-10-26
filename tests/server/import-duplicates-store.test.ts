@@ -24,7 +24,7 @@ function databaseFixture(t: TestContext, member: boolean) {
     }
     assert.equal(member, true, "所属を確認できるまで明細を取得しない");
     assert.match(request.query, /WHERE workspace_id = \$1::uuid/);
-    assert.deepEqual(request.params, [workspaceId, JSON.stringify(["external-a", "external-b"])]);
+    assert.deepEqual(request.params, [workspaceId, userId, workspaceId, userId, JSON.stringify(["external-a", "external-b"])]);
     return Response.json({
       fields: ["external_id", "merchant", "amount_yen", "source"].map(name => ({ name, dataTypeID: 25 })),
       rows: [["external-a", "店舗", "500", "PAYPAY"]],

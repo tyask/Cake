@@ -104,7 +104,7 @@ export function createAppStore() {
     async saveTransactionMemo(input: Action<"saveTransactionMemo">, user: AppUser) {
       const sql = db();
       const results = await sql.transaction([
-        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+        sql`SELECT cake_assert_transaction_access(${input.workspaceId}::uuid, ${user.id}, ARRAY[${input.transactionId}::uuid])`,
         sql`
           UPDATE transactions SET memo = ${input.memo}, updated_by = ${user.id}, updated_at = now()
           WHERE id = ${input.transactionId}::uuid AND workspace_id = ${input.workspaceId}::uuid
@@ -113,14 +113,14 @@ export function createAppStore() {
       ]);
       return results[1][0] as Row | undefined;
     },
-    async previousTransaction(input: Action<"saveTransaction">): Promise<Row | undefined> {
+    async previousTransaction(input: Action<"saveTransaction">, user: AppUser): Promise<Row | undefined> {
       const sql = db();
-      return (await sql`SELECT expense_class, actor_user_id, split_weights FROM transactions WHERE id = ${input.transactionId}::uuid AND workspace_id = ${input.workspaceId}::uuid AND settled_at IS NULL`)[0];
+      return (await sql`SELECT expense_class, actor_user_id, split_weights FROM transactions WHERE id = ${input.transactionId}::uuid AND workspace_id = ${input.workspaceId}::uuid AND settled_at IS NULL AND (expense_class = 'SHARED' OR actor_user_id = ${user.id})`)[0];
     },
     async updateTransaction(input: Action<"saveTransaction">, user: AppUser, split: TransactionSplit) {
       const sql = db();
       const results = await sql.transaction([
-        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+        sql`SELECT cake_assert_transaction_access(${input.workspaceId}::uuid, ${user.id}, ARRAY[${input.transactionId}::uuid], ${split.expenseClass}, ${input.actorUserId})`,
         sql`
           UPDATE transactions SET occurred_at = ${input.occurredAt}::timestamptz, merchant = ${input.merchant},
             method = ${input.method}, type = ${input.type}, amount_yen = ${input.amountYen},
@@ -136,8 +136,8 @@ export function createAppStore() {
       const sql = db();
       const results = await sql.transaction([
         input.categoryId != null
-          ? sql`SELECT cake_assert_transaction_categories(${JSON.stringify([{ workspaceId: input.workspaceId, userId: user.id, categoryId: input.categoryId }])}::jsonb)`
-          : sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+          ? sql`SELECT cake_assert_transaction_access(${input.workspaceId}::uuid, ${user.id}, NULL::uuid[], ${split.expenseClass}, ${input.actorUserId}), cake_assert_transaction_categories(${JSON.stringify([{ workspaceId: input.workspaceId, userId: user.id, categoryId: input.categoryId }])}::jsonb)`
+          : sql`SELECT cake_assert_transaction_access(${input.workspaceId}::uuid, ${user.id}, NULL::uuid[], ${split.expenseClass}, ${input.actorUserId})`,
         sql`
           INSERT INTO transactions (id, workspace_id, occurred_at, merchant, method, type, amount_yen,
             actor_user_id, expense_class, split_weights, external_id, source, created_by, updated_by, memo, category_id, category_confirmed)
@@ -149,10 +149,10 @@ export function createAppStore() {
       ]);
       return results[1][0] as Row;
     },
-    async deleteTransaction(input: Action<"deleteTransaction">) {
+    async deleteTransaction(input: Action<"deleteTransaction">, user: AppUser) {
       const sql = db();
       const results = await sql.transaction([
-        sql`UPDATE workspaces SET updated_at = now() WHERE id = ${input.workspaceId}::uuid`,
+        sql`SELECT cake_assert_transaction_access(${input.workspaceId}::uuid, ${user.id}, ARRAY[${input.transactionId}::uuid])`,
         sql`DELETE FROM transactions
           WHERE id = ${input.transactionId}::uuid AND workspace_id = ${input.workspaceId}::uuid AND settled_at IS NULL
           RETURNING id`,

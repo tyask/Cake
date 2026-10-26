@@ -110,10 +110,10 @@ test("収入の割合省略はルール判定にも触れず、参加者と入�
   assert.throws(() => resolveTransactionSplit({ merchant: "店", actorUserId: "a", type: "RECEIPT", expenseClass: "SHARED", splitWeights: { a: 0, b: 0 } }, context), /少なくとも/);
 });
 
-test("担当者変更した個人費は旧担当者の割合を継承せず、不参加担当者は保存前に拒否する", async () => {
-  const f = fixture({ previousTransaction: async () => ({ expense_class: "PERSONAL", actor_user_id: "b", split_weights: { a: 0, b: 1 } }), updateTransaction: async () => savedRow() });
-  await f.execute({ ...save, transactionId });
-  assert.deepEqual(f.calls[3].args[2], { expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } });
+test("本人の個人費を相手へ付け替えできず、不参加担当者も保存前に拒否する", async () => {
+  const f = fixture({ previousTransaction: async () => ({ expense_class: "PERSONAL", actor_user_id: "a", split_weights: { a: 1, b: 0 } }), updateTransaction: async () => savedRow() });
+  await assert.rejects(f.execute({ ...save, transactionId, actorUserId: "b" }), /個人費は本人/);
+  assert.ok(!f.calls.some(call => call.name === "updateTransaction"));
   const invalid = fixture();
   await assert.rejects(invalid.execute({ ...save, actorUserId: "outsider" }), /参加していません/);
   assert.equal(invalid.calls.length, 3);
@@ -212,7 +212,6 @@ const splitCases = [
   { name: "保存済み共有費の区分・割合を継承", input: { transactionId }, previous: savedShared, expected: ["SHARED", { a: 5, b: 2 }], rules: false },
   { name: "保存済み共有費は担当者変更でも割合を継承", input: { transactionId, actorUserId: "b" }, previous: savedShared, expected: ["SHARED", { a: 5, b: 2 }], rules: false },
   { name: "保存済み個人費の区分・割合を継承", input: { transactionId }, previous: savedPersonal, expected: ["PERSONAL", { a: 1, b: 0 }], rules: false },
-  { name: "個人費の担当者変更で割合を再生成", input: { transactionId, actorUserId: "b" }, previous: savedPersonal, expected: ["PERSONAL", { a: 0, b: 1 }], rules: false },
   { name: "共有費から個人費への変更で割合を再生成", input: { transactionId, expenseClass: "PERSONAL" }, previous: savedShared, expected: ["PERSONAL", { a: 1, b: 0 }], rules: false },
   { name: "個人費から共有費への変更はルール割合", input: { transactionId, expenseClass: "SHARED" }, previous: savedPersonal, expected: ["SHARED", { a: 2, b: 1 }], rules: true },
   { name: "既存でも割合明示・区分省略は前回値を読まずルール区分", input: { transactionId, splitWeights: { a: 4, b: 1 } }, expected: ["SHARED", { a: 4, b: 1 }], rules: true },
@@ -331,4 +330,19 @@ test("清算は専用contextから既存計算を再利用し、対象だけをI
   await assert.rejects(empty.execute({ action: "completeSettlement", workspaceId }), /清算対象の明細がありません/);
   const personal = fixture({ settlementContext: async () => ({ workspaceType: "PERSONAL", members, transactions: [transaction] }) });
   await assert.rejects(personal.execute({ action: "completeSettlement", workspaceId }), /清算対象の明細がありません/);
+});
+
+
+test("本人以外の個人費を手動・CSV・ルール補完から作らない", async () => {
+  for (const transactionId of [undefined, "00000000-0000-4000-8000-000000000002"]) {
+    const f = fixture();
+    await assert.rejects(f.execute({ ...save, transactionId, actorUserId: "b", expenseClass: "PERSONAL", splitWeights: { a: 0, b: 1 } }), /個人費は本人/);
+    assert.ok(!f.calls.some(call => ["insertTransaction", "updateTransaction"].includes(call.name)));
+  }
+  for (const expenseClass of ["PERSONAL", undefined]) {
+    const f = fixture({ splitRules: async () => [{ ...rule, enabled: true, expenseClass: "PERSONAL", splitWeights: null }] });
+    await assert.rejects(f.execute({ action: "bulkImport", workspaceId, fileName: "private.csv", totalRows: 1,
+      items: [{ occurredAt: save.occurredAt, merchant: "店", method: "PayPay", amountYen: 300, actorUserId: "b", externalId: "123", expenseClass }] }), /個人費は本人/);
+    assert.ok(!f.calls.some(call => call.name === "persistPayPayImport"));
+  }
 });

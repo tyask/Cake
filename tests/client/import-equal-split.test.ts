@@ -71,6 +71,16 @@ test("割合の単位は共通の3択で、CSV取込と定期支払いの保存�
             assert.equal(await row("odd").getByLabel("Aの配分割合", { exact: true }).isDisabled(), true);
             assert.equal(requests.length, 1);assert.deepEqual(errors, []);return;
           }
+          const actor = page.getByRole("combobox", { name: "支払者", exact: true });
+          await actor.selectOption("b");
+          assert.equal(await page.getByRole("button", { name: "確認して登録", exact: true }).isDisabled(), true, "個人費を含む取込は本人の支払者でのみ登録できる");
+          assert.equal(await row("odd").getByRole("combobox", { name: "oddの区分", exact: true }).locator('option[value="PERSONAL"]').isDisabled(), true);
+          await row("odd").getByRole("checkbox", { name: "oddを選択", exact: true }).check();
+          assert.equal(await page.getByRole("button", { name: "個人に変更", exact: true }).isDisabled(), true);
+          await row("odd").getByRole("checkbox", { name: "oddを選択", exact: true }).uncheck();
+          assert.equal(requests.length, 1, "担当者の変更だけでは登録しない");
+          await actor.selectOption("a");
+          assert.equal(await page.getByRole("button", { name: "確認して登録", exact: true }).isEnabled(), true);
           assert.equal(await row("odd").getByLabel("Aの配分割合", { exact: true }).inputValue(), "60");
           await unit("odd").selectOption("EQUAL");assert.equal(await unit("odd").inputValue(), "RATIO");
           for (const person of ["A", "B"]) assert.equal(await row("odd").getByLabel(person + "の配分割合", { exact: true }).inputValue(), "50");
@@ -136,6 +146,19 @@ test("割合の単位は共通の3択で、CSV取込と定期支払いの保存�
           await assertThree();await dialog.getByLabel("取引先", { exact: true }).fill("定期家賃");await dialog.getByLabel("金額（円）", { exact: true }).fill("101");
           assert.equal(await dialog.getByLabel("金額（円）", { exact: true }).inputValue(), "101", "支払い入力は正の整数を維持する");
           assert.equal(await dialog.locator(".signed-amount-input > .negative").textContent(), "−", "金額入力の外側に支払い符号を表示する");
+          const actor = dialog.getByRole("combobox", { name: "支払者", exact: true });
+          const classification = dialog.getByRole("combobox", { name: "区分", exact: true });
+          await actor.selectOption("b");
+          await dialog.getByText("個人の定期支払いを登録する場合は、支払者を自分に変更してください。", { exact: true }).waitFor();
+          assert.equal(await classification.locator('option[value="PERSONAL"]').evaluate(element => (element as HTMLOptionElement).disabled), true);
+          await dialog.getByLabel("取引先", { exact: true }).fill("personal");
+          assert.equal(await classification.inputValue(), "PERSONAL", "自動ルールの入力も保持する");
+          assert.equal(await dialog.getByRole("button", { name: "追加する", exact: true }).isDisabled(), true, "ルール経由でも相手の個人費は登録しない");
+          await actor.selectOption("a");
+          await dialog.getByText("個人の定期支払いを登録する場合は、支払者を自分に変更してください。", { exact: true }).waitFor({ state: "hidden" });
+          assert.equal(await actor.locator('option[value="b"]').evaluate(element => (element as HTMLOptionElement).disabled), true);
+          assert.equal(await dialog.getByRole("button", { name: "追加する", exact: true }).isEnabled(), true);
+          await dialog.getByLabel("取引先", { exact: true }).fill("定期家賃");
           await unit().selectOption("EQUAL");assert.equal(await unit().inputValue(), "RATIO");
           for (const who of ["A", "B"]) assert.equal(await dialog.getByLabel(who + "の配分割合", { exact: true }).inputValue(), "50");
           await dialog.getByLabel("取引先", { exact: true }).fill("変更後の定期家賃");assert.equal(await dialog.getByLabel("Aの配分割合", { exact: true }).inputValue(), "50");
