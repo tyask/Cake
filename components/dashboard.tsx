@@ -64,7 +64,7 @@ export function Dashboard({ initialData, initialTab = "home", testAuth = false }
         {loading && <div className="loading-line" />}
         {selected && tab === "home" && <HomePanel selected={selected} userId={data.user.id} pending={data.pendingInvitations.length} setTab={openTab} add={() => setTransactionModal(true)} run={run} refreshAction={<RefreshButton refreshing={refreshing} disabled={loading} onClick={() => { void refreshCurrentView(); }} />} refreshing={refreshing} />}
         {selected && tab === "transactions" && <TransactionsPanel key={selected.workspace.id} selected={selected} userId={data.user.id} add={() => setTransactionModal(true)} run={run} onRefresh={refreshCurrentView} refreshing={refreshing} />}
-        {selected && tab === "import" && <ImportPanel key={selected.workspace.id} selected={selected} currentUserId={data.user.id} run={run} importHistoryRevision={importHistoryRevision} />}
+        {selected && <ImportPanel key={`import:${selected.workspace.id}`} selected={selected} currentUserId={data.user.id} run={run} importHistoryRevision={importHistoryRevision} active={tab === "import"} />}
         {selected && <AnalyticsPanel key={`analytics:${selected.workspace.id}`} workspaceId={selected.workspace.id} currentUserId={data.user.id} revision={analyticsRevision} active={tab === "analytics" && !workspaceSwitching} />}
         {tab === "settings" && <>
           <PageHeading title="設定" />

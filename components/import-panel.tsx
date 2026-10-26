@@ -62,7 +62,7 @@ function CategorySuggestionButton({ disabled, working, onClick }: { disabled: bo
   </div>;
 }
 
-export function ImportPanel({ selected, currentUserId, run, importHistoryRevision }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction; importHistoryRevision: number }) {
+export function ImportPanel({ selected, currentUserId, run, importHistoryRevision, active = true }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction; importHistoryRevision: number; active?: boolean }) {
   const isSafari = useSyncExternalStore(subscribeToBrowser, getSafariSnapshot, getServerSafariSnapshot);
   const inputRef = useRef<HTMLInputElement>(null);
   const [format, setFormat] = useState<ImportFormat>("PAYPAY");
@@ -248,6 +248,10 @@ export function ImportPanel({ selected, currentUserId, run, importHistoryRevisio
     } catch (failure) { setError(failure instanceof Error ? failure.message : "明細を登録できませんでした。"); }
     finally { setSaving(false); }
   }
+
+  // Keep the draft and pending work across tab changes, without retaining
+  // inactive controls, dialogs, or history requests in the current page.
+  if (!active) return null;
 
   return <>
     <PageHeading eyebrow="IMPORT" title="明細を取込" />
