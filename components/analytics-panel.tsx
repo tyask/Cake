@@ -102,8 +102,8 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
         <article className={styles.stat}><span>比較期間の支出額</span><strong>{formatYen(view.comparisonYen)}</strong><small>{analyticsRangeLabel(data.periods.comparison)}</small></article>
         <article className={styles.stat}><span>比較期間との差額</span><strong data-testid="analytics-difference">{view.differenceYen > BigInt(0) ? "+" : ""}{formatYen(view.differenceYen)}</strong><small>{view.differenceYen > BigInt(0) ? "支出が増加" : view.differenceYen < BigInt(0) ? "支出が減少" : "支出の増減なし"} · {view.rate ? `支出の増減率 ${view.rate}` : view.totalYen > BigInt(0) ? "比較期間は0円" : "比較期間も0円"}</small></article>
       </div>}
-      {viewMode === "self" && <p className={styles.scopeNote}>以下のグラフと内訳表は、チェックした内容の支出を表示します。</p>}
-      <Suspense fallback={<div role="status" className={styles.empty}>グラフを準備しています…</div>}><AnalyticsCharts view={view} periods={data.periods} /></Suspense>
+      {viewMode === "self" && <p className={styles.scopeNote}>月次は収入・支出・収支を、カテゴリ別の内訳と前期間差分は支出を表示します。</p>}
+      <Suspense fallback={<div role="status" className={styles.empty}>グラフを準備しています…</div>}><AnalyticsCharts view={view} periods={data.periods} cashflowTrend={viewMode === "self"} /></Suspense>
       <p className={styles.snapshot}>取得日時 {formatJstDateTime(data.snapshotAt)}（日本時間）</p>
     </>}
   </div>;

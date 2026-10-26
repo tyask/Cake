@@ -241,6 +241,24 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
           && await page.getByTestId('analytics-total').textContent() === formatCashflow(-expense)
           && await page.getByTestId('analytics-balance').textContent() === formatCashflow(income - expense));
       };
+      const assertOwnTrend = async (extraIncome = BigInt(0)) => {
+        const chart = page.getByTestId('analytics-cashflow-chart');
+        await chart.locator('.analytics-cashflow-balance .recharts-line-curve').waitFor();
+        const month = dataset.periods.current.to.slice(0, 7);
+        const sum = (buckets: AnalyticsDataset['buckets']) => buckets
+          .filter(bucket => bucket.scope === 'trend' && bucket.month === month && bucket.memberId === `test-user-${item.user}`)
+          .reduce((total, bucket) => total + BigInt(bucket.burdenYen), BigInt(0));
+        const income = sum(dataset.receiptBuckets) + extraIncome, expense = sum(dataset.buckets);
+        const section = page.locator('section[aria-labelledby="analytics-trend-heading"]');
+        const details = section.locator('details');
+        if (!await details.evaluate(element => (element as HTMLDetailsElement).open)) await details.locator('summary').click();
+        const table = section.getByRole('table', { name: '月ごとの収入・支出・収支（円）', exact: true });
+        const cells = await table.getByRole('row', { name: new RegExp(`^${month.replace('-', '/')} `) }).getByRole('cell').allTextContents();
+        requireCondition(cells.length === 3 && cells[0] === formatCashflow(income)
+          && cells[1] === formatCashflow(-expense) && cells[2] === formatCashflow(income - expense));
+        requireCondition(await page.locator('#analytics-trend-heading').evaluate(element =>
+          Boolean(element.compareDocumentPosition(document.getElementById('analytics-composition-heading')!) & Node.DOCUMENT_POSITION_FOLLOWING)));
+      };
       requireCondition(await page.getByTestId('analytics-total').textContent() === formatCashflow(-ownTotal));
       await assertOwnCashflow(['SHARED', 'PERSONAL']);
       await page.getByRole('checkbox', { name: '共有費', exact: true }).uncheck();
@@ -249,6 +267,9 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       requireCondition(await page.getByTestId('analytics-total').count() === 0);
       await page.getByRole('radio', { name: '共有費全体', exact: true }).check();
       requireCondition(await page.getByTestId('analytics-total').textContent() === formatYen(sharedTotal));
+      requireCondition(await page.getByTestId('analytics-cashflow-chart').count() === 0);
+      requireCondition(await page.locator('#analytics-trend-heading').evaluate(element =>
+        Boolean(element.compareDocumentPosition(document.getElementById('analytics-composition-heading')!) & Node.DOCUMENT_POSITION_FOLLOWING)));
       await screenshot('analytics-shared');
       await page.getByRole('radio', { name: '自分の収支', exact: true }).check();
       requireCondition(await page.getByTestId('analytics-total').count() === 0);
@@ -256,6 +277,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       await assertOwnCashflow(['SHARED']);
       await page.getByRole('checkbox', { name: '個人費', exact: true }).check();
       await assertOwnCashflow(['SHARED', 'PERSONAL']);
+      await assertOwnTrend();
       await screenshot('analytics'); check('analytics-self-cashflow-class-filters-and-shared-api-totals');
       stage = 'settings'; await navigate('設定'); await screenshot('settings'); check('settings-navigation');
       stage = 'transactions'; await navigate('取引明細');
@@ -278,6 +300,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       await page.waitForFunction(expected => document.querySelector('[data-testid="analytics-income"]')?.textContent === expected,
         formatCashflow(ownIncomeTotal + BigInt(1234)));
       requireCondition(await page.getByTestId('analytics-total').textContent() === formatCashflow(-ownTotal));
+      await assertOwnTrend(BigInt(1234));
       check('personal-income-ui-create-to-analytics-cashflow');
       stage = 'transactions'; await navigate('取引明細');
       stage = 'privacy';
