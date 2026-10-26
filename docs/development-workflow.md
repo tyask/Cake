@@ -101,6 +101,9 @@ Ready条件や利用者の制限を省略して進めない。
 
 依存導入後、編集中は次を使う。`check:fast` はNode版・lint・型・依存境界・文書参照を順番に確認し、失敗した段階で停止する。Chromiumや実DBを使わない。
 CIもこの確認を先に行い、その後に全自動テストとbuildを実行する。
+ActionsのCI・Preview検証・常設Previewは標準ヘッドレス実行を使うため、
+`playwright install --with-deps --only-shell chromium`で公式Chromium Headless ShellとOS依存ライブラリーを導入する。
+画面付き実行や`channel: 'chromium'`を使う場合は、通常のChromium本体も必要になる。
 
 ```bash
 npm run check:fast

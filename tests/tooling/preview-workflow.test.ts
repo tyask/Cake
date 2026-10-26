@@ -170,7 +170,8 @@ test('verify workflow installs the official browser before secrets and preserves
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /permissions:\s*contents: read\s*pull-requests: read/);
   assert.ok(!/id-token:|checks: write|pull_request:\s|\bpush:/.test(workflow));
-  assert.ok(workflow.indexOf('npx playwright install --with-deps chromium') < workflow.indexOf('GH_TOKEN:'));
+  const browserInstall = workflow.indexOf('npx playwright install --with-deps --only-shell chromium');
+  assert.ok(browserInstall >= 0 && browserInstall < workflow.indexOf('GH_TOKEN:'));
   const notice = workflow.slice(workflow.indexOf('- name: Publish public operation receipt notice'));
   assert.match(notice, /if: success\(\) \|\| \(always\(\) && github\.event_name == 'workflow_dispatch' && inputs\.action == 'verify'\)/);
   assert.ok(!notice.includes('env:')); assert.ok(!notice.includes('TOKEN')); assert.ok(!workflow.includes('upload-artifact'));

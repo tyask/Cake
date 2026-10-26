@@ -60,7 +60,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Install the official Playwright browser for verification
         if: github.event_name == 'workflow_dispatch' && inputs.action == 'verify'
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps --only-shell chromium
       - name: Run the requested operation
         env:
           GH_TOKEN: ${{ github.token }}

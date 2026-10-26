@@ -30,7 +30,7 @@ jobs:
         run: npm run check:node
       - run: npm ci --ignore-scripts
       - name: Install official Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps --only-shell chromium
       - name: Deploy and verify persistent Preview
         env:
           GH_TOKEN: ${{ github.token }}

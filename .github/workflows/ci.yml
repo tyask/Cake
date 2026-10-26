@@ -46,7 +46,7 @@ jobs:
         run: npm run check:fast
 
       - name: Install Chromium for browser isolation regression
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps --only-shell chromium
 
       - name: Test
         run: npm test
