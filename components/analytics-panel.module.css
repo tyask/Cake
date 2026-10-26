@@ -66,6 +66,9 @@
 .categoryName { display: flex; align-items: center; gap: .45rem; min-width: 0; }
 .categoryName > i { flex: none; width: .55rem; height: .55rem; border-radius: .15rem; }
 .categoryName > span { min-width: 0; overflow-wrap: anywhere; }
+.categoryButton { min-width: 0; min-height: 2.75rem; padding: .3rem 0; border: 0; color: var(--accent); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.categoryButton:hover .categoryName > span { text-decoration: underline; }
+.categoryButton:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: .2rem; }
 .miniNote,.comparisonNote { margin: .8rem 0 0; color: var(--muted); font-size: .6rem; line-height: 1.8; }
 .trendChart { height: 16.5rem; margin-top: 1.1rem; }
 .cashflowTrendChart { height: 20rem; margin-top: 1.1rem; }
