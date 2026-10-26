@@ -65,7 +65,8 @@ async function openFixture(browser: Browser, origin: string, width: number, sele
 }
 
 async function assertCategoryLine(row: Locator, width: number, color: string) {
-  if (width >= 768) {
+  const columnLayout = await row.evaluate(element => getComputedStyle(element).display === "table-row");
+  if (width > 768 && columnLayout) {
     assert.equal(await row.locator('[data-label="選択"]').evaluate(element => getComputedStyle(element).boxShadow), `${color} 4px 0px 0px 0px inset`);
   } else {
     const line = await row.evaluate(element => {

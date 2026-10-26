@@ -42,7 +42,7 @@ export function ImportPreviewTable({ rows, members, actorId, currentUserId, savi
     { id: "expenseClass", label: "区分" }, { id: "splitWeights", label: transactionSplitLabel(members) },
     { id: "category", label: "カテゴリ" }, { id: "memo", label: "メモ" }, { id: "status", label: "状態" },
   ] as const;
-  return <TransactionTable columns={columns} label="取り込み明細" header={<tr>
+  return <TransactionTable wrap columns={columns} label="取り込み明細" header={<tr>
     {columns.map(column => <th key={column.id} className={column.id === "selection" ? styles.selectionCell : undefined}>
       {column.id === "selection" ? <SelectionCheckbox label="登録可能な明細をすべて選択" mobileLabel={allSelected ? "全解除" : "全選択"} checked={allSelected} partial={count > 0 && !allSelected} disabled={saving || eligible.length === 0} onChange={() => onSelectAll(!allSelected)} /> : column.label}
     </th>)}
