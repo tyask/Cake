@@ -152,8 +152,8 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
           const button = list.getByRole("button", { name, exact: true });
           await button.click();
           const detail = await f.takeDetails();
-          assert.deepEqual(queryFromRoute(detail), queryFromRoute(request), "表示中の対象期間だけを要求する");
-          assert.deepEqual([...new URL(detail.request().url()).searchParams.keys()].sort(), ["month", "period", "workspaceId"]);
+          assert.deepEqual(queryFromRoute(detail), { workspaceId, period: "range", ...data.periods.current }, "集計snapshotの確定期間だけを要求する");
+          assert.deepEqual([...new URL(detail.request().url()).searchParams.keys()].sort(), ["from", "period", "to", "workspaceId"]);
           await f.replyDetails(detail);
           await dialog.getByRole("heading", { name: `${name}の明細`, exact: true }).waitFor();
           if (expected.length) await dialog.getByText(`${expected.length}件の明細`, { exact: true }).waitFor();
@@ -162,6 +162,7 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
           assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "明細ポップアップが横にはみ出さない");
           return button;
         }
+        await f.page.clock.setFixedTime(new Date("2026-10-24T02:00:00Z"));
         await open("食費", ["grocery-shared", "food-personal"]);
         await dialog.getByText("明細のメモ", { exact: true }).first().waitFor({ state: width <= 768 ? "hidden" : "visible" });
         if (width <= 768) {

@@ -1057,7 +1057,7 @@ amountYen         = abs(payer.balance)</div>
           <p>両モードで月次→カテゴリ内訳→前期間差分の縦配置にする。AnalyticsChartsのcashflowTrendは本人モードだけtrueとし、cashflow.monthsの同じ6か月のincomeYen・expenseYen・balanceYenを使う。本人月次は収入・支出の並列Barと収支のLineを同一ComposedChartへ描き、表示額を10,000で割った座標を共通縦軸に使う。収支の負数を含めた最小値・最大値を整数へ外側に丸め、両端の目盛を表示する。棒は金額の大きさ、折れ線は収入−支出の正負を保つ。0円の月も期間から補い、月別表でも全額を示す。共有費全体は従来のカテゴリ別支出BarChartと表を同じ先頭位置に表示する。</p>
           <p>収入は緑、支出は赤、収支は線と凡例でも区別する。Numberは座標だけに使い、棒の金額ラベル・ツールチップ・月別表は元のBigIntをformatCashflowで整形する。月次ツールチップはスマートフォンの横幅に収め、巨大額も省略や浮動小数化で値を変えない。ラベルは描画領域内に収まる場合だけ表示する。incomeYenがあるだけの期間は月次を描き、支出のドーナツが空であることと区別する。</p>
           <h3>取得・保存・遅延応答</h3>
-          <p>カテゴリ内訳一覧のカテゴリ名はbuttonとし、押下時に<code>AnalyticsTransactionsDialog</code>が<code>GET /api/analytics/transactions</code>へ確定済み期間queryを送る。handlerは集計と同じ期間schemaで重複・未知queryを拒否し、storeは有効本人・現在所属・参加者・カテゴリ・期間内のPAYMENTを一つのstatementで取得する。共有またはactor本人の明細だけを返し、JSTの日付境界とoccurred_atの半開区間を使う。清算済みを含め、収入・相手の個人明細・他workspaceは返さない。</p>
+          <p>カテゴリ内訳一覧のカテゴリ名はbuttonとし、押下時に<code>AnalyticsTransactionsDialog</code>が<code>GET /api/analytics/transactions</code>へ集計snapshotの確定済みfrom・toをrange queryとして送る。月指定でも確定日付を送るため、JSTの日付変更で対象期間を延長しない。handlerは集計と同じ期間schemaで重複・未知queryを拒否し、storeは有効本人・現在所属・参加者・カテゴリ・期間内のPAYMENTを一つのstatementで取得する。共有またはactor本人の明細だけを返し、JSTの日付境界とoccurred_atの半開区間を使う。清算済みを含め、収入・相手の個人明細・他workspaceは返さない。</p>
           <div class="data-flow">
             <div class="dfd-track" role="img" aria-label="カテゴリ名押下で期間内の明細を取得し、現在の集計条件に絞ってポップアップ表示する">
               <div class="dfd-node source"><strong>内訳のカテゴリ名</strong><small>確定期間・表示条件・対象カテゴリ</small></div>

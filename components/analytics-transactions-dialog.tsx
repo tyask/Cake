@@ -1,15 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { AnalyticsDataset, AnalyticsQuery, AnalyticsRow } from "@/lib/shared/analytics";
+import type { AnalyticsDataset, AnalyticsRow } from "@/lib/shared/analytics";
 import type { PreparedAnalyticsDataset } from "@/lib/shared/analytics-view";
 import type { AnalyticsTransactionsDataset } from "@/lib/shared/analytics-transactions";
 import { selectAnalyticsTransactions, type AnalyticsTransactionSelection } from "@/lib/shared/analytics-transaction-view";
 import { formatYen } from "@/lib/shared/display-formatters";
 import { TransactionListDialog, type TransactionListDialogState } from "./transaction-list-dialog";
 
-export function AnalyticsTransactionsDialog({ query, data, prepared, row, selection, close }: {
-  query: AnalyticsQuery;
+export function AnalyticsTransactionsDialog({ data, prepared, row, selection, close }: {
   data: AnalyticsDataset;
   prepared: PreparedAnalyticsDataset;
   row: AnalyticsRow;
@@ -18,7 +17,8 @@ export function AnalyticsTransactionsDialog({ query, data, prepared, row, select
 }) {
   const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<{ attempt: number; state: TransactionListDialogState; totalYen?: bigint } | null>(null);
-  const parameters = new URLSearchParams(query).toString();
+  const parameters = new URLSearchParams({ workspaceId: data.workspaceId, period: "range",
+    from: data.periods.current.from, to: data.periods.current.to }).toString();
   const state: TransactionListDialogState = result?.attempt === attempt ? result.state : { status: "loading" };
 
   useEffect(() => {

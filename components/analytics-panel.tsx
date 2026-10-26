@@ -120,7 +120,7 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
         onCategoryClick={row => setDetails({ row, data, view })} /></Suspense>
       <p className={styles.snapshot}>取得日時 {formatJstDateTime(data.snapshotAt)}（日本時間）</p>
     </>}
-    {details && detailSelection && prepared && <AnalyticsTransactionsDialog query={query} data={details.data} prepared={prepared} row={details.row}
+    {details && detailSelection && prepared && <AnalyticsTransactionsDialog data={details.data} prepared={prepared} row={details.row}
       selection={detailSelection} close={() => setDetails(null)} />}
   </div>;
 }
