@@ -7,6 +7,7 @@ import { build } from "esbuild";
 import { chromium, type Route } from "playwright";
 import { resolveAnalyticsPeriods, type AnalyticsDataset, type AnalyticsQuery } from "../../lib/shared/analytics";
 import { formatCashflow, formatYen } from "../../lib/shared/display-formatters";
+import type { TransactionRecord } from "../../lib/shared/types";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const otherWorkspaceId = "22222222-2222-4222-8222-222222222222";
@@ -46,6 +47,23 @@ function queryFromRoute(route: Route): AnalyticsQuery {
     : { workspaceId: id, period: "month", month: params.get("month")! };
 }
 
+function detailTransactions(): TransactionRecord[] {
+  const payment: TransactionRecord = {
+    id: "grocery-shared", occurredAt: "2026-10-15T01:23:45.123Z", merchant: "共有スーパー", method: "カード",
+    memo: "明細のメモ", type: "PAYMENT", amountYen: 100, actorUserId: "b", actorName: "Bさん",
+    expenseClass: "SHARED", splitWeights: { a: 3, b: 2 }, settledAt: "2026-10-20T00:00:00Z",
+    externalId: "", source: "MANUAL", categoryId: "grocery", categoryConfirmed: true, categoryRevision: 1,
+  };
+  return [
+    payment,
+    { ...payment, id: "food-personal", merchant: "自分の食費", amountYen: 20, actorUserId: "a", actorName: "Aさん",
+      expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 }, categoryId: "food", settledAt: null },
+    { ...payment, id: "grocery-other", merchant: "相手だけに配分", amountYen: 50, splitWeights: { a: 0, b: 1 }, settledAt: null },
+    { ...payment, id: "unclassified", merchant: "未分類の支払い", amountYen: 7, splitWeights: { a: 1, b: 0 }, categoryId: null },
+    { ...payment, id: "deleted-category", merchant: "削除済みカテゴリ", amountYen: 9, splitWeights: { a: 1, b: 0 }, categoryId: "missing" },
+  ];
+}
+
 test("集計は自分の収支と共有費全体をローカルで切り替え、期間と取得世代だけをAPIへ送る", async t => {
   const bundle = await build({ entryPoints: ["tests/client/fixtures/analytics.tsx"], bundle: true, write: false,
     outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
@@ -63,6 +81,7 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
   async function fixture(width = 1440, initialActive = true, currentUserId = "a") {
     const context = await browser.newContext({ viewport: { width, height: width <= 768 ? 844 : 1000 }, isMobile: width <= 768, hasTouch: width <= 768, reducedMotion: "reduce", serviceWorkers: "block" });
     const page = await context.newPage(), requests: Route[] = [], urls: string[] = [], errors: string[] = [];
+    const detailRequests: Route[] = [], detailUrls: string[] = [];
     page.setDefaultTimeout(10000);
     page.on("pageerror", error => errors.push(error.message));
     await page.clock.setFixedTime(now);
@@ -72,6 +91,9 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
       if (url.pathname === "/api/analytics") {
         assert.equal(route.request().method(), "GET");
         urls.push(route.request().url()); requests.push(route);
+      } else if (url.pathname === "/api/analytics/transactions") {
+        assert.equal(route.request().method(), "GET");
+        detailUrls.push(route.request().url()); detailRequests.push(route);
       } else await route.continue();
     });
     await page.addInitScript(({ workspaceId, active, currentUserId }) => { window.analyticsProps = { workspaceId, currentUserId, revision: 0, active }; window.ignoreAnalyticsAbort = true; }, { workspaceId, active: initialActive, currentUserId });
@@ -81,6 +103,16 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
       for (let index = 0; !requests.length && index < 200; index++) await new Promise(done => setTimeout(done, 5));
       assert.ok(requests.length, "集計APIの呼び出しを待つ");
       return requests.shift()!;
+    }
+    async function takeDetails() {
+      for (let index = 0; !detailRequests.length && index < 200; index++) await new Promise(done => setTimeout(done, 5));
+      assert.ok(detailRequests.length, "明細APIの呼び出しを待つ");
+      return detailRequests.shift()!;
+    }
+    async function replyDetails(route: Route, transactions = detailTransactions(), responseWorkspaceId = queryFromRoute(route).workspaceId) {
+      const data = dataset(queryFromRoute(route));
+      await route.fulfill({ json: { workspaceId: responseWorkspaceId, snapshotAt: now.toISOString(),
+        period: data.periods.current, members: data.members, categories: data.categories, transactions } });
     }
     async function reply(route: Route, body = dataset(queryFromRoute(route)), status = 200) { await route.fulfill({ json: body, status }); }
     async function total(value: string) { await page.waitForFunction(expected => document.querySelector('[data-testid="analytics-total"]')?.textContent === expected, value); }
@@ -98,9 +130,154 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
       assert.ok(trendBounds.bottom <= compositionBounds.top, "月次グラフをカテゴリ内訳の上へ縦配置する");
       assert.ok(Math.abs(trendBounds.x - compositionBounds.x) < 1 && Math.abs(trendBounds.width - compositionBounds.width) < 1, "画面幅にかかわらず両カードは同じ幅で表示する");
     }
-    return { context, page, requests, urls, errors, take, reply, total, stable, chartOrder };
+    return { context, page, requests, urls, errors, take, reply, total, stable, chartOrder, detailRequests, detailUrls, takeDetails, replyDetails };
   }
   try {
+    for (const width of [1440, 390]) await t.test(`${width}px: 内訳のカテゴリ名から期間・表示条件に合う明細を開き、閉じると操作元へ戻る`, async () => {
+      const f = await fixture(width);
+      try {
+        const request = await f.take(), data = dataset(queryFromRoute(request));
+        data.buckets.push(
+          { ...data.buckets[0], memberId: "b", burdenYen: "50" },
+          { ...data.buckets[0], categoryId: null, burdenYen: "7" },
+          { ...data.buckets[0], categoryId: "missing", burdenYen: "9" },
+        );
+        await f.reply(request, data); await f.total("−￥96");
+        const list = f.page.getByRole("list", { name: "全カテゴリの支出額と割合" });
+        const food = list.getByRole("button", { name: "食費", exact: true });
+        assert.equal(await food.getAttribute("aria-haspopup"), "dialog");
+        assert.equal(f.detailUrls.length, 0, "カテゴリを開くまで明細を取得しない");
+        const dialog = f.page.getByRole("dialog");
+        async function open(name: string, expected: string[]) {
+          const button = list.getByRole("button", { name, exact: true });
+          await button.click();
+          const detail = await f.takeDetails();
+          assert.deepEqual(queryFromRoute(detail), { workspaceId, period: "range", ...data.periods.current }, "集計snapshotの確定期間だけを要求する");
+          assert.deepEqual([...new URL(detail.request().url()).searchParams.keys()].sort(), ["from", "period", "to", "workspaceId"]);
+          await f.replyDetails(detail);
+          await dialog.getByRole("heading", { name: `${name}の明細`, exact: true }).waitFor();
+          if (expected.length) await dialog.getByText(`${expected.length}件の明細`, { exact: true }).waitFor();
+          else await dialog.getByText("この期間・表示条件に該当する明細はありません。", { exact: true }).waitFor();
+          assert.deepEqual(await dialog.locator("[data-transaction-id]:visible").evaluateAll(rows => rows.map(row => row.getAttribute("data-transaction-id")).sort()), [...expected].sort());
+          assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "明細ポップアップが横にはみ出さない");
+          return button;
+        }
+        async function amount(id: string, value: number) {
+          const item = dialog.locator(`[data-transaction-id="${id}"]:visible`);
+          const expected = formatCashflow(-value);
+          if (width <= 768) await item.locator("summary").getByText(expected, { exact: true }).waitFor();
+          else assert.equal(await item.locator("td").nth(4).textContent(), expected);
+        }
+        async function expandedAmount(id: string, label: string, value: number) {
+          const item = dialog.locator(`[data-transaction-id="${id}"]:visible`);
+          const field = item.locator("dl > div").filter({ has: f.page.locator("dt", { hasText: label }) });
+          assert.equal(await field.locator("dt").textContent(), label);
+          assert.equal(await field.locator("dd").textContent(), formatCashflow(-value));
+        }
+        await f.page.clock.setFixedTime(new Date("2026-10-24T02:00:00Z"));
+        await open("食費", ["grocery-shared", "food-personal"]);
+        await amount("grocery-shared", 60);
+        await amount("food-personal", 20);
+        await dialog.getByText("明細の金額は自分への配分後の金額です。", { exact: false }).waitFor();
+        if (width > 768) await dialog.getByRole("columnheader", { name: "自分の配分（円）", exact: true }).waitFor();
+        await dialog.getByText("明細のメモ", { exact: true }).first().waitFor({ state: width <= 768 ? "hidden" : "visible" });
+        if (width <= 768) {
+          await dialog.locator('[data-transaction-id="grocery-shared"]:visible summary').click();
+          await dialog.locator('[data-transaction-id="grocery-shared"]:visible').getByText("明細のメモ", { exact: true }).waitFor();
+          await expandedAmount("grocery-shared", "自分の配分（円）", 60);
+        }
+        await f.page.keyboard.press("Escape");
+        await dialog.waitFor({ state: "hidden" });
+        assert.equal(await food.evaluate(element => element === document.activeElement), true, "Escapeで操作元のカテゴリへfocusを戻す");
+        await f.page.getByRole("checkbox", { name: "個人費", exact: true }).uncheck();
+        await open("食費", ["grocery-shared"]);
+        await amount("grocery-shared", 60);
+        await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check();
+        await open("食費", ["grocery-shared", "grocery-other"]);
+        await amount("grocery-shared", 100);
+        await amount("grocery-other", 50);
+        await dialog.getByText("明細の金額は取引全額です。", { exact: false }).waitFor();
+        if (width > 768) await dialog.getByRole("columnheader", { name: "金額（円）", exact: true }).waitFor();
+        else {
+          await dialog.locator('[data-transaction-id="grocery-shared"]:visible summary').click();
+          await expandedAmount("grocery-shared", "金額（円）", 100);
+        }
+        await dialog.getByRole("button", { name: "明細一覧を閉じる", exact: true }).click();
+        await f.page.getByRole("radio", { name: "自分の収支", exact: true }).check();
+        await f.page.getByRole("checkbox", { name: "個人費", exact: true }).check();
+        await f.page.getByLabel("カテゴリの細かさ", { exact: true }).selectOption("all");
+        await open("食費（直接設定）", ["food-personal"]);
+        await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+        await open("食費 › スーパー", ["grocery-shared"]);
+        await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+        await open("未分類", ["unclassified", "deleted-category"]);
+        await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+        await open("交通費", []);
+        await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+        await f.page.getByLabel("カテゴリの細かさ", { exact: true }).selectOption("1");
+        await f.page.locator("summary").filter({ hasText: "集計に含めるカテゴリ" }).click();
+        const categories = f.page.getByRole("group", { name: "集計に含めるカテゴリ", exact: true });
+        await categories.getByRole("checkbox", { name: "食費 › スーパー", exact: true }).uncheck();
+        await open("食費", ["food-personal"]);
+        await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+        assert.equal(f.urls.length, 1, "明細操作は集計データを再取得しない");
+        assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
+    await t.test("明細の取得失敗は再読込でき、閉じた要求や期間・世代・画面・workspace変更の古い応答を採用しない", async () => {
+      const f = await fixture();
+      try {
+        await f.reply(await f.take()); await f.total("−￥80");
+        const food = f.page.getByRole("list", { name: "全カテゴリの支出額と割合" }).getByRole("button", { name: "食費", exact: true });
+        const dialog = f.page.getByRole("dialog");
+        await food.click();
+        await (await f.takeDetails()).fulfill({ status: 503, json: { error: "明細の再取得が必要です。" } });
+        await dialog.getByRole("alert").filter({ hasText: "明細の再取得が必要です。" }).waitFor();
+        await dialog.getByRole("button", { name: "再読み込み", exact: true }).click();
+        await f.replyDetails(await f.takeDetails());
+        await dialog.getByText("2件の明細", { exact: true }).waitFor();
+        await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+        await food.click(); const closed = await f.takeDetails();
+        await f.page.keyboard.press("Escape");
+        await f.replyDetails(closed); await f.stable();
+        assert.equal(await dialog.count(), 0, "閉じたpopupの遅い応答で再表示しない");
+
+        for (const change of ["period", "revision", "inactive", "workspace"] as const) {
+          await food.click(); const stale = await f.takeDetails();
+          if (change === "period") await f.page.getByLabel("集計する月", { exact: true }).evaluate(input => {
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+            setter.call(input, "2026-09"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true }));
+          });
+          else if (change === "revision") await f.page.evaluate(() => window.updateAnalytics({ revision: 1 }));
+          else if (change === "inactive") await f.page.evaluate(() => window.updateAnalytics({ active: false }));
+          else await f.page.evaluate(id => window.updateAnalytics({ workspaceId: id }), otherWorkspaceId);
+          await dialog.waitFor({ state: "hidden" });
+          await f.replyDetails(stale); await f.stable();
+          assert.equal(await dialog.count(), 0, `${change}変更後は旧条件の明細を表示しない`);
+          if (change === "inactive") await f.page.evaluate(() => window.updateAnalytics({ active: true }));
+          await f.reply(await f.take()); await f.total("−￥80");
+        }
+        await f.page.getByLabel("集計する期間", { exact: true }).selectOption("range");
+        await f.page.getByLabel("開始日", { exact: true }).fill("2026-10-10");
+        await f.page.getByLabel("終了日", { exact: true }).fill("2026-10-20");
+        await f.page.getByRole("button", { name: "この期間で表示", exact: true }).click();
+        await f.reply(await f.take()); await f.total("−￥80");
+        await food.click();
+        const rangeDetails = await f.takeDetails();
+        assert.deepEqual(queryFromRoute(rangeDetails), { workspaceId: otherWorkspaceId, period: "range", from: "2026-10-10", to: "2026-10-20" });
+        await f.replyDetails(rangeDetails, detailTransactions(), workspaceId);
+        await dialog.getByRole("alert").filter({ hasText: "明細の対象が一致しません。" }).waitFor();
+        assert.equal(await dialog.locator("[data-transaction-id]").count(), 0, "別workspaceの明細応答を描画しない");
+        await dialog.getByRole("button", { name: "再読み込み", exact: true }).click();
+        await f.replyDetails(await f.takeDetails());
+        await dialog.getByText("2件の明細", { exact: true }).waitFor();
+        await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+        assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
     for (const width of [1440, 1000, 850, 800, 769, 390, 320]) await t.test(`${width}px: 自分と共有全体・階層・表を変えても再通信しない`, async () => {
       const f = await fixture(width);
       try {

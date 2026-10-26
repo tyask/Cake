@@ -1,12 +1,13 @@
 "use client";
 
 import { lazy, Suspense, useId, useMemo, useState } from "react";
-import { analyticsQuerySchema, analyticsToday, type AnalyticsQuery, type AnalyticsRange } from "@/lib/shared/analytics";
+import { analyticsQuerySchema, analyticsToday, type AnalyticsDataset, type AnalyticsQuery, type AnalyticsRange, type AnalyticsRow, type AnalyticsView } from "@/lib/shared/analytics";
 import { ANALYTICS_UNCLASSIFIED_ID, buildAnalyticsView, prepareAnalyticsDataset } from "@/lib/shared/analytics-view";
 import { cashflowClass, formatCashflow, formatYen, formatJstDateTime } from "@/lib/shared/display-formatters";
 import type { ExpenseClass } from "@/lib/shared/types";
 import { PageHeading } from "./dashboard-ui";
 import { AnalyticsCategoryFilter } from "./analytics-category-filter";
+import { AnalyticsTransactionsDialog } from "./analytics-transactions-dialog";
 import { useAnalytics } from "./use-analytics";
 import styles from "./analytics-panel.module.css";
 
@@ -31,6 +32,7 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
   const [categoryIds, setCategoryIds] = useState<string[] | null>(null);
   const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
   const [depth, setDepth] = useState<number | "all">(1);
+  const [details, setDetails] = useState<{ row: AnalyticsRow; data: AnalyticsDataset; view: AnalyticsView } | null>(null);
   const { data, loading, error, refresh } = useAnalytics(query, revision, active);
   const prepared = useMemo(() => data ? prepareAnalyticsDataset(data) : null, [data]);
   const classSelectionEmpty = viewMode === "self" && selfClasses.length === 0;
@@ -43,6 +45,10 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
   const viewDescription = viewMode === "self"
     ? "チェックした共有費の自分の配分と個人費を、収入・支出それぞれで合計します。収支は収入から支出を引いた金額です。"
     : "共有費を支払者にかかわらず全額で集計します。個人費は含めません。収入は集計対象外です。";
+  // A changed view or snapshot invalidates both the dialog and its pending request.
+  if (details && (details.data !== data || details.view !== view || !active || loading || error)) setDetails(null);
+  const detailSelection = useMemo(() => details ? ({ rowId: details.row.id, depth, categoryIds, viewMode, selfClasses, currentUserId }) : null,
+    [details, depth, categoryIds, viewMode, selfClasses, currentUserId]);
 
   function toggleClass(expenseClass: ExpenseClass, checked: boolean) {
     setSelfClasses(current => checked ? [...current, expenseClass] : current.filter(value => value !== expenseClass));
@@ -57,7 +63,7 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
 
   return <div hidden={!active} className={styles.analytics}>
     <PageHeading eyebrow="ANALYTICS" title="収支の集計" description="自分の収入・支出と、共有費全体の使いみちを確認します。"
-      action={<button type="button" className={`refresh-button ${styles.refresh}`} disabled={loading} onClick={refresh}>↻ 更新</button>} />
+      action={<button type="button" className={`refresh-button ${styles.refresh}`} disabled={loading} onClick={() => { setDetails(null); refresh(); }}>↻ 更新</button>} />
     <section className={styles.conditions} aria-label="集計の表示条件">
       <div className={styles.periodGroup}>
         <label className={styles.field}>集計する期間<select aria-label="集計する期間" value={periodMode} onChange={event => {
@@ -110,8 +116,11 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
         <article className={styles.stat}><span>比較期間との差額</span><strong data-testid="analytics-difference">{view.differenceYen > BigInt(0) ? "+" : ""}{formatYen(view.differenceYen)}</strong><small>{view.differenceYen > BigInt(0) ? "支出が増加" : view.differenceYen < BigInt(0) ? "支出が減少" : "支出の増減なし"} · {view.rate ? `支出の増減率 ${view.rate}` : view.totalYen > BigInt(0) ? "比較期間は0円" : "比較期間も0円"}</small></article>
       </div>}
       {viewMode === "self" && <p className={styles.scopeNote}>月次は収入・支出・収支を、カテゴリ別の内訳と前期間差分は支出を表示します。</p>}
-      <Suspense fallback={<div role="status" className={styles.empty}>グラフを準備しています…</div>}><AnalyticsCharts view={view} periods={data.periods} cashflowTrend={viewMode === "self"} /></Suspense>
+      <Suspense fallback={<div role="status" className={styles.empty}>グラフを準備しています…</div>}><AnalyticsCharts view={view} periods={data.periods} cashflowTrend={viewMode === "self"}
+        onCategoryClick={row => setDetails({ row, data, view })} /></Suspense>
       <p className={styles.snapshot}>取得日時 {formatJstDateTime(data.snapshotAt)}（日本時間）</p>
     </>}
+    {details && detailSelection && prepared && <AnalyticsTransactionsDialog data={details.data} prepared={prepared} row={details.row}
+      selection={detailSelection} close={() => setDetails(null)} />}
   </div>;
 }
