@@ -167,7 +167,13 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         assert.equal(f.urls.length, 1, "表示条件と表の変更はAPIを呼ばない");
         if (width === 1440) {
           const trend = f.page.getByRole("group", { name: "月ごとのカテゴリ別支出額。下の表でも確認できます。", exact: true });
-          await trend.locator("svg.recharts-surface").focus();
+          const surface = trend.locator("svg.recharts-surface");
+          await surface.scrollIntoViewIfNeeded();
+          // Recharts gives an active mouse hover priority over keyboard focus.
+          // Finish the pointer interaction before checking keyboard-only navigation.
+          await f.page.mouse.move(0, 0); await f.stable();
+          await surface.focus();
+          assert.equal(await surface.evaluate(element => element === document.activeElement), true, "月次グラフへキーボードfocusを移す");
           await trend.getByText("2026-05", { exact: true }).waitFor();
           await f.page.keyboard.press("ArrowRight");
           await trend.getByText("2026-06", { exact: true }).waitFor();
