@@ -440,6 +440,7 @@
               <tr><td><code>/api/app</code> POST</td><td>Node.js Route Handler。JSON <code>{ action, ... }</code>。</td><td>入力・認可・業務条件を検証し、アクション別成功JSONまたは<code>{ error }</code>。</td></tr>
               <tr><td><code>/api/import/duplicates</code> POST</td><td>Node.js Route Handler。workspace UUID、外部ID配列1〜2000件。</td><td>所属を確認し、指定IDに一致するexternalIdsと既存明細の最小照合情報を返す。</td></tr>
               <tr><td><code>/api/analytics</code> GET</td><td>Node.js。workspaceIdと月または指定期間。</td><td>認証・入力・所属を検証し、参加者・カテゴリと3範囲の負担額集約を返す。no-store、業務DB更新なし。</td></tr>
+              <tr><td><code>/api/analytics/transactions</code> GET</td><td>Node.js。集計APIと同じworkspaceId・期間query。</td><td>認証・入力・所属を検証し、対象期間の共有支払いと本人の個人支払い・参加者・カテゴリを同じsnapshotで返す。no-store、業務DB更新なし。</td></tr>
               <tr><td><code>/api/import/transactions</code> GET</td><td>Node.js Route Handler。queryはworkspace UUID・batch UUID・format=PAYPAY。</td><td>本人の現在の所属と対象batchを確認し、その取り込みに紐づく現在のtransactions・カテゴリ全件を返す。対象なしは404、既存batchの明細0件は200。Cache-Control: no-store。</td></tr>
               <tr><td><code>/api/import/history</code> GET</td><td>Node.js Route Handler。queryはworkspace UUIDとformat=PAYPAY。</td><td>認証・入力・現在の所属を確認し、本人の最新5件のhistory配列を新しい順で返す。Cache-Control: no-store。</td></tr>
               <tr><td><code>/api/import/category-suggestions</code> POST</td><td>Node.js Route Handler。workspace UUID、取引先配列1〜2000件。</td><td>認証・入力・所属を確認し、取引先ごとの候補カテゴリIDまたはnullを返す。DB更新なし。</td></tr>
@@ -1056,6 +1057,17 @@ amountYen         = abs(payer.balance)</div>
           <p>両モードで月次→カテゴリ内訳→前期間差分の縦配置にする。AnalyticsChartsのcashflowTrendは本人モードだけtrueとし、cashflow.monthsの同じ6か月のincomeYen・expenseYen・balanceYenを使う。本人月次は収入・支出の並列Barと収支のLineを同一ComposedChartへ描き、表示額を10,000で割った座標を共通縦軸に使う。収支の負数を含めた最小値・最大値を整数へ外側に丸め、両端の目盛を表示する。棒は金額の大きさ、折れ線は収入−支出の正負を保つ。0円の月も期間から補い、月別表でも全額を示す。共有費全体は従来のカテゴリ別支出BarChartと表を同じ先頭位置に表示する。</p>
           <p>収入は緑、支出は赤、収支は線と凡例でも区別する。Numberは座標だけに使い、棒の金額ラベル・ツールチップ・月別表は元のBigIntをformatCashflowで整形する。月次ツールチップはスマートフォンの横幅に収め、巨大額も省略や浮動小数化で値を変えない。ラベルは描画領域内に収まる場合だけ表示する。incomeYenがあるだけの期間は月次を描き、支出のドーナツが空であることと区別する。</p>
           <h3>取得・保存・遅延応答</h3>
+          <p>カテゴリ内訳一覧のカテゴリ名はbuttonとし、押下時に<code>AnalyticsTransactionsDialog</code>が<code>GET /api/analytics/transactions</code>へ確定済み期間queryを送る。handlerは集計と同じ期間schemaで重複・未知queryを拒否し、storeは有効本人・現在所属・参加者・カテゴリ・期間内のPAYMENTを一つのstatementで取得する。共有またはactor本人の明細だけを返し、JSTの日付境界とoccurred_atの半開区間を使う。清算済みを含め、収入・相手の個人明細・他workspaceは返さない。</p>
+          <div class="data-flow">
+            <div class="dfd-track" role="img" aria-label="カテゴリ名押下で期間内の明細を取得し、現在の集計条件に絞ってポップアップ表示する">
+              <div class="dfd-node source"><strong>内訳のカテゴリ名</strong><small>確定期間・表示条件・対象カテゴリ</small></div>
+              <div class="dfd-arrow"><b>→</b><small>GET /api/analytics/transactions</small></div>
+              <div class="dfd-node store"><strong>認可付きsnapshot</strong><small>期間内の支払い・カテゴリ・参加者順</small></div>
+              <div class="dfd-arrow"><b>→</b><small>ローカル絞込み</small></div>
+              <div class="dfd-node output"><strong>TransactionListDialog</strong><small>PC表 / mobile展開一覧</small></div>
+            </div>
+          </div>
+          <p><code>analyticsRowCategoryId</code>で集約と明細の階層対応を共用する。明細は押した集計snapshotのカテゴリ選択・階層・表示対象・区分に絞る。本人の配分は明細snapshotの参加者順で<code>splitAmounts</code>を適用し、配分0円は除外する。取引全額と本人の集計額は説明を分け、保存後の明細による合計が押下時の集計額と異なれば両方を示す。取得失敗は再読み込み、対象期間0件は空表示とする。期間・表示条件・workspace・保存後世代・取得snapshot・タブ有効状態の変更、明示更新でdialogを破棄し、AbortControllerで旧応答を採用しない。再取得時はworkspaceIdと適用期間も照合する。通常の集計取得や表示条件の切替では明細APIを呼ばない。</p>
           <p>集計panelは同じworkspace内のタブ切替でStateを保持する。同階層の条件付きpanelと識別子が衝突しないよう、Reactのkeyには画面種別とworkspace IDを組み合わせる。初回表示・再入場・期間変更・明示更新・保存後の無効化で取得する。本人チェックが全OFFでも期間取得は行い、その後ONへ戻して追加通信しない。取得中にcheckboxを変えても応答は保持し、最新の表示条件で描画する。workspace・期間・保存後世代・要求順が古い応答は破棄する。workspace切替中は旧グラフを非表示とし、切替先で条件を初期化する。切替後の別タブ取得により元の要求を破棄しても切替中を保持し、最新の取得が採用されたときだけ解除する。最新の取得が失敗した場合は以前のworkspaceへ戻して解除し、遅い旧応答を採用しない。</p>
           <p>対象カテゴリはモード・区分・粒度・期間変更と同じworkspaceのタブ往復で保持し、workspace切替で全選択へ初期化する。全件状態では更新後の新カテゴリも含む。個別選択後は明示したIDだけを使い、新カテゴリを自動では追加しない。削除済みIDは現在候補との共通部分だけを選択済みとして扱う。全解除中も期間変更や更新の取得を止めず、選び直した時点の最新データへ同じ表示条件を適用する。</p>
           <p>期間変更中は読込表示とし、旧期間のグラフを新条件の結果として見せない。取得失敗は選択を保持して再試行を表示し、0円の成功へ置き換えない。明細の未保存入力は含めず、保存成功後に世代を進める。グラフは遅延importし、未訪問タブでRechartsを読み込まない。PCホバー・キーボード、mobileタップ、全カテゴリの表を用意する。</p>

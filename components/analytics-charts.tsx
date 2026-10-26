@@ -164,7 +164,9 @@ function CashflowTrend({ view, period }: { view: AnalyticsView; period: Analytic
     </section>;
 }
 
-export default function AnalyticsCharts({ view, periods, cashflowTrend = false }: { view: AnalyticsView; periods: AnalyticsDataset["periods"]; cashflowTrend?: boolean }) {
+export default function AnalyticsCharts({ view, periods, cashflowTrend = false, onCategoryClick }: {
+  view: AnalyticsView; periods: AnalyticsDataset["periods"]; cashflowTrend?: boolean; onCategoryClick: (row: AnalyticsRow) => void;
+}) {
   // Floating point values are graph coordinates only; every amount and ratio label uses bigint.
   const labels = useMemo(() => {
     const measure = createChartAmountMeasurer();
@@ -206,7 +208,7 @@ export default function AnalyticsCharts({ view, periods, cashflowTrend = false }
               </Pie><Tooltip content={<ChartTooltip />} />
             </PieChart></ResponsiveContainer>
           </div> : <p className={styles.chartEmpty}>この期間の支出額はありません。</p>}
-          <ul className={styles.categoryList} aria-label="全カテゴリの支出額と割合">{view.rows.map(row => <li key={row.id}><CategoryName row={row} /><strong>{formatYen(row.currentYen)}</strong><span>{share(row.currentYen, view.totalYen)}</span></li>)}</ul>
+          <ul className={styles.categoryList} aria-label="全カテゴリの支出額と割合">{view.rows.map(row => <li key={row.id}><button type="button" className={styles.categoryButton} aria-haspopup="dialog" onClick={() => onCategoryClick(row)}><CategoryName row={row} /></button><strong>{formatYen(row.currentYen)}</strong><span>{share(row.currentYen, view.totalYen)}</span></li>)}</ul>
         </div>
         <p className={styles.miniNote}>グラフは主な8カテゴリを表示し、残りは「その他」にまとめます。未分類は別に表示します。</p>
       </section>;

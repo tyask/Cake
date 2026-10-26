@@ -86,6 +86,13 @@ function addRow(target: AnalyticsRow, source: AnalyticsRow): void {
   for (let index = 0; index < target.monthlyYen.length; index++) target.monthlyYen[index] += source.monthlyYen[index];
 }
 
+/** Use the same source-category grouping for aggregates and their transaction details. */
+export function analyticsRowCategoryId(prepared: PreparedAnalyticsDataset, categoryId: string | null, depth: number | "all"): string {
+  const source = categoryId ? prepared.categories.get(categoryId) : undefined;
+  return source ? depth === "all" ? source.category.id
+    : source.ancestors[Math.min(depth, source.ancestors.length) - 1] : ANALYTICS_UNCLASSIFIED_ID;
+}
+
 /** Checkbox and category-depth changes combine server aggregates without another request. */
 export function buildAnalyticsView(prepared: PreparedAnalyticsDataset, filters: AnalyticsFilters): AnalyticsView {
   if (filters.depth !== "all" && (!Number.isInteger(filters.depth) || filters.depth < 1)) {
@@ -108,9 +115,7 @@ export function buildAnalyticsView(prepared: PreparedAnalyticsDataset, filters: 
   const grouped = new Map<string, AnalyticsRow>();
   for (const bucket of prepared.buckets) {
     if (!includesBucket(bucket) || bucket.burdenYen === BigInt(0)) continue;
-    const source = bucket.categoryId ? prepared.categories.get(bucket.categoryId) : undefined;
-    const id = source ? filters.depth === "all" ? source.category.id
-      : source.ancestors[Math.min(filters.depth, source.ancestors.length) - 1] : ANALYTICS_UNCLASSIFIED_ID;
+    const id = analyticsRowCategoryId(prepared, bucket.categoryId, filters.depth);
     let row = grouped.get(id);
     if (!row) {
       row = emptyRow(id, prepared, filters.depth);
