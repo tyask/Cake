@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { build } from "esbuild";
 import { chromium, type Route } from "playwright";
 import { resolveAnalyticsPeriods, type AnalyticsDataset, type AnalyticsQuery } from "../../lib/shared/analytics";
@@ -167,10 +167,65 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         assert.equal(f.urls.length, 1, "表示条件と表の変更はAPIを呼ばない");
         if (width === 1440) {
           const trend = f.page.getByRole("group", { name: "月ごとのカテゴリ別支出額。下の表でも確認できます。", exact: true });
-          await trend.locator("svg.recharts-surface").focus();
-          await trend.getByText("2026-05", { exact: true }).waitFor();
-          await f.page.keyboard.press("ArrowRight");
-          await trend.getByText("2026-06", { exact: true }).waitFor();
+          const surface = trend.locator("svg.recharts-surface");
+          await trend.evaluate(group => {
+            const chart = group as HTMLElement & { keyboardTrace?: Record<string, string | number | null>[] };
+            chart.keyboardTrace = [];
+            for (const type of ["focusin", "focusout", "mouseenter", "mouseleave", "mousemove", "keydown"]) group.addEventListener(type, event => {
+              const tooltip = group.querySelector(".recharts-tooltip-wrapper");
+              chart.keyboardTrace!.push({ type, at: performance.now(), key: event instanceof KeyboardEvent ? event.key : null,
+                x: event instanceof MouseEvent ? event.clientX : null, y: event instanceof MouseEvent ? event.clientY : null,
+                activeElement: document.activeElement?.tagName ?? null, label: tooltip?.querySelector("b")?.textContent ?? null,
+                visibility: tooltip ? getComputedStyle(tooltip).visibility : null });
+              if (chart.keyboardTrace!.length > 100) chart.keyboardTrace!.shift();
+            }, true);
+          });
+          let keyboardStage = "focus";
+          try {
+            await surface.scrollIntoViewIfNeeded();
+            // Recharts gives an active mouse hover priority over keyboard focus.
+            // Enter this chart's plot-free margin before leaving, so its own
+            // hover state ends even when the pointer was over another chart.
+            const box = (await surface.boundingBox())!;
+            await f.page.mouse.move(box.x + 1, box.y + 1); await f.stable();
+            await f.page.mouse.move(0, 0); await f.stable();
+            await surface.focus();
+            assert.equal(await surface.evaluate(element => element === document.activeElement), true, "月次グラフへキーボードfocusを移す");
+            const months = ["2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"];
+            // Focus may retain an inactive keyboard index after blur. Navigate to
+            // a known endpoint instead of assuming focus selects the first month.
+            await f.page.keyboard.press("ArrowLeft"); await f.stable();
+            for (let step = 0; step < months.length; step++) {
+              keyboardStage = `reach-last-${step}`;
+              await f.page.keyboard.press("ArrowRight"); await f.stable();
+            }
+            keyboardStage = "last-month";
+            await trend.getByText(months.at(-1)!, { exact: true }).waitFor();
+            for (const month of months.slice(0, -1).reverse()) {
+              keyboardStage = `left-${month}`;
+              await f.page.keyboard.press("ArrowLeft");
+              await trend.getByText(month, { exact: true }).waitFor();
+            }
+            for (const month of months.slice(1)) {
+              keyboardStage = `right-${month}`;
+              await f.page.keyboard.press("ArrowRight");
+              await trend.getByText(month, { exact: true }).waitFor();
+            }
+          } catch (error) {
+            try {
+              const diagnostic = await trend.evaluate(group => {
+                const tooltip = group.querySelector(".recharts-tooltip-wrapper");
+                return { activeElement: { tag: document.activeElement?.tagName, role: document.activeElement?.getAttribute("role") },
+                  label: tooltip?.querySelector("b")?.textContent ?? null, visibility: tooltip ? getComputedStyle(tooltip).visibility : null,
+                  scrollY, trace: (group as HTMLElement & { keyboardTrace?: unknown[] }).keyboardTrace ?? [] };
+              });
+              const record = { recordedAt: new Date().toISOString(), keyboardStage, ...diagnostic };
+              console.error("ANALYTICS_KEYBOARD_FAILURE", JSON.stringify(record));
+              await mkdir(".cake/output/playwright", { recursive: true });
+              await writeFile(".cake/output/playwright/analytics-keyboard-failure.json", JSON.stringify(record, null, 2));
+            } catch { /* Keep the original keyboard assertion failure. */ }
+            throw error;
+          }
         }
         assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "ページ全体の横溢れなし");
         if (width <= 768) {
@@ -219,6 +274,199 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥420");
         assert.equal(f.urls.length, 1); assert.deepEqual(f.errors, []);
         assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      } finally { await f.context.close(); }
+    });
+
+    for (const width of [1440, 390, 320]) await t.test(`${width}px: カテゴリの親子と未分類の選択を収支・月次・共有費へ反映し、再通信しない`, async () => {
+      const f = await fixture(width);
+      try {
+        const request = await f.take(), data = dataset(queryFromRoute(request));
+        data.receiptBuckets = data.receiptBuckets.map(bucket => ({ ...bucket, categoryId: bucket.expenseClass === "PERSONAL" ? "food" : "grocery" }));
+        for (const scope of ["current", "trend"] as const) {
+          data.buckets.push({ scope, month: "2026-10", memberId: "a", expenseClass: "SHARED", categoryId: null, burdenYen: "7" });
+          data.receiptBuckets.push({ scope, month: "2026-10", memberId: "a", expenseClass: "SHARED", categoryId: null, burdenYen: "17" });
+        }
+        await f.reply(request, data); await f.total("−￥87");
+        const summary = f.page.locator("summary").filter({ hasText: "集計に含めるカテゴリ" });
+        assert.match(await summary.textContent() ?? "", /すべて選択中/);
+        await summary.click();
+        const categories = f.page.getByRole("group", { name: "集計に含めるカテゴリ", exact: true });
+        assert.equal(await categories.getByRole("checkbox").count(), 5);
+        const hierarchy = categories.getByRole("list", { name: "カテゴリ階層", exact: true });
+        assert.deepEqual(await hierarchy.locator(":scope > li > label > span").allTextContents(), ["食費", "交通費", "以前のカテゴリ（使用停止）", "未分類"], "親と未分類は単列の根に並ぶ");
+        assert.deepEqual(await hierarchy.getByRole("checkbox").evaluateAll(inputs => inputs.map(input => input.getAttribute("aria-label"))),
+          ["食費", "食費 › スーパー", "交通費", "以前のカテゴリ（使用停止）", "未分類"], "親の直後に子を置き、accessible nameにはfull pathを保つ");
+        const treeGeometry = await hierarchy.evaluate(list => {
+          const food = list.querySelector<HTMLInputElement>('input[aria-label="食費"]')!;
+          const grocery = list.querySelector<HTMLInputElement>('input[aria-label="食費 › スーパー"]')!;
+          const branch = grocery.closest("ul")!;
+          return { nested: branch.parentElement === food.closest("li"), food: food.getBoundingClientRect().toJSON(),
+            grocery: grocery.getBoundingClientRect().toJSON(), guide: getComputedStyle(branch).borderLeftStyle };
+        });
+        assert.equal(treeGeometry.nested, true, "子は親のli内のリストに入る");
+        assert.ok(treeGeometry.grocery.x > treeGeometry.food.x && treeGeometry.grocery.y > treeGeometry.food.y, "子は親の下へインデントする");
+        assert.equal(treeGeometry.guide, "solid", "子リストのガイド線を表示する");
+        assert.equal(await categories.getByRole("checkbox", { name: "以前のカテゴリ（使用停止）", exact: true }).isChecked(), true);
+        await f.page.getByRole("button", { name: "すべて解除", exact: true }).click();
+        await f.page.getByText("集計に含めるカテゴリを1つ以上選んでください。", { exact: true }).waitFor();
+        assert.equal(await f.page.getByTestId("analytics-total").count(), 0);
+        assert.match(await summary.textContent() ?? "", /未選択/);
+        const food = categories.getByRole("checkbox", { name: "食費", exact: true });
+        const grocery = categories.getByRole("checkbox", { name: "食費 › スーパー", exact: true });
+        await food.check(); await f.total("−￥80");
+        assert.equal(await grocery.isChecked(), true, "親の選択は子孫をまとめて含める");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥420");
+        await grocery.uncheck(); await f.total("−￥20");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥300");
+        assert.equal(await food.evaluate(element => (element as HTMLInputElement).indeterminate), true);
+        assert.match(await summary.textContent() ?? "", /1 \/ 5件選択/);
+        await f.page.getByLabel("カテゴリの細かさ", { exact: true }).selectOption("all"); await f.total("−￥20");
+        await f.page.getByLabel("全カテゴリの支出額と割合").getByText("食費（直接設定）", { exact: true }).waitFor();
+        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥0");
+        await grocery.check(); await f.total("￥100");
+        assert.equal(await food.isChecked(), true);
+        await f.page.getByRole("radio", { name: "自分の収支", exact: true }).check(); await f.total("−￥80");
+        await f.page.getByRole("checkbox", { name: "個人費", exact: true }).uncheck(); await f.total("−￥60");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥120");
+        await food.uncheck();
+        await f.page.getByText("集計に含めるカテゴリを1つ以上選んでください。", { exact: true }).waitFor();
+        await categories.getByRole("checkbox", { name: "未分類", exact: true }).check(); await f.total("−￥7");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥17");
+        assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥10");
+        await f.page.getByText("月ごとの金額を表で見る", { exact: true }).click();
+        const monthly = f.page.getByRole("table", { name: "月ごとの収入・支出・収支（円）", exact: true });
+        assert.deepEqual(await monthly.getByRole("row", { name: /^2026\/10 / }).getByRole("cell").allTextContents(), ["+￥17", "−￥7", "+￥10"]);
+        await summary.click();
+        assert.match(await summary.textContent() ?? "", /1 \/ 5件選択/, "折りたたんでも選択状態が分かる");
+        assert.equal(f.urls.length, 1, "カテゴリ・表示対象・区分・粒度は追加通信しない");
+        assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
+    for (const width of [1440, 320]) await t.test(`${width}px: カテゴリは三階層と深い長名をツリーで並べ、スクロールを欄内に収める`, async () => {
+      const f = await fixture(width);
+      try {
+        const request = await f.take(), data = dataset(queryFromRoute(request));
+        data.categories.push({ id: "meal", parentId: "grocery", name: "お弁当", colorHex: "#ef4444", sortOrder: 0, revision: 1, archivedAt: null },
+          { id: "delivery", parentId: "food", name: "宅配", colorHex: "#f59e0b", sortOrder: 1, revision: 1, archivedAt: null });
+        let deepParent: string | null = null;
+        const deepNames: string[] = [];
+        for (let index = 0; index < 40; index++) {
+          const name = `${index + 1}階層${"長いカテゴリ名".repeat(8)}`.slice(0, 40);
+          deepNames.push(name);
+          data.categories.push({ id: `deep${index}`, parentId: deepParent, name, colorHex: "#64748b", sortOrder: 3, revision: 1, archivedAt: null });
+          deepParent = `deep${index}`;
+        }
+        for (const scope of ["current", "trend"] as const) {
+          data.buckets.push({ scope, month: "2026-10", memberId: "a", expenseClass: "SHARED", categoryId: "meal", burdenYen: "11" },
+            { scope, month: "2026-10", memberId: "a", expenseClass: "SHARED", categoryId: deepParent, burdenYen: "9" });
+        }
+        await f.reply(request, data); await f.total("−￥100");
+        await f.page.locator("summary").filter({ hasText: "集計に含めるカテゴリ" }).click();
+        const categories = f.page.getByRole("group", { name: "集計に含めるカテゴリ", exact: true });
+        const hierarchy = categories.getByRole("list", { name: "カテゴリ階層", exact: true });
+        assert.deepEqual((await hierarchy.getByRole("checkbox").evaluateAll(inputs => inputs.map(input => input.getAttribute("aria-label")))).slice(0, 5),
+          ["食費", "食費 › スーパー", "食費 › スーパー › お弁当", "食費 › 宅配", "交通費"]);
+        const geometry = await hierarchy.evaluate(list => {
+          const labels = ["食費", "食費 › スーパー", "食費 › スーパー › お弁当", "食費 › 宅配", "交通費"];
+          return labels.map(label => {
+            const input = Array.from(list.querySelectorAll("input")).find(input => input.getAttribute("aria-label") === label)!;
+            return { x: input.getBoundingClientRect().x, y: input.getBoundingClientRect().y,
+              name: input.closest("label")!.querySelector("span")!.textContent };
+          });
+        });
+        assert.deepEqual(geometry.map(item => item.name), ["食費", "スーパー", "お弁当", "宅配", "交通費"], "見た目は各カテゴリ自身の名前にする");
+        assert.ok(geometry[0].x < geometry[1].x && geometry[1].x < geometry[2].x, "子・孫でインデントを深くする");
+        assert.ok(geometry.every((item, index) => index === 0 || item.y > geometry[index - 1].y), "PCでも親・子・孫・兄弟を単列で並べる");
+        assert.ok(Math.abs(geometry[1].x - geometry[3].x) < 1 && Math.abs(geometry[0].x - geometry[4].x) < 1, "同じ階層は同じ開始位置に揃える");
+        const overflow = await categories.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
+          clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, overflowX: getComputedStyle(element).overflowX }));
+        assert.ok(overflow.scrollWidth > overflow.clientWidth && overflow.scrollHeight > overflow.clientHeight, "深いツリーの横と縦の溢れを欄内で受ける");
+        assert.equal(overflow.overflowX, "auto");
+        assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "深い長名でもページ全体の横溢れなし");
+        if (process.env.CAKE_ANALYTICS_SCREENSHOTS) {
+          await mkdir(".cake/output/playwright", { recursive: true });
+          await categories.screenshot({ path: `.cake/output/playwright/analytics-category-tree-${width}.png`, animations: "disabled" });
+        }
+        await f.page.getByRole("button", { name: "すべて解除", exact: true }).click();
+        const food = categories.getByRole("checkbox", { name: "食費", exact: true });
+        await food.check(); await f.total("−￥91");
+        const meal = categories.getByRole("checkbox", { name: "食費 › スーパー › お弁当", exact: true });
+        assert.equal(await meal.isChecked(), true, "親の一括選択は孫まで含む");
+        await meal.focus(); await f.page.keyboard.press("Space"); await f.total("−￥80");
+        assert.equal(await food.evaluate(element => (element as HTMLInputElement).indeterminate), true);
+        await f.page.getByRole("button", { name: "すべて解除", exact: true }).click();
+        const leaf = categories.getByRole("checkbox", { name: deepNames.join(" › "), exact: true });
+        await leaf.check(); await f.total("−￥9");
+        assert.equal(await leaf.locator("..").locator("span").textContent(), deepNames.at(-1));
+        assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "深いノードの選択・内部scroll後もページの横溢れなし");
+        assert.equal(f.urls.length, 1);
+        assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
+    await t.test("カテゴリは取得中・期間変更・再入場でも保持し、workspace切替で初期化する", async () => {
+      const f = await fixture();
+      try {
+        await f.reply(await f.take()); await f.total("−￥80");
+        const summary = f.page.locator("summary").filter({ hasText: "集計に含めるカテゴリ" });
+        await summary.click();
+        const categories = f.page.getByRole("group", { name: "集計に含めるカテゴリ", exact: true });
+        await f.page.getByRole("button", { name: "すべて解除", exact: true }).click();
+        await categories.getByRole("checkbox", { name: "食費 › スーパー", exact: true }).check(); await f.total("−￥60");
+        await f.page.getByLabel("集計する月", { exact: true }).fill("2026-09");
+        const periodRequest = await f.take();
+        await f.page.getByRole("button", { name: "すべて解除", exact: true }).click();
+        await f.reply(periodRequest);
+        await f.page.getByText("集計に含めるカテゴリを1つ以上選んでください。", { exact: true }).waitFor();
+        assert.equal(await f.page.getByTestId("analytics-total").count(), 0, "取得が終わっても最新の空選択を保つ");
+        await categories.getByRole("checkbox", { name: "食費 › スーパー", exact: true }).check(); await f.total("−￥60");
+        await f.page.evaluate(() => window.updateAnalytics({ active: false }));
+        await f.page.getByRole("heading", { name: "収支の集計", exact: true }).waitFor({ state: "hidden" });
+        await f.page.evaluate(() => window.updateAnalytics({ active: true }));
+        await f.reply(await f.take()); await f.total("−￥60");
+        assert.equal(await categories.getByRole("checkbox", { name: "食費 › スーパー", exact: true }).isChecked(), true);
+        const beforeRefresh = f.urls.length;
+        await f.page.getByRole("button", { name: "すべて選択", exact: true }).click(); await f.total("−￥80");
+        assert.equal(f.urls.length, beforeRefresh, "全選択へ戻す操作も取得済みデータを使う");
+        await f.page.getByRole("button", { name: "すべて解除", exact: true }).click();
+        await f.page.evaluate(id => window.updateAnalytics({ workspaceId: id }), otherWorkspaceId);
+        await f.reply(await f.take()); await f.total("−￥80");
+        assert.match(await f.page.locator("summary").filter({ hasText: "集計に含めるカテゴリ" }).textContent() ?? "", /すべて選択中/);
+        assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
+    await t.test("カテゴリ取得更新時は全選択だけ新規カテゴリを含め、選択済みカテゴリの削除は空選択になる", async () => {
+      const f = await fixture();
+      try {
+        await f.reply(await f.take()); await f.total("−￥80");
+        const summary = f.page.locator("summary").filter({ hasText: "集計に含めるカテゴリ" });
+        await summary.click();
+        const categories = f.page.getByRole("group", { name: "集計に含めるカテゴリ", exact: true });
+        await f.page.getByRole("button", { name: "更新", exact: false }).click();
+        const refresh = await f.take(), added = dataset(queryFromRoute(refresh));
+        added.categories.push({ id: "new", parentId: null, name: "新しいカテゴリ", colorHex: "#123456", sortOrder: 4, revision: 1, archivedAt: null });
+        added.buckets.push({ ...added.buckets[0], categoryId: "new", burdenYen: "9" });
+        await f.reply(refresh, added); await f.total("−￥89");
+        assert.equal(await categories.getByRole("checkbox", { name: "新しいカテゴリ", exact: true }).isChecked(), true);
+        await f.page.getByRole("button", { name: "すべて解除", exact: true }).click();
+        await categories.getByRole("checkbox", { name: "新しいカテゴリ", exact: true }).check(); await f.total("−￥9");
+        await f.page.getByRole("button", { name: "更新", exact: false }).click();
+        const customRequest = await f.take(), addedAgain = structuredClone(added);
+        addedAgain.categories.push({ id: "newer", parentId: null, name: "さらに新しいカテゴリ", colorHex: "#654321", sortOrder: 5, revision: 1, archivedAt: null });
+        addedAgain.buckets.push({ ...addedAgain.buckets[0], categoryId: "newer", burdenYen: "11" });
+        await f.reply(customRequest, addedAgain);
+        await categories.getByRole("checkbox", { name: "さらに新しいカテゴリ", exact: true }).waitFor();
+        await f.total("−￥9");
+        assert.equal(await categories.getByRole("checkbox", { name: "さらに新しいカテゴリ", exact: true }).isChecked(), false, "個別選択には新しいカテゴリを自動追加しない");
+        await f.page.getByRole("button", { name: "更新", exact: false }).click();
+        await f.reply(await f.take());
+        await f.page.getByText("集計に含めるカテゴリを1つ以上選んでください。", { exact: true }).waitFor();
+        assert.match(await summary.textContent() ?? "", /未選択/);
+        assert.equal(await f.page.getByTestId("analytics-total").count(), 0);
+        assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
 
