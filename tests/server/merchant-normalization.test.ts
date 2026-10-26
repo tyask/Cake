@@ -73,7 +73,11 @@ test("取引先正規化のmigrationと全保存経路の実SQL", async t => {
   });
 
   await t.test("取引先の正規化は全保存経路・旧版互換・最大2000件・完全一致・cleanupを保証する", async t => {
-    await sql.exec(await readFile(new URL("022_import_history.sql", directory), "utf8"));
+    // The migration/backfill assertions above use the historical 018 schema.
+    // Current store SQL below must run against every subsequent migration.
+    for (const name of (await readdir(directory)).filter(name => name.endsWith(".sql") && name > migrationName).sort()) {
+      await sql.exec(await readFile(new URL(name, directory), "utf8"));
+    }
     const report = await verifyMerchantNormalizationScenarios(sql, {
       actorA: "test-user-a", actorB: "test-user-b", prefix: "verify-merchant-local",
       runCase: async (name, run) => {

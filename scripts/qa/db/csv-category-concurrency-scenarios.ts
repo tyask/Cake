@@ -92,11 +92,11 @@ export async function createCsvCategoryImportCapture(): Promise<(input: PayPayIm
   return async input => {
     const queries = await compiled.exports.capture!(input);
     assert.equal(queries.length, 4);
-    assert.match(queries[0].query, /SELECT cake_assert_transaction_categories\(/);
+    assert.match(queries[0].query, /SELECT cake_assert_private_import\(/);
     assert.match(queries[1].query, /INSERT INTO import_batches/);
     assert.match(queries[2].query, /INSERT INTO transactions/);
     assert.match(queries[2].query, /ON CONFLICT \(workspace_id, external_id\) DO UPDATE/);
-    assert.match(queries[2].query, /cake_assert_paypay_duplicate/);
+    assert.match(queries[2].query, /cake_assert_visible_paypay_duplicate/);
     assert.match(queries[3].query, /UPDATE import_batches/);
     const batchId = String(queries[1].params[0]);
     assert.match(batchId, /^[0-9a-f-]{36}$/);

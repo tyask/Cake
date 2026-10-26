@@ -144,6 +144,9 @@ test("CSVカテゴリはプレビュー内で個別・選択行へ設定し、�
           await row("first").getByLabel("Aの配分割合", { exact: true }).fill("70");
           await page.locator(".import-summary select").selectOption("b");
           for (const [index, merchant] of merchants.entries()) assert.equal(await category(merchant).inputValue(), expectedCategories[index], "区分・割合・支払者の変更でカテゴリを保持する");
+          assert.equal(await page.getByRole("button", { name: "確認して登録", exact: true }).isDisabled(), true, "相手の個人費を含む取込は登録できない");
+          await page.locator(".import-summary select").selectOption("a");
+          for (const [index, merchant] of merchants.entries()) assert.equal(await category(merchant).inputValue(), expectedCategories[index], "本人へ戻してもカテゴリを保持する");
           assert.equal(await checkbox("first").isChecked(), true);
           assert.equal(await checkbox("personal").isChecked(), true);
           assert.equal(await checkbox("unchecked").isChecked(), false);
@@ -167,9 +170,9 @@ test("CSVカテゴリはプレビュー内で個別・選択行へ設定し、�
           assert.deepEqual(items.map(item => [item.merchant, item.categoryId]), [
             ["first", "japanese"], ["second", "food"], ["unchecked", "transport"], ["personal", "japanese"], ["unclassified", null],
           ], "登録はチェックにかかわらず登録可能行をすべて含む");
-          assert.ok(items.every(item => item.actorUserId === "b"));
+          assert.ok(items.every(item => item.actorUserId === "a"));
           assert.deepEqual(items[0].splitWeights, { a: 700, b: 300 });
-          assert.deepEqual(items.find(item => item.merchant === "personal")!.splitWeights, { a: 0, b: 1 });
+          assert.deepEqual(items.find(item => item.merchant === "personal")!.splitWeights, { a: 1, b: 0 });
 
           await page.getByRole("button", { name: "確認して登録", exact: true }).click();
           await page.getByRole("button", { name: "登録中…", exact: true }).waitFor();

@@ -39,7 +39,8 @@ test("実取込の4 SQLを通信なしで捕捉し、入力順・重複の最初
   assert.deepEqual(original, snapshot, "呼出側の配列・明細を変更しない");
   assert.equal(neonConfig.fetchFunction, parentFetch, "capture専用Neon clientを親から分離する");
   assert.equal(parentFetchCalls, 0);
-  const targets = JSON.parse(String(captured.queries[0].params[0])) as { workspaceId: string; userId: string; categoryId: string | null }[];
+  assert.deepEqual(captured.queries[0].params.slice(0, 2), [workspaceId, "b"]);
+  const targets = JSON.parse(String(captured.queries[0].params[3])) as { workspaceId: string; userId: string; categoryId: string | null }[];
   assert.deepEqual(targets.map(target => target.categoryId).sort(), [null, categoryId, laterCategoryId].sort(), "一致重複として省略する後続行のカテゴリも検証する");
   assert.ok(targets.every(target => target.workspaceId === workspaceId && target.userId === "b"));
   const inserted = JSON.parse(String(captured.queries[2].params[4])) as PayPayImportItem[];
