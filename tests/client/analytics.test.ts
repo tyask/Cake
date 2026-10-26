@@ -298,6 +298,7 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         assert.equal(await f.page.getByTestId("analytics-total").count(), 0, "取得が終わっても最新の空選択を保つ");
         await categories.getByRole("checkbox", { name: "食費 › スーパー", exact: true }).check(); await f.total("−￥60");
         await f.page.evaluate(() => window.updateAnalytics({ active: false }));
+        await f.page.getByRole("heading", { name: "収支の集計", exact: true }).waitFor({ state: "hidden" });
         await f.page.evaluate(() => window.updateAnalytics({ active: true }));
         await f.reply(await f.take()); await f.total("−￥60");
         assert.equal(await categories.getByRole("checkbox", { name: "食費 › スーパー", exact: true }).isChecked(), true);
