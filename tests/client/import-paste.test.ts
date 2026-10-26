@@ -75,7 +75,7 @@ async function openFixture(browser: Browser, origin: string, width: number, api:
 }
 
 async function assertNoManualInput(page: Page) {
-  assert.equal(await page.locator("textarea").count(), 0);
+  assert.equal(await page.locator('textarea:not([aria-label="メモ"])').count(), 0);
   assert.equal(await page.getByLabel("CSVの内容", { exact: true }).count(), 0);
   for (const name of ["内容を確認", "手動で貼り付ける", "手動入力を閉じる"]) {
     assert.equal(await page.getByRole("button", { name, exact: true, includeHidden: true }).count(), 0);
@@ -241,7 +241,7 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
           await assertNoManualInput(page);
           assert.equal(await page.locator("[data-import-key]").count(), 5);
           assert.equal(await page.getByText("受取の行", { exact: true }).count(), 0);
-          const row = (merchant: string) => page.locator("[data-import-key]").filter({ has: page.locator('td[data-label="取引先"] b', { hasText: new RegExp(`^${merchant}$`) }) });
+          const row = (merchant: string) => page.locator("[data-import-key]").filter({ has: page.locator(`td[data-label="取引先"] input[value="${merchant}"]`) });
           for (const merchant of ["和食のお店", "個人カフェ", "保存済みのお店", "除外するお店"]) {
             for (const item of await row(merchant).all()) if (width < 700) await item.getByRole("button", { name: /の詳細を開く$/ }).click();
           }
@@ -294,9 +294,9 @@ test("CSV貼り付けはユーザー操作で読み取り・重複照会し、�
             action: "bulkImport", workspaceId: "workspace", fileName: "PayPay貼り付け.csv", totalRows: 5,
             items: [
               { occurredAt: "2026-10-18T03:00:42.000Z", merchant: "和食のお店", method: "PayPay残高", amountYen: 1234,
-                externalId: "PayPay_20261018120042_00001234", expenseClass: "SHARED", actorUserId: "a", splitWeights: { a: 6, b: 4 }, categoryId: null },
+                externalId: "PayPay_20261018120042_00001234", expenseClass: "SHARED", actorUserId: "a", splitWeights: { a: 6, b: 4 }, categoryId: null, memo: "" },
               { occurredAt: "2026-10-18T03:01:43.000Z", merchant: "個人カフェ", method: "PayPayカード", amountYen: 650,
-                externalId: "PayPay_20261018120143_00001235", expenseClass: "PERSONAL", actorUserId: "a", splitWeights: { a: 1, b: 0 }, categoryId: null },
+                externalId: "PayPay_20261018120143_00001235", expenseClass: "PERSONAL", actorUserId: "a", splitWeights: { a: 1, b: 0 }, categoryId: null, memo: "" },
             ],
           });
           await Promise.all([

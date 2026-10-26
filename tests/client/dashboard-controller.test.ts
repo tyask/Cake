@@ -468,6 +468,8 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       const reconciliation = await f.take();
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionMemo", workspaceId: "a", transactionId: "transaction-a", memo: "確定メモ" }, ""); });
       await f.reply(await f.take("POST"), { ok: true, transactionId: "transaction-a", memo: "確定メモ" });
+      // Fulfill only sends the response; wait for the save to commit before releasing the stale GET.
+      await f.page.evaluate(() => window.operation);
       const old = data(); old.selected!.categories = [{ ...food, id: "unknown-category" }];
       await f.reply(reconciliation, old);
       await expectState(f.page, { "selected.categories": [], "selected.transactions.0.memo": "確定メモ",
