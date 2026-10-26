@@ -18,6 +18,7 @@ export type PreparedAnalyticsDataset = {
   maxDepth: number;
   categories: ReadonlyMap<string, PreparedCategory>;
   buckets: readonly PreparedBucket[];
+  receiptBuckets: readonly PreparedBucket[];
 };
 
 /** Prepare category paths and exact money only when a server dataset changes. */
@@ -54,14 +55,15 @@ export function prepareAnalyticsDataset(dataset: AnalyticsDataset): PreparedAnal
     months.push(`${String(Math.floor(index / 12)).padStart(4, "0")}-${String(index % 12 + 1).padStart(2, "0")}`);
   }
   const monthIndexes = new Map(months.map((month, index) => [month, index]));
-  const buckets = dataset.buckets.map(bucket => {
+  const prepareBuckets = (buckets: AnalyticsDataset["buckets"]): PreparedBucket[] => buckets.map(bucket => {
     if (typeof bucket.burdenYen !== "string" || !/^(0|[1-9]\d*)$/.test(bucket.burdenYen)) {
       throw new Error("集計金額は非負の整数文字列で指定してください。");
     }
     return { ...bucket, categoryId: bucket.categoryId && categories.has(bucket.categoryId) ? bucket.categoryId : null,
       burdenYen: BigInt(bucket.burdenYen), monthIndex: monthIndexes.get(bucket.month) ?? -1 };
   });
-  return { months, maxDepth, categories, buckets };
+  return { months, maxDepth, categories, buckets: prepareBuckets(dataset.buckets),
+    receiptBuckets: prepareBuckets(dataset.receiptBuckets) };
 }
 
 function compareIds(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0; }
@@ -91,6 +93,14 @@ export function buildAnalyticsView(prepared: PreparedAnalyticsDataset, filters: 
   }
   const memberIds = new Set(filters.memberIds);
   const expenseClasses = new Set(filters.expenseClasses);
+  let incomeYen = BigInt(0), comparisonIncomeYen = BigInt(0);
+  const monthlyIncomeYen = prepared.months.map(() => BigInt(0));
+  for (const bucket of prepared.receiptBuckets) {
+    if (!memberIds.has(bucket.memberId) || !expenseClasses.has(bucket.expenseClass)) continue;
+    if (bucket.scope === "current") incomeYen += bucket.burdenYen;
+    else if (bucket.scope === "comparison") comparisonIncomeYen += bucket.burdenYen;
+    else if (bucket.monthIndex >= 0) monthlyIncomeYen[bucket.monthIndex] += bucket.burdenYen;
+  }
   const grouped = new Map<string, AnalyticsRow>();
   for (const bucket of prepared.buckets) {
     if (!memberIds.has(bucket.memberId) || !expenseClasses.has(bucket.expenseClass) || bucket.burdenYen === BigInt(0)) continue;
@@ -126,6 +136,14 @@ export function buildAnalyticsView(prepared: PreparedAnalyticsDataset, filters: 
   }
   const unclassified = grouped.get(ANALYTICS_UNCLASSIFIED_ID);
   if (unclassified && rowMaximum(unclassified) > BigInt(0)) chartRows.push(unclassified);
+  const cashflowMonths = prepared.months.map((month, index) => {
+    const expenseYen = rows.reduce((sum, row) => sum + row.monthlyYen[index], BigInt(0));
+    return { month, incomeYen: monthlyIncomeYen[index], expenseYen,
+      balanceYen: monthlyIncomeYen[index] - expenseYen };
+  });
   return { totalYen, comparisonYen, differenceYen: totalYen - comparisonYen,
-    rate: analyticsChangeRate(totalYen, comparisonYen), months: [...prepared.months], rows, chartRows };
+    rate: analyticsChangeRate(totalYen, comparisonYen), months: [...prepared.months], rows, chartRows,
+    cashflow: { incomeYen, expenseYen: totalYen, balanceYen: incomeYen - totalYen,
+      comparisonIncomeYen, comparisonExpenseYen: comparisonYen,
+      comparisonBalanceYen: comparisonIncomeYen - comparisonYen, months: cashflowMonths } };
 }

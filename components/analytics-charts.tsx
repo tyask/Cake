@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, Label, LabelList, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, type LabelProps } from "recharts";
+import { Bar, BarChart, ComposedChart, Line, CartesianGrid, Cell, Label, LabelList, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, getNiceTickValues, type LabelProps } from "recharts";
 import { barAmountPosition, CHART_AMOUNT_FONT_FAMILY, CHART_AMOUNT_FONT_SIZE, CHART_AMOUNT_FONT_WEIGHT, createChartAmountMeasurer, pieAmountPosition, type ChartAmountLabel, type ChartAmountPosition } from "@/lib/client/analytics-chart-labels";
 import { analyticsChangeRate, type AnalyticsDataset, type AnalyticsRow, type AnalyticsView } from "@/lib/shared/analytics";
-import { formatYen } from "@/lib/shared/display-formatters";
+import { cashflowClass, formatCashflow, formatYen } from "@/lib/shared/display-formatters";
 import styles from "./analytics-panel.module.css";
 
 const compactYen = new Intl.NumberFormat("ja-JP", { notation: "compact", maximumFractionDigits: 1 });
+const yenPerMan = 10_000;
 const chartStyle = { fontSize: 11, fontFamily: "inherit", fill: "var(--muted)" };
 function analyticsRangeLabel(range: { from: string; to: string }) { return `${range.from.replaceAll("-", "/")} ～ ${range.to.replaceAll("-", "/")}`; }
 
@@ -22,15 +23,15 @@ function CategoryName({ row }: { row: AnalyticsRow }) {
   return <span className={styles.categoryName}><i style={{ backgroundColor: row.colorHex }} aria-hidden="true" /><span>{row.label}</span></span>;
 }
 
-function AmountLabel({ label, position, kind, categoryId, month }: {
+function AmountLabel({ label, position, kind, categoryId, month, series }: {
   label: ChartAmountLabel | null; position: ChartAmountPosition | null;
-  kind: "pie" | "trend" | "difference"; categoryId: string; month?: string;
+  kind: "pie" | "trend" | "difference"; categoryId?: string; month?: string; series?: "income" | "expense";
 }) {
   if (!label || !position) return null;
   return <text x={position.x} y={position.y} textAnchor="middle" dominantBaseline="central"
     transform={position.rotation ? `rotate(${position.rotation} ${position.x} ${position.y})` : undefined}
     fill={label.color} fontSize={CHART_AMOUNT_FONT_SIZE} fontFamily={CHART_AMOUNT_FONT_FAMILY} fontWeight={CHART_AMOUNT_FONT_WEIGHT}
-    aria-hidden="true" pointerEvents="none" data-analytics-amount={kind} data-category-id={categoryId} data-month={month}>{label.text}</text>;
+    aria-hidden="true" pointerEvents="none" data-analytics-amount={kind} data-category-id={categoryId} data-month={month} data-cashflow-series={series}>{label.text}</text>;
 }
 
 function donutCenterLayout(totalText: string, innerRadius: number) {
@@ -92,7 +93,78 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
   })}</div>;
 }
 
-export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView; periods: AnalyticsDataset["periods"] }) {
+type CashflowPoint = AnalyticsView["cashflow"]["months"][number];
+function CashflowTooltip({ active, payload }: { active?: boolean; payload?: readonly { payload?: CashflowPoint }[] }) {
+  const row = payload?.[0]?.payload;
+  if (!active || !row) return null;
+  return <div className={`${styles.chartTooltip} ${styles.cashflowTooltip}`}><b>{row.month.replace("-", "/")}</b>
+    <p><span>収入</span><strong className={cashflowClass(row.incomeYen) || undefined}>{formatCashflow(row.incomeYen)}</strong></p>
+    <p><span>支出</span><strong className={cashflowClass(-row.expenseYen) || undefined}>{formatCashflow(-row.expenseYen)}</strong></p>
+    <p><span>収支</span><strong className={cashflowClass(row.balanceYen) || undefined}>{formatCashflow(row.balanceYen)}</strong></p>
+  </div>;
+}
+
+function CashflowTrend({ view, period }: { view: AnalyticsView; period: AnalyticsDataset["periods"]["trend"] }) {
+  const trend = useMemo(() => view.cashflow.months.map(row => ({ ...row,
+    income: Number(row.incomeYen) / yenPerMan, expense: Number(row.expenseYen) / yenPerMan, balance: Number(row.balanceYen) / yenPerMan,
+  })), [view.cashflow.months]);
+  const trendAxis = useMemo(() => {
+    const values = trend.flatMap(row => [row.income, row.expense, row.balance]);
+    const dataMinimum = Math.min(0, ...values);
+    const minimum = Math.floor(dataMinimum);
+    const maximum = Math.max(1, Math.ceil(Math.max(...values)));
+    // Include both rounded bounds so the top and bottom of the scale have labels.
+    return { domain: [minimum, maximum] as [number, number],
+      ticks: [minimum, ...getNiceTickValues([minimum, maximum], 6, false, "snap125")
+        .filter(value => value > minimum && value < maximum), maximum] };
+  }, [trend]);
+  const trendLabels = useMemo(() => {
+    const measure = createChartAmountMeasurer();
+    return view.cashflow.months.map(row => ({
+      income: measure(formatCashflow(row.incomeYen), "#2f6b48"),
+      expense: measure(formatCashflow(-row.expenseYen), "#ad433b"),
+    }));
+  }, [view.cashflow.months]);
+  const hasTrend = trend.some(row => row.incomeYen > BigInt(0) || row.expenseYen > BigInt(0));
+
+  return <section className={styles.card} aria-labelledby="analytics-trend-heading">
+      <div className={styles.cardHeading}><h2 id="analytics-trend-heading">月ごとの収入・支出・収支</h2><span>直近6か月</span></div>
+      <p className={styles.cardSubtitle}>{analyticsRangeLabel(period)}<br />終了月までの6か月を表示します。</p>
+      <ul className={`${styles.legend} ${styles.cashflowLegend}`} aria-label="収支グラフの凡例">
+        <li><i className={styles.incomeKey} aria-hidden="true" />収入</li><li><i className={styles.expenseKey} aria-hidden="true" />支出</li><li><i className={styles.balanceKey} aria-hidden="true" />収支（収入 − 支出）</li>
+      </ul>
+      {hasTrend ? <div className={styles.cashflowTrendChart} role="group" data-testid="analytics-cashflow-chart" aria-label="月ごとの収入・支出・収支。棒は収入・支出、折れ線は収支。下の表でも確認できます。">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0}><ComposedChart data={trend} accessibilityLayer margin={{ top: 16, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="3 4" />
+          <XAxis dataKey="month" tickFormatter={monthLabel} axisLine={false} tickLine={false} tick={chartStyle} />
+          <YAxis width={52} axisLine={false} tickLine={false} tick={chartStyle}
+            domain={trendAxis.domain} ticks={trendAxis.ticks} niceTicks="none" interval="preserveStartEnd" minTickGap={4}
+            tickFormatter={value => compactYen.format(Number(value) * yenPerMan)} />
+          <ReferenceLine y={0} stroke="var(--muted)" />
+          <Tooltip content={<CashflowTooltip />} position={{ x: 0 }} />
+          {(["income", "expense"] as const).map(series => <Bar key={series} dataKey={series} name={series === "income" ? "収入" : "支出"}
+            className={`analytics-cashflow-${series}`} fill={series === "income" ? "#2f6b48" : "#ad433b"} maxBarSize={36} isAnimationActive={false}>
+            <LabelList dataKey="month" content={geometry => {
+              const index = view.cashflow.months.findIndex(row => row.month === String(geometry.value));
+              const row = view.cashflow.months[index];
+              if (!row || (series === "income" ? row.incomeYen : row.expenseYen) === BigInt(0)) return null;
+              const label = trendLabels[index]?.[series] ?? null;
+              return <AmountLabel label={label} position={barAmountPosition(geometry.viewBox, label, true)} kind="trend" series={series} month={row.month} />;
+            }} />
+          </Bar>)}
+          <Line dataKey="balance" name="収支" className="analytics-cashflow-balance" type="linear" stroke="var(--ink)" strokeWidth={2.5}
+            dot={{ r: 4, fill: "var(--paper)", stroke: "var(--ink)", strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={false} />
+        </ComposedChart></ResponsiveContainer>
+      </div> : <p className={styles.chartEmpty}>この6か月の収入・支出はありません。</p>}
+      <p className={styles.miniNote}>棒は収入・支出の金額の大きさ、折れ線は収入から支出を引いた収支です。すべて同じ円単位の縦軸で表示します。</p>
+      <details className={styles.tableDetails}><summary>月ごとの金額を表で見る</summary><div className={styles.tableScroll} tabIndex={0} role="region" aria-label="月ごとの収入・支出・収支の表（横スクロール可能）"><table>
+        <caption>月ごとの収入・支出・収支（円）</caption><thead><tr><th scope="col">対象月</th><th scope="col">収入</th><th scope="col">支出</th><th scope="col">収支</th></tr></thead>
+        <tbody>{view.cashflow.months.map(row => <tr key={row.month}><th scope="row">{row.month.replace("-", "/")}</th><td className={cashflowClass(row.incomeYen) || undefined}>{formatCashflow(row.incomeYen)}</td><td className={cashflowClass(-row.expenseYen) || undefined}>{formatCashflow(-row.expenseYen)}</td><td className={cashflowClass(row.balanceYen) || undefined}>{formatCashflow(row.balanceYen)}</td></tr>)}</tbody>
+      </table></div></details>
+    </section>;
+}
+
+export default function AnalyticsCharts({ view, periods, cashflowTrend = false }: { view: AnalyticsView; periods: AnalyticsDataset["periods"]; cashflowTrend?: boolean }) {
   // Floating point values are graph coordinates only; every amount and ratio label uses bigint.
   const labels = useMemo(() => {
     const measure = createChartAmountMeasurer();
@@ -115,9 +187,7 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
   const monthlyTotals = useMemo(() => view.months.map((_, index) => view.rows.reduce((sum, row) => sum + row.monthlyYen[index], BigInt(0))), [view]);
   const hasTrend = monthlyTotals.some(value => value > BigInt(0));
 
-  return <>
-    <div className={styles.chartGrid}>
-      <section className={styles.card} aria-labelledby="analytics-composition-heading"><div className={styles.cardHeading}><h2 id="analytics-composition-heading">カテゴリ別の内訳</h2><span>支出額</span></div>
+  const compositionCard = <section className={`${styles.card} ${styles.composition}`} aria-labelledby="analytics-composition-heading"><div className={styles.cardHeading}><h2 id="analytics-composition-heading">カテゴリ別の内訳</h2><span>支出額</span></div>
         <p className={styles.cardSubtitle}>{analyticsRangeLabel(periods.current)}</p>
         <div className={styles.compositionBody}>
           {view.totalYen > BigInt(0) ? <div className={styles.donutChart} role="group" aria-label="カテゴリ別の支出額。金額と割合は次の一覧でも確認できます。">
@@ -139,8 +209,8 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
           <ul className={styles.categoryList} aria-label="全カテゴリの支出額と割合">{view.rows.map(row => <li key={row.id}><CategoryName row={row} /><strong>{formatYen(row.currentYen)}</strong><span>{share(row.currentYen, view.totalYen)}</span></li>)}</ul>
         </div>
         <p className={styles.miniNote}>グラフは主な8カテゴリを表示し、残りは「その他」にまとめます。未分類は別に表示します。</p>
-      </section>
-      <section className={styles.card} aria-labelledby="analytics-trend-heading"><div className={styles.cardHeading}><h2 id="analytics-trend-heading">月ごとの推移</h2><span>直近6か月</span></div>
+      </section>;
+  const expenseTrendCard = <section className={styles.card} aria-labelledby="analytics-trend-heading"><div className={styles.cardHeading}><h2 id="analytics-trend-heading">月ごとの推移</h2><span>直近6か月</span></div>
         <p className={styles.cardSubtitle}>{analyticsRangeLabel(periods.trend)}<br />終了月までの6か月を表示します。</p>
         {hasTrend ? <div className={styles.trendChart} role="group" aria-label="月ごとのカテゴリ別支出額。下の表でも確認できます。">
           <ResponsiveContainer width="100%" height="100%" minWidth={0}><BarChart data={trend} accessibilityLayer margin={{ top: 12, right: 2, bottom: 0, left: 0 }}>
@@ -169,8 +239,11 @@ export default function AnalyticsCharts({ view, periods }: { view: AnalyticsView
           <tbody>{view.rows.map(row => <tr key={row.id}><th scope="row"><CategoryName row={row} /></th>{row.monthlyYen.map((value, index) => <td key={view.months[index]}>{formatYen(value)}</td>)}</tr>)}</tbody>
           <tfoot><tr><th scope="row">合計</th>{monthlyTotals.map((value, index) => <td key={view.months[index]}>{formatYen(value)}</td>)}</tr></tfoot>
         </table></div></details>
-      </section>
-    </div>
+      </section>;
+
+  return <>
+    {cashflowTrend ? <CashflowTrend view={view} period={periods.trend} /> : expenseTrendCard}
+    {compositionCard}
     <section className={`${styles.card} ${styles.comparison}`} aria-labelledby="analytics-comparison-heading"><div className={styles.cardHeading}><h2 id="analytics-comparison-heading">カテゴリ別の増減</h2><span>同じ条件で比較</span></div>
       <p className={styles.cardSubtitle}>対象：{analyticsRangeLabel(periods.current)} ／ 比較：{analyticsRangeLabel(periods.comparison)}</p>
       <div className={styles.comparisonBody}>

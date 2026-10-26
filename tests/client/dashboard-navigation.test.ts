@@ -13,7 +13,7 @@ const panels: Record<DashboardTab, { navigation: string; heading: string | null 
   home: { navigation: "ホーム", heading: null },
   transactions: { navigation: "取引明細", heading: "取引明細" },
   settings: { navigation: "設定", heading: "設定" },
-  analytics: { navigation: "集計", heading: "支出の集計" },
+  analytics: { navigation: "集計", heading: "収支の集計" },
   import: { navigation: "取込", heading: "明細を取込" },
 };
 
@@ -40,7 +40,7 @@ function metadata(data: BootstrapData): BootstrapMetadata {
 
 function analytics(query: AnalyticsQuery): AnalyticsDataset {
   return { workspaceId, snapshotAt: now.toISOString(), timeZone: "Asia/Tokyo", periods: resolveAnalyticsPeriods(query, now),
-    members: [{ id: "a", name: "Aさん" }, { id: "b", name: "Bさん" }], categories: [],
+    members: [{ id: "a", name: "Aさん" }, { id: "b", name: "Bさん" }], categories: [], receiptBuckets: [],
     buckets: ["a", "b"].flatMap(memberId => ["current", "trend"].map(scope => ({
       scope: scope as "current" | "trend", month: "2026-10", memberId, expenseClass: "SHARED" as const, categoryId: null, burdenYen: "600",
     }))),
@@ -64,7 +64,7 @@ async function assertPanel(page: Page, tab: DashboardTab, loading = false) {
   assert.deepEqual(await main.getByRole("heading", { level: 1 }).allTextContents(), expected ? [expected] : [],
     `${tab}: 現在の画面の見出しだけを1つ表示する`);
   const allHeadings = await main.locator("h1").allTextContents();
-  assert.equal(allHeadings.filter(value => value === "支出の集計").length, 1, "集計の保持用パネルは1つだけ存在する");
+  assert.equal(allHeadings.filter(value => value === "収支の集計").length, 1, "集計の保持用パネルは1つだけ存在する");
   for (const [id, panel] of Object.entries(panels)) {
     if (!panel.heading || id === "analytics") continue;
     assert.equal(allHeadings.filter(value => value === panel.heading).length, id === tab ? 1 : 0,

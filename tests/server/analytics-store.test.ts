@@ -114,6 +114,75 @@ test("集計の実SQLは保存割合の整数配分・対象期間・認可を�
     assert.deepEqual(buckets.map(bucket => [bucket.scope, bucket.memberId, bucket.burdenYen]), [["comparison", a, "1"], ["trend", a, "1"]]);
   });
 
+  await t.test("収入も保存割合の最大剰余で配分し、受取者の本人額や現在の既定割合へ置き換えない", async () => {
+    for (const fixture of analyticsAllocationCases) {
+      const single = fixture.weights.length === 1, workspace = single ? personalWorkspaceId : workspaceId;
+      const members = single ? [{ id: a }] : [{ id: a }, { id: b }];
+      const weights = Object.fromEntries(members.map((member, index) => [member.id, fixture.weights[index]]));
+      const categoryId = await category(`収入：${fixture.name}`, workspace);
+      await insert(fixture.amount, weights, categoryId, { workspace, type: "RECEIPT", actor: single ? a : b, settled: true });
+      const expected = splitAmounts(fixture.amount, weights, members);
+      const result = await read(workspace);
+      for (const scope of ["current", "trend"]) {
+        const actual = Object.fromEntries(members.map(member => [member.id,
+          result.receiptBuckets.find(bucket => bucket.scope === scope && bucket.categoryId === categoryId && bucket.memberId === member.id)?.burdenYen ?? "0",
+        ]));
+        assert.deepEqual(actual, Object.fromEntries(Object.entries(expected).map(([id, value]) => [id, String(value)])), `${fixture.name}/${scope}`);
+      }
+      assert.equal(result.receiptBuckets.filter(bucket => bucket.scope === "current" && bucket.categoryId === categoryId)
+        .reduce((sum, bucket) => sum + BigInt(bucket.burdenYen), BigInt(0)), BigInt(fixture.amount));
+      assert.ok(!result.buckets.some(bucket => bucket.categoryId === categoryId), "収入は支出のカテゴリ構成比へ入れない");
+    }
+    const id = await category("収入の比較期間と個人区分");
+    await insert(1, { [a]: 1, [b]: 1 }, id, { type: "RECEIPT", actor: b, date: "2026-09-10T00:00Z" });
+    await insert(29, { [a]: 1, [b]: 0 }, id, { type: "RECEIPT", actor: a, expenseClass: "PERSONAL" });
+    await insert(41, { [a]: 0, [b]: 1 }, id, { type: "RECEIPT", actor: b, expenseClass: "PERSONAL" });
+    const result = await read();
+    assert.deepEqual(result.receiptBuckets.filter(bucket => bucket.categoryId === id)
+      .map(bucket => [bucket.scope, bucket.month, bucket.memberId, bucket.expenseClass, bucket.burdenYen]), [
+        ["comparison", "2026-09", a, "SHARED", "1"],
+        ["current", "2026-10", a, "PERSONAL", "29"],
+        ["trend", "2026-09", a, "SHARED", "1"],
+        ["trend", "2026-10", a, "PERSONAL", "29"],
+      ]);
+    assert.ok(!result.receiptBuckets.some(bucket => bucket.expenseClass === "PERSONAL" && bucket.memberId === b));
+    const partner = await read(workspaceId, b);
+    assert.ok(!partner.receiptBuckets.some(bucket => bucket.expenseClass === "PERSONAL" && bucket.memberId === a));
+    assert.equal(partner.receiptBuckets.find(bucket => bucket.scope === "current" && bucket.categoryId === id
+      && bucket.expenseClass === "PERSONAL" && bucket.memberId === b)?.burdenYen, "41");
+  });
+
+  await t.test("収入のJST境界・未分類・別家計を同じsnapshotで扱い未来日を期間へ混ぜない", async () => {
+    const id = await category("収入のJST期間"), foreign = await category("他家計の収入", otherWorkspaceId);
+    await insert(10, { [a]: 1, [b]: 0 }, id, { type: "RECEIPT", date: "2026-09-30T14:59:59.999999Z" });
+    await insert(20, { [a]: 1, [b]: 0 }, id, { type: "RECEIPT", date: "2026-09-30T15:00:00Z" });
+    await insert(30, { [a]: 1, [b]: 0 }, id, { type: "RECEIPT", date: "2026-10-23T14:59:59.999999Z" });
+    await insert(40, { [a]: 1, [b]: 0 }, id, { type: "RECEIPT", date: "2026-10-23T15:00:00Z" });
+    await insert(7, { [a]: 1, [b]: 0 }, null, { type: "RECEIPT", actor: a, expenseClass: "PERSONAL", settled: true });
+    await insert(2000, { [outside]: 1 }, foreign, { type: "RECEIPT", workspace: otherWorkspaceId, actor: outside, expenseClass: "PERSONAL" });
+    const result = await read();
+    assert.deepEqual(result.receiptBuckets.filter(bucket => bucket.categoryId === id)
+      .map(bucket => [bucket.scope, bucket.month, bucket.burdenYen]), [
+        ["current", "2026-10", "50"], ["trend", "2026-09", "10"], ["trend", "2026-10", "50"],
+      ]);
+    assert.equal(result.receiptBuckets.find(bucket => bucket.scope === "current" && bucket.categoryId === null
+      && bucket.memberId === a && bucket.expenseClass === "PERSONAL")?.burdenYen, "7");
+    assert.ok(!result.receiptBuckets.some(bucket => bucket.categoryId === foreign));
+    assert.ok(!result.buckets.some(bucket => bucket.categoryId === id));
+  });
+
+  await t.test("収入だけの家計も空の支出と配分済み収入を返す", async () => {
+    const workspace = randomUUID();
+    await memory.query("INSERT INTO workspaces(id,name,type,owner_user_id) VALUES($1,'収入だけ','PERSONAL',$2)", [workspace, a]);
+    await memory.query("INSERT INTO workspace_members(workspace_id,user_id,role) VALUES($1,$2,'OWNER')", [workspace, a]);
+    await insert(17, { [a]: 1 }, null, { type: "RECEIPT", workspace, expenseClass: "PERSONAL" });
+    const result = await read(workspace);
+    assert.deepEqual(result.buckets, []);
+    assert.deepEqual(result.receiptBuckets.map(bucket => [bucket.scope, bucket.memberId, bucket.burdenYen]), [
+      ["current", a, "17"], ["trend", a, "17"],
+    ]);
+  });
+
   await t.test("JSTの日付境界を半開区間で扱い、範囲間の隙間と未来日を現在期間へ含めない", async () => {
     const id = await category("JST期間");
     await insert(10, { [a]: 1, [b]: 0 }, id, { date: "2026-09-30T14:59:59.999999Z" });
@@ -127,7 +196,7 @@ test("集計の実SQLは保存割合の整数配分・対象期間・認可を�
     assert.deepEqual((await read(workspaceId, a, separate)).buckets.filter(bucket => bucket.categoryId === id).map(bucket => bucket.burdenYen), ["50"]);
   });
 
-  await t.test("全source・清算済・本人個人費・未確認と使用停止カテゴリを含め、RECEIPTと別workspaceは除外する", async () => {
+  await t.test("全source・清算済・本人個人費・未確認と使用停止カテゴリを含め、収入と支出を分離し別workspaceは除外する", async () => {
     const id = await category("全source"), archived = await category("使用停止"), foreign = await category("別家計カテゴリ", otherWorkspaceId);
     for (const source of ["MANUAL", "PAYPAY", "RECURRING"]) await insert(101, { [a]: 1, [b]: 2 }, id, { source, settled: true });
     await insert(97, { [a]: 1, [b]: 0 }, archived);
@@ -143,6 +212,8 @@ test("集計の実SQLは保存割合の整数配分・対象期間・認可を�
     const current = result.buckets.filter(bucket => bucket.scope === "current");
     assert.deepEqual(current.filter(bucket => bucket.categoryId === id).map(bucket => [bucket.memberId, bucket.burdenYen]), [[a, "102"], [b, "201"]]);
     assert.equal(current.find(bucket => bucket.categoryId === archived)?.burdenYen, "97");
+    assert.deepEqual(result.receiptBuckets.filter(bucket => bucket.scope === "current" && bucket.categoryId === id)
+      .map(bucket => [bucket.memberId, bucket.burdenYen]), [[a, "1000"]], "同じカテゴリでも収入を支出へ混ぜない");
     assert.ok(!current.some(bucket => bucket.expenseClass === "PERSONAL" && bucket.memberId === b));
     assert.equal(current.find(bucket => bucket.categoryId === null && bucket.expenseClass === "PERSONAL" && bucket.memberId === a)?.burdenYen, "23");
     const partner = await read(workspaceId, b);
@@ -155,10 +226,14 @@ test("集計の実SQLは保存割合の整数配分・対象期間・認可を�
 
   await t.test("整数上限を超える合計をSQL内で文字列化し、category未設定も失わない", async () => {
     const id = await category("大きい合計");
-    for (let index = 0; index < 5; index++) await insert(2147483647, { [a]: 1, [b]: 0 }, id);
+    for (let index = 0; index < 5; index++) {
+      await insert(2147483647, { [a]: 1, [b]: 0 }, id);
+      await insert(2147483647, { [a]: 1, [b]: 0 }, id, { type: "RECEIPT" });
+    }
     const result = await read();
     assert.equal(result.buckets.find(bucket => bucket.scope === "current" && bucket.categoryId === id)?.burdenYen, "10737418235");
-    assert.ok(result.buckets.every(bucket => typeof bucket.burdenYen === "string" && /^\d+$/.test(bucket.burdenYen)));
+    assert.equal(result.receiptBuckets.find(bucket => bucket.scope === "current" && bucket.categoryId === id)?.burdenYen, "10737418235");
+    assert.ok([...result.buckets, ...result.receiptBuckets].every(bucket => typeof bucket.burdenYen === "string" && /^\d+$/.test(bucket.burdenYen)));
     assert.match(queries.at(-1)!.query, /sum\(a\.burden_yen\)::text/);
   });
 
@@ -167,38 +242,46 @@ test("集計の実SQLは保存割合の整数配分・対象期間・認可を�
     await memory.query("INSERT INTO workspaces(id,name,type,owner_user_id) VALUES($1,'空','PERSONAL',$2)", [empty, a]);
     await memory.query("INSERT INTO workspace_members(workspace_id,user_id,role) VALUES($1,$2,'OWNER')", [empty, a]);
     const before = (await memory.query("SELECT count(*)::text AS count FROM workspaces")).rows;
-    assert.deepEqual((await read(empty)).buckets, []);
+    const result = await read(empty);
+    assert.deepEqual(result.buckets, []);
+    assert.deepEqual(result.receiptBuckets, []);
     assert.deepEqual((await memory.query("SELECT count(*)::text AS count FROM workspaces")).rows, before);
   });
 
-  await t.test("相手の個人費は不正な保存割合でも集計とエラーに影響しない", async () => {
+  await t.test("相手の個人支出・収入は不正な保存割合でも集計とエラーに影響しない", async () => {
     const before = await read();
-    const hidden = await insert(987654, { [a]: 0, [b]: 1 }, null, { expenseClass: "PERSONAL", actor: b });
-    await memory.exec("ALTER TABLE transactions DISABLE TRIGGER transactions_complete_split");
-    try {
-      await memory.query("UPDATE transactions SET split_weights='{}'::jsonb WHERE id=$1", [hidden]);
-      assert.deepEqual((await read()).buckets, before.buckets);
-      await assert.rejects(read(workspaceId, b), /保存済み負担割合が不正/);
-      await memory.query("DELETE FROM transactions WHERE id=$1", [hidden]);
-    } finally { await memory.exec("ALTER TABLE transactions ENABLE TRIGGER transactions_complete_split"); }
+    for (const type of ["PAYMENT", "RECEIPT"]) {
+      const hidden = await insert(987654, { [a]: 0, [b]: 1 }, null, { type, expenseClass: "PERSONAL", actor: b });
+      await memory.exec("ALTER TABLE transactions DISABLE TRIGGER transactions_complete_split");
+      try {
+        await memory.query("UPDATE transactions SET split_weights='{}'::jsonb WHERE id=$1", [hidden]);
+        const actual = await read();
+        assert.deepEqual(actual.buckets, before.buckets);
+        assert.deepEqual(actual.receiptBuckets, before.receiptBuckets);
+        await assert.rejects(read(workspaceId, b), /保存済み負担割合が不正/);
+        await memory.query("DELETE FROM transactions WHERE id=$1", [hidden]);
+      } finally { await memory.exec("ALTER TABLE transactions ENABLE TRIGGER transactions_complete_split"); }
+    }
   });
 
-  await t.test("無効な保存割合・未知参加者・不在の支払者は黙って補正せず集計全体を失敗させる", async () => {
-    const id = await insert(100, { [a]: 1, [b]: 1 }, null);
-    await memory.exec("ALTER TABLE transactions DISABLE TRIGGER transactions_complete_split");
-    try {
-      for (const weights of [{ [a]: 1 }, { [a]: 1, [b]: 1, outsider: 0 }, { [a]: 0, [b]: 0 },
-        { [a]: -1, [b]: 1 }, { [a]: 0.5, [b]: 1 }, { [a]: 2147483648, [b]: 1 },
-        { [a]: "1", [b]: 1 }, { [a]: null, [b]: 1 }, {}]) {
-        await memory.query("UPDATE transactions SET split_weights=$2::jsonb WHERE id=$1", [id, JSON.stringify(weights)]);
+  await t.test("支払い・収入の無効な保存割合・未知参加者・不在の担当者は集計全体を失敗させる", async () => {
+    for (const type of ["PAYMENT", "RECEIPT"]) {
+      const id = await insert(100, { [a]: 1, [b]: 1 }, null, { type });
+      await memory.exec("ALTER TABLE transactions DISABLE TRIGGER transactions_complete_split");
+      try {
+        for (const weights of [{ [a]: 1 }, { [a]: 1, [b]: 1, outsider: 0 }, { [a]: 0, [b]: 0 },
+          { [a]: -1, [b]: 1 }, { [a]: 0.5, [b]: 1 }, { [a]: 2147483648, [b]: 1 },
+          { [a]: "1", [b]: 1 }, { [a]: null, [b]: 1 }, {}]) {
+          await memory.query("UPDATE transactions SET split_weights=$2::jsonb WHERE id=$1", [id, JSON.stringify(weights)]);
+          await assert.rejects(read(), /保存済み負担割合が不正/);
+        }
+        await memory.query("UPDATE transactions SET split_weights=$2::jsonb,actor_user_id=$3 WHERE id=$1", [id, JSON.stringify({ [a]: 1, [b]: 1 }), outside]);
         await assert.rejects(read(), /保存済み負担割合が不正/);
-      }
-      await memory.query("UPDATE transactions SET split_weights=$2::jsonb,actor_user_id=$3 WHERE id=$1", [id, JSON.stringify({ [a]: 1, [b]: 1 }), outside]);
-      await assert.rejects(read(), /保存済み負担割合が不正/);
-      await memory.query("UPDATE transactions SET actor_user_id=$2,expense_class='PERSONAL' WHERE id=$1", [id, a]);
-      await assert.rejects(read(), /保存済み負担割合が不正/);
-      await memory.query("DELETE FROM transactions WHERE id=$1", [id]);
-    } finally { await memory.exec("ALTER TABLE transactions ENABLE TRIGGER transactions_complete_split"); }
+        await memory.query("UPDATE transactions SET actor_user_id=$2,expense_class='PERSONAL' WHERE id=$1", [id, a]);
+        await assert.rejects(read(), /保存済み負担割合が不正/);
+        await memory.query("DELETE FROM transactions WHERE id=$1", [id]);
+      } finally { await memory.exec("ALTER TABLE transactions ENABLE TRIGGER transactions_complete_split"); }
+    }
   });
 
   await t.test("通常APIは有効利用者確認と一括集計の2往復で、非所属・所属削除・利用停止を区別する", async () => {

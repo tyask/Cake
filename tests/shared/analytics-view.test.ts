@@ -11,11 +11,11 @@ function category(id: string, parentId: string | null = null, extra: Partial<Cat
 function bucket(categoryId: string | null, burdenYen: string, extra: Partial<AnalyticsBucket> = {}): AnalyticsBucket {
   return { scope: "current", month: "2026-10", memberId: "a", expenseClass: "SHARED", categoryId, burdenYen, ...extra };
 }
-function dataset(buckets: AnalyticsBucket[], categories: Category[] = []): AnalyticsDataset {
+function dataset(buckets: AnalyticsBucket[], categories: Category[] = [], receiptBuckets: AnalyticsBucket[] = []): AnalyticsDataset {
   return { workspaceId: "11111111-1111-4111-8111-111111111111", snapshotAt: "2026-10-23T02:00:00.123Z", timeZone: "Asia/Tokyo",
     periods: { current: { from: "2026-10-01", to: "2026-10-23" }, comparison: { from: "2026-09-01", to: "2026-09-23" },
       trend: { from: "2026-05-01", to: "2026-10-23" } },
-    members: [{ id: "a", name: "A" }, { id: "b", name: "B" }], categories, buckets };
+    members: [{ id: "a", name: "A" }, { id: "b", name: "B" }], categories, buckets, receiptBuckets };
 }
 const filters: AnalyticsFilters = { memberIds: ["a", "b"], expenseClasses: ["SHARED", "PERSONAL"], depth: 1 };
 
@@ -107,4 +107,131 @@ test("analytics exact sums and currency formatting support amounts beyond safe N
     assert.throws(() => prepareAnalyticsDataset(dataset([bucket(null, amount)])), amount);
   }
   assert.throws(() => prepareAnalyticsDataset(dataset([bucket(null, 1 as unknown as string)])));
+});
+
+test("収入と支出は同じ対象者・区分で選択し、今回と比較期間の収支を別々に計算する", () => {
+  const source = dataset([
+    bucket(null, "501"), bucket(null, "500", { memberId: "b" }),
+    bucket(null, "300", { expenseClass: "PERSONAL" }), bucket(null, "200", { memberId: "b", expenseClass: "PERSONAL" }),
+    bucket(null, "50", { scope: "comparison", month: "2026-09" }),
+    bucket(null, "30", { scope: "comparison", month: "2026-09", memberId: "b", expenseClass: "PERSONAL" }),
+  ], [], [
+    bucket(null, "801"), bucket(null, "800", { memberId: "b" }),
+    bucket(null, "1000", { expenseClass: "PERSONAL" }), bucket(null, "2000", { memberId: "b", expenseClass: "PERSONAL" }),
+    bucket(null, "200", { scope: "comparison", month: "2026-09" }),
+    bucket(null, "100", { scope: "comparison", month: "2026-09", memberId: "b", expenseClass: "PERSONAL" }),
+  ]);
+  const unchanged = JSON.stringify(source), prepared = prepareAnalyticsDataset(source);
+  const cases = [
+    { memberIds: ["a", "b"], expenseClasses: ["SHARED", "PERSONAL"], amounts: [4601, 1501, 300, 80] },
+    { memberIds: ["a"], expenseClasses: ["SHARED", "PERSONAL"], amounts: [1801, 801, 200, 50] },
+    { memberIds: ["b"], expenseClasses: ["SHARED", "PERSONAL"], amounts: [2800, 700, 100, 30] },
+    { memberIds: ["a", "b"], expenseClasses: ["SHARED"], amounts: [1601, 1001, 200, 50] },
+    { memberIds: ["a", "b"], expenseClasses: ["PERSONAL"], amounts: [3000, 500, 100, 30] },
+    { memberIds: ["b"], expenseClasses: ["SHARED"], amounts: [800, 500, 0, 0] },
+    { memberIds: ["a"], expenseClasses: ["PERSONAL"], amounts: [1000, 300, 0, 0] },
+    { memberIds: [], expenseClasses: ["SHARED", "PERSONAL"], amounts: [0, 0, 0, 0] },
+    { memberIds: ["a", "b"], expenseClasses: [], amounts: [0, 0, 0, 0] },
+  ] satisfies { memberIds: string[]; expenseClasses: AnalyticsFilters["expenseClasses"]; amounts: number[] }[];
+  for (const { amounts, ...selected } of cases) {
+    const [income, expense, comparisonIncome, comparisonExpense] = amounts.map(BigInt);
+    const view = buildAnalyticsView(prepared, { ...filters, ...selected });
+    assert.deepEqual(view.cashflow, {
+      incomeYen: income, expenseYen: expense, balanceYen: income - expense,
+      comparisonIncomeYen: comparisonIncome, comparisonExpenseYen: comparisonExpense,
+      comparisonBalanceYen: comparisonIncome - comparisonExpense,
+      months: view.months.map(month => ({ month, incomeYen: BigInt(0), expenseYen: BigInt(0), balanceYen: BigInt(0) })),
+    }, JSON.stringify(selected));
+    assert.equal(view.cashflow.expenseYen, view.totalYen);
+    assert.equal(view.cashflow.comparisonExpenseYen, view.comparisonYen);
+  }
+  assert.equal(JSON.stringify(source), unchanged);
+});
+
+test("収支の月次は欠損月を0で補完し、重複する期間scopeを二重計上しない", () => {
+  const source = dataset([
+    bucket(null, "101"), bucket(null, "101", { scope: "trend" }),
+    bucket(null, "250", { scope: "trend", month: "2026-07" }),
+    bucket(null, "40", { scope: "comparison", month: "2026-09" }),
+  ], [], [
+    bucket(null, "301"), bucket(null, "301", { scope: "trend" }),
+    bucket(null, "200", { scope: "trend", month: "2026-05" }),
+    bucket(null, "100", { scope: "trend", month: "2026-07" }),
+    bucket(null, "120", { scope: "comparison", month: "2026-09" }),
+  ]);
+  const view = buildAnalyticsView(prepareAnalyticsDataset(source), filters);
+  assert.equal(view.cashflow.incomeYen, BigInt(301));
+  assert.equal(view.cashflow.balanceYen, BigInt(200));
+  assert.equal(view.cashflow.comparisonBalanceYen, BigInt(80));
+  assert.deepEqual(view.cashflow.months, [
+    { month: "2026-05", incomeYen: BigInt(200), expenseYen: BigInt(0), balanceYen: BigInt(200) },
+    { month: "2026-06", incomeYen: BigInt(0), expenseYen: BigInt(0), balanceYen: BigInt(0) },
+    { month: "2026-07", incomeYen: BigInt(100), expenseYen: BigInt(250), balanceYen: -BigInt(150) },
+    { month: "2026-08", incomeYen: BigInt(0), expenseYen: BigInt(0), balanceYen: BigInt(0) },
+    { month: "2026-09", incomeYen: BigInt(0), expenseYen: BigInt(0), balanceYen: BigInt(0) },
+    { month: "2026-10", incomeYen: BigInt(301), expenseYen: BigInt(101), balanceYen: BigInt(200) },
+  ]);
+  // The selected period and the six-month trend are different ranges.
+  assert.notEqual(view.cashflow.months.reduce((sum, month) => sum + month.incomeYen, BigInt(0)), view.cashflow.incomeYen);
+});
+
+test("収入だけ・支出だけ・空の家計でも月次と収支を表示でき、収入を支出カテゴリへ混ぜない", () => {
+  for (const { payments, receipts, expected } of [
+    { payments: [], receipts: [bucket("給与", "300"), bucket("給与", "300", { scope: "trend" })], expected: [300, 0, 300] },
+    { payments: [bucket(null, "200"), bucket(null, "200", { scope: "trend" })], receipts: [], expected: [0, 200, -200] },
+    { payments: [], receipts: [], expected: [0, 0, 0] },
+  ]) {
+    const view = buildAnalyticsView(prepareAnalyticsDataset(dataset(payments, [category("給与")], receipts)), filters);
+    assert.deepEqual([view.cashflow.incomeYen, view.cashflow.expenseYen, view.cashflow.balanceYen], expected.map(BigInt));
+    const lastMonth = view.cashflow.months.at(-1)!;
+    assert.deepEqual([lastMonth.incomeYen, lastMonth.expenseYen, lastMonth.balanceYen], expected.map(BigInt));
+    assert.equal(view.cashflow.months.length, 6);
+    assert.ok(!view.rows.some(row => row.id === "給与"));
+    if (!payments.length) assert.deepEqual(view.chartRows, []);
+  }
+});
+
+test("収入のカテゴリ・階層変更で収支は変化せず、巨大整数の相殺差額も正確に保つ", () => {
+  const large = "9007199254740993";
+  const source = dataset([
+    bucket("子", large), bucket("親", "2"),
+    bucket(null, large, { scope: "comparison", month: "2026-09" }),
+    bucket("子", large, { scope: "trend" }), bucket("親", "2", { scope: "trend" }),
+  ], [category("親"), category("子", "親")], [
+    bucket("missing", large), bucket("子", "3"),
+    bucket(null, "9007199254740992", { scope: "comparison", month: "2026-09" }),
+    bucket("missing", large, { scope: "trend" }), bucket("子", "3", { scope: "trend" }),
+  ]);
+  const prepared = prepareAnalyticsDataset(source);
+  for (const depth of [1, 2, "all"] as const) {
+    const { cashflow } = buildAnalyticsView(prepared, { ...filters, depth });
+    assert.equal(cashflow.incomeYen, BigInt("9007199254740996"));
+    assert.equal(cashflow.expenseYen, BigInt("9007199254740995"));
+    assert.equal(cashflow.balanceYen, BigInt(1));
+    assert.equal(cashflow.comparisonBalanceYen, -BigInt(1));
+    assert.equal(cashflow.months.at(-1)!.balanceYen, BigInt(1));
+    assert.equal(formatYen(cashflow.incomeYen), "￥9,007,199,254,740,996");
+  }
+});
+
+test("保存済みの1円配分を再配分せず、参加者ごとの収支を合計して全員の収支に一致させる", () => {
+  const source = dataset([bucket(null, "1"), bucket(null, "0", { memberId: "b" })], [],
+    [bucket(null, "0"), bucket(null, "1", { memberId: "b" })]);
+  const prepared = prepareAnalyticsDataset(source);
+  const a = buildAnalyticsView(prepared, { ...filters, memberIds: ["a"] }).cashflow;
+  const b = buildAnalyticsView(prepared, { ...filters, memberIds: ["b"] }).cashflow;
+  const all = buildAnalyticsView(prepared, filters).cashflow;
+  assert.equal(a.balanceYen, -BigInt(1));
+  assert.equal(b.balanceYen, BigInt(1));
+  assert.equal(all.balanceYen, BigInt(0));
+  assert.equal(a.incomeYen + b.incomeYen, all.incomeYen);
+  assert.equal(a.expenseYen + b.expenseYen, all.expenseYen);
+  assert.equal(a.balanceYen + b.balanceYen, all.balanceYen);
+});
+
+test("収入の集約金額にも非負の整数文字列だけを許可する", () => {
+  for (const amount of ["-1", "1.5", "1e3", "01", "", "NaN"]) {
+    assert.throws(() => prepareAnalyticsDataset(dataset([], [], [bucket(null, amount)])), /非負の整数文字列/, amount);
+  }
+  assert.throws(() => prepareAnalyticsDataset(dataset([], [], [bucket(null, 1 as unknown as string)])), /非負の整数文字列/);
 });
