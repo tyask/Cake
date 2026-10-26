@@ -243,6 +243,20 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         await summary.click();
         const categories = f.page.getByRole("group", { name: "集計に含めるカテゴリ", exact: true });
         assert.equal(await categories.getByRole("checkbox").count(), 5);
+        const hierarchy = categories.getByRole("list", { name: "カテゴリ階層", exact: true });
+        assert.deepEqual(await hierarchy.locator(":scope > li > label > span").allTextContents(), ["食費", "交通費", "以前のカテゴリ（使用停止）", "未分類"], "親と未分類は単列の根に並ぶ");
+        assert.deepEqual(await hierarchy.getByRole("checkbox").evaluateAll(inputs => inputs.map(input => input.getAttribute("aria-label"))),
+          ["食費", "食費 › スーパー", "交通費", "以前のカテゴリ（使用停止）", "未分類"], "親の直後に子を置き、accessible nameにはfull pathを保つ");
+        const treeGeometry = await hierarchy.evaluate(list => {
+          const food = list.querySelector<HTMLInputElement>('input[aria-label="食費"]')!;
+          const grocery = list.querySelector<HTMLInputElement>('input[aria-label="食費 › スーパー"]')!;
+          const branch = grocery.closest("ul")!;
+          return { nested: branch.parentElement === food.closest("li"), food: food.getBoundingClientRect().toJSON(),
+            grocery: grocery.getBoundingClientRect().toJSON(), guide: getComputedStyle(branch).borderLeftStyle };
+        });
+        assert.equal(treeGeometry.nested, true, "子は親のli内のリストに入る");
+        assert.ok(treeGeometry.grocery.x > treeGeometry.food.x && treeGeometry.grocery.y > treeGeometry.food.y, "子は親の下へインデントする");
+        assert.equal(treeGeometry.guide, "solid", "子リストのガイド線を表示する");
         assert.equal(await categories.getByRole("checkbox", { name: "以前のカテゴリ（使用停止）", exact: true }).isChecked(), true);
         await f.page.getByRole("button", { name: "すべて解除", exact: true }).click();
         await f.page.getByText("集計に含めるカテゴリを1つ以上選んでください。", { exact: true }).waitFor();
@@ -277,6 +291,68 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         assert.match(await summary.textContent() ?? "", /1 \/ 5件選択/, "折りたたんでも選択状態が分かる");
         assert.equal(f.urls.length, 1, "カテゴリ・表示対象・区分・粒度は追加通信しない");
         assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
+    for (const width of [1440, 320]) await t.test(`${width}px: カテゴリは三階層と深い長名をツリーで並べ、スクロールを欄内に収める`, async () => {
+      const f = await fixture(width);
+      try {
+        const request = await f.take(), data = dataset(queryFromRoute(request));
+        data.categories.push({ id: "meal", parentId: "grocery", name: "お弁当", colorHex: "#ef4444", sortOrder: 0, revision: 1, archivedAt: null },
+          { id: "delivery", parentId: "food", name: "宅配", colorHex: "#f59e0b", sortOrder: 1, revision: 1, archivedAt: null });
+        let deepParent: string | null = null;
+        const deepNames: string[] = [];
+        for (let index = 0; index < 40; index++) {
+          const name = `${index + 1}階層${"長いカテゴリ名".repeat(8)}`.slice(0, 40);
+          deepNames.push(name);
+          data.categories.push({ id: `deep${index}`, parentId: deepParent, name, colorHex: "#64748b", sortOrder: 3, revision: 1, archivedAt: null });
+          deepParent = `deep${index}`;
+        }
+        for (const scope of ["current", "trend"] as const) {
+          data.buckets.push({ scope, month: "2026-10", memberId: "a", expenseClass: "SHARED", categoryId: "meal", burdenYen: "11" },
+            { scope, month: "2026-10", memberId: "a", expenseClass: "SHARED", categoryId: deepParent, burdenYen: "9" });
+        }
+        await f.reply(request, data); await f.total("−￥100");
+        await f.page.locator("summary").filter({ hasText: "集計に含めるカテゴリ" }).click();
+        const categories = f.page.getByRole("group", { name: "集計に含めるカテゴリ", exact: true });
+        const hierarchy = categories.getByRole("list", { name: "カテゴリ階層", exact: true });
+        assert.deepEqual((await hierarchy.getByRole("checkbox").evaluateAll(inputs => inputs.map(input => input.getAttribute("aria-label")))).slice(0, 5),
+          ["食費", "食費 › スーパー", "食費 › スーパー › お弁当", "食費 › 宅配", "交通費"]);
+        const geometry = await hierarchy.evaluate(list => {
+          const labels = ["食費", "食費 › スーパー", "食費 › スーパー › お弁当", "食費 › 宅配", "交通費"];
+          return labels.map(label => {
+            const input = Array.from(list.querySelectorAll("input")).find(input => input.getAttribute("aria-label") === label)!;
+            return { x: input.getBoundingClientRect().x, y: input.getBoundingClientRect().y,
+              name: input.closest("label")!.querySelector("span")!.textContent };
+          });
+        });
+        assert.deepEqual(geometry.map(item => item.name), ["食費", "スーパー", "お弁当", "宅配", "交通費"], "見た目は各カテゴリ自身の名前にする");
+        assert.ok(geometry[0].x < geometry[1].x && geometry[1].x < geometry[2].x, "子・孫でインデントを深くする");
+        assert.ok(geometry.every((item, index) => index === 0 || item.y > geometry[index - 1].y), "PCでも親・子・孫・兄弟を単列で並べる");
+        assert.ok(Math.abs(geometry[1].x - geometry[3].x) < 1 && Math.abs(geometry[0].x - geometry[4].x) < 1, "同じ階層は同じ開始位置に揃える");
+        const overflow = await categories.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
+          clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, overflowX: getComputedStyle(element).overflowX }));
+        assert.ok(overflow.scrollWidth > overflow.clientWidth && overflow.scrollHeight > overflow.clientHeight, "深いツリーの横と縦の溢れを欄内で受ける");
+        assert.equal(overflow.overflowX, "auto");
+        assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "深い長名でもページ全体の横溢れなし");
+        if (process.env.CAKE_ANALYTICS_SCREENSHOTS) {
+          await mkdir(".cake/output/playwright", { recursive: true });
+          await categories.screenshot({ path: `.cake/output/playwright/analytics-category-tree-${width}.png`, animations: "disabled" });
+        }
+        await f.page.getByRole("button", { name: "すべて解除", exact: true }).click();
+        const food = categories.getByRole("checkbox", { name: "食費", exact: true });
+        await food.check(); await f.total("−￥91");
+        const meal = categories.getByRole("checkbox", { name: "食費 › スーパー › お弁当", exact: true });
+        assert.equal(await meal.isChecked(), true, "親の一括選択は孫まで含む");
+        await meal.focus(); await f.page.keyboard.press("Space"); await f.total("−￥80");
+        assert.equal(await food.evaluate(element => (element as HTMLInputElement).indeterminate), true);
+        await f.page.getByRole("button", { name: "すべて解除", exact: true }).click();
+        const leaf = categories.getByRole("checkbox", { name: deepNames.join(" › "), exact: true });
+        await leaf.check(); await f.total("−￥9");
+        assert.equal(await leaf.locator("..").locator("span").textContent(), deepNames.at(-1));
+        assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "深いノードの選択・内部scroll後もページの横溢れなし");
+        assert.equal(f.urls.length, 1);
         assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
