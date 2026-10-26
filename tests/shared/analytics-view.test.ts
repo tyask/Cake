@@ -235,3 +235,137 @@ test("収入の集約金額にも非負の整数文字列だけを許可する",
   }
   assert.throws(() => prepareAnalyticsDataset(dataset([], [], [bucket(null, 1 as unknown as string)])), /非負の整数文字列/);
 });
+
+test("カテゴリ選択は元の設定先に適用し、表示階層を変えても選択額を変えない", () => {
+  const prepared = prepareAnalyticsDataset(dataset([
+    bucket("親", "10"), bucket("子", "20"), bucket("孫", "30"), bucket("兄弟", "40"), bucket(null, "7"),
+  ], [category("親"), category("子", "親"), category("孫", "子"), category("兄弟", "親")]));
+  for (const depth of [1, 2, "all"] as const) {
+    const child = buildAnalyticsView(prepared, { ...filters, categoryIds: ["子"], depth });
+    assert.equal(child.totalYen, BigInt(20), "親に集約する場合も、親自身や孫の明細は混ぜない");
+    assert.equal(child.rows.length, 1);
+    const parent = buildAnalyticsView(prepared, { ...filters, categoryIds: ["親"], depth });
+    assert.equal(parent.totalYen, BigInt(10), "親への直接設定だけも選択できる");
+    assert.equal(buildAnalyticsView(prepared, { ...filters, categoryIds: ["親", "子", "孫"], depth }).totalYen,
+      BigInt(60), "親と子孫のIDを選んでも明細を二重計上しない");
+  }
+});
+
+test("カテゴリの選択は対象者・区分と組み合わせ、当期・比較期・月次の収入と支出へ同じように適用する", () => {
+  const payments = [bucket("対象", "80"), bucket("対象", "20", { expenseClass: "PERSONAL" }),
+    bucket("対象", "40", { memberId: "b" }), bucket("対象外", "200")];
+  const receipts = [bucket("対象", "300"), bucket("対象", "50", { expenseClass: "PERSONAL" }),
+    bucket("対象", "100", { memberId: "b" }), bucket("対象外", "500")];
+  const inEachScope = (buckets: AnalyticsBucket[]) => buckets.flatMap(item => [
+    item, { ...item, scope: "comparison" as const, month: "2026-09" },
+    { ...item, scope: "trend" as const, month: "2026-07" },
+  ]);
+  const prepared = prepareAnalyticsDataset(dataset(inEachScope(payments), [category("対象"), category("対象外")], inEachScope(receipts)));
+  const cases = [
+    { memberIds: ["a", "b"], expenseClasses: ["SHARED", "PERSONAL"], income: 450, expense: 140 },
+    { memberIds: ["a"], expenseClasses: ["SHARED", "PERSONAL"], income: 350, expense: 100 },
+    { memberIds: ["a", "b"], expenseClasses: ["SHARED"], income: 400, expense: 120 },
+    { memberIds: ["a"], expenseClasses: ["PERSONAL"], income: 50, expense: 20 },
+  ] satisfies { memberIds: string[]; expenseClasses: AnalyticsFilters["expenseClasses"]; income: number; expense: number }[];
+  for (const { income, expense, ...selected } of cases) {
+    const view = buildAnalyticsView(prepared, { ...filters, ...selected, categoryIds: ["対象"] });
+    assert.equal(view.cashflow.incomeYen, BigInt(income));
+    assert.equal(view.totalYen, BigInt(expense));
+    assert.equal(view.cashflow.balanceYen, BigInt(income - expense));
+    assert.equal(view.cashflow.comparisonIncomeYen, BigInt(income));
+    assert.equal(view.comparisonYen, BigInt(expense));
+    assert.equal(view.differenceYen, BigInt(0));
+    assert.deepEqual(view.cashflow.months[2], { month: "2026-07", incomeYen: BigInt(income),
+      expenseYen: BigInt(expense), balanceYen: BigInt(income - expense) });
+    assert.ok(view.cashflow.months.filter(month => month.month !== "2026-07")
+      .every(month => month.incomeYen === BigInt(0) && month.expenseYen === BigInt(0)));
+    assert.deepEqual(view.rows.map(row => row.id), ["対象"]);
+  }
+});
+
+test("未分類の選択は削除済み参照も含み、分類済みの明細とは切り分ける", () => {
+  const prepared = prepareAnalyticsDataset(dataset([
+    bucket(null, "4"), bucket("削除済み", "6"), bucket("分類済み", "11"),
+    bucket("削除済み", "7", { scope: "comparison", month: "2026-09" }),
+    bucket(null, "8", { scope: "trend", month: "2026-08" }),
+  ], [category("分類済み")], [
+    bucket(null, "100"), bucket("削除済み", "200"), bucket("分類済み", "300"),
+    bucket("削除済み", "70", { scope: "comparison", month: "2026-09" }),
+    bucket(null, "80", { scope: "trend", month: "2026-08" }),
+  ]));
+  const unclassified = buildAnalyticsView(prepared, { ...filters, categoryIds: [ANALYTICS_UNCLASSIFIED_ID] });
+  assert.equal(unclassified.totalYen, BigInt(10));
+  assert.equal(unclassified.cashflow.incomeYen, BigInt(300));
+  assert.equal(unclassified.comparisonYen, BigInt(7));
+  assert.equal(unclassified.cashflow.comparisonIncomeYen, BigInt(70));
+  assert.deepEqual(unclassified.rows.map(row => row.id), [ANALYTICS_UNCLASSIFIED_ID]);
+  assert.deepEqual(unclassified.cashflow.months[3], { month: "2026-08", incomeYen: BigInt(80),
+    expenseYen: BigInt(8), balanceYen: BigInt(72) });
+  const classified = buildAnalyticsView(prepared, { ...filters, categoryIds: ["分類済み"] });
+  assert.equal(classified.totalYen, BigInt(11));
+  assert.equal(classified.cashflow.incomeYen, BigInt(300));
+});
+
+test("収入だけの使用停止カテゴリも選択でき、支出グラフへ収入を混ぜない", () => {
+  const prepared = prepareAnalyticsDataset(dataset([bucket("支出", "123")], [category("支出"),
+    category("給与", null, { archivedAt: "2026-10-01T00:00:00Z" })], [
+    bucket("給与", "500"), bucket("給与", "500", { scope: "trend" }),
+  ]));
+  const view = buildAnalyticsView(prepared, { ...filters, categoryIds: ["給与"] });
+  assert.equal(view.cashflow.incomeYen, BigInt(500));
+  assert.equal(view.cashflow.balanceYen, BigInt(500));
+  assert.equal(view.totalYen, BigInt(0));
+  assert.equal(view.cashflow.months.at(-1)!.balanceYen, BigInt(500));
+  assert.deepEqual(view.rows, []);
+  assert.deepEqual(view.chartRows, []);
+});
+
+test("全カテゴリの既定値と空の選択を区別し、選択を戻しても入力や準備済みデータを変更しない", () => {
+  const source = dataset([bucket("食費", "3"), bucket(null, "2")], [category("食費")], [bucket("食費", "10")]);
+  const unchanged = JSON.stringify(source), prepared = prepareAnalyticsDataset(source);
+  const all = buildAnalyticsView(prepared, filters);
+  const categoryIds = Object.freeze(["食費", ANALYTICS_UNCLASSIFIED_ID, "食費"]);
+  assert.deepEqual(buildAnalyticsView(prepared, { ...filters, categoryIds }), all, "重複IDも合計を重複させない");
+  for (const categoryIds of [[], ["存在しないID"]]) {
+    const empty = buildAnalyticsView(prepared, { ...filters, categoryIds });
+    assert.equal(empty.totalYen, BigInt(0));
+    assert.equal(empty.comparisonYen, BigInt(0));
+    assert.equal(empty.cashflow.incomeYen, BigInt(0));
+    assert.equal(empty.cashflow.comparisonIncomeYen, BigInt(0));
+    assert.equal(empty.rate, null);
+    assert.deepEqual(empty.rows, []);
+    assert.deepEqual(empty.chartRows, []);
+    assert.equal(empty.cashflow.months.length, 6);
+    assert.ok(empty.cashflow.months.every(month => month.incomeYen === BigInt(0)
+      && month.expenseYen === BigInt(0) && month.balanceYen === BigInt(0)));
+  }
+  assert.deepEqual(buildAnalyticsView(prepared, filters), all);
+  assert.equal(JSON.stringify(source), unchanged);
+  assert.deepEqual(categoryIds, ["食費", ANALYTICS_UNCLASSIFIED_ID, "食費"]);
+});
+
+test("選択後の上位8件とその他を再計算し、巨大整数を含む合計と差額を正確に維持する", () => {
+  const categories = Array.from({ length: 11 }, (_, index) => category(`c${index}`, null, { sortOrder: index }));
+  const exact = "9007199254740993";
+  const payments = categories.flatMap((item, index) => [bucket(item.id, index === 0 ? exact : String(index + 1)),
+    bucket(item.id, index === 0 ? exact : String((index + 1) * 2), { scope: "comparison", month: "2026-09" }),
+    bucket(item.id, index === 0 ? exact : String((index + 1) * 3), { scope: "trend" })]);
+  const prepared = prepareAnalyticsDataset(dataset([...payments, bucket(null, "100")], categories, [bucket("c0", "9007199254740994")]));
+  const categoryIds = categories.slice(0, 10).map(item => item.id);
+  const view = buildAnalyticsView(prepared, { ...filters, categoryIds });
+  assert.equal(view.totalYen, BigInt(exact) + BigInt(54));
+  assert.equal(view.comparisonYen, BigInt(exact) + BigInt(108));
+  assert.equal(view.differenceYen, -BigInt(54));
+  assert.equal(view.cashflow.balanceYen, -BigInt(53));
+  assert.equal(view.chartRows.length, 9);
+  assert.equal(view.chartRows[0].id, "c0");
+  assert.ok(!view.rows.some(row => row.id === "c10" || row.id === ANALYTICS_UNCLASSIFIED_ID));
+  const others = view.chartRows.find(row => row.id === ANALYTICS_OTHERS_ID)!;
+  assert.equal(others.currentYen, BigInt(5));
+  assert.equal(others.comparisonYen, BigInt(10));
+  assert.equal(others.monthlyYen.at(-1), BigInt(15));
+  for (const key of ["currentYen", "comparisonYen"] as const) {
+    assert.equal(view.chartRows.reduce((sum, row) => sum + row[key], BigInt(0)), view.rows.reduce((sum, row) => sum + row[key], BigInt(0)));
+  }
+  assert.equal(view.chartRows.reduce((sum, row) => sum + row.monthlyYen.at(-1)!, BigInt(0)), BigInt(exact) + BigInt(162));
+});
