@@ -29,11 +29,15 @@ export function verifyReceiptFixture(success = true): VerifyReceipt {
     ...(!success ? { failure: { stage: 'browser' as const, code: 'PREVIEW_VERIFY_BROWSER_FAILED' as const, browserStage: 'boundary' as const } } : {}),
     operation: '12345678-1234-4234-8234-123456789abc', runId: '123', runAttempt: 1, controlSha: 'b'.repeat(40) };
 }
-export function verifyChecksFixture(success = true) {
-  const base = checksFixture(), receipt = verifyReceiptFixture(success);
+export function verifyChecksFixture(success = true, splitJobs = false) {
+  const base = checksFixture('status', splitJobs), receipt = verifyReceiptFixture(success);
   const request: VerifyReadRequest = { action: 'verify', source: receipt.source, expectedDeployment: receipt.deployment!,
     operation: receipt.operation, controlSha: receipt.controlSha, workflowId: base.workflow.id };
   base.run.display_title = `Preview verify PR ${receipt.source.pr} ${receipt.operation}`;
+  if (splitJobs) {
+    base.job.name = base.check.name = 'preview-verify';
+    base.peer.name = 'preview';
+  }
   const conclusion = success ? 'success' : 'failure';
   for (const value of [base.run, base.job, base.check, base.suite]) value.conclusion = conclusion;
   Object.assign(base.job, { steps: [{ name: 'Publish public operation receipt notice', number: 6, status: 'completed', conclusion: 'success' }] });

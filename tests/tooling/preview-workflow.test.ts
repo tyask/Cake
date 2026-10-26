@@ -161,17 +161,44 @@ test('verify writes a failure receipt before failing the job, and notice is emit
   } finally { process.chdir(previous); await rm(directory, { recursive: true, force: true }); }
 });
 
-test('verify workflow installs the official browser before secrets and preserves main-only permissions and receipt isolation', async () => {
+test('verify has a pinned browser container while management stays on the host with main-only permissions and isolated notices', async () => {
   const workflow = await readFile(new URL('../../.github/workflows/preview.yml', import.meta.url), 'utf8');
+  const management = workflow.split('\n  preview:\n')[1]?.split('\n  preview-verify:\n')[0];
+  const verification = workflow.split('\n  preview-verify:\n')[1];
+  assert.ok(management && verification);
   assert.match(workflow, /options: \[deploy, status, cleanup, verify\]/);
   assert.match(workflow, /deploymentId:[\s\S]*?required: false/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
-  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/);
-  assert.match(workflow, /persist-credentials: false/);
-  assert.match(workflow, /permissions:\s*contents: read\s*pull-requests: read/);
+  assert.match(workflow, /concurrency:\s*group: cake-preview-\$\{\{ inputs\.pr \|\| github\.event\.pull_request\.number \}\}\s*cancel-in-progress: false/);
+  assert.match(management, /github\.event_name == 'workflow_dispatch' && inputs\.action != 'verify'/);
+  assert.match(verification, /github\.event_name == 'workflow_dispatch' && inputs\.action == 'verify'/);
+  assert.ok(!management.includes('container:'));
+  assert.ok(!workflow.includes('playwright install'));
   assert.ok(!/id-token:|checks: write|pull_request:\s|\bpush:/.test(workflow));
-  assert.ok(workflow.indexOf('npx playwright install --with-deps chromium') < workflow.indexOf('GH_TOKEN:'));
-  const notice = workflow.slice(workflow.indexOf('- name: Publish public operation receipt notice'));
-  assert.match(notice, /if: success\(\) \|\| \(always\(\) && github\.event_name == 'workflow_dispatch' && inputs\.action == 'verify'\)/);
-  assert.ok(!notice.includes('env:')); assert.ok(!notice.includes('TOKEN')); assert.ok(!workflow.includes('upload-artifact'));
+  for (const job of [management, verification]) {
+    assert.match(job, /github\.ref == 'refs\/heads\/main'/);
+    assert.match(job, /ref: \$\{\{ github\.sha \}\}/);
+    assert.match(job, /persist-credentials: false/);
+    assert.match(job, /permissions:\s*contents: read\s*pull-requests: read/);
+    const noticeIndex = job.indexOf('- name: Publish public operation receipt notice');
+    assert.ok(noticeIndex >= 0);
+    const notice = job.slice(noticeIndex);
+    assert.ok(!notice.includes('env:')); assert.ok(!notice.includes('TOKEN'));
+  }
+  assert.match(verification, /if: success\(\) \|\| \(always\(\) && github\.event_name == 'workflow_dispatch' && inputs\.action == 'verify'\)/);
+  assert.ok(!workflow.includes('upload-artifact'));
+
+  const lock = JSON.parse(await readFile(new URL('../../package-lock.json', import.meta.url), 'utf8'));
+  const version = lock.packages['node_modules/playwright'].version as string;
+  const image = new RegExp(`image: mcr\\.microsoft\\.com/playwright:v${version.replaceAll('.', '\\.')}-noble@sha256:[a-f0-9]{64}`);
+  const staging = await readFile(new URL('../../.github/workflows/staging.yml', import.meta.url), 'utf8');
+  const ci = await readFile(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const pinnedImage = ci.match(image)?.[0];
+  assert.ok(pinnedImage);
+  for (const browserJob of [verification, staging, ci]) {
+    assert.equal(browserJob.match(image)?.[0], pinnedImage);
+    assert.match(browserJob, /options: --init --user 1001:1001/);
+    assert.match(browserJob, /PLAYWRIGHT_BROWSERS_PATH: \/ms-playwright/);
+    assert.match(browserJob, /node-version-file: \.node-version/);
+    assert.ok(!browserJob.includes('playwright install'));
+  }
 });

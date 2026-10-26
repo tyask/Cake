@@ -27,6 +27,81 @@ test('only a matching completed failure is diagnostic; legacy operations still r
   await assert.rejects(readPreviewReceipt(f.get, 123, { ...f.request, action: 'status' }), /PREVIEW_RUN_CHANGED/);
 });
 
+test('split verify success and diagnostic failure select preview-verify with a skipped preview peer', async () => {
+  for (const success of [true, false]) {
+    const f = verifyChecksFixture(success, true);
+    assert.deepEqual(await readVerifyReceipt(f.get, 123, f.request), f.receipt);
+    assert.equal(f.job.name, 'preview-verify');
+    assert.equal(f.calls.filter(path => path === 'check-runs/345').length, 2);
+    assert.equal(f.calls.includes('check-runs/346'), false);
+  }
+});
+
+test('split verify rejects missing or duplicate known jobs and a skipped selected job without fallback', async () => {
+  for (const inventory of ['missing-preview', 'missing-verify', 'duplicate-preview', 'duplicate-verify', 'skipped-verify'] as const) {
+    const f = verifyChecksFixture(true, true);
+    if (inventory === 'missing-preview') f.jobs.jobs.pop();
+    else if (inventory === 'missing-verify') f.jobs.jobs.splice(0, 1);
+    else if (inventory === 'skipped-verify') {
+      f.job.conclusion = 'skipped'; f.peer.conclusion = 'success';
+    } else f.jobs.jobs.push({ ...(inventory === 'duplicate-preview' ? f.peer : f.job), id: 458,
+      url: 'https://api.github.com/repos/tyask/Cake/actions/jobs/458', check_run_url: 'https://api.github.com/repos/tyask/Cake/check-runs/347' });
+    f.jobs.total_count = f.jobs.jobs.length;
+    await assert.rejects(readVerifyReceipt(f.get, 123, f.request), /PREVIEW_JOB_(AMBIGUOUS|CHANGED)/);
+    assert.equal(f.calls.some(path => path.startsWith('check-runs/')), false);
+  }
+});
+
+test('split verify checks peer provenance and requires the notice step on the selected job', async () => {
+  for (const patch of [
+    { status: 'queued' }, { conclusion: 'success' }, { conclusion: 'failure' }, { run_id: 124 }, { run_attempt: 2 },
+    { head_sha: 'c'.repeat(40) }, { head_branch: 'codex/test' }, { url: 'https://evil.example/jobs/457' },
+    { run_url: 'https://evil.example/runs/123' }, { check_run_url: 'https://api.github.com/repos/tyask/Cake/check-runs/346?x=1' },
+  ]) {
+    const f = verifyChecksFixture(true, true); Object.assign(f.peer, patch);
+    await assert.rejects(readVerifyReceipt(f.get, 123, f.request), /PREVIEW_(JOB_CHANGED|CHECK_URL)/);
+  }
+  const misplaced = verifyChecksFixture(true, true);
+  Object.assign(misplaced.peer, { steps: Reflect.get(misplaced.job, 'steps') });
+  Reflect.deleteProperty(misplaced.job, 'steps');
+  await assert.rejects(readVerifyReceipt(misplaced.get, 123, misplaced.request), /PREVIEW_VERIFY_NOTICE_STEP/);
+});
+
+test('split verify rereads bind the selected and skipped jobs and reject downgrade to an executed preview', async () => {
+  for (const change of ['selected', 'peer-state', 'peer-identity', 'downgrade', 'add-peer'] as const) {
+    const f = verifyChecksFixture(true, change !== 'add-peer'); let reads = 0;
+    await assert.rejects(readVerifyReceipt(async path => {
+      const value = await f.get(path);
+      if (path.endsWith('jobs?per_page=100&page=1') && ++reads === 2) {
+        const response = value as typeof f.jobs;
+        if (change === 'selected') Object.assign(response.jobs[0], { completed_at: '2026-10-16T01:00:03Z' });
+        else if (change === 'peer-state') Object.assign(response.jobs[1], { conclusion: 'success' });
+        else if (change === 'peer-identity') Object.assign(response.jobs[1], { id: 458,
+          url: 'https://api.github.com/repos/tyask/Cake/actions/jobs/458', check_run_url: 'https://api.github.com/repos/tyask/Cake/check-runs/347' });
+        else if (change === 'downgrade') {
+          // A valid legacy job still cannot replace the selected split job during retrieval.
+          response.jobs = [{ ...f.job, name: 'preview' }]; response.total_count = 1;
+        } else {
+          response.jobs[0].name = 'preview-verify'; response.jobs.push({ ...f.peer, name: 'preview' }); response.total_count = 2;
+        }
+      }
+      return value;
+    }, 123, f.request), /PREVIEW_JOB_CHANGED/);
+  }
+});
+
+test('skipped peer timestamps and steps are not required or included in execution snapshot comparison', async () => {
+  const f = verifyChecksFixture(true, true); let reads = 0;
+  assert.deepEqual(await readVerifyReceipt(async path => {
+    const value = await f.get(path);
+    if (path.endsWith('jobs?per_page=100&page=1') && ++reads === 2) {
+      const response = value as typeof f.jobs;
+      Object.assign(response.jobs[1], { started_at: null, completed_at: null, steps: [] });
+    }
+    return value;
+  }, 123, f.request), f.receipt);
+});
+
 test('verify requires the unique receipt publication step to have succeeded', async () => {
   for (const steps of [undefined, [], [{ name: 'other', number: 6, status: 'completed', conclusion: 'success' }],
     [{ name: 'Publish public operation receipt notice', number: 6, status: 'completed', conclusion: 'failure' }],

@@ -101,6 +101,16 @@ Ready条件や利用者の制限を省略して進めない。
 
 依存導入後、編集中は次を使う。`check:fast` はNode版・lint・型・依存境界・文書参照を順番に確認し、失敗した段階で停止する。Chromiumや実DBを使わない。
 CIもこの確認を先に行い、その後に全自動テストとbuildを実行する。
+通常CI・Previewの検証専用ジョブ・常設PreviewはPlaywright公式Dockerイメージ内で実行する。
+通常CIでは全自動テスト・build・CloudブラウザQAを同じコンテナで実行する。
+ブラウザーとOS依存ライブラリーは導入済みのものを使い、`PLAYWRIGHT_BROWSERS_PATH`は`/ms-playwright`を指定する。
+コンテナはUID/GID 1001で実行し、GitHub-hosted runnerとcheckout先の所有UIDを揃える。
+イメージのPlaywright版を`package-lock.json`と揃え、tagとdigestを一緒に更新する。
+Nodeはイメージ同梱版に依存せず、`actions/setup-node`で`.node-version`へ揃える。
+Previewのdeploy・status・cleanupはホスト上の`preview`ジョブ、verifyはコンテナ内の`preview-verify`ジョブで実行する。
+PR単位のworkflow concurrencyを共用し、操作間の直列化を維持する。
+正式noticeは実行したジョブ内の資格情報を持たない別stepで発行する。
+受信側は操作に対応するジョブと非実行側のskippedを照合し、旧mainの単一`preview`ジョブの証拠も受理する。
 
 ```bash
 npm run check:fast

@@ -36,7 +36,7 @@ jobs:
   preview:
     if: >-
       github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' &&
-      (github.event_name == 'workflow_dispatch' ||
+      ((github.event_name == 'workflow_dispatch' && inputs.action != 'verify') ||
        (github.event.pull_request.head.repo.full_name == github.repository &&
         startsWith(github.event.pull_request.head.ref, 'codex/')))
     runs-on: ubuntu-latest
@@ -58,9 +58,47 @@ jobs:
       - name: Check Node.js version
         run: npm run check:node
       - run: npm ci --ignore-scripts
-      - name: Install the official Playwright browser for verification
-        if: github.event_name == 'workflow_dispatch' && inputs.action == 'verify'
-        run: npx playwright install --with-deps chromium
+      - name: Run the requested operation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: node --import tsx scripts/preview/preview-workflow.ts
+      - name: Publish public operation receipt notice
+        if: success()
+        run: node --import tsx scripts/preview/preview-workflow.ts --notice
+  preview-verify:
+    if: >-
+      github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' && inputs.action == 'verify'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    container:
+      # Keep the Playwright version aligned with package-lock.json; update the digest with the tag.
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+      options: --init --user 1001:1001
+    defaults:
+      run:
+        shell: bash
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out trusted main only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Check Node.js version
+        run: npm run check:node
+      - run: npm ci --ignore-scripts
       - name: Run the requested operation
         env:
           GH_TOKEN: ${{ github.token }}

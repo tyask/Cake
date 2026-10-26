@@ -21,6 +21,15 @@ jobs:
     name: ci
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    container:
+      # Keep the Playwright version aligned with package-lock.json; update the digest with the tag.
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+      options: --init --user 1001:1001
+    defaults:
+      run:
+        shell: bash
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,9 +53,6 @@ jobs:
 
       - name: Fast checks
         run: npm run check:fast
-
-      - name: Install Chromium for browser isolation regression
-        run: npx playwright install --with-deps chromium
 
       - name: Test
         run: npm test

@@ -14,10 +14,10 @@ test('receipt GET follows a pinned workflow, exact attempt, operation job, suite
   assert.ok(f.calls.every(path => !path.startsWith('http')));
 });
 
-test('the notice reader accepts bounded deploy, status, and closed-PR cleanup receipts', async () => {
+test('legacy and split workflows accept deploy, status and closed-PR cleanup receipts from preview', async () => {
   const database = { branchId: 'br-preview-test', endpointId: 'ep-preview-test', hostDigest: 'd'.repeat(64) };
-  for (const action of ['deploy', 'status', 'cleanup'] as const) {
-    const f = checksFixture(action);
+  for (const action of ['deploy', 'status', 'cleanup'] as const) for (const splitJobs of [false, true]) {
+    const f = checksFixture(action, splitJobs);
     if (action === 'cleanup') f.request.source = { ...f.request.source, state: 'closed' };
     const receipt = { ...f.receipt, source: f.request.source, ...(action !== 'cleanup' ? { database,
       deployment: { id: 'dpl_previewtest', url: 'https://cake-preview-test.vercel.app', sha: f.request.source.sha,
@@ -25,6 +25,53 @@ test('the notice reader accepts bounded deploy, status, and closed-PR cleanup re
         phase: 'application', state: 'READY', createdAt: Date.parse('2026-10-16T00:30:00Z'), database } } : {}) };
     f.annotation.message = JSON.stringify(receipt);
     assert.deepEqual(await readPreviewReceipt(f.get, 123, f.request), receipt);
+    assert.equal(f.calls.filter(path => path.endsWith('jobs?per_page=100&page=1')).length, 2);
+    assert.equal(f.calls.includes('check-runs/346'), false);
+  }
+});
+
+test('split operation jobs require unique known names and never use a skipped selected job', async () => {
+  for (const inventory of ['missing-preview', 'duplicate-preview', 'duplicate-verify', 'skipped-preview'] as const) {
+    const f = checksFixture('status', true);
+    if (inventory === 'missing-preview') f.jobs.jobs.splice(0, 1);
+    else if (inventory === 'skipped-preview') f.job.conclusion = 'skipped';
+    else f.jobs.jobs.push({ ...(inventory === 'duplicate-preview' ? f.job : f.peer), id: 458,
+      url: 'https://api.github.com/repos/tyask/Cake/actions/jobs/458', check_run_url: 'https://api.github.com/repos/tyask/Cake/check-runs/347' });
+    f.jobs.total_count = f.jobs.jobs.length;
+    await assert.rejects(readPreviewReceipt(f.get, 123, f.request), /PREVIEW_JOB_(AMBIGUOUS|CHANGED)/);
+    assert.equal(f.calls.some(path => path.startsWith('check-runs/')), false);
+  }
+});
+
+test('a split operation peer must be skipped and match the exact run, attempt, head and canonical URLs', async () => {
+  for (const patch of [
+    { status: 'queued' }, { status: 'in_progress' }, { conclusion: 'success' }, { conclusion: 'failure' }, { conclusion: 'cancelled' },
+    { run_id: 124 }, { run_attempt: 2 }, { head_sha: 'c'.repeat(40) }, { head_branch: 'codex/test' },
+    { url: 'https://evil.example/jobs/457' }, { run_url: 'https://evil.example/runs/123' },
+    { check_run_url: 'https://api.github.com/repos/tyask/Cake/check-runs/346?x=1' },
+  ]) {
+    const f = checksFixture('status', true); Object.assign(f.peer, patch);
+    await assert.rejects(readPreviewReceipt(f.get, 123, f.request), /PREVIEW_(JOB_CHANGED|CHECK_URL)/);
+    assert.equal(f.calls.some(path => path.startsWith('check-runs/')), false);
+  }
+});
+
+test('operation receipt rereads reject selected job, skipped peer and legacy/split inventory changes', async () => {
+  for (const change of ['selected', 'peer-state', 'peer-identity', 'remove-peer', 'add-peer'] as const) {
+    const f = checksFixture('status', change !== 'add-peer'); let reads = 0;
+    await assert.rejects(readPreviewReceipt(async path => {
+      const value = await f.get(path);
+      if (path.endsWith('jobs?per_page=100&page=1') && ++reads === 2) {
+        const response = value as typeof f.jobs;
+        if (change === 'selected') Object.assign(response.jobs[0], { completed_at: '2026-10-16T01:00:03Z' });
+        else if (change === 'peer-state') Object.assign(response.jobs[1], { conclusion: 'success' });
+        else if (change === 'peer-identity') Object.assign(response.jobs[1], { id: 458,
+          url: 'https://api.github.com/repos/tyask/Cake/actions/jobs/458', check_run_url: 'https://api.github.com/repos/tyask/Cake/check-runs/347' });
+        else if (change === 'remove-peer') { response.jobs.pop(); response.total_count = 1; }
+        else { response.jobs.push(f.peer); response.total_count = 2; }
+      }
+      return value;
+    }, 123, f.request), /PREVIEW_JOB_CHANGED/);
   }
 });
 

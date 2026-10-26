@@ -3,7 +3,7 @@ import { receiptNoticeTitle } from '../../../scripts/preview/preview-receipt';
 import type { PreviewGet, ReceiptRequest } from '../../../scripts/preview/preview-checks';
 
 export const receiptSource: Source = { pr: 71, branch: 'codex/test', sha: 'a'.repeat(40), createdAt: '2026-10-16T00:00:00Z', state: 'open' };
-export function checksFixture(action: 'deploy' | 'status' | 'cleanup' = 'status') {
+export function checksFixture(action: 'deploy' | 'status' | 'cleanup' = 'status', splitJobs = false) {
   const mainSha = 'b'.repeat(40), operation = '12345678-1234-4234-8234-123456789abc';
   const request: ReceiptRequest = { action, source: receiptSource, operation, controlSha: mainSha, workflowId: 45 };
   const url = (path: string) => `https://api.github.com/repos/${config.repository}/${path}`;
@@ -17,7 +17,9 @@ export function checksFixture(action: 'deploy' | 'status' | 'cleanup' = 'status'
     url: url('actions/runs/123'), check_suite_url: url('check-suites/234'), created_at: '2026-10-16T01:00:00Z', updated_at: '2026-10-16T01:00:05Z' };
   const job = { id: 456, name: 'preview', run_id: 123, run_attempt: 1, head_sha: mainSha, head_branch: 'main', status: 'completed', conclusion: 'success',
     url: url('actions/jobs/456'), run_url: run.url, check_run_url: url('check-runs/345'), started_at: started, completed_at: completed };
-  const jobs = { total_count: 1, jobs: [job] };
+  const peer = { id: 457, name: 'preview-verify', run_id: 123, run_attempt: 1, head_sha: mainSha, head_branch: 'main',
+    status: 'completed', conclusion: 'skipped', url: url('actions/jobs/457'), run_url: run.url, check_run_url: url('check-runs/346') };
+  const jobs = { total_count: splitJobs ? 2 : 1, jobs: splitJobs ? [job, peer] : [job] };
   const suite = { id: 234, url: run.check_suite_url, head_sha: mainSha, head_branch: 'main', repository, app, status: 'completed', conclusion: 'success' };
   const check = { id: 345, url: job.check_run_url, name: 'preview', head_sha: mainSha, check_suite: { id: 234 }, app,
     status: 'completed', conclusion: 'success', started_at: started, completed_at: completed,
@@ -34,5 +36,5 @@ export function checksFixture(action: 'deploy' | 'status' | 'cleanup' = 'status'
     if (!responses.has(path)) throw new Error(`Unexpected fixture path: ${path}`);
     return structuredClone(responses.get(path));
   };
-  return { get, calls, responses, request, mainSha, operation, workflow, run, jobs, job, suite, check, receipt, annotation };
+  return { get, calls, responses, request, mainSha, operation, workflow, run, jobs, job, peer, suite, check, receipt, annotation };
 }
