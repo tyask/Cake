@@ -162,21 +162,47 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
           assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "明細ポップアップが横にはみ出さない");
           return button;
         }
+        async function amount(id: string, value: number) {
+          const item = dialog.locator(`[data-transaction-id="${id}"]:visible`);
+          const expected = formatCashflow(-value);
+          if (width <= 768) await item.locator("summary").getByText(expected, { exact: true }).waitFor();
+          else assert.equal(await item.locator("td").nth(4).textContent(), expected);
+        }
+        async function expandedAmount(id: string, label: string, value: number) {
+          const item = dialog.locator(`[data-transaction-id="${id}"]:visible`);
+          const field = item.locator("dl > div").filter({ has: f.page.locator("dt", { hasText: label }) });
+          assert.equal(await field.locator("dt").textContent(), label);
+          assert.equal(await field.locator("dd").textContent(), formatCashflow(-value));
+        }
         await f.page.clock.setFixedTime(new Date("2026-10-24T02:00:00Z"));
         await open("食費", ["grocery-shared", "food-personal"]);
+        await amount("grocery-shared", 60);
+        await amount("food-personal", 20);
+        await dialog.getByText("明細の金額は自分への配分後の金額です。", { exact: false }).waitFor();
+        if (width > 768) await dialog.getByRole("columnheader", { name: "自分の配分（円）", exact: true }).waitFor();
         await dialog.getByText("明細のメモ", { exact: true }).first().waitFor({ state: width <= 768 ? "hidden" : "visible" });
         if (width <= 768) {
           await dialog.locator('[data-transaction-id="grocery-shared"]:visible summary').click();
           await dialog.locator('[data-transaction-id="grocery-shared"]:visible').getByText("明細のメモ", { exact: true }).waitFor();
+          await expandedAmount("grocery-shared", "自分の配分（円）", 60);
         }
         await f.page.keyboard.press("Escape");
         await dialog.waitFor({ state: "hidden" });
         assert.equal(await food.evaluate(element => element === document.activeElement), true, "Escapeで操作元のカテゴリへfocusを戻す");
         await f.page.getByRole("checkbox", { name: "個人費", exact: true }).uncheck();
         await open("食費", ["grocery-shared"]);
+        await amount("grocery-shared", 60);
         await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
         await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check();
         await open("食費", ["grocery-shared", "grocery-other"]);
+        await amount("grocery-shared", 100);
+        await amount("grocery-other", 50);
+        await dialog.getByText("明細の金額は取引全額です。", { exact: false }).waitFor();
+        if (width > 768) await dialog.getByRole("columnheader", { name: "金額（円）", exact: true }).waitFor();
+        else {
+          await dialog.locator('[data-transaction-id="grocery-shared"]:visible summary').click();
+          await expandedAmount("grocery-shared", "金額（円）", 100);
+        }
         await dialog.getByRole("button", { name: "明細一覧を閉じる", exact: true }).click();
         await f.page.getByRole("radio", { name: "自分の収支", exact: true }).check();
         await f.page.getByRole("checkbox", { name: "個人費", exact: true }).check();

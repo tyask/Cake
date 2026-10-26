@@ -38,5 +38,6 @@ export function selectAnalyticsTransactions(
     amounts.set(item.id, amount);
     return true;
   });
-  return { transactions: selected, totalYen: selected.reduce((sum, item) => sum + BigInt(amounts.get(item.id)!), BigInt(0)) };
+  return { transactions: selected, amountsYen: amounts,
+    totalYen: selected.reduce((sum, item) => sum + BigInt(amounts.get(item.id)!), BigInt(0)) };
 }

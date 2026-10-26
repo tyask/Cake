@@ -19,9 +19,10 @@ type Props = {
   onRetry?: () => void;
   onClose: () => void;
   emptyMessage?: string;
+  amountDisplay?: { label: string; amountsYen: ReadonlyMap<string, number> };
 };
 
-export function TransactionListDialog({ title, description, state, onRetry, onClose, emptyMessage = "表示する明細はありません。" }: Props) {
+export function TransactionListDialog({ title, description, state, onRetry, onClose, emptyMessage = "表示する明細はありません。", amountDisplay }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const titleId = useId(), descriptionId = useId();
@@ -42,9 +43,13 @@ export function TransactionListDialog({ title, description, state, onRetry, onCl
   const categoryLabel = (item: TransactionRecord) => item.categoryId
     ? categoryLabels.get(item.categoryId) ?? "利用できないカテゴリ" : "未分類";
   const settlementLabel = (item: TransactionRecord) => item.expenseClass === "PERSONAL" ? "対象外" : item.settledAt ? "清算済み" : "未清算";
-  const amount = (item: TransactionRecord) => <span className={item.amountYen === 0 ? undefined : item.type === "PAYMENT" ? "negative" : "positive"}>
-    {formatTransactionAmount(item.type, item.amountYen)}
-  </span>;
+  const amountLabel = amountDisplay?.label ?? "金額（円）";
+  const amount = (item: TransactionRecord) => {
+    const amountYen = amountDisplay?.amountsYen.get(item.id) ?? item.amountYen;
+    return <span className={amountYen === 0 ? undefined : item.type === "PAYMENT" ? "negative" : "positive"}>
+      {formatTransactionAmount(item.type, amountYen)}
+    </span>;
+  };
 
   return <dialog ref={dialog} className={styles.dialog} aria-labelledby={titleId}
     aria-describedby={description == null ? undefined : descriptionId}
@@ -66,7 +71,7 @@ export function TransactionListDialog({ title, description, state, onRetry, onCl
           <table className={styles.table} aria-label={title}>
             <colgroup>{["date", "merchant", "method", "type", "amount", "actor", "expense", "category", "settlement", "memo"].map(name => <col key={name} className={styles[name]} />)}</colgroup>
             <thead><tr><th scope="col">取引日時</th><th scope="col">取引先</th><th scope="col">方法</th><th scope="col">種別</th>
-              <th scope="col">金額（円）</th><th scope="col">支払者 / 受取者</th><th scope="col">区分</th><th scope="col">カテゴリ</th><th scope="col">清算</th><th scope="col">メモ</th></tr></thead>
+              <th scope="col">{amountLabel}</th><th scope="col">支払者 / 受取者</th><th scope="col">区分</th><th scope="col">カテゴリ</th><th scope="col">清算</th><th scope="col">メモ</th></tr></thead>
             <tbody>{state.transactions.map(item => <tr key={item.id} data-transaction-id={item.id}>
               <td><time dateTime={item.occurredAt}>{formatJstDateTime(item.occurredAt)}</time></td>
               <td><b>{item.merchant}</b></td><td>{item.method}</td><td>{transactionTypeLabels[item.type]}</td>
@@ -87,7 +92,7 @@ export function TransactionListDialog({ title, description, state, onRetry, onCl
               <div><dt>取引日時</dt><dd><time dateTime={item.occurredAt}>{formatJstDateTime(item.occurredAt)}</time></dd></div>
               <div><dt>取引先</dt><dd>{item.merchant}</dd></div>
               <div><dt>{transactionActorLabels[item.type]}</dt><dd>{item.actorName}</dd></div>
-              <div><dt>金額（円）</dt><dd>{amount(item)}</dd></div>
+              <div><dt>{amountLabel}</dt><dd>{amount(item)}</dd></div>
               <div><dt>方法</dt><dd>{item.method}</dd></div>
               <div><dt>種別</dt><dd>{transactionTypeLabels[item.type]}</dd></div>
               <div><dt>区分</dt><dd>{expenseClassLabels[item.expenseClass]}</dd></div>

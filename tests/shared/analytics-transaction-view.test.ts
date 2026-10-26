@@ -26,10 +26,19 @@ const selection: AnalyticsTransactionSelection = {
 
 test("明細も集計と同じ参加者順の余り円を配分し、個別配分0円を除外する", () => {
   const entries = [payment("tie"), payment("unequal", { amountYen: 2147483647, splitWeights: { a: 1, b: 2 } })];
+  const original = structuredClone(entries);
   const result = selectAnalyticsTransactions(entries, members, period, prepared, selection);
   assert.deepEqual(result.transactions.map(item => item.id), ["tie", "unequal"]);
+  assert.deepEqual([...result.amountsYen], [["tie", 1], ["unequal", 1431655765]]);
   assert.equal(result.totalYen, BigInt(1431655766));
-  assert.deepEqual(selectAnalyticsTransactions([entries[0]], members, period, prepared, { ...selection, currentUserId: "a" }).transactions, []);
+  const noShare = selectAnalyticsTransactions([entries[0]], members, period, prepared, { ...selection, currentUserId: "a" });
+  assert.deepEqual(noShare.transactions, []);
+  assert.equal(noShare.amountsYen.size, 0);
+  const shared = selectAnalyticsTransactions(entries, members, period, prepared, { ...selection, viewMode: "shared" });
+  assert.deepEqual([...shared.amountsYen], [["tie", 1], ["unequal", 2147483647]]);
+  assert.equal(shared.totalYen, BigInt(2147483648));
+  assert.deepEqual(entries, original, "配分後の表示金額を作っても保存済みの取引全額・割合は変更しない");
+  assert.equal(result.transactions[1], entries[1], "表示値は元のTransactionRecordとは別に持つ");
 });
 
 test("親集約・直接設定・選択カテゴリとJST境界を維持し、収入と相手個人を除く", () => {
