@@ -24,7 +24,7 @@ jobs:
     container:
       # Keep the Playwright version aligned with package-lock.json; update the digest with the tag.
       image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
-      options: --init
+      options: --init --user 1001:1001
     defaults:
       run:
         shell: bash

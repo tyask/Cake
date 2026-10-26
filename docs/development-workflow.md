@@ -103,6 +103,7 @@ Ready条件や利用者の制限を省略して進めない。
 CIもこの確認を先に行い、その後に全自動テストとbuildを実行する。
 通常CIはPlaywright公式Dockerイメージ内で全自動テスト・build・CloudブラウザQAを実行する。
 ブラウザーとOS依存ライブラリーは導入済みのものを使い、`PLAYWRIGHT_BROWSERS_PATH`は`/ms-playwright`を指定する。
+コンテナはUID/GID 1001で実行し、GitHub-hosted runnerとcheckout先の所有UIDを揃える。
 イメージのPlaywright版を`package-lock.json`と揃え、tagとdigestを一緒に更新する。
 Nodeはイメージ同梱版に依存せず、`actions/setup-node`で`.node-version`へ揃える。
 Preview検証・常設Previewは標準ヘッドレス実行を使うため、
