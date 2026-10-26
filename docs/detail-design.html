@@ -1013,12 +1013,12 @@ amountYen         = abs(payer.balance)</div>
         </section>
 
         <section id="analytics">
-          <h2>9.1 支出の集計API・グラフ</h2>
+          <h2>9.1 収支の集計API・支出グラフ</h2>
           <p><code>lib/shared/analytics.ts</code>にquery schema、JST期間、DTO・表示条件・金額型を定義し、<code>lib/shared/analytics-view.ts</code>が集計済みデータから表示値を純粋計算する。<code>app/api/analytics/route.ts</code>が認証・handler・storeを配線する。<code>lib/server/handlers/analytics-handler.ts</code>はHTTP入力と応答、<code>lib/server/stores/analytics-store.ts</code>は認可を含む集合SQLを担当する。</p>
           <h3>取得条件と表示条件</h3>
           <p>幅48rem以下の条件欄では期間選択と月入力を2列に配置する。月・開始日・終了日の入力は固有幅で列を押し広げず、各列の内側に収める。</p>
           <p>GETのqueryは<code>workspaceId</code>と<code>period=month&amp;month=YYYY-MM</code>または<code>period=range&amp;from=YYYY-MM-DD&amp;to=YYYY-MM-DD</code>。実在する日付・未来不可・開始終了順・最大24暦月を共有schemaで検証し、サーバーの現在日時から今回・比較元・月次の3範囲を確定する。各範囲は日本時間の開始日・終了日を含む。今月は本日まで、過去月は月全体、指定期間は入力どおりで、比較元は前月同日まで／前暦月全体／直前の同日数。月次は終了月を含む6暦月で、今月だけ本日を上限とする。</p>
-          <p>表示対象（自分の支出／共有費全体）とカテゴリ深さは画面Stateで所有し、APIのqueryに含めない。初期表示は本人の共有費負担＋本人個人費とし、共有費全体では全員のSHARED bucketだけを合算する。切替と階層変更は通信しない。入力途中の指定日付と取得に適用した期間を分け、適用操作でのみ取得条件を変更する。</p>
+          <p>表示対象（自分の収支／共有費全体）・本人用の共有費／個人費チェック・カテゴリ深さは画面Stateで所有し、APIのqueryに含めない。本人モードは本人の共有配分＋個人収支を初期値とし、チェックを収入・支出の両方へ適用する。両方OFFは案内表示とし、0円結果とは区別する。共有費全体は全員のSHARED支出だけを合算し、本人チェックを使わない。モード往復でチェックを保持し、切替・チェック・階層変更は通信しない。入力途中の日付と取得適用期間を分け、期間の適用操作だけで再取得する。</p>
           <div class="data-flow">
             <div class="data-flow-head"><h3>集計取得とローカル切替</h3><small>取得キーと表示条件を分離</small></div>
             <div class="dfd-track" role="img" aria-label="期間変更で全員分の集約を取得し、表示対象変更は保持した集計済みデータから表示値だけを合成する">
@@ -1028,29 +1028,30 @@ amountYen         = abs(payer.balance)</div>
               <div class="dfd-arrow"><b>→</b><small>1集計SQL</small></div>
               <div class="dfd-node store"><strong>Neon</strong><small>最新所属・全員配分・範囲別SUM</small></div>
               <div class="dfd-arrow"><b>→</b><small>AnalyticsDataset</small></div>
-              <div class="dfd-node output"><strong>集計hook</strong><small>1 snapshotの金額・参加者・カテゴリ</small></div>
+              <div class="dfd-node output"><strong>集計hook</strong><small>1 snapshotの支出・収入・参加者・カテゴリ</small></div>
             </div>
-            <div class="dfd-track" role="img" aria-label="表示対象・階層の操作はAPIを呼ばず、集計済みbucketから3グラフと表を更新する">
-              <div class="dfd-node source"><strong>表示対象 / 階層</strong><small>画面の表示条件</small></div>
+            <div class="dfd-track" role="img" aria-label="表示対象・区分・階層の操作はAPIを呼ばず、集計済みbucketから3グラフと表を更新する">
+              <div class="dfd-node source"><strong>表示対象 / 区分 / 階層</strong><small>画面の表示条件</small></div>
               <div class="dfd-arrow"><b>→</b><small>通信なし</small></div>
-              <div class="dfd-node process"><strong>buildAnalyticsView</strong><small>選択bucketをBigIntで合算</small></div>
+              <div class="dfd-node process"><strong>buildAnalyticsView</strong><small>支出・収入の選択bucketをBigIntで合算</small></div>
               <div class="dfd-arrow"><b>→</b><small>同じ条件</small></div>
-              <div class="dfd-node output"><strong>構成比 / 推移 / 差分</strong><small>図と全カテゴリの一覧・表</small></div>
+              <div class="dfd-node output"><strong>本人の収支表 / 支出グラフ</strong><small>概要・構成比・推移・差分</small></div>
             </div>
           </div>
           <h3>集約SQLと整数配分</h3>
           <p>本人の有効性確認1 SQLの後、集計storeは本人有効性・現在のworkspace所属・参加者・カテゴリ・集約を同じ1 statementで取得する。通常2 DB往復で、明細や人数に比例する通信を増やさない。GETは初期workspaceも作成せず、未認証401・未所属403・不正入力400・保存データ不整合や取得失敗500を返す。</p>
-          <p>対象は3範囲のいずれかに入る一意な<code>PAYMENT</code>で、SHAREDまたはactor_user_id本人に限定する。相手のPERSONALは保存割合検証・配分・集約より前に除外し、金額・件数・不正割合のエラーを漏らさない。清算状態・source・カテゴリ確認状態にかかわらず取得し、<code>RECEIPT</code>は除く。保存<code>split_weights</code>から各人の整数商と剰余を求め、余り円を剰余降順・<code>joined_at ASC, user_id ASC</code>の順に配分する。全員の配分を確定してから範囲へJOINし、重なった範囲でも配分前の明細が増えないようにする。個人費は担当者100%、不正な保存割合や担当者を黙って補正しない。</p>
+          <p>対象は3範囲のいずれかに入る一意な<code>PAYMENT</code>と<code>RECEIPT</code>で、SHAREDまたはactor_user_id本人に限定する。相手のPERSONALは支出・収入とも保存割合検証・配分・集約より前に除外し、金額・件数・不正割合のエラーを漏らさない。清算状態・source・カテゴリ確認状態にかかわらず取得する。保存<code>split_weights</code>から整数商と剰余を求め、余り円を剰余降順・<code>joined_at ASC, user_id ASC</code>の順に配分する。全員の配分確定後に範囲へJOINし、重なった期間で配分前の明細を増やさない。個人費は担当者100%とし、不正な保存割合や担当者を黙って補正しない。種別ごとに集約し、支出のbucketsと収入のreceiptBucketsを混在させない。</p>
           <p>現行の<code>splitAmounts</code>と同じ明細ごとの整数円を合計するため、全員の負担額は支払総額に一致する。清算の「分数を全件合算して最後に丸める」計算とは目的・丸めの単位が異なる。清算の対象や保存結果は変更しない。TSとSQLの配分を共通fixtureで照合する。</p>
           <p>SQLはUTCへ換算した境界に対する<code>occurred_at &gt;= start AND occurred_at &lt; endExclusive</code>を使い、workspace/date indexを利用できる形にする。金額と重みの積・除算・最終SUMは整数精度を保ち、集計額をSQL内でtext化する。取引先・明細ID・保存割合などの生データは返さない。事前集計テーブルや用途未検証のindexは設けない。</p>
           <h3>DTOと表示計算</h3>
-          <p><code>AnalyticsDataset</code>は<code>workspaceId / snapshotAt / timeZone / periods / members / categories / buckets</code>。bucketは<code>scope(current|comparison|trend) / month / memberId / expenseClass / categoryId / burdenYen</code>で、burdenYenは非負10進整数文字列。0円のみの組合せは省略でき、欠落を0円として扱う。scopeごとに合計し、別scopeを合算しない。月次の欠落月は範囲から0円を補う。</p>
+          <p>本人モードはcaption付きの表に収入・支出・収支を3行で表示し、formatCashflowとcashflowClassで符号・色を統一する。収入のみ・0円も表を表示し、支出グラフが空であることと区別する。共有費全体では従来の3カードと支出グラフを維持する。本人モードのグラフと内訳表も支出専用であることを説明し、チェックに追従させる。表示形式の変更はAPIへ送らない。</p>
+          <p><code>AnalyticsDataset</code>は<code>workspaceId / snapshotAt / timeZone / periods / members / categories / buckets / receiptBuckets</code>。bucketsは支出、receiptBucketsは収入とし、どちらも<code>scope(current|comparison|trend) / month / memberId / expenseClass / categoryId / burdenYen</code>の配列を必須で返す。金額は非負10進整数文字列で、0円のみの組合せは省略して欠落を0円として扱う。scopeを混在させず、月次の欠落月を0円で補う。<code>prepareAnalyticsDataset()</code>は両配列をBigIntへ変換し、<code>buildAnalyticsView()</code>が同じmemberIds・expenseClassesでcashflowの収入・支出・収支、比較期間と月次を算出する。既存のtotalYen・rows・chartRowsは支出だけを保持する。</p>
           <p>参加者・カテゴリは金額と同じsnapshotの情報を使い、metadataの別応答を後から混ぜない。停止中の参加者、旧使用停止カテゴリ、未分類も集計に含む。現在の名称・階層・色で表示し、カテゴリの削除で参照解除された明細は未分類とする。親やrootへの対応表はdatasetの更新時に準備し、フィルタ変更時の祖先探索を繰り返さない。</p>
           <p>カテゴリ粒度は最上位、任意の途中階層、全階層。深い設定は祖先へ集約し、浅い親に直接設定された額を失わず、親集計と子を二重計上しない。全階層で親への直接設定は「直接設定」と表示する。比較元だけのカテゴリも差分に残す。図の共通系列は今回・比較元・各月の最大額順の上位8件＋その他＋未分類、同額はカテゴリ表示順・IDで固定する。一覧・表は全カテゴリ。</p>
           <p>円の描画時は共通系列のうち対象期間が正の項目を取り出し、その他・未分類も含め対象期間の整数金額の降順へ安定整列する。同額は共通系列の順を保つ。開始角90度・終了角−270度とし、12時から時計回りに表示する。他の図と一覧の系列順は変えない。円と棒の金額は領域内へ重ね、描画領域に収まらなければ省略する。月次棒は横置きを優先し、長辺方向に収まる場合は回転して表示する。金額ラベルは背景カテゴリ色に応じた白または黒の文字色で判読性を確保し、金額ラベルは操作を遮らない。中央合計も実際の内円へ収め、文字サイズと改行を調整する。12px以上で全桁を表示できない場合は中央の金額を省略し、画面上部の負担額で全桁を確認できる。円のコンテナは中間幅のgrid配置でも幅を確保する。</p>
           <p>加算・差額・率計算はBigIntを使う。構成比・増減率は小数1桁で表示し、比較元0円は0÷0も含め率を算出しない。Rechartsへ渡すNumberは座標用だけとし、金額はグラフ内のラベルも含め元の整数値からformatYenで表示する。支出額は負へ変換せず、合計・表・ツールチップ・中央合計を符号なしの通常色で表示する。グラフ内の金額も符号なしとし、背景との可読性で文字色を選ぶ。面積・積上げの座標と構成比は非負の金額を使う。前期間との差額は<code>totalYen - comparisonYen</code>とし、支出増を正、支出減を負として通常色で表示する。差額に限って正は＋、負は−を付け、増減がない場合は無符号とする。API/表示計算の非負金額と差額の内部契約は保持し、率は支出の増減として説明する。ラベルが省略されても一覧・表とツールチップで全額を確認できる。複数人の個別件数を足した取引件数は表示しない。</p>
           <h3>取得・保存・遅延応答</h3>
-          <p>集計panelは同じworkspace内のタブ切替でStateを保持する。同階層の条件付きpanelと識別子が衝突しないよう、Reactのkeyには画面種別とworkspace IDを組み合わせる。初回表示・再入場・期間変更・明示更新・保存後の無効化で取得する。未選択でも期間取得は行い、その後ONへ戻して追加通信しない。取得中にcheckboxを変えても応答は保持し、最新の表示条件で描画する。workspace・期間・保存後世代・要求順が古い応答は破棄する。workspace切替中は旧グラフを非表示とし、切替先で条件を初期化する。切替後の別タブ取得により元の要求を破棄しても切替中を保持し、最新の取得が採用されたときだけ解除する。最新の取得が失敗した場合は以前のworkspaceへ戻して解除し、遅い旧応答を採用しない。</p>
+          <p>集計panelは同じworkspace内のタブ切替でStateを保持する。同階層の条件付きpanelと識別子が衝突しないよう、Reactのkeyには画面種別とworkspace IDを組み合わせる。初回表示・再入場・期間変更・明示更新・保存後の無効化で取得する。本人チェックが全OFFでも期間取得は行い、その後ONへ戻して追加通信しない。取得中にcheckboxを変えても応答は保持し、最新の表示条件で描画する。workspace・期間・保存後世代・要求順が古い応答は破棄する。workspace切替中は旧グラフを非表示とし、切替先で条件を初期化する。切替後の別タブ取得により元の要求を破棄しても切替中を保持し、最新の取得が採用されたときだけ解除する。最新の取得が失敗した場合は以前のworkspaceへ戻して解除し、遅い旧応答を採用しない。</p>
           <p>期間変更中は読込表示とし、旧期間のグラフを新条件の結果として見せない。取得失敗は選択を保持して再試行を表示し、0円の成功へ置き換えない。明細の未保存入力は含めず、保存成功後に世代を進める。グラフは遅延importし、未訪問タブでRechartsを読み込まない。PCホバー・キーボード、mobileタップ、全カテゴリの表を用意する。</p>
         </section>
 

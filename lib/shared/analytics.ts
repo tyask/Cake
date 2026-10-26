@@ -28,15 +28,32 @@ export type AnalyticsDataset = {
   members: { id: string; name: string }[];
   categories: Category[];
   buckets: AnalyticsBucket[];
+  receiptBuckets: AnalyticsBucket[];
 };
 export type AnalyticsFilters = { memberIds: string[]; expenseClasses: ExpenseClass[]; depth: number | "all" };
 export type AnalyticsRow = {
   id: string; name: string; path: string; label: string; colorHex: string;
   currentYen: bigint; comparisonYen: bigint; monthlyYen: bigint[];
 };
+export type AnalyticsCashflowMonth = {
+  month: string;
+  incomeYen: bigint;
+  expenseYen: bigint;
+  balanceYen: bigint;
+};
+export type AnalyticsCashflow = {
+  incomeYen: bigint;
+  expenseYen: bigint;
+  balanceYen: bigint;
+  comparisonIncomeYen: bigint;
+  comparisonExpenseYen: bigint;
+  comparisonBalanceYen: bigint;
+  months: AnalyticsCashflowMonth[];
+};
 export type AnalyticsView = {
   totalYen: bigint; comparisonYen: bigint; differenceYen: bigint; rate: string | null;
   months: string[]; rows: AnalyticsRow[]; chartRows: AnalyticsRow[];
+  cashflow: AnalyticsCashflow;
 };
 
 const DAY_MS = 86_400_000;
