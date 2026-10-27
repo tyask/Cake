@@ -47,7 +47,6 @@ export async function findAnalyticsTransactions(
         FROM transactions t JOIN authorized a ON a.id = t.workspace_id
         JOIN app_users u ON u.id = t.actor_user_id
         WHERE t.type = 'PAYMENT'
-          AND (t.expense_class = 'SHARED' OR t.actor_user_id = ${userId})
           AND t.occurred_at >= ${period.from}::date::timestamp AT TIME ZONE 'Asia/Tokyo'
           AND t.occurred_at < (${period.to}::date + 1)::timestamp AT TIME ZONE 'Asia/Tokyo'
       ), '[]'::jsonb) AS transactions

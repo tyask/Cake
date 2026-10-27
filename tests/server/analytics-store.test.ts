@@ -142,12 +142,13 @@ test("集計の実SQLは保存割合の整数配分・対象期間・認可を�
       .map(bucket => [bucket.scope, bucket.month, bucket.memberId, bucket.expenseClass, bucket.burdenYen]), [
         ["comparison", "2026-09", a, "SHARED", "1"],
         ["current", "2026-10", a, "PERSONAL", "29"],
+        ["current", "2026-10", b, "PERSONAL", "41"],
         ["trend", "2026-09", a, "SHARED", "1"],
         ["trend", "2026-10", a, "PERSONAL", "29"],
+        ["trend", "2026-10", b, "PERSONAL", "41"],
       ]);
-    assert.ok(!result.receiptBuckets.some(bucket => bucket.expenseClass === "PERSONAL" && bucket.memberId === b));
     const partner = await read(workspaceId, b);
-    assert.ok(!partner.receiptBuckets.some(bucket => bucket.expenseClass === "PERSONAL" && bucket.memberId === a));
+    assert.deepEqual(partner.receiptBuckets, result.receiptBuckets, "所属者双方が同じ収入集約を参照できる");
     assert.equal(partner.receiptBuckets.find(bucket => bucket.scope === "current" && bucket.categoryId === id
       && bucket.expenseClass === "PERSONAL" && bucket.memberId === b)?.burdenYen, "41");
   });
@@ -196,7 +197,7 @@ test("集計の実SQLは保存割合の整数配分・対象期間・認可を�
     assert.deepEqual((await read(workspaceId, a, separate)).buckets.filter(bucket => bucket.categoryId === id).map(bucket => bucket.burdenYen), ["50"]);
   });
 
-  await t.test("全source・清算済・本人個人費・未確認と使用停止カテゴリを含め、収入と支出を分離し別workspaceは除外する", async () => {
+  await t.test("全source・清算済・全員の個人費・未確認と使用停止カテゴリを含め、収入と支出を分離し別workspaceは除外する", async () => {
     const id = await category("全source"), archived = await category("使用停止"), foreign = await category("別家計カテゴリ", otherWorkspaceId);
     for (const source of ["MANUAL", "PAYPAY", "RECURRING"]) await insert(101, { [a]: 1, [b]: 2 }, id, { source, settled: true });
     await insert(97, { [a]: 1, [b]: 0 }, archived);
@@ -214,10 +215,10 @@ test("集計の実SQLは保存割合の整数配分・対象期間・認可を�
     assert.equal(current.find(bucket => bucket.categoryId === archived)?.burdenYen, "97");
     assert.deepEqual(result.receiptBuckets.filter(bucket => bucket.scope === "current" && bucket.categoryId === id)
       .map(bucket => [bucket.memberId, bucket.burdenYen]), [[a, "1000"]], "同じカテゴリでも収入を支出へ混ぜない");
-    assert.ok(!current.some(bucket => bucket.expenseClass === "PERSONAL" && bucket.memberId === b));
+    assert.equal(current.find(bucket => bucket.expenseClass === "PERSONAL" && bucket.memberId === b)?.burdenYen, "31");
     assert.equal(current.find(bucket => bucket.categoryId === null && bucket.expenseClass === "PERSONAL" && bucket.memberId === a)?.burdenYen, "23");
     const partner = await read(workspaceId, b);
-    assert.ok(!partner.buckets.some(bucket => bucket.expenseClass === "PERSONAL" && bucket.memberId === a));
+    assert.deepEqual(partner.buckets, result.buckets, "所属者双方が同じ支出集約を参照できる");
     assert.equal(partner.buckets.find(bucket => bucket.scope === "current" && bucket.expenseClass === "PERSONAL" && bucket.memberId === b)?.burdenYen, "31");
     assert.ok(result.categories.find(item => item.id === archived)?.archivedAt);
     assert.ok(!result.categories.some(item => item.id === foreign));
@@ -248,16 +249,13 @@ test("集計の実SQLは保存割合の整数配分・対象期間・認可を�
     assert.deepEqual((await memory.query("SELECT count(*)::text AS count FROM workspaces")).rows, before);
   });
 
-  await t.test("相手の個人支出・収入は不正な保存割合でも集計とエラーに影響しない", async () => {
-    const before = await read();
+  await t.test("相手の個人支出・収入も保存割合を検証し、不正データは双方の集計で拒否する", async () => {
     for (const type of ["PAYMENT", "RECEIPT"]) {
       const hidden = await insert(987654, { [a]: 0, [b]: 1 }, null, { type, expenseClass: "PERSONAL", actor: b });
       await memory.exec("ALTER TABLE transactions DISABLE TRIGGER transactions_complete_split");
       try {
         await memory.query("UPDATE transactions SET split_weights='{}'::jsonb WHERE id=$1", [hidden]);
-        const actual = await read();
-        assert.deepEqual(actual.buckets, before.buckets);
-        assert.deepEqual(actual.receiptBuckets, before.receiptBuckets);
+        await assert.rejects(read(), /保存済み負担割合が不正/);
         await assert.rejects(read(workspaceId, b), /保存済み負担割合が不正/);
         await memory.query("DELETE FROM transactions WHERE id=$1", [hidden]);
       } finally { await memory.exec("ALTER TABLE transactions ENABLE TRIGGER transactions_complete_split"); }

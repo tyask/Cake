@@ -369,3 +369,36 @@ test("選択後の上位8件とその他を再計算し、巨大整数を含む�
   }
   assert.equal(view.chartRows.reduce((sum, row) => sum + row.monthlyYen.at(-1)!, BigInt(0)), BigInt(exact) + BigInt(162));
 });
+
+test("収入の選択は共有費・個人費の支出選択から独立し、ユーザーとカテゴリは共通で絞る", () => {
+  const payments = [bucket("対象", "50"), bucket("対象", "70", { expenseClass: "PERSONAL" }),
+    bucket("対象", "90", { memberId: "b", expenseClass: "PERSONAL" })];
+  const receipts = [bucket("対象", "300"), bucket("対象", "500", { expenseClass: "PERSONAL" }),
+    bucket("対象", "900", { memberId: "b", expenseClass: "PERSONAL" }), bucket("対象外", "700")];
+  const prepared = prepareAnalyticsDataset(dataset(
+    payments.flatMap(item => [item, { ...item, scope: "comparison" }, { ...item, scope: "trend" }]),
+    [category("対象"), category("対象外")],
+    receipts.flatMap(item => [item, { ...item, scope: "comparison" }, { ...item, scope: "trend" }]),
+  ));
+  const incomeFilters: AnalyticsFilters = { ...filters, memberIds: ["a"], categoryIds: ["対象"],
+    expenseClasses: [], incomeExpenseClasses: ["SHARED", "PERSONAL"] };
+  const incomeOnly = buildAnalyticsView(prepared, incomeFilters);
+  assert.equal(incomeOnly.totalYen, BigInt(0));
+  assert.equal(incomeOnly.cashflow.incomeYen, BigInt(800));
+  assert.equal(incomeOnly.cashflow.balanceYen, BigInt(800));
+  assert.equal(incomeOnly.cashflow.comparisonBalanceYen, BigInt(800));
+  assert.equal(incomeOnly.cashflow.months.at(-1)!.balanceYen, BigInt(800));
+  assert.deepEqual(incomeOnly.rows, []);
+  const sharedAndIncome = buildAnalyticsView(prepared, { ...incomeFilters, expenseClasses: ["SHARED"] });
+  assert.equal(sharedAndIncome.totalYen, BigInt(50));
+  assert.equal(sharedAndIncome.cashflow.incomeYen, BigInt(800), "個人費を外しても個人収入は維持する");
+  assert.equal(sharedAndIncome.cashflow.balanceYen, BigInt(750));
+  const expensesOnly = buildAnalyticsView(prepared, { ...incomeFilters, memberIds: ["a", "b"],
+    expenseClasses: ["SHARED", "PERSONAL"], incomeExpenseClasses: [] });
+  assert.equal(expensesOnly.totalYen, BigInt(210));
+  assert.equal(expensesOnly.cashflow.incomeYen, BigInt(0));
+  assert.equal(expensesOnly.cashflow.comparisonIncomeYen, BigInt(0));
+  assert.equal(expensesOnly.cashflow.months.at(-1)!.incomeYen, BigInt(0));
+  const bothUsers = buildAnalyticsView(prepared, { ...incomeFilters, memberIds: ["a", "b"] });
+  assert.equal(bothUsers.cashflow.incomeYen, BigInt(1700));
+});

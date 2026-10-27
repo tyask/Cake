@@ -103,8 +103,9 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
   const metadataPinnedIds = useMemo(() => new Set([...memoPinnedIds, ...categoryPinnedIds]), [memoPinnedIds, categoryPinnedIds]);
   const matches = useMemo(() => createTransactionFilterMatcher(columnFilters, selected.members), [columnFilters, selected.members]);
   const { visible, visibleEditable, outsideFilterIds, checkedIds, hiddenCheckedCount, selectionChecked } = useMemo(
-    () => transactionListView(selected.transactions, matches, pinnedIds, metadataPinnedIds, selectedIds),
-    [selected.transactions, matches, pinnedIds, metadataPinnedIds, selectedIds],
+    () => transactionListView(selected.transactions, matches, pinnedIds, metadataPinnedIds, selectedIds,
+      item => item.expenseClass === "SHARED" || item.actorUserId === userId),
+    [selected.transactions, matches, pinnedIds, metadataPinnedIds, selectedIds, userId],
   );
   const busy = bulkAction !== null || preparingRefresh || refreshing;
   const filteredColumns = transactionColumns.filter(column => columnFilters[column.id] !== undefined);
@@ -144,6 +145,8 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
 
   function toggle(id: string) {
     if (bulkBusyRef.current || refreshBusyRef.current) return;
+    const item = currentSelected.current.transactions.find(item => item.id === id);
+    if (!item || item.settledAt || (item.expenseClass === "PERSONAL" && item.actorUserId !== userId)) return;
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -176,7 +179,8 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
     try {
       // A rule must see the saved merchant and actor; no later autosave may undo its result.
       for (const id of ids) await handles.current.get(id)?.flush();
-      const latestTransactions = new Map(currentSelected.current.transactions.filter((item) => !item.settledAt).map((item) => [item.id, item]));
+      const latestTransactions = new Map(currentSelected.current.transactions.filter((item) => !item.settledAt
+        && (item.expenseClass === "SHARED" || item.actorUserId === userId)).map((item) => [item.id, item]));
       if (ids.some((id) => !latestTransactions.has(id))) throw new Error("選択した明細が削除または清算されています。選択し直してください。");
       if (action === "applyTransactionRules" && ids.some(id => latestTransactions.get(id)?.type !== "PAYMENT")) {
         throw new Error("区分のルールは支払いの明細だけに適用できます。収入を選択から外してください。");
@@ -229,7 +233,7 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
       </div>
       {bulkError && <p role="alert" className={styles.bulkError}>{bulkError}</p>}
       {bulkNotice && <p role="status" className={styles.bulkNotice}>{bulkNotice}</p>}
-      <p className={styles.note}>区分のルールは支払いのみが対象です。清算済みの明細もカテゴリとメモを編集できます。カテゴリは選択時、メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。全選択チェックを外すと非表示の選択も解除します。編集中の明細は編集を終えるまで表示します。</p>
+      <p className={styles.note}>相手の個人明細は閲覧のみです。区分のルールは支払いのみが対象です。清算済みの明細もカテゴリとメモを編集できます。カテゴリは選択時、メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。全選択チェックを外すと非表示の選択も解除します。編集中の明細は編集を終えるまで表示します。</p>
       <TransactionTable wrap columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => <Fragment key={column.id}>{column.id === "memo" && <th>カテゴリ</th>}<th><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th></Fragment>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
         {visible.map((item) => <EditableTransaction key={item.id} item={item} currentUserId={userId} members={selected.members} categoryChoices={categoryChoices} categoryDisplay={categoryDisplay} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} onDelete={() => { void performBulk("deleteTransactions", [item.id]); }} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} onSaveCategory={saveCategory} onCategoryPin={onCategoryPin} />)}
       </TransactionTable>
@@ -262,6 +266,7 @@ function EditableTransaction({ item, currentUserId, members, categoryChoices, ca
   onSaveCategory: SaveTransactionCategory;
   onCategoryPin: (id: string, pinned: boolean) => void;
 }) {
+  const readOnly = item.expenseClass === "PERSONAL" && item.actorUserId !== currentUserId;
   const [changes, setChanges] = useState<Partial<TransactionValues>>({});
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const [memoSaving, setMemoSaving] = useState(false);
@@ -434,7 +439,7 @@ function EditableTransaction({ item, currentUserId, members, categoryChoices, ca
   const rowStyle: CSSProperties | undefined = category ? { "--transaction-category-color": category.colorHex } as CSSProperties : undefined;
   const categoryLabel = category ? (categoryDisplay === "root" ? category.rootLabel : category.label) + (category.archived ? "（使用停止）" : "") : "未分類";
   const categoryEditor = <TransactionCategoryEditor id={item.id} merchant={draft.merchant} categoryId={item.categoryId} categoryRevision={item.categoryRevision} choices={categoryChoices} display={categoryDisplay} disabled={busy} onSave={onSaveCategory} onPin={onCategoryPin} onError={() => setMobileExpanded(true)} onSavingChange={setCategorySaving} register={registerCategory} />;
-  if (item.settledAt) return <SettledTransaction item={item} members={members} busy={busy} pinnedOutsideFilter={pinnedOutsideFilter} onSaveMemo={onSaveMemo} onMemoPin={onMemoPin} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} onMemoError={() => setMobileExpanded(true)} updating={pending > 0 || memoSaving || categorySaving} onMemoSavingChange={setMemoSaving} registerMemo={registerMemo} categoryEditor={categoryEditor} categoryLabel={categoryLabel} rowStyle={rowStyle} />;
+  if (item.settledAt || readOnly) return <ReadonlyTransaction item={item} members={members} busy={busy} readOnly={readOnly} pinnedOutsideFilter={pinnedOutsideFilter} onSaveMemo={onSaveMemo} onMemoPin={onMemoPin} expanded={mobileExpanded} onToggle={() => setMobileExpanded(current => !current)} onMemoError={() => setMobileExpanded(true)} updating={pending > 0 || memoSaving || categorySaving} onMemoSavingChange={setMemoSaving} registerMemo={registerMemo} categoryEditor={readOnly ? categoryLabel : categoryEditor} categoryLabel={categoryLabel} rowStyle={rowStyle} />;
 
   const currentValues = () => ({ ...baseRef.current, ...changesRef.current });
   const updating = pending > 0 || applyingRules || memoSaving || categorySaving;
@@ -467,8 +472,8 @@ function EditableTransaction({ item, currentUserId, members, categoryChoices, ca
   </>;
 }
 
-function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMemo, onMemoPin, expanded, onToggle, onMemoError, updating, onMemoSavingChange, registerMemo, categoryEditor, categoryLabel, rowStyle }: {
-  item: TransactionRecord; members: WorkspaceMember[]; busy: boolean; pinnedOutsideFilter: boolean;
+function ReadonlyTransaction({ item, members, busy, readOnly, pinnedOutsideFilter, onSaveMemo, onMemoPin, expanded, onToggle, onMemoError, updating, onMemoSavingChange, registerMemo, categoryEditor, categoryLabel, rowStyle }: {
+  item: TransactionRecord; members: WorkspaceMember[]; busy: boolean; readOnly: boolean; pinnedOutsideFilter: boolean;
   onSaveMemo: SaveTransactionMemo; onMemoPin: (id: string, pinned: boolean) => void;
   expanded: boolean; onToggle: () => void; onMemoError: () => void;
   updating: boolean; onMemoSavingChange: (saving: boolean) => void;
@@ -479,7 +484,7 @@ function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMe
 }) {
   const amounts = splitAmounts(item.amountYen, item.splitWeights, members);
   const percentages = splitAmounts(1000, item.splitWeights, members);
-  return <tr data-transaction-id={item.id} data-expanded={expanded} className={styles.settled + " " + styles.transactionRow} style={rowStyle}>
+  return <tr data-transaction-id={item.id} data-expanded={expanded} className={(item.settledAt ? styles.settled + " " : "") + styles.transactionRow} style={rowStyle}>
     <MobileTransactionSummary item={item} expanded={expanded} onToggle={onToggle} checked={false} disabled onSelect={() => {}} columnCount={tableColumns.length} categoryLabel={categoryLabel} status={item.expenseClass === "PERSONAL" ? "個人" : "清算済み"} indicator={<SavingIndicator active={updating} />} />
     <td data-label="選択" className={styles.selectionCell} data-selection><input className={styles.checkbox} type="checkbox" aria-label={item.merchant + "の明細を選択"} checked={false} disabled /></td>
     <td data-label="取引日時" className={styles.fullCell + " " + styles.dateCell} title={formatJstDateTime(item.occurredAt)}>{formatJstDateTime(item.occurredAt)}</td>
@@ -491,10 +496,10 @@ function SettledTransaction({ item, members, busy, pinnedOutsideFilter, onSaveMe
     <td data-label="区分">{expenseClassLabels[item.expenseClass]}</td>
     <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}><span className={styles.settledSplit}>{members.map(member => <span key={member.id}><span className={cashflowClass(item.type === "PAYMENT" ? -amounts[member.id] : amounts[member.id])}>{formatTransactionAmount(item.type, amounts[member.id])}</span><small>{percentages[member.id] / 10}%</small></span>)}</span></td>
     <td data-label="カテゴリ" className={styles.categoryCell + " " + styles.fullCell}>{categoryEditor}</td>
-    <td data-label="メモ" className={styles.fullCell}><TransactionMemoEditor id={item.id} merchant={item.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} onError={onMemoError} onSavingChange={onMemoSavingChange} register={registerMemo} />
+    <td data-label="メモ" className={styles.fullCell}>{readOnly ? <span style={{ whiteSpace: "pre-wrap" }}>{item.memo}</span> : <TransactionMemoEditor id={item.id} merchant={item.merchant} memo={item.memo} disabled={busy} onSave={onSaveMemo} onPin={onMemoPin} onError={onMemoError} onSavingChange={onMemoSavingChange} register={registerMemo} />}
       {pinnedOutsideFilter && <small className={styles.filterHint}>編集中のため表示</small>}
     </td>
-    <td data-label="清算">清算済み</td>
+    <td data-label="清算">{item.expenseClass === "PERSONAL" ? "対象外" : "清算済み"}</td>
     <td className={styles.updateStatusCell}><SavingIndicator active={updating} /></td>
   </tr>;
 }

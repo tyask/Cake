@@ -45,12 +45,6 @@
 .summaryTable tr:last-child th,.summaryTable tr:last-child td { border-bottom: 0; }
 .summaryNote { margin: .7rem 0 0; color: var(--muted); font-size: .65rem; line-height: 1.8; overflow-wrap: anywhere; }
 .summaryNote b { color: var(--ink); font-weight: 500; }
-.stats { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: .9rem; margin-bottom: 1.25rem; }
-.stat { min-width: 0; padding: 1.1rem 1.2rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--paper); }
-.primaryStat { border-color: #ecd790; background: #fff1b8; }
-.stat > span { color: var(--muted); font-size: .72rem; }
-.stat strong { display: block; margin: .65rem 0 .4rem; font-size: clamp(1.25rem, 2.5vw, 1.9rem); font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.stat small { display: block; color: var(--muted); font-size: .64rem; line-height: 1.7; overflow-wrap: anywhere; }
 .composition { margin-top: 1.1rem; }
 .compositionBody { display: grid; grid-template-columns: minmax(0,.8fr) minmax(0,1.2fr); align-items: center; gap: 1rem; }
 .card { min-width: 0; padding: 1.3rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--paper); }
@@ -70,7 +64,6 @@
 .categoryButton:hover .categoryName > span { text-decoration: underline; }
 .categoryButton:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: .2rem; }
 .miniNote,.comparisonNote { margin: .8rem 0 0; color: var(--muted); font-size: .6rem; line-height: 1.8; }
-.trendChart { height: 16.5rem; margin-top: 1.1rem; }
 .cashflowTrendChart { height: 20rem; margin-top: 1.1rem; }
 .cashflowLegend li { display: inline-flex; align-items: center; gap: .4rem; }
 .cashflowLegend i { flex: none; width: .65rem; height: .65rem; border-radius: .12rem; }
@@ -123,10 +116,6 @@
   .customDates button { grid-column: 1 / -1; }.periodError { grid-column: 1 / -1; }
   .scopeNote { margin-top: .6rem; font-size: .61rem; }
   .selectionLine { font-size: .62rem; }
-  .stats { grid-template-columns: repeat(2,minmax(0,1fr)); gap: .65rem; }
-  .stat { padding: .95rem .85rem; }.primaryStat { grid-column: 1 / -1; }
-  .stat strong { font-size: 1.3rem; }.primaryStat strong { font-size: 2rem; }
-  .stat > span { font-size: .65rem; }.stat small { font-size: .58rem; }
   .card { padding: 1.1rem .95rem; }.cardHeading h2 { font-size: .95rem; }
   .compositionBody { display: block; }
   .cashflowTrendChart { height: 18rem; }

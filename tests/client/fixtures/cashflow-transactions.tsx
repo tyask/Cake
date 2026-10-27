@@ -41,6 +41,11 @@ const workspace: WorkspaceData = {
     completedAt: "2026-10-01T03:00:00.000Z" }],
 };
 
+if (mode === "partner") workspace.transactions.push(
+  transaction("partner-payment", { amountYen: 400, expenseClass: "PERSONAL", actorUserId: "b", actorName: "B", splitWeights: { a: 0, b: 1 } }),
+  transaction("partner-income", { type: "RECEIPT", amountYen: 1_200, expenseClass: "PERSONAL", actorUserId: "b", actorName: "B", splitWeights: { a: 0, b: 1 } }),
+);
+
 if (mode === "personal" || mode === "single") {
   workspace.workspace.type = mode === "personal" ? "PERSONAL" : "SHARED";
   workspace.members = workspace.members.slice(0, 1);
