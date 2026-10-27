@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, object, array } from '../preview/preview-model';
 import { transport, type Transport } from '../preview/preview-provider';
+import { pushedPullRequests } from '../preview/pr-event';
 import { fullSha } from './task-workflow';
 import { PostMergeChecks } from './post-merge-checks';
 import { failPostMerge, mergedTask, parsePostMergeResult, parseTaskMetadata, positiveId, sameTask,
@@ -16,7 +17,7 @@ type Context = { pr: number; controlSha: string; runId: string; runAttempt: numb
 type VerificationOptions = { api?: Transport; checks?: PostMergeChecks; wait?: (ms: number) => Promise<void>;
   now?: () => number; maxWaitMs?: number; pollMs?: number; directory?: string };
 
-export async function postMergeContext(env: Readonly<Record<string, string | undefined>>): Promise<Context> {
+async function workflowContext(env: Readonly<Record<string, string | undefined>>): Promise<Record<string, unknown>> {
   if (env.GITHUB_REPOSITORY !== config.repository || env.GITHUB_REF !== 'refs/heads/main'
     || env.GITHUB_WORKFLOW_REF !== `${config.repository}/.github/workflows/post-merge.yml@refs/heads/main`
     || !fullSha(env.GITHUB_SHA) || !env.GITHUB_EVENT_PATH || !env.GH_TOKEN
@@ -24,18 +25,46 @@ export async function postMergeContext(env: Readonly<Record<string, string | und
     || !/^[1-9][0-9]*$/.test(env.GITHUB_RUN_ATTEMPT ?? '') || !positiveId(Number(env.GITHUB_RUN_ATTEMPT))) return failPostMerge('UNTRUSTED_WORKFLOW');
   const event = object(JSON.parse(await readFile(env.GITHUB_EVENT_PATH, 'utf8')));
   if (object(event.repository).full_name !== config.repository || object(event.repository).id !== config.repositoryId) return failPostMerge('UNTRUSTED_EVENT');
+  if (!['push', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME ?? '')) return failPostMerge('UNTRUSTED_EVENT');
+  return event;
+}
+
+function dispatchPr(event: Record<string, unknown>): number {
+  const input = object(event.inputs).pr;
+  if (typeof input !== 'string' || !/^[1-9][0-9]*$/.test(input) || !positiveId(Number(input))) return failPostMerge('INVALID_PR');
+  return Number(input);
+}
+
+/** A main-only job resolves all tasks before creating the independent PR matrix. */
+export async function preparePostMerge(env: Readonly<Record<string, string | undefined>> = process.env,
+  api: Transport = transport({ GH_TOKEN: env.GH_TOKEN })): Promise<{ pr: number; issue: number }[]> {
+  const event = await workflowContext(env);
+  const raws = env.GITHUB_EVENT_NAME === 'push' ? await pushedPullRequests(env, event, api)
+    : [await api('github', `${repoPrefix}pulls/${dispatchPr(event)}`)];
+  // Keep the verification batch within the Preview cleanup's bounded matrix.
+  if (raws.length > 10) return failPostMerge('TASKS_INVALID');
+  const tasks = raws.map(mergedTask).filter((task): task is MergedTask => task !== undefined);
+  if (new Set(tasks.map(task => task.source.pr)).size !== tasks.length) return failPostMerge('TASKS_INVALID');
+  const targets = tasks.map(task => ({ pr: task.source.pr, issue: task.metadata.issue }));
+  if (env.GITHUB_OUTPUT) await appendFile(env.GITHUB_OUTPUT, `targets=${JSON.stringify(targets)}\n`);
+  return targets;
+}
+
+export async function postMergeContext(env: Readonly<Record<string, string | undefined>>,
+  api: Transport = transport({ GH_TOKEN: env.GH_TOKEN })): Promise<Context> {
+  const event = await workflowContext(env);
   let pr: number, eventTask: MergedTask | undefined;
-  if (env.GITHUB_EVENT_NAME === 'pull_request_target') {
-    const raw = object(event.pull_request);
-    if (event.action !== 'closed' || raw.merged !== true) return failPostMerge('UNTRUSTED_EVENT');
-    pr = Number(raw.number); eventTask = mergedTask(raw);
-  } else if (env.GITHUB_EVENT_NAME === 'workflow_dispatch') {
-    const input = object(event.inputs).pr;
-    if (typeof input !== 'string' || !/^[1-9][0-9]*$/.test(input)) return failPostMerge('INVALID_PR');
-    pr = Number(input);
-  } else return failPostMerge('UNTRUSTED_EVENT');
+  if (env.GITHUB_EVENT_NAME === 'push') {
+    const selected = env.CAKE_POST_MERGE_PR;
+    if (!selected || !/^[1-9][0-9]*$/.test(selected) || !positiveId(Number(selected))) return failPostMerge('INVALID_PR');
+    pr = Number(selected);
+    const candidates = await pushedPullRequests(env, event, api);
+    const raw = candidates.find(candidate => candidate.number === pr);
+    if (!raw || !(eventTask = mergedTask(raw))) return failPostMerge('INVALID_PR');
+  } else pr = dispatchPr(event);
+  if (env.CAKE_POST_MERGE_PR !== undefined && env.CAKE_POST_MERGE_PR !== String(pr)) return failPostMerge('INVALID_PR');
   if (!positiveId(pr)) return failPostMerge('INVALID_PR');
-  return { pr, controlSha: env.GITHUB_SHA, runId: env.GITHUB_RUN_ID!, runAttempt: Number(env.GITHUB_RUN_ATTEMPT), eventTask };
+  return { pr, controlSha: env.GITHUB_SHA!, runId: env.GITHUB_RUN_ID!, runAttempt: Number(env.GITHUB_RUN_ATTEMPT), eventTask };
 }
 
 const emptyChecks = (): Record<CheckName, PostMergeCheck> => Object.fromEntries(checkNames.map(name => [name,
@@ -45,8 +74,7 @@ async function freshTask(api: Transport, pr: number): Promise<MergedTask | undef
 }
 
 export async function verifyPostMerge(env: Readonly<Record<string, string | undefined>> = process.env, options: VerificationOptions = {}): Promise<PostMergeResult | undefined> {
-  const context = await postMergeContext(env), api = options.api ?? transport(env), directory = options.directory ?? process.cwd();
-  if (env.GITHUB_EVENT_NAME === 'pull_request_target' && !context.eventTask) return undefined;
+  const api = options.api ?? transport(env), context = await postMergeContext(env, api), directory = options.directory ?? process.cwd();
   const task = await freshTask(api, context.pr);
   if (!task) return undefined;
   if (context.eventTask && !sameTask(task, context.eventTask)) return failPostMerge('PR_CHANGED');
@@ -203,13 +231,14 @@ function representativeResult(history: PostMergeResult[], mainSha: string): Post
 }
 
 export async function publishPostMerge(env: Readonly<Record<string, string | undefined>> = process.env, api: Transport = transport({ GH_TOKEN: env.GH_TOKEN }), directory = process.cwd()): Promise<void> {
-  const context = await postMergeContext(env), path = resolve(directory, resultFile), stats = await lstat(path);
+  const context = await postMergeContext(env, api), path = resolve(directory, resultFile), stats = await lstat(path);
   if (!stats.isFile() || stats.isSymbolicLink() || stats.size > 30_000) return failPostMerge('RESULT_INVALID');
   const result = parsePostMergeResult(JSON.parse(await readFile(path, 'utf8')));
   if (result.runId !== context.runId || result.runAttempt !== context.runAttempt || result.controlSha !== context.controlSha
     || result.task.source.pr !== context.pr) return failPostMerge('RESULT_MISMATCH');
   const current = await freshTask(api, context.pr);
   if (!current || !sameTask(current, result.task)) return failPostMerge('PR_CHANGED');
+  if (context.eventTask && !sameTask(current, context.eventTask)) return failPostMerge('PR_CHANGED');
   const mainBefore = object(await api('github', `${repoPrefix}branches/main`));
   if (object(mainBefore.commit).sha !== current.mergeSha) result.status = 'superseded';
   const issue = object(await api('github', `${repoPrefix}issues/${current.metadata.issue}`));
@@ -250,7 +279,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const run = command === 'verify' ? async () => {
     const result = await verifyPostMerge();
     if (result && result.status !== 'success') process.exitCode = 1;
-  } : command === 'publish' ? () => publishPostMerge() : () => failPostMerge('INVALID_COMMAND');
+  } : command === 'publish' ? () => publishPostMerge() : command === 'prepare' ? async () => { await preparePostMerge(); }
+    : () => failPostMerge('INVALID_COMMAND');
   Promise.resolve().then(run).catch(() => {
     console.error('Cake: マージ後確認を完了できませんでした。Actionsの実行状態とIssueの報告を確認してください。秘密値・外部応答は表示しません。');
     process.exitCode = 1;

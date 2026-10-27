@@ -438,7 +438,11 @@ PRがmerge/close済みなら、そのbranchの作業を再開せず、最新main
 
 ## merge後の確認
 
-利用者のmergeで`post-merge.yml`が自動起動する。
+利用者のmergeによるmainへの`push`で`post-merge.yml`が自動起動する。
+pushのcommitとGitHub APIのmerged PRを照合し、関連Intentを持つ案件をPRごとに確認する。
+同時に起動した`preview.yml`のmain push cleanupの正式receiptも確認する。
+cleanupのjobは`preview-cleanup-<PR番号>`、notice titleは`cake-preview/v1 PR <PR番号>`となる。
+1 pushにmerged PRが10件を超えて含まれる場合は、両Workflowともprepareで停止する。
 既存のPR番号を指定すると、同じ確認を信頼済みmainから手動で再実行できる。
 
 ```bash

@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   staging:
+    environment: cake-automation
     if: github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 25

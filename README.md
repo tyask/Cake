@@ -291,6 +291,10 @@ PR作成・Ready管理は `npm run task:pr` を使います。
 
 同一repositoryの `codex/*` からmainへのPR作成・更新・再openで、draftを含めて専用Vercel PreviewとNeon Native DBを自動作成・更新します。
 PR未作成のpushだけでは作成せず、Vercel Git連携のfeature deployは止めたままmainのActionsで管理します。
+PRの受付は`pull_request`、管理処理はmainの`workflow_run`に分け、対象PRと現在HEADをGitHub APIで照合します。
+未マージcloseは受付後のcleanup、mergeはmainへのpushからのcleanup・稼働確認・Issue更新へ進みます。
+provider資格情報はmain限定Environment `cake-automation`で管理します。
+設定と切替時の確認は[Actionsのイベントと資格情報](docs/actions-event-migration.md)を参照してください。
 通常の変更依頼には、当該PRの作成・更新と専用DBへのmigration/seedを含めます。
 利用者が明示した制限を優先してください。
 merge/closeは資源削除を起動するため、通常の変更依頼とは別に対象と影響を含む依頼範囲に従います。

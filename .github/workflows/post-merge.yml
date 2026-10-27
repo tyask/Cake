@@ -1,9 +1,8 @@
 name: Cake Post Merge
-run-name: Post Merge PR ${{ inputs.pr || github.event.pull_request.number }}
+run-name: Post Merge ${{ inputs.pr || github.sha }}
 on:
-  pull_request_target:
+  push:
     branches: [main]
-    types: [closed]
   workflow_dispatch:
     inputs:
       pr:
@@ -12,17 +11,45 @@ on:
         required: true
 permissions: {}
 concurrency:
-  group: cake-post-merge-pr-${{ inputs.pr || github.event.pull_request.number }}
+  group: cake-post-merge-${{ inputs.pr || github.sha }}
   cancel-in-progress: false
 jobs:
-  verify:
-    if: >-
-      github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event.pull_request.merged == true &&
-        github.event.pull_request.head.repo.full_name == github.repository &&
-        startsWith(github.event.pull_request.head.ref, 'codex/')))
+  prepare:
+    if: github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      targets: ${{ steps.prepare.outputs.targets }}
+    steps:
+      - name: Check out trusted main only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm run check:node
+      - run: npm ci --ignore-scripts
+      - name: Resolve merged PRs from the trusted event
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node --import tsx scripts/task/post-merge-workflow.ts prepare
+  verify:
+    needs: prepare
+    if: needs.prepare.outputs.targets != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.prepare.outputs.targets) }}
+    runs-on: ubuntu-latest
+    environment: cake-automation
     timeout-minutes: 25
     permissions:
       contents: read
@@ -30,8 +57,6 @@ jobs:
       issues: read
       actions: read
       checks: read
-    outputs:
-      issue: ${{ steps.verify.outputs.issue }}
     steps:
       - name: Check out trusted main only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -46,27 +71,32 @@ jobs:
       - run: npm run check:node
       - run: npm ci --ignore-scripts
       - name: Verify merge, deployments, CI and cleanup
-        id: verify
         env:
           GH_TOKEN: ${{ github.token }}
+          CAKE_POST_MERGE_PR: ${{ matrix.target.pr }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: node --import tsx scripts/task/post-merge-workflow.ts verify
       - name: Save public verification result
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: post-merge-${{ github.run_id }}-${{ github.run_attempt }}
+          name: post-merge-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.target.pr }}
           path: post-merge-result.json
           if-no-files-found: ignore
           retention-days: 30
   publish:
-    needs: verify
-    if: always() && needs.verify.outputs.issue != ''
+    needs: [prepare, verify]
+    if: always() && needs.prepare.result == 'success' && needs.prepare.outputs.targets != '[]'
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        target: ${{ fromJSON(needs.prepare.outputs.targets) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:
-      group: cake-post-merge-issue-${{ needs.verify.outputs.issue }}
+      group: cake-post-merge-issue-${{ matrix.target.issue }}
       cancel-in-progress: false
     permissions:
       contents: read
@@ -86,11 +116,12 @@ jobs:
           cache: npm
       - run: npm run check:node
       - run: npm ci --ignore-scripts
-      - name: Read this run's public result
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - name: Read this PR's public result from this run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: post-merge-${{ github.run_id }}-${{ github.run_attempt }}
+          name: post-merge-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.target.pr }}
       - name: Update the linked Issue
         env:
           GH_TOKEN: ${{ github.token }}
+          CAKE_POST_MERGE_PR: ${{ matrix.target.pr }}
         run: node --import tsx scripts/task/post-merge-workflow.ts publish

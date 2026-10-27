@@ -9,6 +9,15 @@
         "codex/aidlc-development-flow"
       ],
       "recordDir": "aidlc/spaces/default/intents/261027-aidlc-development-flow"
+    },
+    {
+      "id": "261027-actions-event-isolation",
+      "issue": 156,
+      "branch": "codex/actions-event-isolation",
+      "branches": [
+        "codex/actions-event-isolation"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261027-actions-event-isolation"
     }
   ]
 }

@@ -204,6 +204,16 @@ draftを含めて専用Preview・Neon Native DBの作成/更新とmigration/seed
 PR未作成のpushだけではPreviewを作らない。
 Vercel Git連携の `**: false` / `main: true` は維持し、管理処理は信頼済みmainのActionsだけで実行する。
 
+PRイベントは資格情報・checkout・artifactを持たない`pr-events.yml`が`pull_request`で受け付ける。
+`preview.yml`は`workflow_run`から通知元run・Workflow・repository・対象PR・現在HEADをGitHub APIで再照合し、
+mainのコードでPreview管理と未マージclose後のcleanupを行う。
+merge後のcleanupと案件確認はmainへの`push`から対象merged PRを照合して実行する。
+`pull_request_target`へ戻したり、PR由来のコード・artifactを管理資格情報付きで実行したりしない。
+
+provider資格情報はmainだけを許可したEnvironment `cake-automation`へ置き、旧Repository Secretsには残さない。
+手動QA・常設Preview・Deployment保持も同じEnvironmentを使う。
+設定と切替時の確認は[Actionsのイベントと資格情報](docs/actions-event-migration.md)に従う。
+
 PR作成・更新前に、上記の既定の依頼範囲と利用者の明示した制限に照らして対象と自動資源操作の影響を確認し、
 範囲内の操作は追加確認せず進める。
 文書変更でも同じ自動化が起動する。

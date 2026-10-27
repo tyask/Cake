@@ -10,7 +10,7 @@ import { PreviewService } from '../../scripts/preview/preview-service';
 import { StagingProvider } from '../../scripts/preview/staging-service';
 import { PostMergeChecks } from '../../scripts/task/post-merge-checks';
 import { parseTaskMetadata, mergedTask, parsePostMergeResult, type PostMergeResult, type TaskMetadata } from '../../scripts/task/post-merge-model';
-import { verifyPostMerge, publishPostMerge, postMergeComment, stalePostMergeResult } from '../../scripts/task/post-merge-workflow';
+import { verifyPostMerge, publishPostMerge, postMergeComment, stalePostMergeResult, preparePostMerge, postMergeContext } from '../../scripts/task/post-merge-workflow';
 
 const head = 'a'.repeat(40), merge = 'b'.repeat(40), control = 'c'.repeat(40);
 const metadata: TaskMetadata = { issue: 9, intent: 'aidlc/spaces/default/intents/261027-example', completesIssue: true, manualPostMerge: false };
@@ -29,10 +29,10 @@ async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), 'cake-post-merge-'));
   const eventPath = join(directory, 'event.json');
   await writeFile(eventPath, JSON.stringify({ repository: { id: config.repositoryId, full_name: config.repository },
-    action: 'closed', pull_request: rawPr() }));
+    inputs: { pr: '71' } }));
   const env = { GH_TOKEN: 'fixture-token', GITHUB_REPOSITORY: config.repository, GITHUB_REF: 'refs/heads/main',
     GITHUB_WORKFLOW_REF: `${config.repository}/.github/workflows/post-merge.yml@refs/heads/main`, GITHUB_SHA: control,
-    GITHUB_EVENT_PATH: eventPath, GITHUB_EVENT_NAME: 'pull_request_target', GITHUB_RUN_ID: '101', GITHUB_RUN_ATTEMPT: '1' };
+    GITHUB_EVENT_PATH: eventPath, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_RUN_ID: '101', GITHUB_RUN_ATTEMPT: '1' };
   return { directory, eventPath, env, cleanup: () => rm(directory, { recursive: true, force: true }) };
 }
 
@@ -68,20 +68,109 @@ test('workflow trust, fork identity and PR changes are checked before any provid
       { GITHUB_WORKFLOW_REF: `${config.repository}/.github/workflows/other.yml@refs/heads/main` }, { GITHUB_SHA: 'short' }]) {
       await assert.rejects(verifyPostMerge({ ...f.env, ...change }, { api, directory: f.directory }), /UNTRUSTED_WORKFLOW/);
     }
-    await writeFile(f.eventPath, JSON.stringify({ repository: { id: config.repositoryId, full_name: config.repository }, action: 'closed',
-      pull_request: { ...rawPr(), head: { ...rawPr().head, repo: { id: 1, full_name: 'other/Cake' } } } }));
-    await assert.rejects(verifyPostMerge(f.env, { api, directory: f.directory }));
+    await assert.rejects(verifyPostMerge({ ...f.env, GITHUB_EVENT_NAME: 'pull_request_target' }, { api, directory: f.directory }), /UNTRUSTED_EVENT/);
     assert.equal(calls, 0);
+    const forkApi: Transport = async provider => {
+      assert.equal(provider, 'github');
+      return { ...rawPr(), head: { ...rawPr().head, repo: { id: 1, full_name: 'other/Cake' } } };
+    };
+    await assert.rejects(verifyPostMerge(f.env, { api: forkApi, directory: f.directory }), /PR_MISMATCH/);
   } finally { await f.cleanup(); }
 });
 
 test('legacy merged PRs without task metadata do not create reports or touch providers', async () => {
   const f = await fixture();
   try {
-    await writeFile(f.eventPath, JSON.stringify({ repository: { id: config.repositoryId, full_name: config.repository },
-      action: 'closed', pull_request: { ...rawPr(), body: 'legacy' } }));
-    const api: Transport = async () => assert.fail('legacy event must not fetch providers');
+    const api: Transport = async provider => {
+      assert.equal(provider, 'github', 'legacy tasks must not fetch providers');
+      return { ...rawPr(), body: 'legacy' };
+    };
     assert.equal(await verifyPostMerge(f.env, { api, directory: f.directory }), undefined);
+    assert.deepEqual(await preparePostMerge(f.env, api), []);
+  } finally { await f.cleanup(); }
+});
+
+test('main push discovers separate PR and Issue matrix targets and binds each matrix to that push', async () => {
+  const f = await fixture(), before = 'f'.repeat(40), earlierMerge = 'd'.repeat(40);
+  const older = { ...rawPr({ ...metadata, issue: 8, completesIssue: false }), number: 72,
+    merge_commit_sha: earlierMerge, head: { ...rawPr().head, ref: 'codex/earlier', sha: 'e'.repeat(40) } };
+  const legacy = { ...rawPr(), number: 73, body: 'legacy', head: { ...rawPr().head, ref: 'codex/legacy' } };
+  const prs = [older, legacy, rawPr()];
+  const env = { ...f.env, GITHUB_EVENT_NAME: 'push', GITHUB_SHA: merge };
+  const api: Transport = async (provider, path, method = 'GET') => {
+    assert.equal(provider, 'github', 'discovery never accesses providers'); assert.equal(method, 'GET');
+    if (path.includes(`/compare/${before}...${merge}?`)) return { status: 'ahead', behind_by: 0, ahead_by: 2, total_commits: 2,
+      base_commit: { sha: before }, merge_base_commit: { sha: before }, commits: [{ sha: earlierMerge }, { sha: merge }] };
+    if (path.includes('/commits/') && path.includes('/pulls?')) return prs;
+    const matched = prs.find(pr => path.endsWith(`/pulls/${pr.number}`));
+    if (matched) return matched;
+    assert.fail(path);
+  };
+  try {
+    await writeFile(f.eventPath, JSON.stringify({ repository: { id: config.repositoryId, full_name: config.repository },
+      ref: 'refs/heads/main', before, after: merge, forced: false, created: false, deleted: false }));
+    const output = join(f.directory, 'output');
+    assert.deepEqual(await preparePostMerge({ ...env, GITHUB_OUTPUT: output }, api), [{ pr: 72, issue: 8 }, { pr: 71, issue: 9 }]);
+    assert.equal(await readFile(output, 'utf8'), 'targets=[{"pr":72,"issue":8},{"pr":71,"issue":9}]\n');
+    const context = await postMergeContext({ ...env, CAKE_POST_MERGE_PR: '71' }, api);
+    assert.equal(context.eventTask!.mergeSha, merge); assert.equal(context.controlSha, merge);
+    const previous = await postMergeContext({ ...env, CAKE_POST_MERGE_PR: '72' }, api);
+    assert.equal(previous.eventTask!.mergeSha, earlierMerge, 'each PR preserves its own actual merge SHA');
+    for (const selected of [undefined, '73', '999', '01']) {
+      await assert.rejects(postMergeContext({ ...env, CAKE_POST_MERGE_PR: selected }, api), /INVALID_PR/);
+    }
+    for (let i = 0; i < 8; i++) prs.push({ ...rawPr(), number: 100 + i,
+      head: { ...rawPr().head, ref: `codex/bulk-${i}` } });
+    await assert.rejects(preparePostMerge(env, api), /TASKS_INVALID/, 'an oversized push cannot partially start provider verification');
+    await writeFile(f.eventPath, JSON.stringify({ repository: { id: config.repositoryId, full_name: config.repository },
+      ref: 'refs/heads/main', before, after: merge, forced: true, created: false, deleted: false }));
+    await assert.rejects(preparePostMerge(env, api), /UNTRUSTED_PUSH/);
+  } finally { await f.cleanup(); }
+});
+
+test('publication cannot consume the artifact for another matrix PR', async () => {
+  const f = await fixture(); let calls = 0;
+  try {
+    const report = result(); report.task.source.pr = 72;
+    await writeFile(join(f.directory, 'post-merge-result.json'), JSON.stringify(report));
+    const api: Transport = async () => { calls++; assert.fail('mismatched result must not access the Issue'); };
+    await assert.rejects(publishPostMerge({ ...f.env, CAKE_POST_MERGE_PR: '71' }, api, f.directory), /RESULT_MISMATCH/);
+    assert.equal(calls, 0);
+    await assert.rejects(publishPostMerge({ ...f.env, CAKE_POST_MERGE_PR: '72' }, api, f.directory), /INVALID_PR/);
+  } finally { await f.cleanup(); }
+});
+
+test('a main-push matrix verifies its PR and publishes the same run result before completing the Issue', async t => {
+  const f = await fixture(), before = 'f'.repeat(40), writes: { path: string; body: unknown }[] = [];
+  const env = { ...f.env, GITHUB_EVENT_NAME: 'push', GITHUB_SHA: merge, CAKE_POST_MERGE_PR: '71' };
+  const api: Transport = async (provider, path, method = 'GET', body) => {
+    assert.equal(provider, 'github');
+    if (method !== 'GET') { writes.push({ path, body }); return {}; }
+    if (path.includes(`/compare/${before}...${merge}?`)) return { status: 'ahead', behind_by: 0, ahead_by: 1, total_commits: 1,
+      base_commit: { sha: before }, merge_base_commit: { sha: before }, commits: [{ sha: merge }] };
+    if (path.includes('/commits/') && path.includes('/pulls?')) return [rawPr()];
+    if (path.endsWith('/pulls/71')) return rawPr();
+    if (path.endsWith('/issues/9')) return { number: 9, state: 'open' };
+    if (path.includes('/issues/9/comments?')) return [];
+    if (path.endsWith('/branches/main')) return { name: 'main', commit: { sha: merge } };
+    if (path.includes('/pulls?state=all')) return [rawPr()];
+    assert.fail(path);
+  };
+  const checks = new PostMergeChecks(api);
+  t.mock.method(checks, 'assertBindings', async () => {});
+  t.mock.method(checks, 'mainSha', async () => merge);
+  t.mock.method(checks, 'all', async () => result().checks);
+  try {
+    await writeFile(f.eventPath, JSON.stringify({ repository: { id: config.repositoryId, full_name: config.repository },
+      ref: 'refs/heads/main', before, after: merge, forced: false, created: false, deleted: false }));
+    const verified = await verifyPostMerge(env, { api, checks, directory: f.directory });
+    assert.equal(verified!.status, 'success'); assert.equal(verified!.controlSha, merge);
+    assert.equal(writes.length, 0, 'read-side verification must not change the Issue');
+    await publishPostMerge(env, api, f.directory);
+    const comment = writes.find(write => write.path.endsWith('/comments'))!.body as { body: string };
+    assert.ok(comment.body.includes(`"controlSha":"${merge}"`));
+    assert.ok(comment.body.includes('"pr":71'));
+    assert.deepEqual(writes.find(write => write.path.endsWith('/issues/9'))!.body, { state: 'closed', state_reason: 'completed' });
   } finally { await f.cleanup(); }
 });
 
@@ -162,23 +251,26 @@ test('CI checks the latest main-push run for the merge SHA, not the successful P
 });
 
 test('cleanup consumes a trusted official receipt and rechecks source absence', async t => {
-  let retained = false, wrongHead = false;
-  const run = workflowFixture('preview.yml', 22, { event: 'pull_request_target', display_title: 'Preview cleanup PR 71 22', head_branch: 'codex/example', head_sha: head });
+  let retained = false, wrongHead = false, wrongTitle = false, wrongControl = false;
+  const operation = '20000000-0000-4000-8000-000000000002';
+  const run: Record<string, unknown> = workflowFixture('preview.yml', 22, { display_title: `Preview cleanup main ${merge} 22` });
   const getPrefix = `/repos/${config.repository}/`;
   const api: Transport = async (provider, path) => {
+    const jobName = run.event === 'push' ? 'preview-cleanup-71' : 'preview';
     assert.equal(provider, 'github');
     if (path === getPrefix + 'actions/workflows/preview.yml') return { id: 12, path: '.github/workflows/preview.yml', state: 'active' };
     if (path.startsWith(getPrefix + 'actions/workflows/preview.yml/runs?')) return { total_count: 1, workflow_runs: [run] };
     if (path === getPrefix + 'actions/runs/22') return run;
-    if (path.includes('/attempts/1/jobs?')) return { total_count: 1, jobs: [{ id: 80, name: 'preview', run_id: 22, run_attempt: 1,
-      head_branch: 'codex/example', head_sha: head, status: 'completed', conclusion: 'success',
+    if (path.includes('/attempts/1/jobs?')) return { total_count: 1, jobs: [{ id: 80, name: jobName, run_id: 22, run_attempt: 1,
+      head_branch: run.head_branch, head_sha: run.head_sha, status: 'completed', conclusion: 'success',
       check_run_url: `https://api.github.com/repos/${config.repository}/check-runs/80` }] };
-    if (path === getPrefix + 'check-runs/80') return { id: 80, name: 'preview', head_sha: head,
+    if (path === getPrefix + 'check-runs/80') return { id: 80, name: jobName, head_sha: run.head_sha,
       url: `https://api.github.com/repos/${config.repository}/check-runs/80`, check_suite: { id: 122 },
       app: { slug: 'github-actions', html_url: 'https://github.com/apps/github-actions' }, status: 'completed', conclusion: 'success', output: { annotations_count: 1 } };
-    if (path.includes('/check-runs/80/annotations?')) return [{ title: 'cake-preview-receipt/v1', annotation_level: 'notice', message: JSON.stringify({
+    if (path.includes('/check-runs/80/annotations?')) return [{ title: wrongTitle ? 'cake-preview/v1 PR 72'
+      : run.event === 'push' ? 'cake-preview/v1 PR 71' : 'cake-preview-receipt/v1', annotation_level: 'notice', message: JSON.stringify({
       protocol: 'cake-preview/v1', action: 'cleanup', source: { ...task().source, sha: wrongHead ? merge : head }, checkedAt: '2026-10-27T00:03:00Z',
-      success: true, operation: null, runId: '22', runAttempt: 1, controlSha: merge }) }];
+      success: true, operation: run.event === 'push' ? null : operation, runId: '22', runAttempt: 1, controlSha: wrongControl ? control : merge }) }];
     assert.fail(path);
   };
   t.mock.method(PreviewService.prototype, 'status', async function (source: Source) {
@@ -192,6 +284,12 @@ test('cleanup consumes a trusted official receipt and rechecks source absence', 
   assert.equal((await checks.cleanup(task())).status, 'success');
   retained = true; await assert.rejects(checks.cleanup(task()), /RESOURCES_REMAIN/);
   retained = false; wrongHead = true; await assert.rejects(checks.cleanup(task()), /RECEIPT_INVALID/);
+  wrongHead = false; wrongTitle = true; await assert.rejects(checks.cleanup(task()), /RECEIPT_INVALID/);
+  wrongTitle = false; wrongControl = true; await assert.rejects(checks.cleanup(task()), /CLEANUP_RECEIPT_INVALID/);
+  wrongControl = false; run.event = 'pull_request_target';
+  assert.equal((await checks.cleanup(task())).code, 'RUN_NOT_CREATED', 'legacy PR-event evidence cannot satisfy the new main-push cleanup');
+  run.event = 'workflow_dispatch'; run.display_title = `Preview cleanup PR 71 ${operation}`;
+  assert.equal((await checks.cleanup(task())).status, 'success', 'explicit trusted-main recovery remains supported');
 });
 
 test('staging binds its official browser receipt to the merge SHA and current alias', async t => {
@@ -400,11 +498,14 @@ test('a successful retry replaces only its PR history and permits a later final 
 
 test('workflow splits provider reads from Issue writes and never checks out PR input', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/post-merge.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /types: \[closed\]/);
-  assert.match(workflow, /github\.event\.pull_request\.merged == true/);
-  assert.match(workflow, /if: always\(\) && needs\.verify\.outputs\.issue != ''/);
+  assert.match(workflow, /push:\n    branches: \[main\]/);
+  assert.ok(!workflow.includes('pull_request_target'));
+  assert.match(workflow, /environment: cake-automation/);
+  assert.match(workflow, /if: always\(\) && needs\.prepare\.result == 'success'/);
   assert.match(workflow, /group: cake-post-merge-issue-/);
+  assert.match(workflow, /name: post-merge-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}-\$\{\{ matrix.target.pr \}\}/);
   const publish = workflow.slice(workflow.indexOf('  publish:'));
+  assert.match(publish, /max-parallel: 1/);
   assert.match(publish, /issues: write/); assert.ok(!publish.includes('VERCEL_TOKEN')); assert.ok(!publish.includes('NEON_API_KEY'));
   assert.ok(!workflow.includes('ref: ${{ github.event.pull_request.head')); assert.ok(!workflow.includes('contents: write'));
 });

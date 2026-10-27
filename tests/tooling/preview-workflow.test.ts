@@ -17,7 +17,7 @@ test('workflow refuses untrusted ref/event, fork PR and stale source before any 
   const eventPath=join(directory,'event.json');let calls=0;
   const pr={number:71,state:'open',created_at:'2026-10-16T00:00:00Z',head:{ref:'codex/test',sha:'a'.repeat(40),repo:{full_name:config.repository}},base:{ref:'main',repo:{full_name:config.repository}}};
   const service=new PreviewService(new PreviewProvider(async(_provider,_path,method='GET')=>{assert.equal(method,'GET');calls++;return pr;}));
-  const env:NodeJS.ProcessEnv={NODE_ENV:'test',VERCEL_TOKEN:'test-only',NEON_API_KEY:'test-only',GITHUB_REPOSITORY:config.repository,GITHUB_REF:'refs/heads/main',GITHUB_WORKFLOW_REF:`${config.repository}/.github/workflows/preview.yml@refs/heads/main`,GITHUB_EVENT_PATH:eventPath,GITHUB_RUN_ID:'1',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'c'.repeat(40),GITHUB_EVENT_NAME:'workflow_dispatch'};
+  const env:NodeJS.ProcessEnv={NODE_ENV:'test',CAKE_PREVIEW_PR:'71',VERCEL_TOKEN:'test-only',NEON_API_KEY:'test-only',GITHUB_REPOSITORY:config.repository,GITHUB_REF:'refs/heads/main',GITHUB_WORKFLOW_REF:`${config.repository}/.github/workflows/preview.yml@refs/heads/main`,GITHUB_EVENT_PATH:eventPath,GITHUB_RUN_ID:'1',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'c'.repeat(40),GITHUB_EVENT_NAME:'workflow_dispatch'};
   try{
     const event={repository:{full_name:config.repository},inputs:{pr:'71',sha:'b'.repeat(40),action:'deploy',operation:'20000000-0000-4000-8000-000000000002',controlSha:env.GITHUB_SHA}};
     await writeFile(eventPath,JSON.stringify(event));
@@ -58,7 +58,7 @@ test('workflow writes only projected receipt and a separate credential-free step
   });
   t.mock.method(service,'status',async(s:Source)=>{method='status';return {...common,action:'status',source:s};});
   t.mock.method(service,'cleanup',async(s:Source)=>{method='cleanup';return {...common,action:'cleanup',source:s};});
-  const env:NodeJS.ProcessEnv={NODE_ENV:'test',VERCEL_TOKEN:'test-only',NEON_API_KEY:'test-only',GITHUB_REPOSITORY:config.repository,GITHUB_REF:'refs/heads/main',
+  const env:NodeJS.ProcessEnv={NODE_ENV:'test',CAKE_PREVIEW_PR:'71',VERCEL_TOKEN:'test-only',NEON_API_KEY:'test-only',GITHUB_REPOSITORY:config.repository,GITHUB_REF:'refs/heads/main',
     GITHUB_WORKFLOW_REF:`${config.repository}/.github/workflows/preview.yml@refs/heads/main`,GITHUB_EVENT_PATH:eventPath,
     GITHUB_RUN_ID:'38896088643',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'c'.repeat(40),GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_STEP_SUMMARY:summary};
   try{
@@ -75,8 +75,11 @@ test('workflow writes only projected receipt and a separate credential-free step
       assert.equal(emitted.length,1);assert.equal(emitted[0],`::notice title=${receiptNoticeTitle}::${text}`);
     }
     raw.state='closed';
-    await writeFile(eventPath,JSON.stringify({repository:{full_name:config.repository},action:'closed',pull_request:raw}));
-    await runPreviewWorkflow({...env,GITHUB_EVENT_NAME:'pull_request_target'},service);
+    await writeFile(eventPath,JSON.stringify({repository:{full_name:config.repository}}));
+    await runPreviewWorkflow({...env,GITHUB_EVENT_NAME:'workflow_run'},service,undefined,{
+      workflowRunPullRequest:async()=>({source:{...source,state:'closed'},raw:{...raw,merged:false}}),
+      pushedPullRequests:async()=>assert.fail('not a push'),
+    });
     assert.equal(parseReceipt(await readFile(join(directory,'preview-result.json'),'utf8')).operation,null);
     assert.ok(!(await readFile(summary,'utf8')).includes(secret));
     assert.ok(!(await readFile(summary,'utf8')).includes('::notice'));
@@ -163,27 +166,36 @@ test('verify writes a failure receipt before failing the job, and notice is emit
 
 test('verify has a pinned browser container while management stays on the host with main-only permissions and isolated notices', async () => {
   const workflow = await readFile(new URL('../../.github/workflows/preview.yml', import.meta.url), 'utf8');
+  const preparation = workflow.split('\n  prepare:\n')[1]?.split('\n  preview:\n')[0];
   const management = workflow.split('\n  preview:\n')[1]?.split('\n  preview-verify:\n')[0];
   const verification = workflow.split('\n  preview-verify:\n')[1];
-  assert.ok(management && verification);
+  assert.ok(preparation && management && verification);
   assert.match(workflow, /options: \[deploy, status, cleanup, verify\]/);
   assert.match(workflow, /deploymentId:[\s\S]*?required: false/);
-  assert.match(workflow, /concurrency:\s*group: cake-preview-\$\{\{ inputs\.pr \|\| github\.event\.pull_request\.number \}\}\s*cancel-in-progress: false/);
-  assert.match(management, /github\.event_name == 'workflow_dispatch' && inputs\.action != 'verify'/);
+  assert.match(management, /concurrency:\s*group: cake-preview-\$\{\{ matrix\.pr \}\}\s*cancel-in-progress: false/);
+  assert.match(verification, /concurrency:\s*group: cake-preview-\$\{\{ inputs\.pr \}\}\s*cancel-in-progress: false/);
+  assert.match(management, /CAKE_PREVIEW_PR: \$\{\{ matrix.pr \}\}/);
+  assert.ok(!verification.includes('needs:'));
+  assert.ok(!preparation.includes('environment:')); assert.ok(!preparation.includes('VERCEL_TOKEN')); assert.ok(!preparation.includes('NEON_API_KEY'));
+  assert.match(workflow, /workflow_run:\s*workflows: \[Cake PR Events\]\s*types: \[completed\]/);
+  assert.match(workflow, /push:\s*branches: \[main\]/);
+  assert.match(preparation, /github\.event_name == 'workflow_dispatch' && inputs\.action != 'verify'/);
   assert.match(verification, /github\.event_name == 'workflow_dispatch' && inputs\.action == 'verify'/);
   assert.ok(!management.includes('container:'));
   assert.ok(!workflow.includes('playwright install'));
-  assert.ok(!/id-token:|checks: write|pull_request:\s|\bpush:/.test(workflow));
+  assert.ok(!/id-token:|checks: write|pull_request:\s|pull_request_target:/.test(workflow));
   for (const job of [management, verification]) {
     assert.match(job, /github\.ref == 'refs\/heads\/main'/);
     assert.match(job, /ref: \$\{\{ github\.sha \}\}/);
     assert.match(job, /persist-credentials: false/);
+    assert.match(job, /environment: cake-automation/);
     assert.match(job, /permissions:\s*contents: read\s*pull-requests: read/);
     const noticeIndex = job.indexOf('- name: Publish public operation receipt notice');
     assert.ok(noticeIndex >= 0);
     const notice = job.slice(noticeIndex);
     assert.ok(!notice.includes('env:')); assert.ok(!notice.includes('TOKEN'));
   }
+  assert.match(management, /actions: read/);
   assert.match(verification, /if: success\(\) \|\| \(always\(\) && github\.event_name == 'workflow_dispatch' && inputs\.action == 'verify'\)/);
   assert.ok(!workflow.includes('upload-artifact'));
 
