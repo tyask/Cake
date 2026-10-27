@@ -123,6 +123,7 @@ export function stalePostMergeResult(previous: CommentMarker, next: PostMergeRes
 }
 
 export function postMergeComment(result: PostMergeResult, otherWork: boolean, history: PostMergeResult[] = [result]): string {
+  if (history.length > 50) return failPostMerge('COMMENT_TOO_LARGE');
   const labels = { success: '成功', failed: '失敗・要対応', timeout: '確認待ち（待機上限）', superseded: '後続のmain更新により未完了' };
   const names = { ci: 'main CI', production: '本番Deployment・alias', staging: '常設Preview・ブラウザ検証', cleanup: 'PR専用Preview・DB削除' };
   const runLink = (run: string | number) => `https://github.com/${config.repository}/actions/runs/${run}`;
@@ -164,7 +165,9 @@ async function relatedWork(api: Transport, current: MergedTask): Promise<Related
   for (const pr of pulls) {
     let metadata;
     try { metadata = parseTaskMetadata(pr.body ?? ''); }
-    catch { blocked = true; continue; }
+    // Invalid metadata cannot associate an otherwise unrelated PR with this Issue.
+    // A previously associated PR still blocks completion through history reconciliation.
+    catch { continue; }
     if (!metadata || metadata.issue !== current.metadata.issue || pr.number === current.source.pr) continue;
     if (!positiveId(pr.number)) { blocked = true; continue; }
     const raw = object(await api('github', `${repoPrefix}pulls/${pr.number}`));

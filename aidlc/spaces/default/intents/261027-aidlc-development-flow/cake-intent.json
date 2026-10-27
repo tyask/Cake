@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-10-27T11:32:34.977Z",
-  "updatedAt": "2026-10-27T11:43:11.237Z",
+  "updatedAt": "2026-10-27T11:46:03.139Z",
   "events": [
     {
       "action": "CREATED",
@@ -62,6 +62,18 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-10-27T11:43:11.237Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-27T11:45:42.029Z",
+      "note": "追加の独立レビューで、無関係な過去PRの不正metadataが全Issueの完了を阻害するP2と、履歴の読取/書込上限が一致しないP3を確認した。\nIssueへの関連付けが成立しないPRは当該Issueの判定から除き、既知の関連PRが消えた場合は履歴との照合で未確認として残す。\n履歴は書込前にも読取と同じ50件上限を検査し、自身が次回読めなくなるコメントを保存しない。\n両条件の回帰を追加する。計画の目的・範囲は変更せず、承認済みの残作業判定と再実行の整合性を満たす修正として進める。\n",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-27T11:46:03.139Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
     }

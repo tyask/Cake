@@ -272,10 +272,22 @@ test('Issue reporting is repeatable, preserves its body, and closes only final f
     }
     currentMetadata = metadata; report = result(); comments = []; writes.length = 0; issueState = 'open';
     open = [{ body: marker() }]; await save(); await publishPostMerge(f.env, api, f.directory); assert.equal(issueState, 'open');
-    open = []; comments = []; report = result({ status: 'failed', checks: { ...result().checks, cleanup: { status: 'failure', code: 'CLEANUP_FAILED' } } });
+    open = [{ number: 99, state: 'closed', merged: false, body: '<!-- cake-task/v1 broken -->' }];
+    comments = []; issueState = 'open'; await save(); await publishPostMerge(f.env, api, f.directory);
+    assert.equal(issueState, 'closed', 'unrelated malformed closed PRs must not block this Issue');
+    open = []; comments = []; issueState = 'open'; report = result({ status: 'failed', checks: { ...result().checks, cleanup: { status: 'failure', code: 'CLEANUP_FAILED' } } });
     await save(); await publishPostMerge(f.env, api, f.directory); assert.equal(issueState, 'open');
     assert.ok(!writes.some(w => (w.body as Record<string, unknown>).body === 'human-authored issue body'));
   } finally { await f.cleanup(); }
+});
+
+test('the comment writer applies the same history limit as its reader', () => {
+  const history = Array.from({ length: 51 }, (_, index) => {
+    const entry = result();
+    entry.task.source.pr = index + 1;
+    return entry;
+  });
+  assert.throws(() => postMergeComment(result(), false, history), /COMMENT_TOO_LARGE/);
 });
 
 test('stale ordering compares generations within one PR and never treats PR numbers as merge order', () => {
