@@ -37,6 +37,7 @@ function dataset(query: AnalyticsQuery = { workspaceId, period: "month", month: 
       bucket("current", "a", "PERSONAL", null, "300"), bucket("current", "b", "PERSONAL", null, "200"),
       bucket("comparison", "a", "SHARED", null, "100"),
       bucket("trend", "a", "SHARED", null, "120"), bucket("trend", "a", "PERSONAL", null, "300"),
+      bucket("trend", "b", "SHARED", null, "80"), bucket("trend", "b", "PERSONAL", null, "200"),
     ],
   };
 }
@@ -58,13 +59,15 @@ function detailTransactions(): TransactionRecord[] {
     payment,
     { ...payment, id: "food-personal", merchant: "自分の食費", amountYen: 20, actorUserId: "a", actorName: "Aさん",
       expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 }, categoryId: "food", settledAt: null },
+    { ...payment, id: "other-personal", merchant: "相手の個人費", amountYen: 30, actorUserId: "b", actorName: "Bさん",
+      expenseClass: "PERSONAL", splitWeights: { a: 0, b: 1 }, categoryId: null, settledAt: null },
     { ...payment, id: "grocery-other", merchant: "相手だけに配分", amountYen: 50, splitWeights: { a: 0, b: 1 }, settledAt: null },
     { ...payment, id: "unclassified", merchant: "未分類の支払い", amountYen: 7, splitWeights: { a: 1, b: 0 }, categoryId: null },
     { ...payment, id: "deleted-category", merchant: "削除済みカテゴリ", amountYen: 9, splitWeights: { a: 1, b: 0 }, categoryId: "missing" },
   ];
 }
 
-test("集計は自分の収支と共有費全体をローカルで切り替え、期間と取得世代だけをAPIへ送る", async t => {
+test("集計はユーザー・共有費・個人費・収入をローカルで切り替え、期間と取得世代だけをAPIへ送る", async t => {
   const bundle = await build({ entryPoints: ["tests/client/fixtures/analytics.tsx"], bundle: true, write: false,
     outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
   const server = createServer((req, res) => {
@@ -178,13 +181,13 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         await open("食費", ["grocery-shared", "food-personal"]);
         await amount("grocery-shared", 60);
         await amount("food-personal", 20);
-        await dialog.getByText("明細の金額は自分への配分後の金額です。", { exact: false }).waitFor();
-        if (width > 768) await dialog.getByRole("columnheader", { name: "自分の配分（円）", exact: true }).waitFor();
+        await dialog.getByText("明細の金額は選択したユーザーへの配分後の金額です。", { exact: false }).waitFor();
+        if (width > 768) await dialog.getByRole("columnheader", { name: "選択ユーザーの配分（円）", exact: true }).waitFor();
         await dialog.getByText("明細のメモ", { exact: true }).first().waitFor({ state: width <= 768 ? "hidden" : "visible" });
         if (width <= 768) {
           await dialog.locator('[data-transaction-id="grocery-shared"]:visible summary').click();
           await dialog.locator('[data-transaction-id="grocery-shared"]:visible').getByText("明細のメモ", { exact: true }).waitFor();
-          await expandedAmount("grocery-shared", "自分の配分（円）", 60);
+          await expandedAmount("grocery-shared", "選択ユーザーの配分（円）", 60);
         }
         await f.page.keyboard.press("Escape");
         await dialog.waitFor({ state: "hidden" });
@@ -193,19 +196,24 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         await open("食費", ["grocery-shared"]);
         await amount("grocery-shared", 60);
         await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
-        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check();
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).check();
         await open("食費", ["grocery-shared", "grocery-other"]);
         await amount("grocery-shared", 100);
         await amount("grocery-other", 50);
-        await dialog.getByText("明細の金額は取引全額です。", { exact: false }).waitFor();
-        if (width > 768) await dialog.getByRole("columnheader", { name: "金額（円）", exact: true }).waitFor();
+        await dialog.getByText("明細の金額は選択したユーザーへの配分後の金額です。", { exact: false }).waitFor();
+        if (width > 768) await dialog.getByRole("columnheader", { name: "選択ユーザーの配分（円）", exact: true }).waitFor();
         else {
           await dialog.locator('[data-transaction-id="grocery-shared"]:visible summary').click();
-          await expandedAmount("grocery-shared", "金額（円）", 100);
+          await expandedAmount("grocery-shared", "選択ユーザーの配分（円）", 100);
         }
         await dialog.getByRole("button", { name: "明細一覧を閉じる", exact: true }).click();
-        await f.page.getByRole("radio", { name: "自分の収支", exact: true }).check();
+        await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).uncheck();
         await f.page.getByRole("checkbox", { name: "個人費", exact: true }).check();
+        await open("未分類", ["other-personal"]);
+        await amount("other-personal", 30);
+        await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+        await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).check();
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck();
         await f.page.getByLabel("カテゴリの細かさ", { exact: true }).selectOption("all");
         await open("食費（直接設定）", ["food-personal"]);
         await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
@@ -278,13 +286,13 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
       } finally { await f.context.close(); }
     });
 
-    for (const width of [1440, 1000, 850, 800, 769, 390, 320]) await t.test(`${width}px: 自分と共有全体・階層・表を変えても再通信しない`, async () => {
+    for (const width of [1440, 1000, 850, 800, 769, 390, 320]) await t.test(`${width}px: 表示ユーザー・階層・表を変えても再通信しない`, async () => {
       const f = await fixture(width);
       try {
         const request = await f.take();
         assert.deepEqual([...new URL(request.request().url()).searchParams.keys()].sort(), ["month", "period", "workspaceId"]);
         await f.reply(request); await f.total("−￥80");
-        const summary = f.page.getByRole("table", { name: "対象期間の自分の収支", exact: true });
+        const summary = f.page.getByRole("table", { name: "対象期間の収支", exact: true });
         assert.deepEqual(await summary.getByRole("rowheader").allTextContents(), ["収入", "支出", "収支"]);
         assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥420");
         assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥340");
@@ -320,30 +328,28 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         const pieBounds = (await pie.locator("svg").first().boundingBox())!;
         assert.ok(pieBounds.width > 100 && pieBounds.height > 100, "中間幅でも円グラフが消えない");
         assert.equal(await f.page.getByRole("combobox", { name: "集計の基準" }).count(), 0);
-        assert.equal(await f.page.getByRole("checkbox").count(), 2, "自分の配分に含める共有費と個人費を選べる");
-        assert.equal(await f.page.getByRole("radio", { name: "自分の収支", exact: true }).isChecked(), true);
-        await f.page.getByText("チェックした共有費の自分の配分と個人費を、収入・支出それぞれで合計します。", { exact: false }).waitFor();
-        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥100");
-        assert.equal(await f.page.getByRole("table", { name: "対象期間の自分の収支", exact: true }).count(), 0);
-        assert.equal(await f.page.getByTestId("analytics-cashflow-chart").count(), 0, "共有費全体は旧カテゴリ別の推移を維持する");
-        await f.page.getByRole("heading", { name: "カテゴリ別の内訳", exact: true }).waitFor();
-        await f.chartOrder("月ごとの推移", "カテゴリ別の内訳");
-        assert.equal(await f.page.getByRole("checkbox").count(), 0);
-        assert.equal(await f.page.getByTestId("analytics-total").evaluate(element => getComputedStyle(element).color), "rgb(51, 42, 24)");
-        await f.page.getByText("共有費を支払者にかかわらず全額で集計します。個人費は含めません。", { exact: false }).waitFor();
-        await f.page.getByRole("radio", { name: "自分の収支", exact: true }).check(); await f.total("−￥80");
-        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥100");
+        assert.equal(await f.page.getByRole("checkbox").count(), 5, "表示ユーザー2人と共有費・個人費・収入を選べる");
+        assert.equal(await f.page.getByRole("radio").count(), 0, "共有費全体の切替は廃止する");
+        assert.equal(await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).isChecked(), true);
+        assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), false);
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).check(); await f.total("−￥150");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥700");
+        assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥550");
+        assert.equal(await summary.count(), 1, "全員選択でも同じ収支表を表示する");
+        await f.chartOrder("月ごとの収入・支出・収支", "カテゴリ別の内訳");
+        await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).uncheck(); await f.total("−￥70");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥280");
+        await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).check(); await f.total("−￥150");
         await f.page.getByLabel("カテゴリの細かさ", { exact: true }).selectOption("all");
         await f.page.getByLabel("全カテゴリの支出額と割合").getByText("食費 › スーパー", { exact: true }).waitFor();
         await f.page.getByText("月ごとの金額を表で見る", { exact: true }).click();
-        await f.page.getByRole("table", { name: "月ごとの支出額（円）" }).waitFor();
-        const monthlyAmounts = f.page.getByRole("table", { name: "月ごとの支出額（円）" }).locator("td");
-        assert.ok((await monthlyAmounts.allTextContents()).every(text => /^￥[\d,]+$/.test(text)));
-        assert.ok((await monthlyAmounts.evaluateAll(elements => elements.map(element => getComputedStyle(element).color))).every(color => color === "rgb(51, 42, 24)"), "月別表の費用も通常色で表示する");
+        const monthlyAmounts = f.page.getByRole("table", { name: "月ごとの収入・支出・収支（円）" });
+        await monthlyAmounts.waitFor();
+        assert.deepEqual(await monthlyAmounts.getByRole("row", { name: /^2026\/10 / }).getByRole("cell").allTextContents(), ["+￥700", "−￥150", "+￥550"]);
         await f.stable();
         assert.equal(f.urls.length, 1, "表示条件と表の変更はAPIを呼ばない");
         if (width === 1440) {
-          const trend = f.page.getByRole("group", { name: "月ごとのカテゴリ別支出額。下の表でも確認できます。", exact: true });
+          const trend = f.page.getByTestId("analytics-cashflow-chart");
           const surface = trend.locator("svg.recharts-surface");
           await trend.evaluate(group => {
             const chart = group as HTMLElement & { keyboardTrace?: Record<string, string | number | null>[] };
@@ -368,7 +374,7 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
             await f.page.mouse.move(0, 0); await f.stable();
             await surface.focus();
             assert.equal(await surface.evaluate(element => element === document.activeElement), true, "月次グラフへキーボードfocusを移す");
-            const months = ["2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"];
+            const months = ["2026/05", "2026/06", "2026/07", "2026/08", "2026/09", "2026/10"];
             // Focus may retain an inactive keyboard index after blur. Navigate to
             // a known endpoint instead of assuming focus selects the first month.
             await f.page.keyboard.press("ArrowLeft"); await f.stable();
@@ -421,33 +427,41 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
       } finally { await f.context.close(); }
     });
 
-    for (const width of [1440, 390]) await t.test(`${width}px: 共有費・個人費の選択は収入と支出へ同時に反映し、共有費全体に影響せず保持する`, async () => {
+    for (const width of [1440, 390]) await t.test(`${width}px: 共有費・個人費・収入を独立して選択し、相手の個人費も表示する`, async () => {
       const f = await fixture(width);
       try {
         await f.reply(await f.take()); await f.total("−￥80");
         const shared = f.page.getByRole("checkbox", { name: "共有費", exact: true });
         const personal = f.page.getByRole("checkbox", { name: "個人費", exact: true });
-        assert.equal(await shared.isChecked(), true); assert.equal(await personal.isChecked(), true);
+        const income = f.page.getByRole("checkbox", { name: "収入", exact: true });
+        assert.equal(await shared.isChecked(), true); assert.equal(await personal.isChecked(), true); assert.equal(await income.isChecked(), true);
+        assert.deepEqual(await f.page.getByRole("group", { name: "収支に含める内容", exact: true }).locator("label").allTextContents(), ["収入", "共有費", "個人費"], "指定された順序で内容を選ぶ");
         await personal.uncheck(); await f.total("−￥60");
-        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥120");
-        assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥60");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥420", "支出の区分選択は収入に影響しない");
+        assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥360");
         assert.deepEqual(await f.page.getByLabel("全カテゴリの支出額と割合").locator("strong").allTextContents(), ["￥60", "￥0"], "比較期間だけのカテゴリも0円で残す");
-        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥100");
-        assert.equal(await f.page.getByTestId("analytics-income").count(), 0);
-        await f.page.getByRole("radio", { name: "自分の収支", exact: true }).check(); await f.total("−￥60");
-        assert.equal(await personal.isChecked(), false); assert.equal(await shared.isChecked(), true);
-        await shared.uncheck();
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).check(); await f.total("−￥100");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥700");
+        await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).uncheck(); await f.total("−￥40");
+        await personal.check(); await f.total("−￥70");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥280");
+        assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥210");
+        await shared.uncheck(); await f.total("−￥30");
+        await personal.uncheck(); await f.total("￥0");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥280", "収入だけでも集計できる");
+        assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥280");
+        await income.uncheck();
         await f.page.getByRole("status").filter({ hasText: "収支に含める内容を1つ以上選んでください。" }).waitFor();
         assert.equal(await f.page.getByTestId("analytics-total").count(), 0, "全OFFは0円の集計ではない");
         assert.equal(await f.page.getByRole("heading", { name: "カテゴリ別の内訳", exact: true }).count(), 0);
-        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥100");
-        await f.page.getByRole("radio", { name: "自分の収支", exact: true }).check();
-        await f.page.getByRole("status").filter({ hasText: "収支に含める内容を1つ以上選んでください。" }).waitFor();
-        await personal.check(); await f.total("−￥20");
-        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥300");
-        assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥280");
-        assert.deepEqual(await f.page.getByLabel("全カテゴリの支出額と割合").locator("strong").allTextContents(), ["￥20"]);
-        await shared.check(); await f.total("−￥80");
+        await personal.check(); await f.total("−￥30");
+        assert.equal(await f.page.getByTestId("analytics-income").count(), 0);
+        assert.equal(await f.page.getByTestId("analytics-balance").count(), 0);
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck();
+        await f.page.getByRole("status").filter({ hasText: "表示対象のユーザーを1人以上選んでください。" }).waitFor();
+        assert.equal(await f.page.getByTestId("analytics-total").count(), 0, "ユーザーの全解除は0円表示にしない");
+        await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).check(); await f.total("−￥20");
+        await shared.check(); await income.check(); await f.total("−￥80");
         assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥420");
         assert.equal(f.urls.length, 1); assert.deepEqual(f.errors, []);
         assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
@@ -499,12 +513,14 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         assert.match(await summary.textContent() ?? "", /1 \/ 5件選択/);
         await f.page.getByLabel("カテゴリの細かさ", { exact: true }).selectOption("all"); await f.total("−￥20");
         await f.page.getByLabel("全カテゴリの支出額と割合").getByText("食費（直接設定）", { exact: true }).waitFor();
-        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥0");
-        await grocery.check(); await f.total("￥100");
+        await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).uncheck();
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).check(); await f.total("￥0");
+        await grocery.check(); await f.total("−￥40");
         assert.equal(await food.isChecked(), true);
-        await f.page.getByRole("radio", { name: "自分の収支", exact: true }).check(); await f.total("−￥80");
+        await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).check();
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck(); await f.total("−￥80");
         await f.page.getByRole("checkbox", { name: "個人費", exact: true }).uncheck(); await f.total("−￥60");
-        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥120");
+        assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥420");
         await food.uncheck();
         await f.page.getByText("集計に含めるカテゴリを1つ以上選んでください。", { exact: true }).waitFor();
         await categories.getByRole("checkbox", { name: "未分類", exact: true }).check(); await f.total("−￥7");
@@ -715,7 +731,8 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         assert.ok(labels.length > 0 && labels.every(label => expectedValues.has(label)), "図内の金額は正確な円表記");
         const trend = f.page.getByRole("group", { name: "月ごとの収入・支出・収支。棒は収入・支出、折れ線は収支。下の表でも確認できます。", exact: true });
         await trend.locator(".analytics-cashflow-expense .recharts-bar-rectangle path").first().waitFor();
-        assert.equal(await trend.locator('[data-analytics-amount="trend"][data-category-id="c10"]').count(), 0);
+        const trendAmounts = await trend.locator('[data-analytics-amount="trend"][data-cashflow-series="expense"]').allTextContents();
+        assert.ok(trendAmounts.every(amount => amount === "−￥725"), "月次の支出ラベルは全カテゴリの合計を表示する");
         const difference = f.page.getByRole("group", { name: "カテゴリ別の支出額の増減。正は増加、負は減少。全カテゴリの金額は次の表に表示します。", exact: true });
         assert.equal(await difference.locator('[data-analytics-amount="difference"][data-category-id="c10"]').textContent(), "-￥499", "支出の減少額はマイナスで表示する");
         const decrease = f.page.getByRole("row").filter({ has: f.page.getByRole("rowheader", { name: "分類10", exact: true }) });
@@ -821,21 +838,30 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         assert.deepEqual(await monthCells("2026/09").allTextContents(), ["+￥100", "−￥200", "−￥100"]);
         assert.deepEqual(await monthCells("2026/10").allTextContents(), ["+￥250", "−￥80", "+￥170"]);
         await f.page.getByRole("checkbox", { name: "個人費", exact: true }).uncheck(); await f.total("−￥60");
-        assert.deepEqual(await monthCells("2026/10").allTextContents(), ["+￥200", "−￥60", "+￥140"]);
+        assert.deepEqual(await monthCells("2026/10").allTextContents(), ["+￥250", "−￥60", "+￥190"]);
         await f.page.getByLabel("カテゴリの細かさ", { exact: true }).selectOption("all");
-        assert.deepEqual(await monthCells("2026/10").allTextContents(), ["+￥200", "−￥60", "+￥140"], "カテゴリ粒度は収入と支出の合計を変えない");
-        await f.page.getByRole("checkbox", { name: "共有費", exact: true }).uncheck();
-        await f.page.getByRole("status").filter({ hasText: "収支に含める内容を1つ以上選んでください。" }).waitFor();
+        assert.deepEqual(await monthCells("2026/10").allTextContents(), ["+￥250", "−￥60", "+￥190"], "カテゴリ粒度は収入と支出の合計を変えない");
+        await f.page.getByRole("checkbox", { name: "共有費", exact: true }).uncheck(); await f.total("￥0");
+        assert.deepEqual(await monthCells("2026/10").allTextContents(), ["+￥250", "￥0", "+￥250"], "収入のみも月次へ反映する");
         await f.page.getByRole("checkbox", { name: "個人費", exact: true }).check(); await f.total("−￥20");
-        await f.page.getByText("月ごとの金額を表で見る", { exact: true }).click();
-        assert.deepEqual(await monthCells("2026/10").allTextContents(), ["+￥50", "−￥20", "+￥30"]);
-        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥100");
-        assert.equal(await f.page.getByTestId("analytics-cashflow-chart").count(), 0);
-        const sharedTrend = f.page.getByRole("group", { name: "月ごとのカテゴリ別支出額。下の表でも確認できます。", exact: true });
-        await sharedTrend.locator(".recharts-bar-rectangle path").first().waitFor();
-        assert.equal(await sharedTrend.locator(".recharts-line").count(), 0);
-        await f.page.getByRole("radio", { name: "自分の収支", exact: true }).check(); await f.total("−￥20");
-        assert.equal(await f.page.getByRole("checkbox", { name: "共有費", exact: true }).isChecked(), false);
+        assert.deepEqual(await monthCells("2026/10").allTextContents(), ["+￥250", "−￥20", "+￥230"]);
+        await f.page.getByRole("checkbox", { name: "収入", exact: true }).uncheck();
+        assert.equal(await f.page.getByTestId("analytics-income").count(), 0);
+        assert.equal(await f.page.getByTestId("analytics-balance").count(), 0);
+        assert.deepEqual(await f.page.getByRole("table", { name: "対象期間の収支", exact: true }).getByRole("rowheader").allTextContents(), ["支出"]);
+        assert.equal(await chart.locator(".analytics-cashflow-income").count(), 0);
+        assert.equal(await chart.locator(".analytics-cashflow-balance").count(), 0);
+        assert.deepEqual(await f.page.getByRole("list", { name: "収支グラフの凡例" }).locator("li").allTextContents(), ["支出"]);
+        const expenseMonthly = f.page.getByRole("table", { name: "月ごとの支出（円）", exact: true });
+        assert.deepEqual(await expenseMonthly.getByRole("columnheader").allTextContents(), ["対象月", "支出"]);
+        assert.deepEqual(await expenseMonthly.getByRole("row", { name: /^2026\/10 / }).getByRole("cell").allTextContents(), ["−￥20"]);
+        await chart.locator("svg.recharts-surface").scrollIntoViewIfNeeded();
+        await f.page.mouse.move(0, 0);
+        await chart.locator("svg.recharts-surface").focus();
+        for (let index = 0; index < 6; index++) await f.page.keyboard.press("ArrowRight");
+        await chart.getByText("2026/10", { exact: true }).waitFor();
+        assert.deepEqual(await chart.locator(".recharts-tooltip-wrapper strong").allTextContents(), ["−￥20"], "収入OFFではtooltipにも支出だけを表示する");
+        await f.page.getByRole("checkbox", { name: "収入", exact: true }).check();
         await f.page.getByRole("checkbox", { name: "共有費", exact: true }).check();
         await f.page.getByRole("checkbox", { name: "個人費", exact: true }).uncheck(); await f.total("−￥60");
         assert.equal(f.urls.length, 1, "共有/個人・表示対象・カテゴリの変更は追加通信しない");
@@ -880,9 +906,10 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         await f.reply(await f.take()); await f.total("−￥70");
         assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥280");
         assert.equal(await f.page.getByTestId("analytics-balance").textContent(), "+￥210");
-        assert.equal(await f.page.getByRole("radio", { name: "自分の収支", exact: true }).isChecked(), true);
-        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥100");
-        await f.page.getByRole("radio", { name: "自分の収支", exact: true }).check(); await f.total("−￥70");
+        assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), true);
+        assert.equal(await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).isChecked(), false);
+        await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).check(); await f.total("−￥150");
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck(); await f.total("−￥80");
         assert.equal(f.urls.length, 1); assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
@@ -892,8 +919,8 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
       try {
         await f.reply(await f.take()); await f.total("−￥80");
         await f.page.getByRole("button", { name: "更新", exact: false }).click(); const refreshing = await f.take();
-        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check();
-        await f.reply(refreshing); await f.total("￥100");
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).check();
+        await f.reply(refreshing); await f.total("−￥150");
         assert.equal(f.urls.length, 2); assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
@@ -909,23 +936,23 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
         const latest = dataset(queryFromRoute(newer)); latest.buckets[0].burdenYen = "560";
         await f.reply(newer, latest); await f.total("−￥580");
         await f.reply(older); await f.stable(); await f.total("−￥580");
-        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check(); await f.total("￥600");
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).check(); await f.total("−￥650");
         await f.page.getByLabel("集計する期間", { exact: true }).selectOption("range");
         await f.page.getByLabel("開始日", { exact: true }).fill("2026-07-10");
         await f.page.getByLabel("終了日", { exact: true }).fill("2026-07-20");
         await f.stable(); assert.equal(f.urls.length, 3, "日付入力中は通信しない");
         await f.page.getByRole("button", { name: "この期間で表示" }).click(); const custom = await f.take();
         assert.deepEqual(queryFromRoute(custom), { workspaceId, period: "range", from: "2026-07-10", to: "2026-07-20" });
-        await f.reply(custom); await f.total("￥100");
-        await f.page.evaluate(() => window.updateAnalytics({ revision: 1 })); await f.reply(await f.take()); await f.total("￥100");
+        await f.reply(custom); await f.total("−￥150");
+        await f.page.evaluate(() => window.updateAnalytics({ revision: 1 })); await f.reply(await f.take()); await f.total("−￥150");
         await f.page.evaluate(() => window.updateAnalytics({ active: false, revision: 2 })); await f.stable(); assert.equal(f.urls.length, 5);
-        await f.page.evaluate(() => window.updateAnalytics({ active: true })); await f.reply(await f.take()); await f.total("￥100");
+        await f.page.evaluate(() => window.updateAnalytics({ active: true })); await f.reply(await f.take()); await f.total("−￥150");
         assert.equal(await f.page.getByLabel("開始日", { exact: true }).inputValue(), "2026-07-10");
-        assert.equal(await f.page.getByRole("radio", { name: "共有費全体", exact: true }).isChecked(), true);
+        assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), true);
         await f.page.evaluate(id => window.updateAnalytics({ workspaceId: id }), otherWorkspaceId); const other = await f.take();
         assert.equal(queryFromRoute(other).workspaceId, otherWorkspaceId);
         await f.reply(other); await f.total("−￥80");
-        assert.equal(await f.page.getByRole("radio", { name: "自分の収支", exact: true }).isChecked(), true);
+        assert.equal(await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).isChecked(), true);
         assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });
@@ -934,18 +961,18 @@ test("集計は自分の収支と共有費全体をローカルで切り替え�
       const f = await fixture();
       try {
         await f.reply(await f.take()); await f.total("−￥80");
-        await f.page.getByRole("radio", { name: "共有費全体", exact: true }).check();
+        await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).check();
         await f.page.getByRole("button", { name: "更新", exact: false }).click();
         await (await f.take()).fulfill({ status: 503, json: { error: "集計を再取得してください。" } });
         await f.page.getByRole("alert").filter({ hasText: "集計を再取得してください。" }).waitFor();
-        assert.equal(await f.page.getByRole("radio", { name: "共有費全体", exact: true }).isChecked(), true);
+        assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), true);
         assert.equal(await f.page.getByTestId("analytics-total").count(), 0);
         await f.page.getByRole("button", { name: "再試行", exact: true }).click();
-        const request = await f.take(), empty = dataset(queryFromRoute(request)); empty.buckets = [];
+        const request = await f.take(), empty = dataset(queryFromRoute(request)); empty.buckets = []; empty.receiptBuckets = [];
         await f.reply(request, empty); await f.total("￥0");
         assert.equal(await f.page.getByTestId("analytics-total").getAttribute("class"), null, "0円にも収入・支払いの色を付けない");
         await f.page.getByText("この期間の支出額はありません。", { exact: true }).waitFor();
-        await f.page.getByText("この6か月の支出額はありません。", { exact: true }).waitFor();
+        await f.page.getByText("この6か月の収入・支出はありません。", { exact: true }).waitFor();
         assert.equal(f.urls.length, 3); assert.deepEqual(f.errors, []);
       } finally { await f.context.close(); }
     });

@@ -28,6 +28,16 @@ const workspace: WorkspaceData = {
   settlement: null, settlementHistory: [],
 };
 
+if (new URLSearchParams(location.search).has("partnerPersonal")) {
+  workspace.transactions.push(...["own-personal", "partner-payment", "partner-receipt"].map(id => ({
+    ...workspace.transactions[0], id, merchant: id, expenseClass: "PERSONAL" as const,
+    type: id === "partner-receipt" ? "RECEIPT" as const : "PAYMENT" as const,
+    actorUserId: id === "own-personal" ? "a" : "b", actorName: id === "own-personal" ? "A" : "B",
+    splitWeights: id === "own-personal" ? { a: 1, b: 0 } : { a: 0, b: 1 },
+    categoryId: "leaf", memo: "相手にも見えるメモ\n2行目",
+  })));
+}
+
 function Harness() {
   const [selected, setSelected] = useState(workspace);
   const [modal, setModal] = useState(false);

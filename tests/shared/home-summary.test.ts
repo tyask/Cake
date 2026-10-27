@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cashflowSummary, currentMonthTransactions, personalCashflowSummary } from "../../lib/shared/home-summary";
+import { cashflowSummary, currentMonthTransactions, personalCashflowSummary, workspaceCashflowSummary } from "../../lib/shared/home-summary";
 import type { TransactionRecord } from "../../lib/shared/types";
 
 function transaction(id: string, occurredAt: string): TransactionRecord {
@@ -88,4 +88,21 @@ test("共有の収入も保存割合で整数円配分し、個人収入と合�
   assert.deepEqual(personalCashflowSummary(entries, members, "a"), { paymentTotal: BigInt(51), receiptTotal: BigInt(1_016), balanceYen: BigInt(965) });
   assert.deepEqual(personalCashflowSummary(entries, members, "b"), { paymentTotal: BigInt(50), receiptTotal: BigInt(15), balanceYen: BigInt(-35) });
   assert.deepEqual(personalCashflowSummary([], members, "a"), { paymentTotal: BigInt(0), receiptTotal: BigInt(0), balanceYen: BigInt(0) });
+});
+
+test("ユーザー別の収支と合計は個人費と共有費を重複なく整数円で集計する", () => {
+  const members = [{ id: "a" }, { id: "b" }];
+  const entries: TransactionRecord[] = [
+    { ...transaction("shared", "2026-10-01T00:00:00+09:00"), expenseClass: "SHARED", amountYen: 101, splitWeights: { a: 1, b: 1 } },
+    { ...transaction("refund", "2026-10-02T00:00:00+09:00"), type: "RECEIPT", expenseClass: "SHARED", amountYen: 31, splitWeights: { a: 1, b: 1 } },
+    { ...transaction("a-salary", "2026-10-03T00:00:00+09:00"), type: "RECEIPT", amountYen: 1_000 },
+    { ...transaction("b-personal", "2026-10-04T00:00:00+09:00"), amountYen: 500, actorUserId: "b", splitWeights: { b: 1 } },
+    { ...transaction("b-salary", "2026-10-04T00:00:00+09:00"), type: "RECEIPT", amountYen: 2_000, actorUserId: "b", splitWeights: { b: 1 } },
+  ];
+  const result = workspaceCashflowSummary(entries, members);
+  for (const member of members) assert.deepEqual(result.people.get(member.id), personalCashflowSummary(entries, members, member.id));
+  assert.deepEqual(result.total, { paymentTotal: BigInt(601), receiptTotal: BigInt(3_031), balanceYen: BigInt(2_430) });
+  assert.deepEqual(workspaceCashflowSummary([], members).total, cashflowSummary([]));
+  assert.deepEqual(workspaceCashflowSummary(entries.filter(item => item.expenseClass === "PERSONAL" && item.actorUserId === "a"), [members[0]]).total,
+    { paymentTotal: BigInt(0), receiptTotal: BigInt(1_000), balanceYen: BigInt(1_000) });
 });

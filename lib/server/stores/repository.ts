@@ -127,7 +127,6 @@ async function readBootstrapRow(
           FROM transactions t
           JOIN selected_workspace sw ON sw.id = t.workspace_id
           JOIN app_users u ON u.id = t.actor_user_id
-          WHERE t.expense_class = 'SHARED' OR t.actor_user_id = ${user.id}
         ), '[]'::jsonb) AS transactions,
         COALESCE((
           SELECT jsonb_agg(jsonb_build_object(

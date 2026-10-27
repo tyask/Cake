@@ -100,21 +100,22 @@ export function buildAnalyticsView(prepared: PreparedAnalyticsDataset, filters: 
   }
   const memberIds = new Set(filters.memberIds);
   const expenseClasses = new Set(filters.expenseClasses);
+  const incomeExpenseClasses = new Set(filters.incomeExpenseClasses ?? filters.expenseClasses);
   const categoryIds = filters.categoryIds === undefined ? null : new Set(filters.categoryIds);
-  const includesBucket = (bucket: PreparedBucket) => memberIds.has(bucket.memberId)
-    && expenseClasses.has(bucket.expenseClass)
+  const includesBucket = (bucket: PreparedBucket, classes: ReadonlySet<string>) => memberIds.has(bucket.memberId)
+    && classes.has(bucket.expenseClass)
     && (categoryIds === null || categoryIds.has(bucket.categoryId ?? ANALYTICS_UNCLASSIFIED_ID));
   let incomeYen = BigInt(0), comparisonIncomeYen = BigInt(0);
   const monthlyIncomeYen = prepared.months.map(() => BigInt(0));
   for (const bucket of prepared.receiptBuckets) {
-    if (!includesBucket(bucket)) continue;
+    if (!includesBucket(bucket, incomeExpenseClasses)) continue;
     if (bucket.scope === "current") incomeYen += bucket.burdenYen;
     else if (bucket.scope === "comparison") comparisonIncomeYen += bucket.burdenYen;
     else if (bucket.monthIndex >= 0) monthlyIncomeYen[bucket.monthIndex] += bucket.burdenYen;
   }
   const grouped = new Map<string, AnalyticsRow>();
   for (const bucket of prepared.buckets) {
-    if (!includesBucket(bucket) || bucket.burdenYen === BigInt(0)) continue;
+    if (!includesBucket(bucket, expenseClasses) || bucket.burdenYen === BigInt(0)) continue;
     const id = analyticsRowCategoryId(prepared, bucket.categoryId, filters.depth);
     let row = grouped.get(id);
     if (!row) {

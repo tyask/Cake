@@ -1,16 +1,15 @@
 "use client";
 
 import { cashflowClass, formatCashflow, formatYen, formatJstDateTime } from "@/lib/shared/display-formatters";
-import { cashflowSummary, currentMonthTransactions, personalCashflowSummary } from "@/lib/shared/home-summary";
+import { cashflowSummary, currentMonthTransactions, workspaceCashflowSummary } from "@/lib/shared/home-summary";
 import type { RunAppAction } from "@/lib/shared/schemas/app-input";
 import type { DashboardTab as Tab, WorkspaceData } from "@/lib/shared/types";
 
-export function HomePanel({ selected, userId, pending, setTab, add, run, refreshAction, refreshing }: { selected: WorkspaceData; userId: string; pending: number; setTab: (tab: Tab) => void; add: () => void; run: RunAppAction; refreshAction: React.ReactNode; refreshing: boolean }) {
+export function HomePanel({ selected, pending, setTab, add, run, refreshAction, refreshing }: { selected: WorkspaceData; userId: string; pending: number; setTab: (tab: Tab) => void; add: () => void; run: RunAppAction; refreshAction: React.ReactNode; refreshing: boolean }) {
   const monthTransactions = currentMonthTransactions(selected.transactions);
-  const month = personalCashflowSummary(monthTransactions, selected.members, userId);
-  const sharedMonthTransactions = monthTransactions.filter(item => item.expenseClass === "SHARED");
-  const sharedMonth = cashflowSummary(sharedMonthTransactions);
-  const sharedMonthPersonal = personalCashflowSummary(sharedMonthTransactions, selected.members, userId);
+  const month = workspaceCashflowSummary(monthTransactions, selected.members);
+  const columns = [...selected.members.map(member => ({ id: member.id, name: member.name, ...month.people.get(member.id)! })),
+    { id: "total", name: "合計", ...month.total }];
   const unsettledShared = selected.transactions.filter((item) => item.expenseClass === "SHARED" && !item.settledAt);
   const shared = cashflowSummary(unsettledShared);
   const result = selected.settlement;
@@ -28,32 +27,18 @@ export function HomePanel({ selected, userId, pending, setTab, add, run, refresh
     <div className="home-actions page-actions">{refreshAction}<button className="primary" disabled={refreshing} onClick={add}>＋ 明細を追加</button></div>
     {pending > 0 && <button className="invite-alert" onClick={() => setTab("settings")}>あなた宛ての招待が{pending}件あります <span>確認する →</span></button>}
     <div className="kpi-grid">
-      <div className="home-month-summaries">
-        <article className="kpi">
-          <table className="home-summary-table">
-            <caption>今月の自分の収支</caption>
-            <tbody>
-              <tr><th scope="row">収入</th><td className={cashflowClass(month.receiptTotal)}>{formatCashflow(month.receiptTotal)}</td></tr>
-              <tr><th scope="row">支出</th><td className={cashflowClass(-month.paymentTotal)}>{formatCashflow(-month.paymentTotal)}</td></tr>
-              <tr><th scope="row">収支</th><td className={cashflowClass(month.balanceYen)}>{formatCashflow(month.balanceYen)}</td></tr>
-              <tr><th scope="row">取引件数</th><td>{monthTransactions.length.toLocaleString("ja-JP")}件</td></tr>
-            </tbody>
-          </table>
-          <p className="section-note">自分の個人収支と、共有の収支を配分した金額です。清算済み・当月の未来日付を含みます。</p>
-        </article>
-        {selected.workspace.type === "SHARED" && <article className="kpi">
-          <table className="home-summary-table">
-            <caption>今月の共有費</caption>
-            <tbody>
-              <tr><th scope="row">共有の支出</th><td className={cashflowClass(-sharedMonth.paymentTotal)}>{formatCashflow(-sharedMonth.paymentTotal)}</td></tr>
-              <tr><th scope="row">うち自分の負担</th><td className={cashflowClass(-sharedMonthPersonal.paymentTotal)}>{formatCashflow(-sharedMonthPersonal.paymentTotal)}</td></tr>
-              <tr><th scope="row">共有の収入</th><td className={cashflowClass(sharedMonth.receiptTotal)}>{formatCashflow(sharedMonth.receiptTotal)}</td></tr>
-              <tr><th scope="row">うち自分の配分</th><td className={cashflowClass(sharedMonthPersonal.receiptTotal)}>{formatCashflow(sharedMonthPersonal.receiptTotal)}</td></tr>
-            </tbody>
-          </table>
-          <p className="section-note">共有費全体です。個人費は含みません。</p>
-        </article>}
-      </div>
+      <article className="kpi home-month-summary">
+        <table className="home-summary-table">
+          <caption>今月の収支</caption>
+          <thead><tr><td />{columns.map(column => <th scope="col" key={column.id}>{column.name}</th>)}</tr></thead>
+          <tbody>
+            <tr><th scope="row">収入</th>{columns.map(column => <td key={column.id} className={cashflowClass(column.receiptTotal)}>{formatCashflow(column.receiptTotal)}</td>)}</tr>
+            <tr><th scope="row">支出</th>{columns.map(column => <td key={column.id} className={cashflowClass(-column.paymentTotal)}>{formatCashflow(-column.paymentTotal)}</td>)}</tr>
+            <tr><th scope="row">収支</th>{columns.map(column => <td key={column.id} className={cashflowClass(column.balanceYen)}>{formatCashflow(column.balanceYen)}</td>)}</tr>
+          </tbody>
+        </table>
+        <p className="section-note">各ユーザーの個人収支と、共有の収支を配分した金額です。清算済み・当月の未来日付を含みます。</p>
+      </article>
       <section className="settlement-hero">
         <span>次の清算</span>
         {settlementUnavailable ? <p>{settlementUnavailable}</p> : result && <>

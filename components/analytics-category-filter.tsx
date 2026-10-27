@@ -74,7 +74,7 @@ export function AnalyticsCategoryFilter({ prepared, selectedIds, onChange, open,
         <button type="button" onClick={() => onChange(null)}>すべて選択</button>
         <button type="button" onClick={() => onChange([])}>すべて解除</button>
       </div>
-      <p className={styles.categoryHint}>親カテゴリのチェックは、子カテゴリもまとめて切り替えます。自分の収支では、収入・支出の両方に適用します。</p>
+      <p className={styles.categoryHint}>親カテゴリのチェックは、子カテゴリもまとめて切り替えます。選択したユーザーの収入・支出に適用します。</p>
       <ul className={styles.categoryTree} aria-label="カテゴリ階層">{renderNodes(roots)}</ul>
     </fieldset>
   </details>;

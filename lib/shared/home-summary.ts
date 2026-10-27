@@ -36,3 +36,29 @@ export function personalCashflowSummary(
         : splitAmounts(item.amountYen, item.splitWeights, members)[userId] ?? 0,
     })));
 }
+
+/** Allocate each shared entry once so member columns and their total use identical whole yen. */
+export function workspaceCashflowSummary(
+  transactions: readonly TransactionRecord[], members: readonly Pick<WorkspaceMember, "id">[],
+) {
+  const people = new Map(members.map(member => [member.id, cashflowSummary([])]));
+  for (const transaction of transactions) {
+    const amounts = transaction.expenseClass === "PERSONAL"
+      ? { [transaction.actorUserId]: transaction.amountYen }
+      : splitAmounts(transaction.amountYen, transaction.splitWeights, members);
+    for (const [id, amount] of Object.entries(amounts)) {
+      const person = people.get(id);
+      if (!person) continue;
+      if (transaction.type === "RECEIPT") person.receiptTotal += BigInt(amount);
+      else person.paymentTotal += BigInt(amount);
+      person.balanceYen = person.receiptTotal - person.paymentTotal;
+    }
+  }
+  const total = cashflowSummary([]);
+  for (const person of people.values()) {
+    total.receiptTotal += person.receiptTotal;
+    total.paymentTotal += person.paymentTotal;
+    total.balanceYen += person.balanceYen;
+  }
+  return { people, total };
+}

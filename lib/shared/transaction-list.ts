@@ -7,6 +7,7 @@ export function transactionListView(
   pinnedIds: ReadonlySet<string>,
   memoPinnedIds: ReadonlySet<string>,
   selectedIds: ReadonlySet<string>,
+  canEdit: (item: TransactionRecord) => boolean = () => true,
 ) {
   const visible: TransactionRecord[] = [];
   const visibleEditable: TransactionRecord[] = [];
@@ -16,12 +17,13 @@ export function transactionListView(
   let checkedVisibleCount = 0;
   for (const item of items) {
     const matched = matches(item);
-    if (!item.settledAt) editableIds.add(item.id);
+    const editable = !item.settledAt && canEdit(item);
+    if (editable) editableIds.add(item.id);
     if (!matched && !pinnedIds.has(item.id) && !memoPinnedIds.has(item.id)) continue;
     visible.push(item);
     visibleIds.add(item.id);
     if (!matched) outsideFilterIds.add(item.id);
-    if (!item.settledAt) {
+    if (editable) {
       visibleEditable.push(item);
       if (selectedIds.has(item.id)) checkedVisibleCount += 1;
     }

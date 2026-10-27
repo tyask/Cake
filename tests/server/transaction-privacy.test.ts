@@ -10,7 +10,7 @@ import { createAppStore } from "../../lib/server/stores/app-store";
 import { createAppService } from "../../lib/server/services/app-service";
 import { parseAppActionInput } from "../../lib/shared/schemas/app-input";
 
-test("個人明細は担当者本人だけが参照・操作でき、共有明細は双方で操作できる", async t => {
+test("個人明細は同じ家計の所属者が参照でき、変更は担当者本人だけに許可する", async t => {
   const memory = new PGlite({ extensions: { pgcrypto } });
   t.after(() => memory.close());
   const migrations = new URL("../../db/migrations/", import.meta.url);
@@ -32,6 +32,13 @@ test("個人明細は担当者本人だけが参照・操作でき、共有明�
   }
   const sharedA = await insert("a", "SHARED", "共有A"), sharedB = await insert("b", "SHARED", "共有B");
   const personalA = await insert("a", "PERSONAL", "本人だけのA"), personalB = await insert("b", "PERSONAL", "本人だけのB");
+  const privateWorkspaceId = randomUUID(), privateWorkspaceTransactionId = randomUUID();
+  await memory.query("INSERT INTO workspaces(id,name,type,owner_user_id) VALUES ($1,'B個人の家計','PERSONAL','b')", [privateWorkspaceId]);
+  await memory.query("INSERT INTO workspace_members(workspace_id,user_id,role) VALUES ($1,'b','OWNER')", [privateWorkspaceId]);
+  await memory.query(`INSERT INTO transactions(id,workspace_id,occurred_at,merchant,method,type,amount_yen,
+    actor_user_id,expense_class,split_weights,external_id,created_by,updated_by)
+    VALUES ($1::uuid,$2,'2026-10-01T00:00:00Z','別家計の個人費','現金','PAYMENT',700,'b','PERSONAL',
+      '{"b":1}'::jsonb,$1::text,'b','b')`, [privateWorkspaceTransactionId, privateWorkspaceId]);
   const users = {
     a: { id: "a", email: "a@example.test", name: "A", imageUrl: null },
     b: { id: "b", email: "b@example.test", name: "B", imageUrl: null },
@@ -76,14 +83,24 @@ test("個人明細は担当者本人だけが参照・操作でき、共有明�
     'workspace',(SELECT to_jsonb(w) FROM workspaces w WHERE id=$1),
     'transactions',(SELECT jsonb_agg(t ORDER BY id) FROM transactions t WHERE workspace_id=$1)) AS data`, [workspaceId])).rows[0].data;
 
-  await t.test("bootstrapは作成者やOWNER権限によらず本人個人費と双方の共有費だけを返す", async () => {
+  await t.test("bootstrapは作成者やOWNER権限によらず双方の個人費と共有費を返す", async () => {
     for (const actor of ["a", "b"] as const) {
       const data = await getBootstrap(users[actor], workspaceId);
-      assert.deepEqual(new Set(data.selected!.transactions.map(row => row.id)), new Set([sharedA, sharedB, actor === "a" ? personalA : personalB]));
-      assert.doesNotMatch(JSON.stringify(data), new RegExp(actor === "a" ? "本人だけのB" : "本人だけのA"));
+      assert.deepEqual(new Set(data.selected!.transactions.map(row => row.id)), new Set([sharedA, sharedB, personalA, personalB]));
+      assert.equal(data.selected!.transactions.find(row => row.id === personalA)?.actorName, "A");
+      assert.equal(data.selected!.transactions.find(row => row.id === personalB)?.actorName, "B");
       assert.equal(data.selected!.settlement!.amountYen, 0);
     }
     assert.equal(await store.previousTransaction({ ...save, transactionId: personalB }, users.a), undefined);
+  });
+  await t.test("同じ利用者の別家計の個人明細は共有家計へ混ぜず、未所属の家計指定では公開しない", async () => {
+    const own = await getBootstrap(users.a, privateWorkspaceId);
+    assert.ok(own.selected);
+    assert.notEqual(own.selected.workspace.id, privateWorkspaceId);
+    assert.ok(!own.workspaces.some(workspace => workspace.id === privateWorkspaceId));
+    assert.ok(!own.selected.transactions.some(item => item.id === privateWorkspaceTransactionId));
+    const personal = await getBootstrap(users.b, privateWorkspaceId);
+    assert.deepEqual(personal.selected?.transactions.map(item => item.id), [privateWorkspaceTransactionId]);
   });
   await t.test("相手の個人IDを指定した更新・削除・メモ・カテゴリと混在一括操作は全体をrollbackする", async () => {
     const before = await snapshot();
@@ -128,11 +145,15 @@ test("個人明細は担当者本人だけが参照・操作でき、共有明�
     assert.equal((await memory.query<{ count: number }>("SELECT count(*)::int AS count FROM transactions WHERE id=$1", [personalB])).rows[0].count, 1);
     await memory.query("INSERT INTO workspace_members(workspace_id,user_id,role) VALUES ($1,'b','MEMBER')", [workspaceId]);
   });
-  await t.test("共有カテゴリ削除は参照を全解除し、応答には相手個人費のIDや件数を含めない", async () => {
+  await t.test("共有カテゴリ削除は双方の個人費も参照解除し、応答に全可視明細の更新を含める", async () => {
     const result = await run({ action: "deleteCategory", workspaceId, categoryId });
     assert.ok("detachedTransactions" in result && Array.isArray(result.detachedTransactions));
-    assert.deepEqual(new Set(result.detachedTransactions.map(row => row.transactionId)), new Set([sharedA, sharedB]));
-    assert.equal(JSON.stringify(result).includes(personalB), false);
+    assert.deepEqual(new Set(result.detachedTransactions.map(row => row.transactionId)), new Set([sharedA, sharedB, personalB]));
+    const partner = result.detachedTransactions.find(row => row.transactionId === personalB);
+    assert.ok(partner);
+    assert.equal(partner.categoryId, null);
+    assert.equal(partner.categoryConfirmed, false);
+    assert.equal(partner.categoryRevision, 2);
     assert.equal((await memory.query<{ count: number }>("SELECT count(*)::int AS count FROM transactions WHERE category_id=$1", [categoryId])).rows[0].count, 0);
     await run({ action: "deleteTransaction", workspaceId, transactionId: personalA });
     await run({ action: "deleteTransactions", workspaceId, transactionIds: [personalB] }, "b");
