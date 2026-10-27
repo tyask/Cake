@@ -2,7 +2,8 @@ name: Cake Deployment Retention
 run-name: Deployment Retention ${{ inputs.mode || 'apply' }} ${{ github.sha }}
 on:
   schedule:
-    - cron: '17 3 * * *'
+    # 06:00 JST (21:00 UTC on the previous day).
+    - cron: '0 21 * * *'
   workflow_dispatch:
     inputs:
       mode:

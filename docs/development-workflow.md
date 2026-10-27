@@ -395,7 +395,7 @@ Production用カスタムドメインは常設Previewへ付け替えない。
 ### 本番・常設PreviewのDeployment保持
 
 `.github/workflows/deployment-retention.yml`の`Cake Deployment Retention`は、
-信頼済みmain上で毎日03:17 UTCに古いDeploymentを整理する。
+信頼済みmain上で毎朝06:00 JST（前日21:00 UTC）に古いDeploymentを整理する。
 手動実行の`mode`は、読取のみの`plan`を既定とし、`apply`で削除する。
 実行中のmainとworkflowの完全SHAを照合し、専用の`cake-deployment-retention` concurrencyで整理処理を直列化する。
 常設Previewの待機runを取り消さないよう、そのconcurrency groupは共有しない。

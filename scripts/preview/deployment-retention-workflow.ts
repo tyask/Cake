@@ -35,7 +35,7 @@ export async function runRetentionWorkflow(env: Environment = process.env,
   if (object(event.repository).id !== config.repositoryId || object(event.repository).full_name !== config.repository)
     throw new Error('PREVIEW_RETENTION_UNTRUSTED_EVENT');
   let mode: Mode;
-  if (env.GITHUB_EVENT_NAME === 'schedule' && event.schedule === '17 3 * * *') mode = 'apply';
+  if (env.GITHUB_EVENT_NAME === 'schedule' && event.schedule === '0 21 * * *') mode = 'apply';
   else if (env.GITHUB_EVENT_NAME === 'workflow_dispatch') {
     const input = object(event.inputs ?? {}).mode ?? 'plan';
     if (input !== 'plan' && input !== 'apply') throw new Error('PREVIEW_RETENTION_INVALID_MODE');

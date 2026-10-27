@@ -59,7 +59,7 @@ test('定刻scheduleはapply、手動の明示applyも許可する', async () =>
     const f = await fixture();
     try {
       await writeFile(f.env.GITHUB_EVENT_PATH, JSON.stringify({ repository: { id: config.repositoryId, full_name: config.repository },
-        ...(scheduled ? { schedule: '17 3 * * *' } : { inputs: { mode: 'apply' } }) }));
+        ...(scheduled ? { schedule: '0 21 * * *' } : { inputs: { mode: 'apply' } }) }));
       f.env.GITHUB_EVENT_NAME = scheduled ? 'schedule' : 'workflow_dispatch';
       await runRetentionWorkflow(f.env, audit => ({ run: async mode => {
         assert.equal(mode, 'apply'); audit({ action: 'plan', ids: ['dpl_old'] });
