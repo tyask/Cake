@@ -14,7 +14,7 @@ import { seedTestUsers, testSeedSql } from '../../db/seed-test-users.ts';
 // PGlite outside the repository and point to its dist/index.js module.
 const args = process.argv.slice(2);
 if (args.length !== 2 || args[0] !== '--pglite-module' || !args[1]) {
-  console.error('Usage: node --import tsx scripts/qa/db/verify-preview-database-safety.mjs --pglite-module /absolute/path/to/pglite/dist/index.js');
+  console.error('Usage: node --no-wasm-code-gc --import tsx scripts/qa/db/verify-preview-database-safety.mjs --pglite-module /absolute/path/to/pglite/dist/index.js');
   process.exit(1);
 }
 const moduleUrl = pathToFileURL(resolve(args[1]));
