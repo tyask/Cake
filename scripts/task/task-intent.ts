@@ -73,7 +73,8 @@ async function textFile(cwd: string, input: string, max = 1_000_000): Promise<st
   if (!isText(value, max)) error('CAKE_INTENT_INVALID_TEXT_FILE');
   // Reject recognizable secrets rather than publishing them in committed history.
   if (/(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|postgres(?:ql)?:\/\/[^\s/:]+:[^\s@]+@)/.test(value)) error('CAKE_INTENT_SECRET_CONTENT');
-  return value;
+  // Match the repository's LF contract before hashing or committing user-authored input.
+  return value.replaceAll('\r\n', '\n');
 }
 
 async function jsonFile(cwd: string, path: string): Promise<unknown> {

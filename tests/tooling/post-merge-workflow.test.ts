@@ -278,11 +278,112 @@ test('Issue reporting is repeatable, preserves its body, and closes only final f
   } finally { await f.cleanup(); }
 });
 
-test('stale results cannot overwrite a newer PR or a newer rerun on the same Issue', () => {
+test('stale ordering compares generations within one PR and never treats PR numbers as merge order', () => {
   const previous = JSON.parse(postMergeComment(result({ runId: '102', runAttempt: 2 }), false).split(' -->')[0].split('cake-post-merge/v1 ')[1]);
   assert.equal(stalePostMergeResult(previous, result()), true);
   assert.equal(stalePostMergeResult(previous, result({ runId: '102', runAttempt: 3 })), false);
-  assert.equal(stalePostMergeResult({ ...previous, mergedAt: '2026-10-28T00:00:00Z', pr: 72 }, result({ runId: '999' })), true);
+  assert.equal(stalePostMergeResult({ ...previous, mergedAt: '2026-10-28T00:00:00Z', pr: 72 }, result({ runId: '999' })), false);
+});
+
+test('a final PR cannot close an Issue while an earlier merged PR is manual, failed, or unconfirmed', async () => {
+  for (const earlier of ['manual', 'failed', 'unknown', 'legacy'] as const) {
+    const f = await fixture();
+    const oldMetadata = { ...metadata, completesIssue: false, manualPostMerge: earlier === 'manual' };
+    const oldPr = { ...rawPr(oldMetadata), number: 72, merge_commit_sha: 'd'.repeat(40),
+      head: { ...rawPr().head, ref: 'codex/earlier', sha: 'e'.repeat(40) } };
+    const oldTask = mergedTask(oldPr)!, currentPr = rawPr();
+    let main = oldTask.mergeSha, issueState = 'open', comments: Record<string, unknown>[] = [];
+    const api: Transport = async (provider, path, method = 'GET', body) => {
+      assert.equal(provider, 'github');
+      if (method !== 'GET') {
+        if (path.endsWith('/issues/9')) issueState = 'closed';
+        else comments = [{ id: 111, body: (body as { body: string }).body, user: { login: 'github-actions[bot]', type: 'Bot' } }];
+        return {};
+      }
+      if (path.endsWith('/pulls/71')) return currentPr;
+      if (path.endsWith('/pulls/72')) return oldPr;
+      if (path.endsWith('/issues/9')) return { number: 9, state: issueState };
+      if (path.includes('/issues/9/comments?')) return comments;
+      if (path.endsWith('/issues/comments/111')) return comments[0];
+      if (path.includes('/pulls?state=all')) return [oldPr, currentPr];
+      if (path.endsWith('/branches/main')) return { name: 'main', commit: { sha: main } };
+      assert.fail(path);
+    };
+    const publish = async (pr: number, runId: string, report: PostMergeResult) => {
+      await writeFile(f.eventPath, JSON.stringify({ repository: { id: config.repositoryId, full_name: config.repository }, inputs: { pr: String(pr) } }));
+      await writeFile(join(f.directory, 'post-merge-result.json'), JSON.stringify(report));
+      await publishPostMerge({ ...f.env, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_RUN_ID: runId }, api, f.directory);
+    };
+    try {
+      if (earlier === 'manual' || earlier === 'failed') {
+        const saved = result({ task: oldTask, runId: '101', status: earlier === 'failed' ? 'failed' : 'success',
+          checks: earlier === 'failed' ? { ...result().checks, cleanup: { status: 'failure', code: 'CLEANUP_FAILED' } } : result().checks });
+        await publish(72, '101', saved);
+      } else if (earlier === 'legacy') {
+        const legacy = { pr: 72, mergeSha: oldTask.mergeSha, mergedAt: oldTask.mergedAt, runId: '101', runAttempt: 1, status: 'success' };
+        comments = [{ id: 111, body: `<!-- cake-post-merge/v1 ${JSON.stringify(legacy)} -->\nlegacy successful result`, user: { login: 'github-actions[bot]', type: 'Bot' } }];
+      }
+      main = merge;
+      await publish(71, '102', result({ runId: '102' }));
+      assert.equal(issueState, 'open', earlier);
+      const saved = JSON.parse(String(comments[0].body).split(' -->')[0].split('cake-post-merge/v1 ')[1]);
+      assert.equal(saved.pr, 71, 'same-second lower-number final PR is the current main representative');
+      assert.equal(saved.history.find((entry: PostMergeResult) => entry.task.source.pr === 71).status, 'success');
+      if (earlier === 'manual' || earlier === 'failed') {
+        assert.ok(saved.history.some((entry: PostMergeResult) => entry.task.source.pr === 72));
+        const previousBody = comments[0].body;
+        await publish(72, '103', result({ task: oldTask, runId: '103', status: 'timeout' }));
+        const updated = JSON.parse(String(comments[0].body).split(' -->')[0].split('cake-post-merge/v1 ')[1]);
+        assert.equal(updated.pr, 71, 'an older PR retry must not replace the current main representative');
+        assert.equal(updated.history.find((entry: PostMergeResult) => entry.task.source.pr === 72).runId, '103');
+        assert.equal(updated.history.find((entry: PostMergeResult) => entry.task.source.pr === 71).runId, '102');
+        assert.notEqual(comments[0].body, previousBody);
+        const newerBody = comments[0].body;
+        await publish(72, '101', result({ task: oldTask, runId: '101' }));
+        assert.equal(comments[0].body, newerBody, 'old retries must not overwrite another PR or a newer own result');
+      }
+    } finally { await f.cleanup(); }
+  }
+});
+
+test('a successful retry replaces only its PR history and permits a later final PR to close', async () => {
+  const f = await fixture();
+  const olderMetadata = { ...metadata, completesIssue: false }, oldPr = { ...rawPr(olderMetadata), number: 72,
+    merge_commit_sha: 'd'.repeat(40), head: { ...rawPr().head, ref: 'codex/earlier', sha: 'e'.repeat(40) } };
+  const oldTask = mergedTask(oldPr)!;
+  let main = oldTask.mergeSha, finalMerged = false, comments: Record<string, unknown>[] = [], issueState = 'open';
+  const api: Transport = async (_provider, path, method = 'GET', body) => {
+    if (method !== 'GET') {
+      if (path.endsWith('/issues/9')) issueState = 'closed';
+      else comments = [{ id: 111, body: (body as { body: string }).body, user: { login: 'github-actions[bot]', type: 'Bot' } }];
+      return {};
+    }
+    if (path.endsWith('/pulls/71')) return rawPr();
+    if (path.endsWith('/pulls/72')) return oldPr;
+    if (path.endsWith('/issues/9')) return { number: 9, state: issueState };
+    if (path.includes('/issues/9/comments?')) return comments;
+    if (path.endsWith('/issues/comments/111')) return comments[0];
+    if (path.includes('/pulls?state=all')) return finalMerged ? [oldPr, rawPr()] : [oldPr];
+    if (path.endsWith('/branches/main')) return { name: 'main', commit: { sha: main } };
+    assert.fail(path);
+  };
+  const publish = async (pr: number, runId: string, report: PostMergeResult) => {
+    await writeFile(f.eventPath, JSON.stringify({ repository: { id: config.repositoryId, full_name: config.repository }, inputs: { pr: String(pr) } }));
+    await writeFile(join(f.directory, 'post-merge-result.json'), JSON.stringify(report));
+    await publishPostMerge({ ...f.env, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_RUN_ID: runId }, api, f.directory);
+  };
+  try {
+    await publish(72, '101', result({ task: oldTask, runId: '101', status: 'failed',
+      checks: { ...result().checks, cleanup: { status: 'failure', code: 'CLEANUP_FAILED' } } }));
+    await publish(72, '102', result({ task: oldTask, runId: '102' }));
+    assert.equal(issueState, 'open', 'a recovered split PR is not the final PR');
+    main = merge; finalMerged = true;
+    await publish(71, '103', result({ runId: '103' }));
+    assert.equal(issueState, 'closed');
+    const saved = JSON.parse(String(comments[0].body).split(' -->')[0].split('cake-post-merge/v1 ')[1]);
+    assert.equal(saved.history.length, 2);
+    assert.equal(saved.history.find((entry: PostMergeResult) => entry.task.source.pr === 72).runId, '102');
+  } finally { await f.cleanup(); }
 });
 
 test('workflow splits provider reads from Issue writes and never checks out PR input', () => {

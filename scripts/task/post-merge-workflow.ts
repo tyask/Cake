@@ -86,7 +86,7 @@ export async function verifyPostMerge(env: Readonly<Record<string, string | unde
   return result;
 }
 
-type CommentMarker = { pr: number; mergeSha: string; mergedAt: string; runId: string; runAttempt: number; status: PostMergeResult['status'] };
+type CommentMarker = { pr: number; mergeSha: string; mergedAt: string; runId: string; runAttempt: number; status: PostMergeResult['status']; history?: PostMergeResult[] };
 function marker(result: PostMergeResult): CommentMarker {
   return { pr: result.task.source.pr, mergeSha: result.task.mergeSha, mergedAt: result.task.mergedAt,
     runId: result.runId, runAttempt: result.runAttempt, status: result.status };
@@ -94,25 +94,35 @@ function marker(result: PostMergeResult): CommentMarker {
 function previousMarker(body: unknown): CommentMarker | undefined {
   if (typeof body !== 'string' || !body.startsWith(commentPrefix)) return undefined;
   const end = body.indexOf(' -->');
-  if (end < 0 || end > 1000) return failPostMerge('COMMENT_INVALID');
+  if (end < 0 || end > 60_000) return failPostMerge('COMMENT_INVALID');
   try {
     const value = object(JSON.parse(body.slice(commentPrefix.length, end)));
     if (!positiveId(value.pr) || !fullSha(value.mergeSha) || typeof value.mergedAt !== 'string' || !Number.isFinite(Date.parse(value.mergedAt))
       || typeof value.runId !== 'string' || !positiveId(Number(value.runId)) || !positiveId(value.runAttempt)
       || !['success', 'failed', 'timeout', 'superseded'].includes(String(value.status))) return failPostMerge('COMMENT_INVALID');
+    if (value.history !== undefined) {
+      if (!Array.isArray(value.history) || value.history.length > 50) return failPostMerge('COMMENT_INVALID');
+      const history = value.history.map(parsePostMergeResult);
+      if (new Set(history.map(entry => entry.task.source.pr)).size !== history.length) return failPostMerge('COMMENT_INVALID');
+      const representative = history.find(entry => entry.task.source.pr === value.pr);
+      if (!representative || JSON.stringify(marker(representative)) !== JSON.stringify({ pr: value.pr, mergeSha: value.mergeSha,
+        mergedAt: value.mergedAt, runId: value.runId, runAttempt: value.runAttempt, status: value.status })) return failPostMerge('COMMENT_INVALID');
+      return { ...marker(representative), history };
+    }
+    // The old single-entry marker lacks source, metadata and check evidence.
+    // Retain it only for generation ordering, never as a completed prior PR.
     return value as CommentMarker;
   } catch { return failPostMerge('COMMENT_INVALID'); }
 }
 export function stalePostMergeResult(previous: CommentMarker, next: PostMergeResult): boolean {
   const current = marker(next);
-  if (previous.mergedAt !== current.mergedAt) return previous.mergedAt > current.mergedAt;
-  if (previous.pr !== current.pr) return previous.pr > current.pr;
+  if (previous.pr !== current.pr) return false;
   if (previous.mergeSha !== current.mergeSha) return true;
   if (Number(previous.runId) !== Number(current.runId)) return Number(previous.runId) > Number(current.runId);
   return previous.runAttempt > current.runAttempt;
 }
 
-export function postMergeComment(result: PostMergeResult, otherWork: boolean): string {
+export function postMergeComment(result: PostMergeResult, otherWork: boolean, history: PostMergeResult[] = [result]): string {
   const labels = { success: '成功', failed: '失敗・要対応', timeout: '確認待ち（待機上限）', superseded: '後続のmain更新により未完了' };
   const names = { ci: 'main CI', production: '本番Deployment・alias', staging: '常設Preview・ブラウザ検証', cleanup: 'PR専用Preview・DB削除' };
   const runLink = (run: string | number) => `https://github.com/${config.repository}/actions/runs/${run}`;
@@ -122,13 +132,18 @@ export function postMergeComment(result: PostMergeResult, otherWork: boolean): s
   });
   const blocking = result.task.metadata.manualPostMerge ? '人による確認が必要です。Issueは自動完了しません。'
     : !result.task.metadata.completesIssue ? '分割PRの結果です。Issueは継続します。'
-    : otherWork ? '同じIssueに関連する未マージPRがあります。Issueは継続します。'
+    : otherWork ? '同じIssueに未完了または未確認の関連PRがあります。Issueは継続します。'
     : result.status !== 'success' ? '必要な確認が完了していません。Issueは継続します。' : '必要な自動確認が完了しました。';
-  return `${commentPrefix}${JSON.stringify(marker(result))} -->\n## マージ後確認: ${labels[result.status]}\n\n`
+  const related = history.map(entry => `| #${entry.task.source.pr} | ${entry.task.mergeSha} | ${entry.status} | ${entry.task.metadata.manualPostMerge ? '必要' : 'なし'} | [Actions](${runLink(entry.runId)}) |`);
+  const body = `${commentPrefix}${JSON.stringify({ ...marker(result), history })} -->\n## マージ後確認: ${labels[result.status]}\n\n`
     + `- PR: #${result.task.source.pr}\n- PR head SHA: ${result.task.source.sha}\n- Merge SHA: ${result.task.mergeSha}\n`
     + `- Intent: [案件記録](https://github.com/${config.repository}/tree/${result.task.mergeSha}/${result.task.metadata.intent})\n`
     + `- 確認日時: ${result.checkedAt}\n- 実行: [Actions](${runLink(result.runId)})（attempt ${result.runAttempt}）\n\n`
-    + `| 確認 | 結果 | 根拠 |\n|---|---|---|\n${lines.join('\n')}\n\n${blocking}\n\n本番の画面操作・業務データ更新はこの確認に含みません。\n`;
+    + `| 確認 | 結果 | 根拠 |\n|---|---|---|\n${lines.join('\n')}\n\n${blocking}\n\n`
+    + `### 関連PRの確認履歴\n\n| PR | Merge SHA | 最新結果 | 手動確認 | 根拠 |\n|---|---|---|---|---|\n${related.join('\n')}\n\n`
+    + `本番の画面操作・業務データ更新はこの確認に含みません。\n`;
+  if (Buffer.byteLength(body) > 60_000) return failPostMerge('COMMENT_TOO_LARGE');
+  return body;
 }
 
 async function githubPages(api: Transport, path: string): Promise<Record<string, unknown>[]> {
@@ -140,6 +155,48 @@ async function githubPages(api: Transport, path: string): Promise<Record<string,
     if (batch.length < 100) return rows;
   }
   return failPostMerge('INVENTORY_INCOMPLETE');
+}
+
+type RelatedWork = { merged: MergedTask[]; blocked: boolean };
+async function relatedWork(api: Transport, current: MergedTask): Promise<RelatedWork> {
+  const pulls = await githubPages(api, 'pulls?state=all&base=main'), merged: MergedTask[] = [current];
+  let blocked = false;
+  for (const pr of pulls) {
+    let metadata;
+    try { metadata = parseTaskMetadata(pr.body ?? ''); }
+    catch { blocked = true; continue; }
+    if (!metadata || metadata.issue !== current.metadata.issue || pr.number === current.source.pr) continue;
+    if (!positiveId(pr.number)) { blocked = true; continue; }
+    const raw = object(await api('github', `${repoPrefix}pulls/${pr.number}`));
+    const actual = parseTaskMetadata(raw.body ?? '');
+    if (!actual || actual.issue !== current.metadata.issue) { blocked = true; continue; }
+    if (raw.state === 'open') { blocked = true; continue; }
+    if (raw.state !== 'closed') { blocked = true; continue; }
+    if (raw.merged === true) {
+      const task = mergedTask(raw);
+      if (!task || task.source.pr !== pr.number) return failPostMerge('RELATED_PR_CHANGED');
+      merged.push(task);
+    }
+  }
+  if (new Set(merged.map(task => task.source.pr)).size !== merged.length) return failPostMerge('INVENTORY_INVALID');
+  return { merged, blocked };
+}
+
+function completedRelatedWork(work: RelatedWork, history: PostMergeResult[]): boolean {
+  return !work.blocked && history.every(entry => work.merged.some(task => task.source.pr === entry.task.source.pr)) && work.merged.every(task => {
+    const entry = history.find(entry => entry.task.source.pr === task.source.pr);
+    return entry?.status === 'success' && !task.metadata.manualPostMerge && sameTask(entry.task, task)
+      && Object.values(entry.checks).every(check => check.status === 'success');
+  });
+}
+
+function representativeResult(history: PostMergeResult[], mainSha: string): PostMergeResult {
+  const current = history.filter(entry => entry.task.mergeSha === mainSha);
+  const candidates = current.length ? current : history;
+  // PR numbers are identifiers, not merge order. A same-second merge is ordered
+  // by the actual current main SHA; otherwise show the latest recorded check.
+  return [...candidates].sort((a, b) => Date.parse(b.task.mergedAt) - Date.parse(a.task.mergedAt)
+    || Date.parse(b.checkedAt) - Date.parse(a.checkedAt) || Number(b.runId) - Number(a.runId))[0];
 }
 
 export async function publishPostMerge(env: Readonly<Record<string, string | undefined>> = process.env, api: Transport = transport({ GH_TOKEN: env.GH_TOKEN }), directory = process.cwd()): Promise<void> {
@@ -159,13 +216,15 @@ export async function publishPostMerge(env: Readonly<Record<string, string | und
     && typeof comment.body === 'string' && comment.body.startsWith(commentPrefix));
   if (owned.length > 1) return failPostMerge('COMMENT_AMBIGUOUS');
   const existing = owned[0], prior = existing && previousMarker(existing.body);
-  if (prior && stalePostMergeResult(prior, result)) return;
-  const pulls = await githubPages(api, 'pulls?state=open&base=main');
-  const otherWork = pulls.some(pr => {
-    try { return parseTaskMetadata(pr.body ?? '')?.issue === current.metadata.issue; }
-    catch { return true; }
-  });
-  const body = postMergeComment(result, otherWork);
+  const history = prior?.history ?? [];
+  if (history.some(entry => entry.task.metadata.issue !== current.metadata.issue)) return failPostMerge('COMMENT_INVALID');
+  const previous = history.find(entry => entry.task.source.pr === current.source.pr);
+  if (previous && stalePostMergeResult(marker(previous), result)
+    || !previous && prior && !prior.history && stalePostMergeResult(prior, result)) return;
+  const updated = [...history.filter(entry => entry.task.source.pr !== current.source.pr), result];
+  const work = await relatedWork(api, current), complete = completedRelatedWork(work, updated);
+  const representative = representativeResult(updated, String(object(mainBefore.commit).sha));
+  const body = postMergeComment(representative, !complete, updated);
   if (existing) {
     if (!positiveId(existing.id)) return failPostMerge('COMMENT_INVALID');
     // Reject a moved/edited comment rather than overwriting another actor's content.
@@ -175,13 +234,10 @@ export async function publishPostMerge(env: Readonly<Record<string, string | und
   } else await api('github', `${repoPrefix}issues/${current.metadata.issue}/comments`, 'POST', { body });
   const again = await freshTask(api, context.pr);
   if (!again || !sameTask(again, current)) return failPostMerge('PR_CHANGED');
-  if (result.status === 'success' && current.metadata.completesIssue && !current.metadata.manualPostMerge && !otherWork && issue.state === 'open') {
+  if (result.status === 'success' && current.metadata.completesIssue && !current.metadata.manualPostMerge && complete && issue.state === 'open') {
     const main = object(await api('github', `${repoPrefix}branches/main`));
     if (object(main.commit).sha !== current.mergeSha) return;
-    const latestPulls = await githubPages(api, 'pulls?state=open&base=main');
-    if (latestPulls.some(pr => {
-      try { return parseTaskMetadata(pr.body ?? '')?.issue === current.metadata.issue; } catch { return true; }
-    })) return;
+    if (!completedRelatedWork(await relatedWork(api, current), updated)) return;
     await api('github', `${repoPrefix}issues/${current.metadata.issue}`, 'PATCH', { state: 'closed', state_reason: 'completed' });
   }
 }

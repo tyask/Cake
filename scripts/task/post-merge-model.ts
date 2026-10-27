@@ -55,18 +55,22 @@ export function parsePostMergeResult(value: unknown): PostMergeResult {
     || typeof result.runId !== 'string' || !/^[1-9][0-9]*$/.test(result.runId) || !positiveId(Number(result.runId))
     || !positiveId(result.runAttempt) || !isoTime(result.checkedAt)
     || !['success', 'failed', 'timeout', 'superseded'].includes(String(result.status))) return failPostMerge('RESULT_INVALID');
-  const checks = object(result.checks);
+  const checks = object(result.checks), publicChecks: Partial<Record<CheckName, PostMergeCheck>> = {};
   if (Object.keys(checks).sort().join(',') !== 'ci,cleanup,production,staging') return failPostMerge('RESULT_INVALID');
   for (const name of ['ci', 'production', 'staging', 'cleanup'] as const) {
     const check = object(checks[name]);
     if (!['pending', 'success', 'failure'].includes(String(check.status)) || typeof check.code !== 'string' || !/^[A-Z][A-Z0-9_]{0,79}$/.test(check.code)
       || check.runId !== undefined && !positiveId(check.runId)
       || check.deploymentId !== undefined && (typeof check.deploymentId !== 'string' || !/^dpl_[A-Za-z0-9]+$/.test(check.deploymentId))) return failPostMerge('RESULT_INVALID');
+    publicChecks[name] = { status: check.status as PostMergeCheck['status'], code: check.code,
+      ...(check.runId !== undefined ? { runId: check.runId as number } : {}),
+      ...(check.deploymentId !== undefined ? { deploymentId: check.deploymentId as string } : {}) };
   }
   if (result.status === 'success' && Object.values(checks).some(check => object(check).status !== 'success')) return failPostMerge('RESULT_INVALID');
   // Project the exact public schema; provider responses and messages never become a report.
-  return { protocol: 'cake-post-merge/v1', task: { source: original as Source, mergeSha: task.mergeSha as string,
+  return { protocol: 'cake-post-merge/v1', task: { source: { pr: original.pr as number, branch: original.branch as string,
+    sha: original.sha as string, createdAt: original.createdAt as string, state: 'closed' }, mergeSha: task.mergeSha as string,
     mergedAt: task.mergedAt as string, metadata: parsedMetadata }, controlSha: result.controlSha as string,
   runId: result.runId as string, runAttempt: result.runAttempt as number, status: result.status as PostMergeResult['status'],
-  checkedAt: result.checkedAt as string, checks: checks as PostMergeResult['checks'] };
+  checkedAt: result.checkedAt as string, checks: publicChecks as PostMergeResult['checks'] };
 }

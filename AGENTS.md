@@ -15,8 +15,9 @@
 
 Readyは開発・PR検証の完了であり、Issueの完了とは区別する。
 利用者がmergeした後、Actionsがmain CI・Production・常設Preview・専用資源cleanupを確認する。
-案件を完了するPRで全確認が成功し、手動の運用確認や関連する未完了PRが残らない場合にIssueをcloseする。
-失敗・未完了はIssueの固定コメントへ記録し、openを維持する。
+案件を完了するPRで全確認が成功し、同じIssueの先行分割PRを含む手動確認・失敗・未確認・未マージPRが残らない場合にIssueをcloseする。
+結果はIssueの固定コメントにPRごとの履歴として保持し、先行PRの未解決事項を後続PRの成功で消さない。
+失敗・未完了はopenを維持する。
 
 利用者による「PRを作成して」「Readyにして」という追加依頼を待たず、ローカル実装・commit・pushだけで完了と報告しない。
 

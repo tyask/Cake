@@ -629,7 +629,8 @@ PR専用DBや常設Previewを本番用途へ流用しない。
 - PR専用資源cleanupの正式receiptと削除後の不在。
 
 確認結果はActions artifactと、関連Issueのbot所有の固定コメントへ記録する。
-案件を完了するPRで全確認が成功し、手動確認もほかの関連OPEN PRも残らない場合にIssueをcloseする。
+案件を完了するPRで全確認が成功し、同じIssueの先行分割PRを含む手動確認・失敗・未確認・未マージPRが残らない場合にIssueをcloseする。
+固定コメントには各PRの最新結果を保持し、後続PRの成功で先行PRの未解決事項を消さない。
 失敗・timeout・対象変更・手動確認待ちは、その理由とrunへのリンクを記録し、openを維持する。
 既にcloseされたIssueを勝手にreopenしない。
 手動再確認は[merge後の確認](development-commands.md#merge後の確認)のdispatchを使う。

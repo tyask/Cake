@@ -55,6 +55,16 @@ test('未承認の計画で実装工程へ進めず、入力本文や秘密値�
   assert.equal((await readTaskIntent(cwd, id, branch))!.approval, null);
 });
 
+test('WindowsのCRLF入力をLFへ揃え、Gitで共有した後も計画と承認が一致する', async t => {
+  const { cwd, init, approve, freeze, recordDir } = await fixture(t);
+  const plan = '# 計画\n\nAC-01: 改行形式を変えても合意内容を保持する。\n';
+  await writeFile(join(cwd, '.cake/plan.md'), plan.replaceAll('\n', '\r\n'));
+  await init(); const approved = await approve(); await freeze();
+  assert.equal(await readFile(join(cwd, recordDir, 'plan.md'), 'utf8'), plan);
+  assert.equal(await readFile(join(cwd, recordDir, approved!.approval!.planFile), 'utf8'), plan);
+  await assertTaskIntentReady(cwd, id, branch);
+});
+
 test('直接編集された計画の古い承認はReady判定に使えない', async t => {
   const { cwd, init, approve, freeze, recordDir } = await fixture(t);
   await init(); await approve(); await freeze();
