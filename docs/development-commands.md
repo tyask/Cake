@@ -337,6 +337,44 @@ gh pr view "$PR" --repo tyask/Cake --json headRefOid,isDraft
 
 PRがmerge/close済みなら、そのbranchの作業を再開せず、最新mainから別タスクを作る。
 
+## Deployment保持の確認と整理
+
+本番と常設Previewの保持条件・保護対象は[開発・QA運用手順](development-workflow.md#本番常設previewのdeployment保持)を参照する。
+既存本人認証済みのghからmainのActionsを実行し、provider tokenをローカルへ移さない。
+
+まず読取のみの計画を確認する。
+
+```bash
+gh workflow run deployment-retention.yml --repo tyask/Cake --ref main -f mode=plan
+gh run list --repo tyask/Cake --workflow deployment-retention.yml --limit 5 --json databaseId,event,headSha,status,conclusion,url
+```
+
+対象run IDを確認してから状態とreceiptを読む。`RUN_ID`は上の一覧から選んだ実際の数値に置き換える。
+
+```bash
+RUN_ID='<対象run ID>'
+gh run view "$RUN_ID" --repo tyask/Cake --json event,headSha,status,conclusion,jobs,url
+gh api "repos/tyask/Cake/actions/runs/$RUN_ID/jobs" --paginate --jq '.jobs[] | {name,check_run_url,conclusion}'
+```
+
+取得した対象jobの`check_run_url`を使い、標準noticeの公開結果を確認する。
+
+```bash
+CHECK_RUN_URL='<対象jobのcheck_run_url>'
+gh api "$CHECK_RUN_URL/annotations" --paginate --jq '.[] | select(.title == "cake-deployment-retention/v1") | .message'
+```
+
+対象runのmain SHA・mode・候補と保護対象を照合し、削除の対象・影響が依頼範囲に含まれる場合に`apply`を実行する。
+`apply`は実行時点の状態を再取得するため、計画後に参照先が変わったDeploymentを削除しない。
+
+```bash
+gh workflow run deployment-retention.yml --repo tyask/Cake --ref main -f mode=apply
+```
+
+同じ手順でapplyのrun・notice・Summaryを確認する。
+失敗や応答不明では削除済み件数を推測せず、対象IDの直接GETと一覧を読み直してから再実行を判断する。
+workflowはmainに配置されている版だけを使い、PRのコードを資格情報付きで実行しない。
+
 ## 固定コマンドにしない判断
 
 次は単一のコマンドで完了を判定できない。親Agentが対象と根拠を記録する。
