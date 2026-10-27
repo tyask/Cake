@@ -162,10 +162,24 @@ npm run build
 ```
 
 `npm test` は Node.js 24 の
-`node --import tsx --test --test-concurrency=2 "tests/**/*.test.ts"` で
+`node --no-wasm-code-gc --import tsx --test --test-concurrency=2 "tests/**/*.test.ts"` で
 対象領域別のテストと `tests/architecture/` の依存境界検査を再帰的に実行する。
 globは引用してNodeへ渡し、下位ディレクトリのテストを取りこぼさない。ファイルごとのプロセス分離を保ち、同時実行を2つまでに制限する。
 fixture・PGlite・スタブ・ローカルChromiumを使い、実DBへ接続しない。ローカルCake全体の起動や実Previewでの操作とは区別する。
+
+PGliteを実行するNode 24には、Wasm import wrapperの解放と参照取得の競合によって
+`jit_page_->allocations_.erase(addr) == 1`で異常終了する上流不具合がある
+（[Node #66366](https://github.com/nodejs/node/issues/66366)、
+[V8の修正](https://github.com/v8/v8/commit/9b8ca54d5a6b6c615eb7ad6d9e2bdca7f8cb1a81)）。
+全体・領域別テストとCloudのローカルCake／ブラウザQAは、Nodeの直接引数
+`--no-wasm-code-gc`でWasmコードのGCを無効にして競合経路を避ける。
+JavaScriptのGC、SQLの検証、ファイルごとのプロセス分離と並列数2は維持する。
+未使用のWasm機械語コードはプロセス終了時に解放されるため、テストプロセスの寿命内はコードのメモリ使用量が増える場合がある。
+PGliteを起動する検証用の子プロセスにも同じ直接引数を渡す。
+この引数は`NODE_OPTIONS`に指定できない。
+本番・Previewのアプリ起動やbuildコマンドへは追加しない。
+ランタイムの修正版へ更新する際は、上流修正の取り込みと反復検証を確認して回避策を外す。
+
 
 文書のみの変更はリンク、コマンド、現行実装との整合性を確認する。アプリテストを省略した場合は理由を報告する。
 

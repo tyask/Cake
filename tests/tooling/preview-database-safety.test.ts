@@ -223,7 +223,7 @@ test("Preview検査の権限・接続失敗を空DB扱いしない", async () =>
 test("一時メモリPostgreSQLで空DB・厳密fixture base・同PR保持・Productionの実SQLを検証する", () => {
   const loader = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
   const script = fileURLToPath(new URL("../../scripts/qa/db/verify-preview-database-safety.mjs", import.meta.url));
-  const result = spawnSync(process.execPath, ["--import", loader, script, "--pglite-module", process.env.CAKE_LOCAL_PGLITE_MODULE ?? createRequire(import.meta.url).resolve("@electric-sql/pglite")], {
+  const result = spawnSync(process.execPath, ["--no-wasm-code-gc", "--import", loader, script, "--pglite-module", process.env.CAKE_LOCAL_PGLITE_MODULE ?? createRequire(import.meta.url).resolve("@electric-sql/pglite")], {
     cwd: fileURLToPath(new URL("../..", import.meta.url)), encoding: "utf8", timeout: 120_000,
   });
   assert.ifError(result.error);
