@@ -45,6 +45,7 @@ export function TransactionFilterDialog({ column, options, selected, onColumnCha
         })} />
       <span>{query ? "検索結果をすべて選択" : "すべて選択"}</span>
     </label>
+    {column === "category" && <p className={styles.filterCountNote}>親カテゴリと下位カテゴリは別々に選択します。</p>}
     <p className={styles.filterCountNote}>件数は現在表示中の明細をもとに表示しています。</p>
     <div className={styles.filterOptions}>
       {matching.map(option => <label key={option.value}>

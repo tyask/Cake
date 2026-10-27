@@ -38,6 +38,13 @@ if (new URLSearchParams(location.search).has("partnerPersonal")) {
   })));
 }
 
+if (new URLSearchParams(location.search).has("categoryFilters")) {
+  workspace.transactions.push(...["food", "fresh", "leaf"].map(categoryId => ({
+    ...workspace.transactions[0], id: `category-${categoryId}`, merchant: `category-${categoryId}`,
+    categoryId, categoryConfirmed: true, categoryRevision: 1,
+  })));
+}
+
 function Harness() {
   const [selected, setSelected] = useState(workspace);
   const [modal, setModal] = useState(false);

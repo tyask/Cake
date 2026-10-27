@@ -827,11 +827,12 @@
           <h3>取引明細のフィルタ保存</h3>
           <p><code>TransactionsPanel</code>は<code>useTransactionFilters(userId, workspaceId)</code>で列ごとの条件を管理し、<code>lib/client/transaction-filter-storage.ts</code>を通して<code>localStorage</code>へ保存・復元する。API・DBへは保存しない。</p>
           <p>保存用の列条件は文字列配列のまま保持し、条件または参加者の変更時に<code>createTransactionFilterMatcher</code>が列ごとの検索用Setを準備する。同じ列はOR、列間はAND、空選択は0件とする。<code>transactionListView</code>は各明細の条件を一度だけ判定し、編集中・保存失敗・メモ編集中の条件外行を含む表示と条件外表示の印で結果を共用する。表示ID・未清算ID・選択IDの所属をSetで照合して非表示選択数と全選択状態を求め、削除済み・清算済みIDは一括操作対象から除く。絞り込みでは非表示の選択を保持する。</p>
+          <p>カテゴリ列の候補ラベルは、カテゴリ一覧の変更時に一度準備する<code>prepareCategoryChoices</code>の結果を編集欄と共有する。候補は明細に存在する<code>categoryId</code>ごとに作り、全階層の経路と旧使用停止カテゴリの「（使用停止）」を表示する。未分類の値は空文字、ラベルは「未分類」とする。親と子は別のIDとして完全一致で判定し、<code>categoryDisplay</code>のroot/fullによらず保存済みIDを使う。候補件数は他列と同様に現在表示中の明細から数える。カテゴリ専用保存の確定値が反映されると条件を再評価し、編集中・保存中・保存失敗の条件外行と非表示選択は既存の保持規則に従う。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>項目</th><th>仕様</th></tr></thead>
             <tbody>
               <tr><td>保存キー</td><td><code>cake:transaction-filters:v1:{encodeURIComponent(userId)}:{encodeURIComponent(workspaceId)}</code>。ユーザーとワークスペースごとに分離し、キー内の<code>v1</code>で保存形式を識別する。</td></tr>
-              <tr><td>保存内容</td><td><code>TransactionFilters</code>をJSON化したオブジェクト。列IDは<code>occurredAt</code>、<code>merchant</code>、<code>method</code>、<code>type</code>、<code>amountYen</code>、<code>actorUserId</code>、<code>expenseClass</code>、<code>splitWeights</code>、<code>memo</code>、<code>settlement</code>だけを認め、各値は文字列配列とする。</td></tr>
+              <tr><td>保存内容</td><td><code>TransactionFilters</code>をJSON化したオブジェクト。列IDは<code>occurredAt</code>、<code>merchant</code>、<code>method</code>、<code>type</code>、<code>amountYen</code>、<code>actorUserId</code>、<code>expenseClass</code>、<code>splitWeights</code>、<code>category</code>、<code>memo</code>、<code>settlement</code>だけを認め、各値は文字列配列とする。カテゴリ列はカテゴリIDまたは未分類の空文字を保存する。</td></tr>
               <tr><td>条件の意味</td><td>種別はPAYMENT／RECEIPTの値で絞り込む。金額候補は<code>PAYMENT:1000</code>／<code>RECEIPT:1000</code>のように種別と正額を組み合わせ、−¥1,000と+¥1,000を区別する。列IDの省略はその列の絞り込みなし。空配列はすべての候補を未選択にした条件として保持し、該当明細を0件にする。全列の絞り込み解除でオブジェクトが空になった場合は保存キーを削除する。</td></tr>
               <tr><td>復元・更新</td><td>保存キーのv1を維持し、旧形式の金額条件である符号なし数字文字列は復元時にPAYMENTとRECEIPTの両候補へ展開して、同じ正額の両種別に一致する意味を維持する。その他の列条件は保持する。ユーザーIDまたはワークスペースIDの変更時に保存先を切り替える。画面再表示・再読み込み時に保存値を読み、変更時は即時保存する。<code>useSyncExternalStore</code>のサーバー描画時の初期値は空オブジェクトとし、ブラウザで復元する。同じブラウザの別タブによる変更・削除は<code>storage</code>イベントで再読込する。</td></tr>
               <tr><td>異常時</td><td>JSON不正やオブジェクト以外の値は空条件へ戻す。不明な列IDや文字列配列以外の列値は無視する。読込・書込・削除の例外を捕捉し、保存領域が利用できない場合も現在の画面上の絞り込み操作を継続する。</td></tr>

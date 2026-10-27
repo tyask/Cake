@@ -61,7 +61,7 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         await assertCategoryLine(first, width, "rgba(0, 0, 0, 0)");
         await assertCategoryLine(settled, width, "rgb(59, 130, 246)");
         const headers = await page.getByRole("table", { name: "取引明細", exact: true }).locator("thead th").allTextContents();
-        const categoryIndex = headers.indexOf("カテゴリ");
+        const categoryIndex = headers.findIndex(header => header.startsWith("カテゴリ"));
         assert.match(headers[categoryIndex + 1], /^メモ/);
         for (const row of [first, settled]) {
           const labels = await row.locator("td[data-label]").evaluateAll(elements => elements.map(element => element.getAttribute("data-label")));
@@ -152,6 +152,98 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         await modal.waitFor({ state: "hidden" });
         assert.equal(writes.at(-1)?.categoryId, "leaf");
         assert.equal(writes.at(-1)?.merchant, "新しい支払い");
+        assert.deepEqual(errors, []);
+      } finally { release?.(); await context.close(); }
+    });
+    for (const width of [1600, 390]) await t.test(`${width}px: カテゴリの絞り込み・保存復元・他列との併用・編集後の再判定`, async () => {
+      const context = await browser.newContext({ viewport: { width, height: 900 } });
+      const page = await context.newPage();
+      const writes: Record<string, unknown>[] = [], errors: string[] = [];
+      let release: (() => void) | undefined;
+      page.setDefaultTimeout(6000);
+      page.on("pageerror", error => errors.push(error.message));
+      await page.route("**/api/app", async route => {
+        const payload = route.request().postDataJSON();
+        writes.push(payload);
+        await new Promise<void>(resolve => { release = resolve; });
+        await route.fulfill({ json: { transactionId: payload.transactionId, categoryId: payload.categoryId, categoryConfirmed: true, categoryRevision: 2 } });
+      });
+      const visible = async (ids: string[]) => {
+        await page.waitForFunction(expected => JSON.stringify([...document.querySelectorAll("[data-transaction-id]")].map(row => row.getAttribute("data-transaction-id"))) === JSON.stringify(expected), ids);
+      };
+      const openFilter = async (column: string) => {
+        await page.getByRole("button", { name: column + "で絞り込み", exact: true }).click();
+        const dialog = page.getByRole("dialog", { name: column + "で絞り込み", exact: true });
+        await dialog.waitFor();
+        return dialog;
+      };
+      const choose = async (column: string, labels: string[]) => {
+        const dialog = await openFilter(column);
+        const all = dialog.getByRole("checkbox", { name: "候補の値をすべて選択", exact: true });
+        await all.check();
+        await all.uncheck();
+        for (const label of labels) await dialog.getByText(label, { exact: true }).locator("..").getByRole("checkbox").check();
+        await dialog.getByRole("button", { name: "適用", exact: true }).click();
+        await dialog.waitFor({ state: "hidden" });
+      };
+      try {
+        await page.goto(origin + "?categoryFilters");
+        const allIds = ["first", "settled", "category-food", "category-fresh", "category-leaf"];
+        await visible(allIds);
+        const dialog = await openFilter("カテゴリ");
+        assert.equal(await dialog.getByRole("combobox").inputValue(), "category");
+        for (const label of ["未分類", "以前のカテゴリ（使用停止）", "食費", "食費 › 生鮮食品", "食費 › 生鮮食品 › 野菜"]) {
+          await dialog.getByText(label, { exact: true }).waitFor();
+        }
+        await dialog.getByLabel("候補の値を検索", { exact: true }).fill("野菜");
+        assert.equal(await dialog.getByRole("checkbox").count(), 2, "検索結果の全選択と全階層名に一致するカテゴリだけを示す");
+        await page.keyboard.press("Escape");
+
+        await choose("カテゴリ", ["食費", "食費 › 生鮮食品 › 野菜"]);
+        await visible(["category-food", "category-leaf"]);
+        await page.getByRole("button", { name: "カテゴリの絞り込みを解除", exact: true }).waitFor();
+        await page.getByLabel("カテゴリの表示範囲").selectOption("root");
+        await visible(["category-food", "category-leaf"]);
+        await page.getByLabel("カテゴリの表示範囲").selectOption("full");
+        await page.reload();
+        await visible(["category-food", "category-leaf"]);
+        assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem("cake:transaction-filters:v1:a:workspace")!).category), ["food", "leaf"]);
+
+        await choose("取引先", ["category-leaf"]);
+        await visible(["category-leaf"]);
+        const filteredDialog = await openFilter("カテゴリ");
+        assert.equal(await filteredDialog.getByText("食費", { exact: true }).locator("..").locator("small").textContent(), "0件");
+        assert.equal(await filteredDialog.getByText("食費 › 生鮮食品 › 野菜", { exact: true }).locator("..").locator("small").textContent(), "1件");
+        await page.keyboard.press("Escape");
+        await page.getByRole("button", { name: "取引先の絞り込みを解除", exact: true }).click();
+        await visible(["category-food", "category-leaf"]);
+
+        await choose("カテゴリ", ["未分類", "以前のカテゴリ（使用停止）"]);
+        await visible(["first", "settled"]);
+        await choose("カテゴリ", []);
+        await visible([]);
+        await page.getByText("条件に一致する明細がありません。", { exact: true }).waitFor();
+        await page.getByRole("button", { name: "絞り込みをすべて解除", exact: true }).click();
+        await visible(allIds);
+        assert.equal(await page.evaluate(() => localStorage.getItem("cake:transaction-filters:v1:a:workspace")), null);
+        assert.equal(writes.length, 0, "絞り込み・表示範囲切替・再読み込み・解除だけでは業務更新しない");
+
+        await choose("カテゴリ", ["食費 › 生鮮食品"]);
+        await visible(["category-fresh"]);
+        const row = page.locator('[data-transaction-id="category-fresh"]');
+        if (width < 768) await row.getByRole("button", { name: "category-freshの詳細を開く", exact: true }).click();
+        const select = row.getByLabel("category-freshのカテゴリ", { exact: true });
+        await select.selectOption("leaf");
+        await page.waitForFunction(() => (document.querySelector('select[aria-label="category-freshのカテゴリ"]') as HTMLSelectElement).disabled);
+        await visible(["category-fresh"]);
+        await page.getByRole("heading", { name: "取引明細", exact: true }).click();
+        assert.ok(release);
+        release();
+        await page.waitForFunction(() => JSON.parse(document.getElementById("saved-transactions")!.textContent!).find((row: { id: string }) => row.id === "category-fresh").categoryId === "leaf");
+        await visible([]);
+        assert.match(await page.getByRole("button", { name: "カテゴリの絞り込みを解除", exact: true }).textContent() ?? "", /食費 › 生鮮食品/);
+        assert.equal(writes.length, 1);
+        assert.equal(writes[0].action, "saveTransactionCategory");
         assert.deepEqual(errors, []);
       } finally { release?.(); await context.close(); }
     });
