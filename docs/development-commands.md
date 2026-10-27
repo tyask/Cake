@@ -26,10 +26,15 @@ env -u VERCEL_TOKEN -u VERCEL_OIDC_TOKEN -u NEON_API_KEY \
 
 ## 計画承認とIssue
 
-既存仕様・実装を調べ、目的・範囲・受入条件・実装と検証の計画を利用者へ提示する。
-具体的な計画が承認された後に、その案件のIssueを作成・更新する。
+[AI-DLC開発フロー](aidlc-workflow.md)に従い、既存仕様・実装を読み取りのみで調べる。
+対象Issueテンプレートの該当内容と[計画・承認・受入条件](aidlc-workflow.md#計画承認受入条件)の項目を含め、Issue本文へ記載できる具体性・情報量の開発計画をチャット上で提示する。
+未確定事項は未確定と明示し、未作成のIssue・PR番号などの事後情報を推測して埋めない。
+提示後に、その計画を対象とする利用者の承認を得てから、案件のIssueを作成・更新する。
+承認の文言は固定せず、一般的な方針への合意・作業依頼・着手指示を未提示の計画への承認として扱わない。
+承認前は専用branch/worktree・Intentの作成、実装、PR作成にも進まない。
 既存Issueがあれば同じものを使い、相談や調査だけでは新規Issueを作らない。
-Issueの要約・受入条件・承認済み計画を`.cake/issue.md`へ用意する。
+承認済みの計画に基づき、Issueの要約・受入条件・計画を`.cake/issue.md`へ用意する。
+承認対象となる要件や受入条件を、Issue化時に初めて補わない。
 
 ```bash
 gh issue create --repo tyask/Cake --title '今回の目的を日本語で記載' --body-file .cake/issue.md
@@ -40,7 +45,7 @@ gh issue edit <Issue番号> --repo tyask/Cake --body-file .cake/issue.md
 実際には作成・更新のどちらかを選び、返されたIssue番号とURLを記録する。
 計画本文は`.cake/plan.md`等へ、実際の承認発言は`.cake/approval.md`等へ保存しておく。
 承認文を作成・要約して置き換えたり、利用者の発言日時を推測したりしない。
-既に具体的な計画が承認されていれば、その発言を参照して同じ承認を求め直さない。
+チャットで提示・承認された同じ計画を再開する場合は、計画とその承認発言を参照して同じ承認を求め直さない。
 
 ## タスクの準備
 
@@ -81,7 +86,7 @@ npm run task:intent -- status --intent "$TASK_INTENT_ID"
 
 `approve`は承認者・実際の承認文・計画hash・記録日時を保存する。
 `--at <ISO日時>`を省略すると現在時刻を記録する。これは発言日時ではなく記録日時である。
-承認対象の計画と利用者の発言の対応はAgentが確認する。
+チャットで提示した計画と、その後の利用者の承認発言の対応はAgentが確認する。
 CLIへの記録だけを根拠に、未承認の計画を承認済みとして扱わない。
 
 凍結前の進捗は、現在の工程とメモを記録する。
@@ -94,7 +99,7 @@ npm run task:intent -- status
 ```
 
 計画が変わる場合は次で本文を更新する。過去の承認とfreezeは無効になる。
-変更後の計画を提示して承認を得てから、同じ`approve`手順で新たに記録する。
+変更後の計画をチャット上で提示して承認を得てから、同じ`approve`手順で新たに記録する。
 
 ```bash
 npm run task:intent -- plan --intent "$TASK_INTENT_ID" --plan-file .cake/revised-plan.md
