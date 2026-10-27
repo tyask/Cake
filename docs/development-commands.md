@@ -27,12 +27,14 @@ env -u VERCEL_TOKEN -u VERCEL_OIDC_TOKEN -u NEON_API_KEY \
 ## 計画承認とIssue
 
 [AI-DLC開発フロー](aidlc-workflow.md)に従い、既存仕様・実装を読み取りのみで調べる。
-目的・範囲・受入条件・実装方針・検証方法を含む具体的な開発計画をチャット上で提示する。
+対象Issueテンプレートの該当内容と[計画・承認・受入条件](aidlc-workflow.md#計画承認受入条件)の項目を含め、Issue本文へ記載できる具体性・情報量の開発計画をチャット上で提示する。
+未確定事項は未確定と明示し、未作成のIssue・PR番号などの事後情報を推測して埋めない。
 提示後に、その計画を対象とする利用者の承認を得てから、案件のIssueを作成・更新する。
 承認の文言は固定せず、一般的な方針への合意・作業依頼・着手指示を未提示の計画への承認として扱わない。
 承認前は専用branch/worktree・Intentの作成、実装、PR作成にも進まない。
 既存Issueがあれば同じものを使い、相談や調査だけでは新規Issueを作らない。
-Issueの要約・受入条件・承認済み計画を`.cake/issue.md`へ用意する。
+承認済みの計画に基づき、Issueの要約・受入条件・計画を`.cake/issue.md`へ用意する。
+承認対象となる要件や受入条件を、Issue化時に初めて補わない。
 
 ```bash
 gh issue create --repo tyask/Cake --title '今回の目的を日本語で記載' --body-file .cake/issue.md

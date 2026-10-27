@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-10-27T15:28:19.699Z",
-  "updatedAt": "2026-10-27T15:31:39.607Z",
+  "updatedAt": "2026-10-27T15:38:14.636Z",
   "events": [
     {
       "action": "CREATED",
@@ -44,6 +44,24 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-10-27T15:31:39.607Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-27T15:36:38.973Z",
+      "note": "利用者から追加指示「開発計画の提示では、Issueに記載する内容と同等の情報を提示するようにしてください。」を受領した。\n承認済みの4文書で開発計画の内容を定める範囲内で、チャット提示時の具体性・情報量をIssue本文相当とすることを明記する。\n既存の承認本文と承認hashは書き換えず、利用者が直接追加した要件をこの履歴へ記録する。\n4文書と当該記録の修正後にfreeze・commitし、新しいHEADを再レビュー・文書検査・CI・自動Preview/statusで確認する。PR159はdraftを維持する。\n",
+      "planHash": "ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-27T15:38:03.876Z",
+      "note": "利用者の追加指示に従い、4文書で提示計画にIssue本文と同等の具体性・情報量を求めた。\n対象Issueテンプレートと照合し、目的・背景、現在の問題・期待挙動、範囲・対象外・制約、識別子付き受入条件、実装方針・影響、工程・検証方法、merge後確認、未確定事項・関連資料を計画へ含める。\n未確定事項を明示し、承認対象の要件・受入条件をIssue化時に初めて追加しない。計画の記載項目はAI-DLC手順を正本とし、他3文書からリンクする。\n実装コード・Actions・CLI・依存・実行設定の変更はない。自己レビューを完了し、元の提示計画・承認snapshotは保持した。\n前回レビューと検証はfb6a2f7d3c66ee29bb28b97b97f476a113bf3fc0のものとして区別し、次のcommitに対する再レビューと必要な検証を揃える。PR159はdraftのまま更新する。\n",
+      "planHash": "ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-27T15:38:14.636Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91"
     }
