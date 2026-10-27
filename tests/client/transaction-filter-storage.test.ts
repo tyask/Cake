@@ -100,3 +100,19 @@ test("旧金額フィルタは同額の支払いと収入の両方を復元す�
   writeStoredTransactionFilters(storage, "signed", filters);
   assert.deepEqual(readStoredTransactionFilters(storage, "signed"), filters);
 });
+
+test("カテゴリIDと未分類を他の条件と一緒に復元し、個別解除・全解除を保存する", () => {
+  const storage = memoryStorage();
+  const key = transactionFiltersStorageKey("user", "workspace");
+  const filters = { category: ["food", "vegetables", ""], merchant: ["スーパー"] };
+  writeStoredTransactionFilters(storage, key, filters);
+  assert.deepEqual(readStoredTransactionFilters(storage, key), filters);
+  assert.deepEqual(parseStoredTransactionFilters('{"category":[],"memo":[""]}'), { category: [], memo: [""] });
+  assert.deepEqual(parseStoredTransactionFilters('{"category":["food",null],"method":["現金"]}'), { method: ["現金"] });
+
+  writeStoredTransactionFilters(storage, key, { merchant: filters.merchant });
+  assert.deepEqual(readStoredTransactionFilters(storage, key), { merchant: ["スーパー"] });
+  writeStoredTransactionFilters(storage, key, {});
+  assert.equal(storage.getItem(key), null);
+  assert.deepEqual(readStoredTransactionFilters(storage, key), {});
+});

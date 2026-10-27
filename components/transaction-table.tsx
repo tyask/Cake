@@ -10,7 +10,7 @@ import type { TransactionRecord, WorkspaceMember } from "@/lib/shared/types";
 import { SwipeDelete } from "./swipe-delete";
 import styles from "./transactions-panel.module.css";
 
-export type TransactionTableColumn = "selection" | TransactionColumn | "category" | "status" | "updateStatus";
+export type TransactionTableColumn = "selection" | TransactionColumn | "status" | "updateStatus";
 export type TransactionTableColumnDefinition = { id: TransactionTableColumn; label: string };
 
 const columnWidths: Record<TransactionTableColumn, string> = {

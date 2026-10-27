@@ -13,6 +13,7 @@ export const transactionColumns = [
   { id: "actorUserId", label: "支払者／受取者" },
   { id: "expenseClass", label: "区分" },
   { id: "splitWeights", label: "配分割合" },
+  { id: "category", label: "カテゴリ" },
   { id: "memo", label: "メモ" },
   { id: "settlement", label: "清算" },
 ] as const;
@@ -20,8 +21,15 @@ export const transactionColumns = [
 export type TransactionColumn = typeof transactionColumns[number]["id"];
 export type TransactionFilters = Partial<Record<TransactionColumn, string[]>>;
 export type FilterOption = { value: string; label: string; count: number };
+type CategoryFilterLabels = ReadonlyMap<string, { label: string; archived: boolean }>;
 
-export function transactionFilterValue(item: TransactionRecord, column: TransactionColumn, members: WorkspaceMember[]): { value: string; label: string } {
+export function transactionCategoryFilterLabel(categoryId: string | null, categories?: CategoryFilterLabels): string {
+  if (categoryId === null) return "未分類";
+  const category = categories?.get(categoryId);
+  return category ? category.label + (category.archived ? "（使用停止）" : "") : "利用できないカテゴリ";
+}
+
+export function transactionFilterValue(item: TransactionRecord, column: TransactionColumn, members: WorkspaceMember[], categories?: CategoryFilterLabels): { value: string; label: string } {
   switch (column) {
     case "occurredAt": {
       const value = transactionDateInput(item.occurredAt).replace("T", " ");
@@ -30,6 +38,7 @@ export function transactionFilterValue(item: TransactionRecord, column: Transact
     case "merchant": return { value: item.merchant, label: item.merchant };
     case "method": return { value: item.method, label: item.method };
     case "memo": return { value: item.memo, label: item.memo || "（空白）" };
+    case "category": return { value: item.categoryId ?? "", label: transactionCategoryFilterLabel(item.categoryId, categories) };
     case "type": return { value: item.type, label: transactionTypeLabels[item.type] };
     case "amountYen": return { value: `${item.type}:${item.amountYen}`, label: formatTransactionAmount(item.type, item.amountYen) };
     case "actorUserId": return { value: item.actorUserId, label: members.find(member => member.id === item.actorUserId)?.name ?? item.actorName };
@@ -46,15 +55,15 @@ export function transactionFilterValue(item: TransactionRecord, column: Transact
   }
 }
 
-export function transactionFilterOptions(items: TransactionRecord[], column: TransactionColumn, members: WorkspaceMember[], visibleItems: TransactionRecord[] = items): FilterOption[] {
+export function transactionFilterOptions(items: TransactionRecord[], column: TransactionColumn, members: WorkspaceMember[], visibleItems: TransactionRecord[] = items, categories?: CategoryFilterLabels): FilterOption[] {
   const counts = new Map<string, number>();
   for (const item of visibleItems) {
-    const { value } = transactionFilterValue(item, column, members);
+    const { value } = transactionFilterValue(item, column, members, categories);
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
   const options = new Map<string, FilterOption>();
   for (const item of items) {
-    const { value, label } = transactionFilterValue(item, column, members);
+    const { value, label } = transactionFilterValue(item, column, members, categories);
     options.set(value, { value, label, count: counts.get(value) ?? 0 });
   }
   return [...options.values()].sort((a, b) => column === "amountYen"

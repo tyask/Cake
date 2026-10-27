@@ -8,7 +8,7 @@ import type { RunAppAction } from "@/lib/shared/schemas/app-input";
 
 import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/client/autosave";
 
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { transactionActorPatch, transactionDateInput, transactionDateToIso, transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues } from "@/lib/shared/transaction-editing";
 import type { ExpenseClass, TransactionRecord, WorkspaceData, WorkspaceMember } from "@/lib/shared/types";
 import styles from "./transactions-panel.module.css";
@@ -20,7 +20,7 @@ import { TransactionMemoEditor, type SaveTransactionMemo, type TransactionMemoHa
 import { RefreshButton } from "./refresh-button";
 import { refreshTransactionEditors } from "@/lib/client/transaction-refresh";
 import { transactionMemoSchema } from "@/lib/shared/schemas/transaction-memo";
-import { createTransactionFilterMatcher, transactionColumns, transactionFilterOptions, type TransactionColumn } from "@/lib/shared/transaction-filters";
+import { createTransactionFilterMatcher, transactionCategoryFilterLabel, transactionColumns, transactionFilterOptions, type TransactionColumn } from "@/lib/shared/transaction-filters";
 import { transactionListView } from "@/lib/shared/transaction-list";
 import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } from "./transaction-table";
 import { useTransactionFilters } from "./use-transaction-filters";
@@ -41,8 +41,7 @@ type TransactionListProps = {
   refreshing: boolean;
 };
 
-const memoColumnIndex = transactionColumns.findIndex(column => column.id === "memo");
-const tableColumns = [{ id: "selection", label: "選択" }, ...transactionColumns.slice(0, memoColumnIndex), { id: "category", label: "カテゴリ" }, ...transactionColumns.slice(memoColumnIndex), { id: "updateStatus", label: "更新状態" }] as const;
+const tableColumns = [{ id: "selection", label: "選択" }, ...transactionColumns, { id: "updateStatus", label: "更新状態" }] as const;
 
 function signature(values: TransactionValues): string {
   return JSON.stringify([values.occurredAt, values.merchant, values.method, values.type, values.amountYen, values.actorUserId, values.expenseClass, Object.entries(values.splitWeights).sort(([a], [b]) => a.localeCompare(b))]);
@@ -220,8 +219,9 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
     <div className="page-heading"><div><span>TRANSACTIONS</span><h1>取引明細</h1><p>一覧から直接編集できます。配分割合は割合・金額から選べます。欄を離れるかEnterで保存し、選択項目はすぐ保存します。</p></div><div className="page-actions"><RefreshButton refreshing={preparingRefresh || refreshing} disabled={bulkAction !== null} onClick={() => { void requestRefresh(); }} /><button className="primary" disabled={busy} onClick={add}>＋ 明細を追加</button></div></div>
     <section className={"panel " + styles.panel} aria-busy={pending > 0 || busy}>
       {filteredColumns.length > 0 && <div className={styles.activeFilters}>{filteredColumns.map(column => {
-        const labels = new Map(transactionFilterOptions(selected.transactions, column.id, selected.members).map(option => [option.value, option.label]));
-        const values = columnFilters[column.id]!.map(value => labels.get(value) || value || "（空白）");
+        const labels = new Map(transactionFilterOptions(selected.transactions, column.id, selected.members, selected.transactions, categoryChoices.byId).map(option => [option.value, option.label]));
+        const values = columnFilters[column.id]!.map(value => column.id === "category"
+          ? transactionCategoryFilterLabel(value || null, categoryChoices.byId) : labels.get(value) || value || "（空白）");
         return <button key={column.id} type="button" disabled={busy} onClick={() => setColumnFilter(column.id, undefined)} aria-label={column.label + "の絞り込みを解除"}>{column.label}：{values.length > 0 ? values.join("、") : "選択なし"} <span aria-hidden="true">×</span></button>;
       })}</div>}
       <div className={styles.bulkBar}>
@@ -234,13 +234,13 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
       {bulkError && <p role="alert" className={styles.bulkError}>{bulkError}</p>}
       {bulkNotice && <p role="status" className={styles.bulkNotice}>{bulkNotice}</p>}
       <p className={styles.note}>相手の個人明細は閲覧のみです。区分のルールは支払いのみが対象です。清算済みの明細もカテゴリとメモを編集できます。カテゴリは選択時、メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。全選択チェックを外すと非表示の選択も解除します。編集中の明細は編集を終えるまで表示します。</p>
-      <TransactionTable wrap columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => <Fragment key={column.id}>{column.id === "memo" && <th>カテゴリ</th>}<th><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th></Fragment>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
+      <TransactionTable wrap columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => <th key={column.id}><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
         {visible.map((item) => <EditableTransaction key={item.id} item={item} currentUserId={userId} members={selected.members} categoryChoices={categoryChoices} categoryDisplay={categoryDisplay} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} onDelete={() => { void performBulk("deleteTransactions", [item.id]); }} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} onSaveCategory={saveCategory} onCategoryPin={onCategoryPin} />)}
       </TransactionTable>
       {visible.length === 0 && <p className={styles.empty}>条件に一致する明細がありません。</p>}
     </section>
     {filterColumn && <TransactionFilterDialog key={filterColumn} column={filterColumn}
-      options={transactionFilterOptions(selected.transactions, filterColumn, selected.members, visible)} selected={columnFilters[filterColumn]}
+      options={transactionFilterOptions(selected.transactions, filterColumn, selected.members, visible, categoryChoices.byId)} selected={columnFilters[filterColumn]}
       onColumnChange={setFilterColumn} onClose={() => setFilterColumn(null)}
       onApply={values => { setColumnFilter(filterColumn, values); setFilterColumn(null); }} />}
   </>;

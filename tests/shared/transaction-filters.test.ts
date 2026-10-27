@@ -103,3 +103,63 @@ test("同額の支払いと収入は別候補になり種別と金額で絞り�
   assert.equal(matchesTransactionFilters(base, { type: ["RECEIPT"] }, members), false);
   assert.equal(transactionFilterValue(receipt, "type", members).label, "収入");
 });
+
+test("カテゴリはIDで複数選択し、親子と同名の別カテゴリを区別する", () => {
+  const items = [
+    { ...base, id: "parent", categoryId: "food" },
+    { ...base, id: "child", categoryId: "vegetables" },
+    { ...base, id: "same-name", categoryId: "other-vegetables" },
+    { ...base, id: "unclassified" },
+  ];
+  const matchingIds = (filters: TransactionFilters) => items.filter(createTransactionFilterMatcher(filters, members)).map(item => item.id);
+  assert.deepEqual(matchingIds({ category: ["food"] }), ["parent"], "親を選んでも下位カテゴリは選択されない");
+  assert.deepEqual(matchingIds({ category: ["vegetables"] }), ["child"], "同名でも別IDのカテゴリは含めない");
+  assert.deepEqual(matchingIds({ category: ["food", "vegetables"] }), ["parent", "child"]);
+  assert.deepEqual(matchingIds({ category: [""] }), ["unclassified"]);
+  assert.deepEqual(matchingIds({ category: [] }), []);
+  assert.deepEqual(matchingIds({ category: ["vegetables"], method: ["カード"] }), [], "他の列との条件はANDで適用する");
+  assert.deepEqual(matchingIds({ category: ["vegetables"], method: ["現金"] }), ["child"]);
+});
+
+test("カテゴリ候補は全階層名・未分類・使用停止を表示し、表示中の件数だけを数える", () => {
+  const categories = new Map([
+    ["food", { label: "食費", archived: false }],
+    ["vegetables", { label: "食費 › 生鮮食品 › 野菜", archived: false }],
+    ["other-vegetables", { label: "家庭菜園 › 野菜", archived: false }],
+    ["old", { label: "以前のカテゴリ", archived: true }],
+  ]);
+  const items = [
+    base,
+    { ...base, id: "parent", categoryId: "food" },
+    { ...base, id: "child-one", categoryId: "vegetables" },
+    { ...base, id: "child-two", categoryId: "vegetables", method: "カード" },
+    { ...base, id: "same-name", categoryId: "other-vegetables" },
+    { ...base, id: "archived", categoryId: "old" },
+    { ...base, id: "unavailable", categoryId: "missing" },
+  ];
+  const visible = items.filter(createTransactionFilterMatcher({ category: ["vegetables"], method: ["現金"] }, members));
+  const options = transactionFilterOptions(items, "category", members, visible, categories);
+  assert.equal(options.length, 6, "同じIDのカテゴリだけを集約する");
+  assert.deepEqual(options.find(option => option.value === "vegetables"), { value: "vegetables", label: "食費 › 生鮮食品 › 野菜", count: 1 });
+  assert.deepEqual(options.find(option => option.value === "other-vegetables"), { value: "other-vegetables", label: "家庭菜園 › 野菜", count: 0 });
+  assert.deepEqual(options.find(option => option.value === "old"), { value: "old", label: "以前のカテゴリ（使用停止）", count: 0 });
+  assert.deepEqual(options.find(option => option.value === ""), { value: "", label: "未分類", count: 0 });
+  assert.deepEqual(options.find(option => option.value === "missing"), { value: "missing", label: "利用できないカテゴリ", count: 0 });
+  assert.deepEqual(transactionFilterValue(items[2], "category", members, categories), { value: "vegetables", label: "食費 › 生鮮食品 › 野菜" });
+  assert.deepEqual(transactionFilterOptions([], "category", members, [], categories), []);
+});
+
+test("カテゴリで清算済み・個人・収入を絞り込め、表示名の変更後も保存したIDで一致する", () => {
+  const items: TransactionRecord[] = [
+    { ...base, id: "settled", categoryId: "old", settledAt: "2026-10-07T00:00:00Z" },
+    { ...base, id: "personal", categoryId: "old", expenseClass: "PERSONAL" },
+    { ...base, id: "receipt", categoryId: "old", type: "RECEIPT" },
+    { ...base, id: "other", categoryId: "food" },
+  ];
+  const matches = createTransactionFilterMatcher({ category: ["old"] }, members);
+  assert.deepEqual(items.filter(matches).map(item => item.id), ["settled", "personal", "receipt"]);
+  const renamedCategories = new Map([["old", { label: "変更後 › 名前", archived: true }]]);
+  assert.equal(transactionFilterValue(items[0], "category", members, renamedCategories).label, "変更後 › 名前（使用停止）");
+  assert.equal(matches(items[0]), true);
+  assert.deepEqual(items.filter(createTransactionFilterMatcher({ category: ["old"], settlement: ["SETTLED"] }, members)).map(item => item.id), ["settled"]);
+});
