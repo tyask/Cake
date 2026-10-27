@@ -1,0 +1,51 @@
+{
+  "protocol": "cake-intent/v1",
+  "id": "261027-aidlc-development-flow",
+  "repository": "tyask/Cake",
+  "issue": 154,
+  "issueUrl": "https://github.com/tyask/Cake/issues/154",
+  "branch": "codex/aidlc-development-flow",
+  "branches": [
+    "codex/aidlc-development-flow"
+  ],
+  "recordDir": "aidlc/spaces/default/intents/261027-aidlc-development-flow",
+  "phase": "Construction",
+  "status": "frozen",
+  "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574",
+  "approval": {
+    "actor": "このチャットの利用者",
+    "reply": "ではこの方針で修正を進めてください。\n",
+    "recordedAt": "2026-10-27T11:32:35.491Z",
+    "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574",
+    "planFile": "plans/ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574.md"
+  },
+  "frozen": true,
+  "createdAt": "2026-10-27T11:32:34.977Z",
+  "updatedAt": "2026-10-27T11:35:15.815Z",
+  "events": [
+    {
+      "action": "CREATED",
+      "recordedAt": "2026-10-27T11:32:34.977Z",
+      "note": "Issueに対応する計画を記録した。承認は別途記録する。",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "APPROVE",
+      "recordedAt": "2026-10-27T11:32:35.491Z",
+      "note": "承認者：このチャットの利用者\n承認の記録日時：2026-10-27T11:32:35.491Z\n承認対象本文：[plans/ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574.md](../plans/ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574.md)\n利用者の実際の回答：\nではこの方針で修正を進めてください。",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-27T11:35:14.972Z",
+      "note": "AC-01〜AC-08に対応する初期実装・関連テスト・自己レビューを終えた。\nAI-DLC v2の構成に沿うCake運用記録、計画hash承認・元計画snapshot・分割branch対応を用意した。\nPR生成は承認済み凍結Intentと関連Issueを引き継ぎ、既存の最終SHA・clean・正式Previewゲートを維持する。\nマージ後確認はmain CI・本番Deployment/alias・常設Preview/browser・PR資源cleanupの4条件を照合する。\n失敗・未確認・手動確認待ち・分割PRはIssueを開いたままとし、同一botコメントを更新する。\n実GitHub APIとVercelのread-only確認で、本番Deploymentと自動cleanup runの実データ形式を照合した。\n独立レビュー、最終commitの全検証、draft PRのCI/Preview/正式ブラウザ検証は以後に実施する。\nfreeze後の結果はPR・Issue・Actionsへ保存し、未実施を成功として記録しない。\n",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-27T11:35:15.815Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    }
+  ]
+}

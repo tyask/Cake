@@ -1,0 +1,36 @@
+name: 開発・運用・文書の作業
+description: リファクタリング、開発環境、検証、運用手順、文書などの変更を依頼します。
+body:
+  - type: markdown
+    attributes:
+      value: |
+        最初は「作業の目的」だけで構いません。
+        Agentが調査し、対象範囲・受入条件・検証計画を整理します。
+        承認された計画とIntent・PRへのリンクは、このIssueへ追記します。
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 作業の目的
+      description: 何を変えたいか、その理由や解決したい問題を書いてください。
+      placeholder: 開発手順を整理して、別のAgentでも同じ流れで作業できるようにしたい。
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 対象範囲・制約
+      description: 対象の機能・文書・環境や、維持したい挙動が分かれば書いてください。
+    validations:
+      required: false
+  - type: textarea
+    id: completion
+    attributes:
+      label: 完了したと判断できる状態
+      description: 作業後に何を確認できればよいか、具体例や関連資料があれば書いてください。
+    validations:
+      required: false
+  - type: markdown
+    attributes:
+      value: |
+        詳細な計画・進捗・判断履歴は、リポジトリの`aidlc/`で管理します。
+        PRのReadyは検証完了を表します。案件の完了は、利用者によるmerge後のActions結果を確認して判定します。

@@ -15,6 +15,7 @@
     "db:setup": "node scripts/db/setup-db.mjs",
     "db:seed:test": "tsx scripts/db/seed-test-users.ts",
     "task:start": "node scripts/tooling/check-node-version.mjs && node --import tsx scripts/task/start-task.ts",
+    "task:intent": "node --import tsx scripts/task/task-intent-command.ts",
     "deploy:preview": "node --import tsx scripts/preview/preview-command.ts deploy",
     "task:pr": "node --import tsx scripts/task/task-pr.ts",
     "test": "node --no-wasm-code-gc --import tsx --test --test-concurrency=2 \"tests/**/*.test.ts\"",
