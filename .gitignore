@@ -29,3 +29,7 @@ next-env.d.ts
 
 /data/
 /.cake/
+
+# Intent locks and atomic-write scratch are local; plans, approvals, and state are committed.
+/aidlc/spaces/default/intents/.cake-lock/
+/aidlc/**/.cake-*.tmp

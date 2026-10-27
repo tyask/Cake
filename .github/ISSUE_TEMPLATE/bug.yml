@@ -1,0 +1,37 @@
+name: 不具合
+description: 期待どおりに動かない挙動を報告します。
+body:
+  - type: markdown
+    attributes:
+      value: |
+        最初は「起きていること」だけで構いません。
+        再現手順や原因が分からなくても報告できます。Agentが調査し、修正範囲・受入条件・検証計画を整理します。
+        承認された計画とIntent・PRへのリンクは、このIssueへ追記します。
+  - type: textarea
+    id: actual
+    attributes:
+      label: 起きていること
+      description: 困っている挙動と、発生した画面や操作を書いてください。
+      placeholder: スマートフォンで明細を保存すると、入力した内容が表示に反映されない。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する挙動
+      description: 本来どのように動いてほしいか、分かる範囲で書いてください。
+    validations:
+      required: false
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 再現手順・発生条件
+      description: 操作の順番、頻度、端末やブラウザ、エラー表示などが分かれば書いてください。
+    validations:
+      required: false
+  - type: markdown
+    attributes:
+      value: |
+        接続文字列・パスワード・トークンや、実際の家計データは記載しないでください。
+        詳細な調査・判断履歴はリポジトリの`aidlc/`へ残します。
+        PRのReadyは検証完了を表します。案件の完了は、利用者によるmerge後のActions結果を確認して判定します。

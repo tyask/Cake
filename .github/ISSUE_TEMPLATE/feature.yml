@@ -1,0 +1,36 @@
+name: 新機能・改善
+description: 新しい機能や、既存の使い勝手の改善を依頼します。
+body:
+  - type: markdown
+    attributes:
+      value: |
+        最初は「実現したいこと」だけで構いません。
+        Agentが調査し、範囲・受入条件・検証計画を整理します。
+        承認された計画とIntent・PRへのリンクは、このIssueへ追記します。
+  - type: textarea
+    id: request
+    attributes:
+      label: 実現したいこと
+      description: 誰のどのような困りごとを、どう改善したいかを書いてください。
+      placeholder: 明細を確認するときに、目的の取引を見つけやすくしたい。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する挙動・具体例
+      description: 画面のイメージや、操作したときに期待する結果があれば書いてください。
+    validations:
+      required: false
+  - type: textarea
+    id: constraints
+    attributes:
+      label: 補足・制約
+      description: 対象範囲、今回扱わないこと、関連するIssueや資料があれば書いてください。
+    validations:
+      required: false
+  - type: markdown
+    attributes:
+      value: |
+        詳細な要件・設計・判断履歴は、リポジトリの`aidlc/`で管理します。
+        PRのReadyは検証完了を表します。案件の完了は、利用者によるmerge後のActions結果を確認して判定します。

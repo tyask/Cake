@@ -4,6 +4,12 @@ CakeはPRごとのVercel Preview固有URLと専用Neon Native DBで検証する�
 WSL2/Linux、Codex CloudまたはWindowsネイティブで開発し、
 通常CI・Preview/DB管理・close時cleanupはmainのActionsで実行する。PRと検証報告は日本語で書く。
 
+着手前に[AI-DLC開発フロー](aidlc-workflow.md)に従って調査・計画・利用者の承認を揃える。
+承認後にIssueを作成・更新し、専用worktreeのIntentへ計画と実際の承認文を記録する。
+具体的な計画が既に承認されていれば、その発言を参照して同じ承認を求め直さない。
+目的・範囲・受入条件・重要な実装方針が変わる場合は、計画を更新して再承認を得る。
+相談・調査だけを根拠にIssueやPRを作らない。
+
 ## 1. 環境と作業ディレクトリ
 
 [.node-version](../.node-version) のNode.js・npm・Git・既存本人認証済みgh・公式Playwright Chromiumを使う。
@@ -31,6 +37,8 @@ npm run task:start -- feature-name
 
 このコマンドは最新 `origin/main` から `codex/feature-name` と専用worktreeを作り、その中で `npm ci` を実行する。
 作業先を変える場合は `CAKE_WORKTREE_ROOT` をそのプロセスだけに指定する。
+対象worktreeで`task:intent`を使い、Issue・branch・承認済み計画を関連付ける。
+作成・計画更新・承認・進捗・凍結・再開のコマンドは[案件記録の操作](development-commands.md#案件記録の操作)を参照する。
 
 同じCloud環境内の並列タスクもworktree・ポートを分ける。
 Cloud用CakeはNode + PGliteのオンメモリDBに全migration・非管理者A/B・共有workspace・架空サンプルを設定し、停止時にDBを破棄する。
@@ -55,8 +63,8 @@ npmコマンドとworkflowからの正式な運用経路、receipt・資格情�
 
 開発は次の順に進める。
 
-1. 実装・関連テスト・自己レビュー。
-2. commit。
+1. 承認済み計画と受入条件に沿って実装・関連テスト・自己レビュー。
+2. 案件記録を更新・freezeし、実装とともにcommit。
 3. 別Agentレビュー。
 4. 指摘への対応・必要な再レビュー。
 5. 最終SHAでのローカル検証。
@@ -65,17 +73,22 @@ npmコマンドとworkflowからの正式な運用経路、receipt・資格情�
 8. Ready。
 
 文書のみの変更にも別Agentレビューを適用する。
+freeze後は追跡ファイルを更新せず、最終SHAのレビュー・検証結果をPR・Issue・Actionsへ記録する。
+修正時はIntentをreopenし、更新した記録を含めてfreeze・commitし直す。
+新しいHEADに対して再レビュー・必要な検証を行い、過去SHAの成功を使い回さない。
 
 各工程の実行場所・入力値の取得方法・成功条件は、[開発コマンド集](development-commands.md)にまとめる。
 
 | 工程 | 具体的な操作 |
 | --- | --- |
+| 計画承認とIssue・Intentの対応 | [案件記録の操作](development-commands.md#案件記録の操作) |
 | 比較元・完全SHA・clean状態の記録 | [レビュー対象の記録](development-commands.md#レビュー対象の記録) |
 | PR・remote SHA・現在HEADの両CI照合 | [対象PRとCIの確認](development-commands.md#対象prとciの確認) |
 | 信頼済みmainの別worktree準備 | [control checkoutの準備](development-commands.md#control-checkoutの準備) |
 | レビューコメントのID保存・同一コメントの再更新 | [レビューコメントの作成と更新](development-commands.md#レビューコメントの作成と更新) |
 | 文書のみのPR本文更新とReady | [文書のみのReady](development-commands.md#文書のみのready) |
 | Ready後の追加修正と再検証 | [Ready後の追加修正](development-commands.md#ready後の追加修正) |
+| merge後の確認とIssue完了 | [merge後の確認](development-commands.md#merge後の確認) |
 | 変更ごとに決める検証・業務操作・マージ判断 | [固定コマンドにしない判断](development-commands.md#固定コマンドにしない判断) |
 
 通常の変更依頼は、[AGENTS.mdの開発依頼の完了条件](../AGENTS.md#開発依頼の完了条件)に従い、
@@ -136,7 +149,7 @@ npm run test:tooling
 1. 親Agentは実装・関連テスト・自己レビューを終えてcommitし、cleanなworktree・完全HEAD SHAと比較元のSHAを記録する。
    通常の比較元は `origin/main` とのmerge-baseとし、差分全体を確認できるようにする。
 2. 実装時の会話履歴を引き継がない別Agentを起動する。
-   元の要求、適用する `AGENTS.md` と開発手順、関連設計、対象worktree、比較元・対象の完全SHA、検証済み・未実施の範囲を渡す。
+   元の要求、Issue・Intentと受入条件、適用する `AGENTS.md` と開発手順、関連設計、対象worktree、比較元・対象の完全SHA、検証済み・未実施の範囲を渡す。
    利用者の指定がなければモデル・推論強度は未指定とし、別モデルの利用を前提にしない。
 3. レビュー担当は対象SHAと差分・関連コード・テストを読み、仕様との不一致、不具合、既存機能への影響、権限・データ境界、検証不足を確認する。
    文書変更ではリンク・コマンド・現行実装・関連文書との整合性を確認する。ファイル変更やPR操作は行わず、日本語で指摘箇所・発生条件・影響・根拠と、確認範囲・限界を返す。
@@ -190,6 +203,8 @@ Cloudでは上記に加えて`npm run qa:cloud`を実行する。
 
 PRのタイトル・本文・コメント・レビューコメント・検証報告は日本語にする。コマンド、識別子、エラーコード、引用するログは原文のままでよい。
 PR本文は最終的な問題・変更内容・検証結果を記載し、作業途中の経緯や過去の受入記録を混ぜない。
+詳しい要件・計画・承認・判断履歴はIntentへ残し、PRとIssueからリンクする。
+Issue・Intent・PRのフォーマットと役割は[AI-DLC開発フロー](aidlc-workflow.md)を参照する。
 
 「変更内容」には、次を機能ごとに関連付けて記載する。小さな変更は数段落でよく、複数機能にまたがる場合は小見出しや具体例を使う。
 
@@ -203,6 +218,10 @@ PR本文は最終的な問題・変更内容・検証結果を記載し、作業
 
 Git外の `.cake/changes.md` に「変更内容」の本文をMarkdownで保存する（`## 変更内容`自体はCLIが付ける）。
 `task:pr`は必須の`--changes-file`でその内容を読み、タイトル・Preview証拠・検証結果と分けてPR本文へ反映する。
+対応する`--intent`を指定する。省略した場合は現在branchに対応するIntentを検索する。
+新規PRには、計画hashと一致する承認・freeze・対象branchの一致が必要である。
+Intentを使っていない既存PRの更新だけは`--legacy`を使え、新規PR作成には使えない。
+PRには関連Issue・Intentのリンクと機械可読な関連情報を生成する。生成blockを手編集・転載しない。
 draft作成時だけでなく更新・Ready時にも同じ指定が必要で、最終実装に合わせて説明を書き直す。
 空・不存在・NULを含むファイル、通常ファイル以外、1MBを超えるファイルはPR操作前に拒否する。
 手動でPRを作る場合も[PRテンプレート](../.github/pull_request_template.md)と同じ記載方針に従う。
@@ -217,11 +236,25 @@ draft作成時だけでなく更新・Ready時にも同じ指定が必要で、�
 - 件数。
 - 実画面で確認した内容。
 - 未実施項目。
+- 受入条件ごとの検証結果と証拠へのリンク。
+
+受入条件と証拠は、例えば次の形で対応付ける。
+未検証の項目を成功として記載せず、非該当・未実施・失敗の理由を分ける。
+
+| 受入条件 | 結果 | 検証・証拠 |
+| --- | --- | --- |
+| AC-01 | 成功 / 失敗 / 未実施 / 非該当 | 対象SHA・テスト・画面操作・runへのリンクと理由 |
+
+Issueをmerge時に閉じる`Closes`・`Fixes`・`Resolves`等のキーワードは使用しない。
+案件を完了するPRは`--completes-issue`、手動の運用確認が必要なPRは`--manual-post-merge`を指定する。
+分割途中のPRでは完了を申告しない。
+既存PR更新時にこれらを省略すると既存値を保つ。
+解除には`--no-completes-issue`・`--no-manual-post-merge`を使う。
 
 既定の依頼範囲と利用者の明示した制限に照らして対象を確認し、次を実行する。通常の変更依頼では、当該PRの専用Preview/DB操作について追加確認を求めない。
 
 ```bash
-npm run task:pr -- --draft --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md
+npm run task:pr -- --draft --intent <Intent ID> --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md --completes-issue
 ```
 
 CLIがpushしてdraft PRを作成/更新する。remoteとPRの完全SHAが検証commitに一致すること、
@@ -529,7 +562,7 @@ PR番号・完全SHA・Deployment IDは、対象worktreeで取得した正式sta
 
 ```bash
 npm run qa:verify:ci -- --pr <PR番号> --sha <完全SHA> --deployment <Deployment ID>
-npm run task:pr -- --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md --remote-proof /absolute/path/proof.json --target-worktree /absolute/path/target
+npm run task:pr -- --intent <Intent ID> --title '変更内容を日本語で記載' --changes-file /absolute/path/changes.md --verification-file /absolute/path/report.md --remote-proof /absolute/path/proof.json --target-worktree /absolute/path/target --completes-issue
 ```
 
 controlの `preview-verify.config.json` capabilityを照合し、成功証拠は `.cake/verify-<PR>.json` に保存する。
@@ -538,7 +571,8 @@ controlから別の対象worktreeを管理するときは、対象に管理CLI�
 `task:pr --remote-proof ... --target-worktree /absolute/path/target` を使う。
 target指定はremote proof必須・非draft専用で、対象コードを管理資格情報付きで実行しない。
 
-**文書のみのReady操作：** mainとの差分がAGENTS.md・README.md・docs配下の文書だけで、
+**文書のみのReady操作：** mainとの差分がAGENTS.md・README.md・docs配下の文書、
+またはIntentの計画・状態・監査記録だけで、
 アプリ・script・workflow・依存・設定を変更しない場合に限る。
 リンク・コマンド例・現行実装との整合性と差分全体をレビューし、上記のCI・自動Preview/statusを確認する。
 PR本文の変更説明・Preview欄・検証結果を現在HEADの内容へ更新し、ブラウザ再検証を省略する理由を記載する。
@@ -558,6 +592,7 @@ Ready完了後、このチャットで「Codexとしてマージ可能と判断�
 - 未実施項目と残る資源。
 
 ReadyはCodex側の検証完了を示すもので、GitHubの必須レビュー・branch保護や利用者によるマージ判断は維持する。
+Issueの完了とは区別し、merge後の確認が揃うまでIssueをopenで維持する。
 
 main mergeはProduction deployと本番buildのDB更新を起動し得る。PR merge/closeは専用DBと入力データの削除を起動する。
 実行前に対象と影響を提示し、既に承認された範囲なら再承認を求めず進める。
@@ -582,6 +617,24 @@ cleanupを再実行する必要があり、その対象削除が承認済みの�
 将来のmajor version更新・復旧は、[本番DB運用手順](production-database-upgrade.md)で
 対象・バックアップ・同期・接続切替・新しいProduction Deployment・本人確認を確認する。
 PR専用DBや常設Previewを本番用途へ流用しない。
+
+### merge後の案件完了
+
+利用者がmergeしたPRは`post-merge.yml`が確認する。
+信頼済みmain上でPRのHEAD SHAとmerge SHAを分けて照合し、次の完了を待つ。
+
+- 対象mergeのmain CI。
+- 対象mergeのProduction Deploymentと本番alias。
+- 常設Previewの正式receipt。
+- PR専用資源cleanupの正式receiptと削除後の不在。
+
+確認結果はActions artifactと、関連Issueのbot所有の固定コメントへ記録する。
+案件を完了するPRで全確認が成功し、同じIssueの先行分割PRを含む手動確認・失敗・未確認・未マージPRが残らない場合にIssueをcloseする。
+固定コメントには各PRの最新結果を保持し、後続PRの成功で先行PRの未解決事項を消さない。
+失敗・timeout・対象変更・手動確認待ちは、その理由とrunへのリンクを記録し、openを維持する。
+既にcloseされたIssueを勝手にreopenしない。
+手動再確認は[merge後の確認](development-commands.md#merge後の確認)のdispatchを使う。
+確認のために本番へ再deployしたり、無関係な資源を操作したりしない。
 
 ## 7. 管理側の契約と停止条件
 

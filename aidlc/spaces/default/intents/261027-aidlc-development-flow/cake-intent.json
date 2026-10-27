@@ -1,0 +1,81 @@
+{
+  "protocol": "cake-intent/v1",
+  "id": "261027-aidlc-development-flow",
+  "repository": "tyask/Cake",
+  "issue": 154,
+  "issueUrl": "https://github.com/tyask/Cake/issues/154",
+  "branch": "codex/aidlc-development-flow",
+  "branches": [
+    "codex/aidlc-development-flow"
+  ],
+  "recordDir": "aidlc/spaces/default/intents/261027-aidlc-development-flow",
+  "phase": "Construction",
+  "status": "frozen",
+  "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574",
+  "approval": {
+    "actor": "このチャットの利用者",
+    "reply": "ではこの方針で修正を進めてください。\n",
+    "recordedAt": "2026-10-27T11:32:35.491Z",
+    "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574",
+    "planFile": "plans/ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574.md"
+  },
+  "frozen": true,
+  "createdAt": "2026-10-27T11:32:34.977Z",
+  "updatedAt": "2026-10-27T11:46:03.139Z",
+  "events": [
+    {
+      "action": "CREATED",
+      "recordedAt": "2026-10-27T11:32:34.977Z",
+      "note": "Issueに対応する計画を記録した。承認は別途記録する。",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "APPROVE",
+      "recordedAt": "2026-10-27T11:32:35.491Z",
+      "note": "承認者：このチャットの利用者\n承認の記録日時：2026-10-27T11:32:35.491Z\n承認対象本文：[plans/ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574.md](../plans/ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574.md)\n利用者の実際の回答：\nではこの方針で修正を進めてください。",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-27T11:35:14.972Z",
+      "note": "AC-01〜AC-08に対応する初期実装・関連テスト・自己レビューを終えた。\nAI-DLC v2の構成に沿うCake運用記録、計画hash承認・元計画snapshot・分割branch対応を用意した。\nPR生成は承認済み凍結Intentと関連Issueを引き継ぎ、既存の最終SHA・clean・正式Previewゲートを維持する。\nマージ後確認はmain CI・本番Deployment/alias・常設Preview/browser・PR資源cleanupの4条件を照合する。\n失敗・未確認・手動確認待ち・分割PRはIssueを開いたままとし、同一botコメントを更新する。\n実GitHub APIとVercelのread-only確認で、本番Deploymentと自動cleanup runの実データ形式を照合した。\n独立レビュー、最終commitの全検証、draft PRのCI/Preview/正式ブラウザ検証は以後に実施する。\nfreeze後の結果はPR・Issue・Actionsへ保存し、未実施を成功として記録しない。\n",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-27T11:35:15.815Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-27T11:38:41.234Z",
+      "note": "独立レビューで指摘されたマージ後確認の2件へ対応する。\n同一Issueの先行分割PRで残る手動確認・cleanup失敗が、後続PRの成功で消える不具合を修正する。\n同じ秒にmergedされたPRの新旧をPR番号で判定し、正しい完了結果を拒否する不具合を修正する。\nIssue内にPRごとの結果履歴を保持し、実際のmain/merge SHAと最新run世代を使って判定する。\nこれは承認済み計画の『残作業なしだけclose』『再実行/旧結果上書き防止』を満たす修正であり、目的と範囲は変更しない。\n",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-27T11:43:10.103Z",
+      "note": "独立レビューのP2 2件に対応した。\nIssue内の同じbotコメントにPRごとの最新結果を保持し、同じIssueに関連するすべてのPRを照合する。\n先行分割PRの失敗・手動確認・未確認・metadata不一致が残る場合はIssueを閉じない。\n同秒mergeはPR番号で順序を決めず、実際のmain SHAとPRごとのrun世代を用いる。\n指摘に対応する回帰と、WindowsのCRLF入力をLFへ正規化してGit共有後の承認hashを維持する回帰を追加した。\n対象テスト、型チェック、lintの確認を実施した。独立再レビューと最終SHAの全体検証、PRのCI/Preview/正式QAは以後に行う。\n",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-27T11:43:11.237Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-27T11:45:42.029Z",
+      "note": "追加の独立レビューで、無関係な過去PRの不正metadataが全Issueの完了を阻害するP2と、履歴の読取/書込上限が一致しないP3を確認した。\nIssueへの関連付けが成立しないPRは当該Issueの判定から除き、既知の関連PRが消えた場合は履歴との照合で未確認として残す。\n履歴は書込前にも読取と同じ50件上限を検査し、自身が次回読めなくなるコメントを保存しない。\n両条件の回帰を追加する。計画の目的・範囲は変更せず、承認済みの残作業判定と再実行の整合性を満たす修正として進める。\n",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-27T11:46:03.139Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "ac4bcc25fea82497d2a2356c34e120d5eb496a9c4921d0d9d723f9d7e0e22574"
+    }
+  ]
+}

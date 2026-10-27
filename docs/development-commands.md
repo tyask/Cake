@@ -24,9 +24,28 @@ env -u VERCEL_TOKEN -u VERCEL_OIDC_TOKEN -u NEON_API_KEY \
 非対応なら公式配布版を作業用領域へ用意し、そのプロセスだけPATHを補完する。
 導入できない場合は阻害として報告し、CI照合を省略しない。
 
+## 計画承認とIssue
+
+既存仕様・実装を調べ、目的・範囲・受入条件・実装と検証の計画を利用者へ提示する。
+具体的な計画が承認された後に、その案件のIssueを作成・更新する。
+既存Issueがあれば同じものを使い、相談や調査だけでは新規Issueを作らない。
+Issueの要約・受入条件・承認済み計画を`.cake/issue.md`へ用意する。
+
+```bash
+gh issue create --repo tyask/Cake --title '今回の目的を日本語で記載' --body-file .cake/issue.md
+# 既存Issueを更新する場合
+gh issue edit <Issue番号> --repo tyask/Cake --body-file .cake/issue.md
+```
+
+実際には作成・更新のどちらかを選び、返されたIssue番号とURLを記録する。
+計画本文は`.cake/plan.md`等へ、実際の承認発言は`.cake/approval.md`等へ保存しておく。
+承認文を作成・要約して置き換えたり、利用者の発言日時を推測したりしない。
+既に具体的な計画が承認されていれば、その発言を参照して同じ承認を求め直さない。
+
 ## タスクの準備
 
-元のCake checkoutで実行する。初回cloneで依存がなければ、先にNode版を確認して`npm ci`を行う。
+計画承認とIssue作成・更新の後、元のCake checkoutで実行する。
+初回cloneで依存がなければ、先にNode版を確認して`npm ci`を行う。
 既に作成済みの同一タスクを、同じ名前で作り直さない。
 
 ```bash
@@ -39,9 +58,79 @@ npm run task:start -- feature-name
 作成途中の依存導入が失敗した場合は、`git worktree list`で表示された既存の作業先を確認する。
 原因を解消してその作業先の`npm ci`から再開し、元checkoutの変更を移動・破棄しない。
 
+## 案件記録の操作
+
+対象worktreeで、承認済み計画を使ってIntentを作る。
+元checkoutに計画と承認の下書きを置いた場合は、その公開可能な本文だけを対象worktreeの`.cake/`へ用意する。
+資格情報・環境ファイルはコピーしない。
+`task:intent`の入力ファイルは対象worktree内に限定し、symlinkは使わない。
+
+```bash
+npm run task:intent -- init --issue <Issue番号> --name feature-name --plan-file .cake/plan.md
+```
+
+表示されたIntent IDを以後の操作に使う。
+IDは日本標準時の日付`YYMMDD`と案件名から生成され、同じIssueのIntentを重複作成しない。
+
+```bash
+TASK_INTENT_ID='<表示されたIntent ID>'
+npm run task:intent -- approve --intent "$TASK_INTENT_ID" \
+  --actor 'このチャットの利用者' --reply-file .cake/approval.md
+npm run task:intent -- status --intent "$TASK_INTENT_ID"
+```
+
+`approve`は承認者・実際の承認文・計画hash・記録日時を保存する。
+`--at <ISO日時>`を省略すると現在時刻を記録する。これは発言日時ではなく記録日時である。
+承認対象の計画と利用者の発言の対応はAgentが確認する。
+CLIへの記録だけを根拠に、未承認の計画を承認済みとして扱わない。
+
+凍結前の進捗は、現在の工程とメモを記録する。
+`status`は読み取りだけで、追跡ファイルを更新しない。
+
+```bash
+npm run task:intent -- progress --intent "$TASK_INTENT_ID" \
+  --phase Construction --status running --note-file .cake/progress.md
+npm run task:intent -- status
+```
+
+計画が変わる場合は次で本文を更新する。過去の承認とfreezeは無効になる。
+変更後の計画を提示して承認を得てから、同じ`approve`手順で新たに記録する。
+
+```bash
+npm run task:intent -- plan --intent "$TASK_INTENT_ID" --plan-file .cake/revised-plan.md
+```
+
+最終レビューへ進む前に、計画・実装・進捗を揃えて記録を凍結する。
+
+```bash
+npm run task:intent -- freeze --intent "$TASK_INTENT_ID"
+git status --short
+```
+
+承認hashと計画が一致したfreeze済みの記録を、実装・関連テストとともにcommitする。
+以後のレビュー・最終QA・PR・Ready・merge後の結果は、PR・Issue・Actionsへ記録する。
+修正のため記録更新を再開する場合は、その理由を用意して実行する。
+
+```bash
+npm run task:intent -- reopen --intent "$TASK_INTENT_ID" --note-file .cake/reopen.md
+```
+
+計画本文が同じなら承認は維持される。
+必要な記録と実装を直し、freeze・commit後の新HEADで再レビュー・必要な検証を行う。
+凍結済みIntentのJSON・state・auditを直接書き換えない。
+
+同じ承認済み案件を分割PRで実装する場合は、既存Intentを含む新しいworktreeで現在branchを関連付ける。
+関連付けはfreezeを解除するため、そのbranchの作業・記録を確定してfreeze・commitする。
+
+```bash
+npm run task:intent -- attach --intent "$TASK_INTENT_ID" --note-file .cake/attach.md
+```
+
+計画の対象外となる追加機能は、関連branchの追加だけで承認済みとせず、計画更新と必要な承認へ戻る。
+
 ## レビュー対象の記録
 
-対象タスクのworktreeで、実装・関連テスト・自己レビュー・commitを終えてから実行する。
+対象タスクのworktreeで、実装・関連テスト・自己レビュー・Intentのfreeze・commitを終えてから実行する。
 空でない`git status`は作業中の変更を示す。変更を捨てず、レビュー対象を確定してから進める。
 
 ```bash
@@ -56,7 +145,7 @@ git diff --stat "$(git merge-base origin/main HEAD)" HEAD
 ```
 
 表示された作業先・branch・比較元SHA・完全HEAD SHAを別Agentへ渡す。
-元の要求・関連設計・適用ルール・検証済み/未実施の範囲も渡す。
+元の要求・Issue・Intent・受入条件・関連設計・適用ルール・検証済み/未実施の範囲も渡す。
 Agentの起動は利用しているCodexの別Agent機能で行い、架空のnpmコマンドで代用しない。
 実装時の履歴を渡さず、モデル・推論強度は利用者の指定がなければ未指定にする。
 
@@ -163,11 +252,13 @@ npm run qa:verify:ci -- --pr "$PR" --sha "$TESTED_SHA" --deployment "$DEPLOYMENT
 
 ```bash
 npm run task:pr -- \
+  --intent '<対象Intent ID>' \
   --title '変更内容を日本語で記載' \
   --changes-file "$CONTROL_WORKTREE/.cake/changes.md" \
   --verification-file "$CONTROL_WORKTREE/.cake/report.md" \
   --remote-proof "$CONTROL_WORKTREE/.cake/verify-$PR.json" \
-  --target-worktree "$TASK_WORKTREE"
+  --target-worktree "$TASK_WORKTREE" \
+  --completes-issue
 ```
 
 別worktreeの管理には`--target-worktree`を必ず指定する。
@@ -240,11 +331,13 @@ gh api repos/tyask/Cake/issues/comments/<確認したID> > .cake/review-comment.
 
 ## 文書のみのReady
 
-対象worktreeで実行する。差分がAGENTS.md・README.md・docs配下の文書だけの場合に限る。
+対象worktreeで実行する。差分がAGENTS.md・README.md・docs配下の文書、
+またはIntentの計画・状態・監査記録だけの場合に限る。
+アプリ・script・workflow・依存・実行設定を含む変更は対象外とする。
 レビュー・必要な文書検査・現在HEADのCI・自動Preview/statusを先に完了する。
 `.cake/report.md`へ正式ブラウザ再検証の省略理由と、現在HEADのレビュー要約・詳細リンクを記載する。
 
-1. `.cake/changes.md`と`.cake/report.md`を最終内容へ更新する。
+1. `.cake/changes.md`と`.cake/report.md`を最終内容へ更新し、`task:pr --draft --intent <Intent ID>`で関連情報を確定する。
 2. `git fetch origin main`と`npm run qa:status`を実行する。
 3. 次の例で、最終本文を既存のPR更新処理へ渡す。
 4. 更新内容と現在HEADの一致を確認してからReadyにする。
@@ -262,6 +355,7 @@ import {
 import { source } from './scripts/preview/preview-model.ts';
 import { assertPreviewCi } from './scripts/preview/preview-ready.ts';
 import { updateTaskPullRequest } from './scripts/task/task-pr-update.ts';
+import { createTaskPrBody } from './scripts/task/task-pr.ts';
 const head = await cleanTaskHead(process.cwd());
 const prs = await taskPullRequests(head);
 assert(prs.length === 1 && prs[0].isDraft && prs[0].headRefOid === head.sha);
@@ -271,7 +365,7 @@ const current = source(JSON.parse(await commandOutput(executeWorkflowCommand, 'g
 assert(current.sha === head.sha && current.branch === head.branch && current.state === 'open');
 const base = await commandOutput(executeWorkflowCommand, 'git', ['merge-base', 'origin/main', 'HEAD'], head.cwd);
 const files = (await commandOutput(executeWorkflowCommand, 'git', ['diff', '--name-only', base, 'HEAD'], head.cwd)).split('\n');
-assert(files.length && files.every(file => /^(AGENTS\.md|README\.md|docs\/.+\.(md|html))$/.test(file)));
+assert(files.length && files.every(file => /^(AGENTS\.md|README\.md|docs\/.+\.(md|html)|aidlc\/spaces\/default\/(intents\.json|intents\/[^/]+\/(cake-intent\.json|plan\.md|plans\/[a-f0-9]{64}\.md|aidlc-state\.md|audit\/cake\.md)))$/.test(file)));
 const r = JSON.parse(readFileSync('.cake/preview.json', 'utf8'));
 assert(r.success && r.action === 'status' && JSON.stringify(r.source) === JSON.stringify(current));
 assert(r.deployment?.phase === 'application' && r.deployment.state === 'READY');
@@ -287,12 +381,16 @@ const published = JSON.parse(await commandOutput(executeWorkflowCommand, 'gh',
 assert.equal(published.body, readFileSync('.cake/review.md', 'utf8'));
 assert(published.body.includes(head.sha));
 assert(changes && report.includes(head.sha) && report.includes(review.html_url));
-const preview = `- URL: ${r.deployment.url}\n- 検証commit: ${head.sha}\n`
+const preview = `## Preview\n\n- URL: ${r.deployment.url}\n- 検証commit: ${head.sha}\n`
   + `- Deployment: ${r.deployment.id}\n- DB branch: ${r.database.branchId}\n`
   + `- DB endpoint: ${r.database.endpointId}\n- generation: ${r.deployment.generation}\n`
   + '- 自動Preview/status照合済み。文書のみのため正式ブラウザ再検証を省略。';
-const body = `## 変更内容\n\n${changes}\n\n## Preview\n\n${preview}\n\n## 検証結果\n\n${report}\n`;
-await updateTaskPullRequest(head, pr, '変更内容を日本語で記載', body, executeWorkflowCommand);
+const latestPr = JSON.parse(await commandOutput(executeWorkflowCommand, 'gh',
+  ['api', `repos/tyask/Cake/pulls/${pr}`], head.cwd));
+const title = '変更内容を日本語で記載';
+const body = await createTaskPrBody({ head, title, changes, verification: report, preview,
+  existingBody: latestPr.body });
+await updateTaskPullRequest(head, pr, title, body, executeWorkflowCommand);
 assert.deepEqual(await cleanTaskHead(head.cwd), head);
 const latest = await taskPullRequests(head);
 assert(latest.length === 1 && latest[0].headRefOid === head.sha && latest[0].isDraft);
@@ -301,6 +399,7 @@ JS
 ```
 
 例のタイトルは実際の変更内容へ置き換える。
+直前の`task:pr --draft`が生成したIssue・Intentの関連情報を保持し、metadataを手作り・転載しない。
 最後に、PR本文・レビューコメント・検証記録が現在HEADを対象としていることを確認する。
 
 ```bash
@@ -327,7 +426,7 @@ gh pr view "$PR" --repo tyask/Cake --json headRefOid,isDraft
 
 `isDraft: true`を確認してから、次の順に進める。
 
-1. 修正とcommit。
+1. 必要ならIntentをreopenし、修正と記録更新・freeze・commit。
 2. 追加差分・影響範囲の再レビュー。
 3. 新しい最終SHAの検証。
 4. 変更説明・報告を更新し、`task:pr --draft`でpush・PR更新。
@@ -336,6 +435,32 @@ gh pr view "$PR" --repo tyask/Cake --json headRefOid,isDraft
 7. アプリ変更または文書のみの手順でReady。
 
 PRがmerge/close済みなら、そのbranchの作業を再開せず、最新mainから別タスクを作る。
+
+## merge後の確認
+
+利用者のmergeで`post-merge.yml`が自動起動する。
+既存のPR番号を指定すると、同じ確認を信頼済みmainから手動で再実行できる。
+
+```bash
+gh workflow run post-merge.yml --repo tyask/Cake --ref main -f pr=<PR番号>
+gh run list --repo tyask/Cake --workflow post-merge.yml --limit 5 \
+  --json databaseId,event,headSha,status,conclusion,url
+```
+
+対象PRの最新runを確認してから、詳細・Summary・artifact・Issueの固定コメントを読む。
+
+```bash
+gh run view <対象run ID> --repo tyask/Cake --json url,status,conclusion,jobs
+gh issue view <Issue番号> --repo tyask/Cake --json url,state,body,comments
+```
+
+main CI・対象Productionとalias・常設Preview・専用資源cleanupの4確認を区別する。
+PRのHEAD SHAとmerge SHA、各確認対象のrun・receiptを照合する。
+全確認が成功し、案件完了指定・手動確認なし・ほかの関連OPEN PRなしの条件が揃った場合にIssueをcloseする。
+失敗・timeout・対象変更や手動確認待ちでは、固定コメントの理由を確認してopenのまま対応する。
+既にcloseされたIssueを勝手にreopenしない。
+手動確認が必要な案件は、利用者または担当者が結果と証拠を記載して完了を判断する。
+確認のため本番へ再deployしたり、cleanupを盲目的に再実行したりしない。
 
 ## Deployment保持の確認と整理
 

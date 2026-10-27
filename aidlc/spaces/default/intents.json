@@ -1,0 +1,14 @@
+{
+  "protocol": "cake-intent-registry/v1",
+  "intents": [
+    {
+      "id": "261027-aidlc-development-flow",
+      "issue": 154,
+      "branch": "codex/aidlc-development-flow",
+      "branches": [
+        "codex/aidlc-development-flow"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261027-aidlc-development-flow"
+    }
+  ]
+}
