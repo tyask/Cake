@@ -13,7 +13,7 @@ const repoPrefix = `/repos/${config.repository}/`;
 const resultFile = 'post-merge-result.json';
 const commentPrefix = '<!-- cake-post-merge/v1 ';
 const checkNames = ['ci', 'production', 'staging', 'cleanup'] as const;
-type Context = { pr: number; controlSha: string; runId: string; runAttempt: number; eventTask?: MergedTask };
+type Context = { pr: number; issue: number; controlSha: string; runId: string; runAttempt: number; eventTask?: MergedTask };
 type VerificationOptions = { api?: Transport; checks?: PostMergeChecks; wait?: (ms: number) => Promise<void>;
   now?: () => number; maxWaitMs?: number; pollMs?: number; directory?: string };
 
@@ -53,6 +53,9 @@ export async function preparePostMerge(env: Readonly<Record<string, string | und
 export async function postMergeContext(env: Readonly<Record<string, string | undefined>>,
   api: Transport = transport({ GH_TOKEN: env.GH_TOKEN })): Promise<Context> {
   const event = await workflowContext(env);
+  const preparedIssue = env.CAKE_POST_MERGE_ISSUE;
+  if (!preparedIssue || !/^[1-9][0-9]*$/.test(preparedIssue) || !positiveId(Number(preparedIssue))) return failPostMerge('INVALID_ISSUE');
+  const issue = Number(preparedIssue);
   let pr: number, eventTask: MergedTask | undefined;
   if (env.GITHUB_EVENT_NAME === 'push') {
     const selected = env.CAKE_POST_MERGE_PR;
@@ -61,10 +64,11 @@ export async function postMergeContext(env: Readonly<Record<string, string | und
     const candidates = await pushedPullRequests(env, event, api);
     const raw = candidates.find(candidate => candidate.number === pr);
     if (!raw || !(eventTask = mergedTask(raw))) return failPostMerge('INVALID_PR');
+    if (eventTask.metadata.issue !== issue) return failPostMerge('ISSUE_CHANGED');
   } else pr = dispatchPr(event);
   if (env.CAKE_POST_MERGE_PR !== undefined && env.CAKE_POST_MERGE_PR !== String(pr)) return failPostMerge('INVALID_PR');
   if (!positiveId(pr)) return failPostMerge('INVALID_PR');
-  return { pr, controlSha: env.GITHUB_SHA!, runId: env.GITHUB_RUN_ID!, runAttempt: Number(env.GITHUB_RUN_ATTEMPT), eventTask };
+  return { pr, issue, controlSha: env.GITHUB_SHA!, runId: env.GITHUB_RUN_ID!, runAttempt: Number(env.GITHUB_RUN_ATTEMPT), eventTask };
 }
 
 const emptyChecks = (): Record<CheckName, PostMergeCheck> => Object.fromEntries(checkNames.map(name => [name,
@@ -77,6 +81,7 @@ export async function verifyPostMerge(env: Readonly<Record<string, string | unde
   const api = options.api ?? transport(env), context = await postMergeContext(env, api), directory = options.directory ?? process.cwd();
   const task = await freshTask(api, context.pr);
   if (!task) return undefined;
+  if (task.metadata.issue !== context.issue) return failPostMerge('ISSUE_CHANGED');
   if (context.eventTask && !sameTask(task, context.eventTask)) return failPostMerge('PR_CHANGED');
   const issue = object(await api('github', `${repoPrefix}issues/${task.metadata.issue}`));
   if (issue.number !== task.metadata.issue || issue.pull_request != null) return failPostMerge('ISSUE_INVALID');
@@ -235,8 +240,9 @@ export async function publishPostMerge(env: Readonly<Record<string, string | und
   if (!stats.isFile() || stats.isSymbolicLink() || stats.size > 30_000) return failPostMerge('RESULT_INVALID');
   const result = parsePostMergeResult(JSON.parse(await readFile(path, 'utf8')));
   if (result.runId !== context.runId || result.runAttempt !== context.runAttempt || result.controlSha !== context.controlSha
-    || result.task.source.pr !== context.pr) return failPostMerge('RESULT_MISMATCH');
+    || result.task.source.pr !== context.pr || result.task.metadata.issue !== context.issue) return failPostMerge('RESULT_MISMATCH');
   const current = await freshTask(api, context.pr);
+  if (current && current.metadata.issue !== context.issue) return failPostMerge('ISSUE_CHANGED');
   if (!current || !sameTask(current, result.task)) return failPostMerge('PR_CHANGED');
   if (context.eventTask && !sameTask(current, context.eventTask)) return failPostMerge('PR_CHANGED');
   const mainBefore = object(await api('github', `${repoPrefix}branches/main`));

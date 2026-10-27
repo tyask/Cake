@@ -74,6 +74,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CAKE_POST_MERGE_PR: ${{ matrix.target.pr }}
+          CAKE_POST_MERGE_ISSUE: ${{ matrix.target.issue }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: node --import tsx scripts/task/post-merge-workflow.ts verify
@@ -124,4 +125,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CAKE_POST_MERGE_PR: ${{ matrix.target.pr }}
+          CAKE_POST_MERGE_ISSUE: ${{ matrix.target.issue }}
         run: node --import tsx scripts/task/post-merge-workflow.ts publish

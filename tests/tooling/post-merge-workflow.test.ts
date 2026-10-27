@@ -32,7 +32,8 @@ async function fixture() {
     inputs: { pr: '71' } }));
   const env = { GH_TOKEN: 'fixture-token', GITHUB_REPOSITORY: config.repository, GITHUB_REF: 'refs/heads/main',
     GITHUB_WORKFLOW_REF: `${config.repository}/.github/workflows/post-merge.yml@refs/heads/main`, GITHUB_SHA: control,
-    GITHUB_EVENT_PATH: eventPath, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_RUN_ID: '101', GITHUB_RUN_ATTEMPT: '1' };
+    GITHUB_EVENT_PATH: eventPath, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_RUN_ID: '101', GITHUB_RUN_ATTEMPT: '1',
+    CAKE_POST_MERGE_ISSUE: '9' };
   return { directory, eventPath, env, cleanup: () => rm(directory, { recursive: true, force: true }) };
 }
 
@@ -114,7 +115,8 @@ test('main push discovers separate PR and Issue matrix targets and binds each ma
     assert.equal(await readFile(output, 'utf8'), 'targets=[{"pr":72,"issue":8},{"pr":71,"issue":9}]\n');
     const context = await postMergeContext({ ...env, CAKE_POST_MERGE_PR: '71' }, api);
     assert.equal(context.eventTask!.mergeSha, merge); assert.equal(context.controlSha, merge);
-    const previous = await postMergeContext({ ...env, CAKE_POST_MERGE_PR: '72' }, api);
+    await assert.rejects(postMergeContext({ ...env, CAKE_POST_MERGE_PR: '71', CAKE_POST_MERGE_ISSUE: '8' }, api), /ISSUE_CHANGED/);
+    const previous = await postMergeContext({ ...env, CAKE_POST_MERGE_PR: '72', CAKE_POST_MERGE_ISSUE: '8' }, api);
     assert.equal(previous.eventTask!.mergeSha, earlierMerge, 'each PR preserves its own actual merge SHA');
     for (const selected of [undefined, '73', '999', '01']) {
       await assert.rejects(postMergeContext({ ...env, CAKE_POST_MERGE_PR: selected }, api), /INVALID_PR/);
@@ -137,6 +139,34 @@ test('publication cannot consume the artifact for another matrix PR', async () =
     await assert.rejects(publishPostMerge({ ...f.env, CAKE_POST_MERGE_PR: '71' }, api, f.directory), /RESULT_MISMATCH/);
     assert.equal(calls, 0);
     await assert.rejects(publishPostMerge({ ...f.env, CAKE_POST_MERGE_PR: '72' }, api, f.directory), /INVALID_PR/);
+  } finally { await f.cleanup(); }
+});
+
+test('the prepared Issue remains bound to the matrix lock across verification and publication', async () => {
+  const f = await fixture(); let actualMetadata = metadata, calls = 0;
+  const api: Transport = async (provider, path, method = 'GET') => {
+    calls++;
+    assert.equal(provider, 'github', 'a changed Issue cannot authorize provider access');
+    assert.equal(method, 'GET', 'a changed Issue cannot authorize writes');
+    assert.ok(path.endsWith('/pulls/71'), 'no Issue may be read or changed under another Issue lock');
+    return rawPr(actualMetadata);
+  };
+  try {
+    assert.deepEqual(await preparePostMerge(f.env, api), [{ pr: 71, issue: 9 }]);
+    actualMetadata = { ...metadata, issue: 10 };
+    await assert.rejects(verifyPostMerge(f.env, { api, directory: f.directory }), /ISSUE_CHANGED/);
+    const report = result();
+    await writeFile(join(f.directory, 'post-merge-result.json'), JSON.stringify(report));
+    await assert.rejects(publishPostMerge(f.env, api, f.directory), /ISSUE_CHANGED/);
+    report.task.metadata.issue = 10;
+    await writeFile(join(f.directory, 'post-merge-result.json'), JSON.stringify(report));
+    calls = 0;
+    await assert.rejects(publishPostMerge(f.env, api, f.directory), /RESULT_MISMATCH/);
+    assert.equal(calls, 0, 'an artifact for another Issue is rejected before reading its current state');
+    for (const issue of [undefined, '0', '09', 'not-an-id']) {
+      await assert.rejects(postMergeContext({ ...f.env, CAKE_POST_MERGE_ISSUE: issue }, api), /INVALID_ISSUE/);
+    }
+    assert.equal(calls, 0);
   } finally { await f.cleanup(); }
 });
 
@@ -251,7 +281,7 @@ test('CI checks the latest main-push run for the merge SHA, not the successful P
 });
 
 test('cleanup consumes a trusted official receipt and rechecks source absence', async t => {
-  let retained = false, wrongHead = false, wrongTitle = false, wrongControl = false;
+  let retained = false, wrongHead = false, wrongTitle = false, wrongControl = false, jobFailed = false, checkFailed = false;
   const operation = '20000000-0000-4000-8000-000000000002';
   const run: Record<string, unknown> = workflowFixture('preview.yml', 22, { display_title: `Preview cleanup main ${merge} 22` });
   const getPrefix = `/repos/${config.repository}/`;
@@ -261,12 +291,18 @@ test('cleanup consumes a trusted official receipt and rechecks source absence', 
     if (path === getPrefix + 'actions/workflows/preview.yml') return { id: 12, path: '.github/workflows/preview.yml', state: 'active' };
     if (path.startsWith(getPrefix + 'actions/workflows/preview.yml/runs?')) return { total_count: 1, workflow_runs: [run] };
     if (path === getPrefix + 'actions/runs/22') return run;
-    if (path.includes('/attempts/1/jobs?')) return { total_count: 1, jobs: [{ id: 80, name: jobName, run_id: 22, run_attempt: 1,
-      head_branch: run.head_branch, head_sha: run.head_sha, status: 'completed', conclusion: 'success',
-      check_run_url: `https://api.github.com/repos/${config.repository}/check-runs/80` }] };
+    if (path.includes('/attempts/1/jobs?')) {
+      const jobs = [{ id: 80, name: jobName, run_id: 22, run_attempt: 1,
+        head_branch: run.head_branch, head_sha: run.head_sha, status: 'completed', conclusion: jobFailed ? 'failure' : 'success',
+        check_run_url: `https://api.github.com/repos/${config.repository}/check-runs/80` }];
+      if (run.event === 'push' && run.conclusion === 'failure') jobs.push({ ...jobs[0], id: 81, name: 'preview-cleanup-72', conclusion: 'failure',
+        check_run_url: `https://api.github.com/repos/${config.repository}/check-runs/81` });
+      return { total_count: jobs.length, jobs };
+    }
     if (path === getPrefix + 'check-runs/80') return { id: 80, name: jobName, head_sha: run.head_sha,
       url: `https://api.github.com/repos/${config.repository}/check-runs/80`, check_suite: { id: 122 },
-      app: { slug: 'github-actions', html_url: 'https://github.com/apps/github-actions' }, status: 'completed', conclusion: 'success', output: { annotations_count: 1 } };
+      app: { slug: 'github-actions', html_url: 'https://github.com/apps/github-actions' }, status: 'completed',
+      conclusion: checkFailed ? 'failure' : 'success', output: { annotations_count: 1 } };
     if (path.includes('/check-runs/80/annotations?')) return [{ title: wrongTitle ? 'cake-preview/v1 PR 72'
       : run.event === 'push' ? 'cake-preview/v1 PR 71' : 'cake-preview-receipt/v1', annotation_level: 'notice', message: JSON.stringify({
       protocol: 'cake-preview/v1', action: 'cleanup', source: { ...task().source, sha: wrongHead ? merge : head }, checkedAt: '2026-10-27T00:03:00Z',
@@ -282,6 +318,18 @@ test('cleanup consumes a trusted official receipt and rechecks source absence', 
   assert.ok(new PreviewProvider(api));
   const checks = new PostMergeChecks(api);
   assert.equal((await checks.cleanup(task())).status, 'success');
+  run.conclusion = 'failure';
+  assert.equal((await checks.cleanup(task())).status, 'success', 'a successful target job is independent of its failed sibling PR');
+  jobFailed = true; await assert.rejects(checks.cleanup(task()), /JOB_INVALID/);
+  jobFailed = false; checkFailed = true; await assert.rejects(checks.cleanup(task()), /CHECK_INVALID/);
+  checkFailed = false; run.status = 'in_progress';
+  assert.equal((await checks.cleanup(task())).code, 'RUN_PENDING');
+  run.status = 'completed';
+  for (const conclusion of ['cancelled', 'timed_out', 'action_required', 'skipped']) {
+    run.conclusion = conclusion;
+    assert.equal((await checks.cleanup(task())).code, 'RUN_NOT_SUCCESSFUL');
+  }
+  run.conclusion = 'success';
   retained = true; await assert.rejects(checks.cleanup(task()), /RESOURCES_REMAIN/);
   retained = false; wrongHead = true; await assert.rejects(checks.cleanup(task()), /RECEIPT_INVALID/);
   wrongHead = false; wrongTitle = true; await assert.rejects(checks.cleanup(task()), /RECEIPT_INVALID/);
@@ -290,6 +338,8 @@ test('cleanup consumes a trusted official receipt and rechecks source absence', 
   assert.equal((await checks.cleanup(task())).code, 'RUN_NOT_CREATED', 'legacy PR-event evidence cannot satisfy the new main-push cleanup');
   run.event = 'workflow_dispatch'; run.display_title = `Preview cleanup PR 71 ${operation}`;
   assert.equal((await checks.cleanup(task())).status, 'success', 'explicit trusted-main recovery remains supported');
+  run.conclusion = 'failure';
+  assert.equal((await checks.cleanup(task())).code, 'RUN_NOT_SUCCESSFUL', 'dispatch still requires the whole run to succeed');
 });
 
 test('staging binds its official browser receipt to the merge SHA and current alias', async t => {

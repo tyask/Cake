@@ -157,7 +157,12 @@ export class PostMergeChecks {
       run.head_branch === 'main' && (run.event === 'push' && run.head_sha === task.mergeSha
         || run.event === 'workflow_dispatch' && typeof run.display_title === 'string'
           && run.display_title.startsWith(`Preview cleanup PR ${task.source.pr} `)));
-    const state = this.runState(run); if (state) return state;
+    // A failed sibling matrix job does not invalidate this PR's own proof.
+    const state = run?.event === 'push'
+      ? run.status !== 'completed' ? pending('RUN_PENDING')
+        : !['success', 'failure'].includes(String(run.conclusion)) ? failure('RUN_NOT_SUCCESSFUL', { runId: Number(run.id) }) : undefined
+      : this.runState(run);
+    if (state) return state;
     const receipt = parseReceipt(await this.notice(run!, run!.event === 'push' ? `preview-cleanup-${task.source.pr}` : 'preview', run!.event === 'push'
       ? `cake-preview/v1 PR ${task.source.pr}` : receiptNoticeTitle));
     assertReceipt(receipt, { action: 'cleanup', source: task.source, operation: receipt.operation,

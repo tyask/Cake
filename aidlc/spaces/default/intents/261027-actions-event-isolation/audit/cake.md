@@ -48,3 +48,29 @@ Cake運用の記録。公式エンジンの承認receiptではない。日時は
 - 計画SHA-256：`7e964b76c5ac9d5696387a1ae53a62af873987272e8ceceaee44112f46fb401b`
 
 > 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
+
+## REOPEN
+
+- 記録日時：2026-10-27T13:41:06.499Z
+- 計画SHA-256：`7e964b76c5ac9d5696387a1ae53a62af873987272e8ceceaee44112f46fb401b`
+
+> 独立レビューで、prepare時のIssue番号と実際の更新先Issueを一致させるgate不足、およびcleanup matrix全体のfailureが成功した別PRにも波及する問題を確認した。
+> 同じ承認済み計画の範囲でIssue metadataの固定とPR単位の正式証拠照合を修正し、新しいHEADで再レビューと最終検証を行う。
+
+## PROGRESS
+
+- 記録日時：2026-10-27T13:44:00.644Z
+- 計画SHA-256：`7e964b76c5ac9d5696387a1ae53a62af873987272e8ceceaee44112f46fb401b`
+
+> 独立した2名のレビューでunique 2件のP2を確認し、両方を修正した。
+> prepare時のIssueをverify/publishの必須入力へ固定し、canonical PR・artifact・更新先と一致しなければ停止する。
+> push cleanupはWorkflowの完了を確認してから対象PRのjob/check/noticeを検証し、別PRのfailureが成功したPRへ波及しないようにした。
+> 関連fixture19件・対象lint・型チェックが成功した。新しいHEADで差分再レビューと所定の最終検証を行う。
+> Environment作成・Secrets管理は引き続き403で、設定と資格情報移行は未実施。利用者向けの移行手順と検証結果をPRへ記録する。
+
+## FREEZE
+
+- 記録日時：2026-10-27T13:44:01.244Z
+- 計画SHA-256：`7e964b76c5ac9d5696387a1ae53a62af873987272e8ceceaee44112f46fb401b`
+
+> 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
