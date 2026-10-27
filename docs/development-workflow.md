@@ -397,7 +397,12 @@ Production用カスタムドメインは常設Previewへ付け替えない。
 `.github/workflows/deployment-retention.yml`の`Cake Deployment Retention`は、
 信頼済みmain上で毎日03:17 UTCに古いDeploymentを整理する。
 手動実行の`mode`は、読取のみの`plan`を既定とし、`apply`で削除する。
-実行中のmainとworkflowの完全SHAを照合し、常設Previewと同じ`cake-main-preview` concurrencyで直列化する。
+実行中のmainとworkflowの完全SHAを照合し、専用の`cake-deployment-retention` concurrencyで整理処理を直列化する。
+常設Previewの待機runを取り消さないよう、そのconcurrency groupは共有しない。
+`apply`開始前と各DELETE直前に、`staging.yml`の未完了runをGitHub APIで確認する。
+requested/queued/pending/in_progress/waitingのrunを1件でも検出したら、整理側を停止する。
+これは完全排他の保証ではなく、main SHA・alias等の直前再照合も継続する。
+読取だけの`plan`にはこの実行中判定を適用しない。
 
 | 対象 | 保持するDeployment |
 | --- | --- |
@@ -412,7 +417,10 @@ DB・Neon branch/endpoint・Git branch・aliasは変更せず、常設DBの所�
 全ページの一覧、project/team/repositoryの所属、main SHA、常設Previewのstatus・DB世代と認証保護を確認して削除候補を選ぶ。
 `apply`では各DELETEの直前にも参照先と対象identityを再照合し、削除後は対象IDの直接GET不在と一覧の再取得で確認する。
 欠落・重複・不一致・応答不明では停止し、DELETEを盲目的に再試行しない。
-結果は独立した`cake-deployment-retention/v1` noticeとActions Summaryへ記録する。
+staging runの取得失敗や不正応答でも停止し、次回の日次処理または手動`plan`で再照合する。
+結果は独立した`cake-deployment-retention/v1` notice 1件で、run情報・mode・成否と件数を返す。
+候補・削除要求対象（不在確認前）・削除確認済みの全IDは公開auditログとActions Summaryへ記録する。
+失敗時も、それまでに削除要求または不在確認を行ったIDを残す。
 手動のplan/applyと結果確認は[開発コマンド集](development-commands.md#deployment保持の確認と整理)を使い、ローカルから削除を実行する入口は設けない。
 
 ## 4. Previewの特定と認証

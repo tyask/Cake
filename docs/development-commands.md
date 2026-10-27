@@ -357,11 +357,17 @@ gh run view "$RUN_ID" --repo tyask/Cake --json event,headSha,status,conclusion,j
 gh api "repos/tyask/Cake/actions/runs/$RUN_ID/jobs" --paginate --jq '.jobs[] | {name,check_run_url,conclusion}'
 ```
 
-取得した対象jobの`check_run_url`を使い、標準noticeの公開結果を確認する。
+取得した対象jobの`check_run_url`を使い、標準notice 1件のrun情報・mode・成否と集約件数を確認する。
 
 ```bash
 CHECK_RUN_URL='<対象jobのcheck_run_url>'
 gh api "$CHECK_RUN_URL/annotations" --paginate --jq '.[] | select(.title == "cake-deployment-retention/v1") | .message'
+```
+
+候補・削除要求対象（不在確認前）・削除確認済みの全IDはActions Summaryと公開auditログで確認する。
+
+```bash
+gh run view "$RUN_ID" --repo tyask/Cake --log | rg 'Cake retention audit:'
 ```
 
 対象runのmain SHA・mode・候補と保護対象を照合し、削除の対象・影響が依頼範囲に含まれる場合に`apply`を実行する。
@@ -371,7 +377,10 @@ gh api "$CHECK_RUN_URL/annotations" --paginate --jq '.[] | select(.title == "cak
 gh workflow run deployment-retention.yml --repo tyask/Cake --ref main -f mode=apply
 ```
 
-同じ手順でapplyのrun・notice・Summaryを確認する。
+同じ手順でapplyのrun・notice・Summary・auditログを確認する。
+失敗時も、それまでの削除要求対象と削除確認済みIDを確認できる。
+stagingの未完了runを検出した場合や、その取得に失敗した場合は整理側が停止する。
+次回の日次処理または手動`plan`で状態を再照合する。
 失敗や応答不明では削除済み件数を推測せず、対象IDの直接GETと一覧を読み直してから再実行を判断する。
 workflowはmainに配置されている版だけを使い、PRのコードを資格情報付きで実行しない。
 

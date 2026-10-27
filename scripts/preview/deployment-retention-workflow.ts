@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DeploymentRetentionService, type RetentionReceipt } from './deployment-retention';
 import { StagingProvider } from './staging-service';
-import { transport } from './preview-provider';
+import { transport, type Transport } from './preview-provider';
 import { config, object } from './preview-model';
 import { fullSha } from '../task/task-workflow';
 
@@ -13,16 +13,13 @@ type Audit = { action: 'plan' | 'deleting' | 'deleted'; ids: readonly string[] }
 type Service = { run(mode: Mode, expectedSha: string): Promise<RetentionReceipt> };
 type ServiceFactory = (audit: (event: Audit) => void) => Service;
 
-/** Project only public IDs; provider objects and credentials never enter notices. */
-export function retentionNotices(event: Record<string, unknown>, emit = console.log): void {
-  const ids = event.ids as readonly string[] | undefined;
-  if (ids && (!Array.isArray(ids) || ids.some(id => !/^dpl_[A-Za-z0-9]+$/.test(id))))
-    throw new Error('PREVIEW_RETENTION_INVALID_RECEIPT');
-  const parts = Math.max(1, Math.ceil((ids?.length ?? 0) / 30));
-  for (let part = 0; part < parts; part++) {
-    const text = JSON.stringify({ ...event, ...(ids ? { ids: ids.slice(part * 30, (part + 1) * 30) } : {}), part: part + 1, parts });
-    if (Buffer.byteLength(text) > 4096) throw new Error('PREVIEW_RETENTION_RECEIPT_TOO_LARGE');
-    emit(`::notice title=cake-deployment-retention/v1::${text.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`);
+/** Existence checks cover every non-completed Actions status; no history scan. */
+export async function assertStagingIdle(api: Transport): Promise<void> {
+  for (const status of ['requested', 'queued', 'pending', 'in_progress', 'waiting']) {
+    const response = object(await api('github', `/repos/${config.repository}/actions/workflows/staging.yml/runs?branch=main&status=${status}&per_page=1`));
+    if (!Number.isSafeInteger(response.total_count) || Number(response.total_count) < 0 || !Array.isArray(response.workflow_runs)
+      || (response.total_count === 0) !== (response.workflow_runs.length === 0)) throw new Error('PREVIEW_RETENTION_STAGING_RUNS_INVALID');
+    if (response.total_count !== 0) throw new Error('PREVIEW_RETENTION_STAGING_BUSY');
   }
 }
 
@@ -52,22 +49,28 @@ export async function runRetentionWorkflow(env: Environment = process.env,
     runAttempt: Number(env.GITHUB_RUN_ATTEMPT), controlSha: env.GITHUB_SHA };
   const auditEvents: Audit[] = [];
   const audit = (event: Audit) => {
+    if (event.ids.some(id => !/^dpl_[A-Za-z0-9]+$/.test(id))) throw new Error('PREVIEW_RETENTION_INVALID_RECEIPT');
     auditEvents.push({ action: event.action, ids: [...event.ids] });
-    retentionNotices({ ...context, action: event.action, ids: event.ids }, emit);
+    // Per-ID annotations exceed Actions' per-step quota on a large cleanup.
+    // Keep all IDs in ordinary public audit logs and the Summary instead.
+    emit(`Cake retention audit: ${JSON.stringify({ ...context, action: event.action, ids: event.ids })}`);
   };
+  const api = transport(env);
   const service = factory ? factory(audit)
-    : new DeploymentRetentionService(new StagingProvider(transport(env)), Date.now, audit);
+    : new DeploymentRetentionService(new StagingProvider(api), Date.now, audit, () => assertStagingIdle(api));
   let result: RetentionReceipt | undefined;
+  let failure: string | undefined;
   try {
     result = await service.run(mode, env.GITHUB_SHA);
-    retentionNotices({ ...context, action: 'complete', sourceSha: result.sourceSha, checkedAt: result.checkedAt,
-      success: true, planned: result.planned.length, deleted: result.deleted.length, retained: result.retained,
-      ids: result.skipped }, emit);
     return result;
+  } catch (error) {
+    failure = error instanceof Error && /^PREVIEW_[A-Z0-9_]+$/.test(error.message) ? error.message : 'PREVIEW_RETENTION_FAILED';
+    throw error;
   } finally {
     if (env.GITHUB_STEP_SUMMARY) {
       const lines = [`Deployment retention ${mode}: ${result ? '成功' : '未完了'}`, '', `SHA: ${env.GITHUB_SHA}`, '',
         'DB・branch・aliasは削除しません。候補と削除確認済みIDは別に記録します。', ''];
+      if (failure) lines.push(`停止理由: ${failure}`, '');
       for (const event of auditEvents) {
         lines.push(event.action === 'plan' ? '削除候補:' : event.action === 'deleting' ? '削除要求対象（不在確認前）:' : '削除確認済み:');
         lines.push(...event.ids.map(id => `- ${id}`), '');
@@ -76,6 +79,13 @@ export async function runRetentionWorkflow(env: Environment = process.env,
         ...result.skipped.map(id => `- ${id}`), '');
       await appendFile(env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
     }
+    const text = JSON.stringify({ ...context, action: result ? 'complete' : 'incomplete', success: Boolean(result), failure: failure ?? null,
+      planned: auditEvents.find(event => event.action === 'plan')?.ids.length ?? null,
+      requested: auditEvents.filter(event => event.action === 'deleting').reduce((sum, event) => sum + event.ids.length, 0),
+      deleted: auditEvents.filter(event => event.action === 'deleted').reduce((sum, event) => sum + event.ids.length, 0),
+      skipped: result?.skipped.length ?? null, retained: result?.retained ?? null });
+    if (Buffer.byteLength(text) > 4096) throw new Error('PREVIEW_RETENTION_RECEIPT_TOO_LARGE');
+    emit(`::notice title=cake-deployment-retention/v1::${text}`);
   }
 }
 

@@ -13,8 +13,8 @@ on:
         options: [plan, apply]
 permissions: {}
 concurrency:
-  # Serialize with persistent Preview updates, including their DB ownership checks.
-  group: cake-main-preview
+  # A separate queue never replaces a pending persistent Preview update.
+  group: cake-deployment-retention
   cancel-in-progress: false
 jobs:
   retention:
@@ -23,6 +23,7 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
+      actions: read
     steps:
       - name: Check out trusted main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

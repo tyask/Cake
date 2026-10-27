@@ -145,6 +145,28 @@ test('applyは確認済みの過去Deploymentだけを削除し、現用とDB・
   assert.ok(f.writes.every(call => call.provider === 'vercel' && call.method === 'DELETE' && call.path.startsWith('/v13/deployments/')));
 });
 
+test('開始時に未完了stagingを検出した場合は計画・削除を開始しない', async () => {
+  const f = fixture(); oldHistory(f);
+  const audit: { action: string; ids: readonly string[] }[] = [];
+  const service = new DeploymentRetentionService(f.service.provider, () => now, event => { audit.push(event); },
+    async () => { throw new Error('PREVIEW_RETENTION_STAGING_BUSY'); });
+  await assert.rejects(service.run('apply'), /STAGING_BUSY/);
+  assert.deepEqual(f.writes, []); assert.deepEqual(f.calls, []); assert.deepEqual(audit, []);
+});
+
+test('開始後に未完了stagingを検出した場合も削除前の再照合より先に停止する', async () => {
+  const f = fixture(); oldHistory(f);
+  let guards = 0;
+  const audit: { action: string; ids: readonly string[] }[] = [];
+  const service = new DeploymentRetentionService(f.service.provider, () => now, event => { audit.push(event); }, async () => {
+    if (++guards === 2) throw new Error('PREVIEW_RETENTION_STAGING_BUSY');
+  });
+  await assert.rejects(service.run('apply'), /STAGING_BUSY/);
+  assert.equal(guards, 2); assert.deepEqual(f.writes, []);
+  assert.deepEqual(audit.map(event => event.action), ['plan']);
+  assert.equal(f.calls.filter(call => call.path === '/v13/deployments/dpl_prod5').length, 1);
+});
+
 test('alias・cronの参照先を保持し、参照のないrollback履歴は削除候補にする', async () => {
   const f = fixture();
   for (let i = 1; i <= 8; i++) f.add(raw(`dpl_protected${i}`, 'production', (35 + i) * day));

@@ -3,11 +3,30 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { retentionNotices, runRetentionWorkflow } from '../../scripts/preview/deployment-retention-workflow';
+import { assertStagingIdle, runRetentionWorkflow } from '../../scripts/preview/deployment-retention-workflow';
 import { config } from '../../scripts/preview/preview-model';
 import type { RetentionReceipt } from '../../scripts/preview/deployment-retention';
 
 const sha = 'a'.repeat(40);
+test('mainのstaging未完了run全状態を確認し、busy・取得不明では整理を停止する', async () => {
+  const statuses = ['requested', 'queued', 'pending', 'in_progress', 'waiting'];
+  const paths: string[] = [];
+  await assertStagingIdle(async (provider, path, method = 'GET') => {
+    assert.equal(provider, 'github'); assert.equal(method, 'GET');
+    assert.equal(new URL(path, 'https://api.github.com').searchParams.get('branch'), 'main');
+    paths.push(path); return { total_count: 0, workflow_runs: [] };
+  });
+  assert.deepEqual(paths.map(path => new URL(path, 'https://api.github.com').searchParams.get('status')), statuses);
+  for (const active of statuses) {
+    await assert.rejects(assertStagingIdle(async (_provider, path) => {
+      const busy = new URL(path, 'https://api.github.com').searchParams.get('status') === active;
+      return { total_count: busy ? 1 : 0, workflow_runs: busy ? [{ status: active }] : [] };
+    }), /STAGING_BUSY/);
+  }
+  for (const response of [{}, { total_count: 0, workflow_runs: [{}] }, { total_count: 1, workflow_runs: [] }])
+    await assert.rejects(assertStagingIdle(async () => response), /STAGING_RUNS_INVALID/);
+  await assert.rejects(assertStagingIdle(async () => { throw new Error('PREVIEW_GITHUB_GET_RESPONSE_UNKNOWN'); }), /RESPONSE_UNKNOWN/);
+});
 async function fixture(event = { repository: { id: config.repositoryId, full_name: config.repository }, inputs: {} }) {
   const directory = await mkdtemp(join(tmpdir(), 'cake-retention-test-'));
   const path = join(directory, 'event.json'), summary = join(directory, 'summary.md');
@@ -85,14 +104,22 @@ test('途中失敗は成功receiptを出さず、削除確認済みIDを残す',
     assert.ok(!summary.includes('削除確認済み:\n- dpl_two'));
   } finally { await f.cleanup(); }
 });
-test('大量の公開IDは欠落なく分割し、各noticeを4KiB以下にする', () => {
-  const ids = Array.from({ length: 141 }, (_, i) => `dpl_${i.toString().padStart(30, '0')}`), lines: string[] = [];
-  retentionNotices({ protocol: 'cake-deployment-retention/v1', action: 'plan', ids }, line => lines.push(line));
-  const payloads = lines.map(line => {
-    const text = line.split('::').at(-1)!; assert.ok(Buffer.byteLength(text) <= 4096); return JSON.parse(text);
-  });
-  assert.equal(lines.length, 5); assert.deepEqual(payloads.flatMap(part => part.ids), ids);
-  assert.deepEqual(payloads.map(part => part.part), [1, 2, 3, 4, 5]);
-  assert.ok(payloads.every(part => part.parts === 5));
-  assert.throws(() => retentionNotices({ ids: ['dpl_bad\n::warning::injected'] }), /INVALID_RECEIPT/);
+test('大量削除でもnoticeは1件だけとし、全IDをSummaryと公開ログへ残す', async () => {
+  const f = await fixture(), lines: string[] = [];
+  const ids = Array.from({ length: 141 }, (_, i) => `dpl_${i.toString().padStart(30, '0')}`);
+  try {
+    await runRetentionWorkflow(f.env, audit => ({ run: async mode => {
+      audit({ action: 'plan', ids });
+      for (const id of ids) { audit({ action: 'deleting', ids: [id] }); audit({ action: 'deleted', ids: [id] }); }
+      return { ...receipt(mode), planned: ids, deleted: ids };
+    } }), line => lines.push(line));
+    const notices = lines.filter(line => line.startsWith('::notice'));
+    assert.equal(notices.length, 1); assert.ok(Buffer.byteLength(notices[0]) < 4096);
+    assert.match(notices[0], /"deleted":141/);
+    const summary = await readFile(f.summary, 'utf8');
+    for (const id of ids) { assert.ok(summary.includes(id)); assert.ok(lines.some(line => line.includes(id))); }
+    await assert.rejects(runRetentionWorkflow(f.env, audit => ({ run: async mode => {
+      audit({ action: 'plan', ids: ['dpl_bad\n::warning::injected'] }); return receipt(mode);
+    } }), () => {}), /INVALID_RECEIPT/);
+  } finally { await f.cleanup(); }
 });

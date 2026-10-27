@@ -20,7 +20,8 @@ const id = (value: unknown): string => {
 
 /** Retains live references and ownership anchors; never changes databases or aliases. */
 export class DeploymentRetentionService {
-  constructor(readonly provider = new StagingProvider(), readonly now = () => Date.now(), readonly audit: RetentionAudit = () => {}) {}
+  constructor(readonly provider = new StagingProvider(), readonly now = () => Date.now(), readonly audit: RetentionAudit = () => {},
+    readonly beforeDelete: () => Promise<void> = async () => {}) {}
 
   private async inventory(): Promise<Record<string, unknown>[]> {
     const found: Record<string, unknown>[] = [], ids = new Set<string>(), cursors = new Set<number>();
@@ -129,6 +130,7 @@ export class DeploymentRetentionService {
 
   async run(mode: RetentionMode, expectedSha?: string): Promise<RetentionReceipt> {
     if (!['plan', 'apply'].includes(mode)) throw new Error('PREVIEW_RETENTION_MODE');
+    if (mode === 'apply') await this.beforeDelete();
     const checkedAt = this.now();
     if (!Number.isSafeInteger(checkedAt) || checkedAt < 0) throw new Error('PREVIEW_RETENTION_CLOCK');
     const source = await this.provider.main();
@@ -157,6 +159,7 @@ export class DeploymentRetentionService {
     const planned = candidates.map(item => item.id), deleted: string[] = [], skipped: string[] = [];
     this.audit({ action: 'plan', ids: planned });
     if (mode === 'apply') for (const candidate of candidates) {
+      await this.beforeDelete();
       await this.provider.assertSource(source);
       const current = await this.detail(candidate.id, candidate.kind, source, true);
       if (!current) { skipped.push(candidate.id); continue; }
