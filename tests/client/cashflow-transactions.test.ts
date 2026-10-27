@@ -75,7 +75,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           ["zero", "￥0", normal, "−￥13,500"],
         ]) {
           await page.goto(origin + "?balance=" + mode);
-          const month = page.getByRole("table", { name: "今月の収支", exact: true });
+          const month = page.getByRole("table", { name: "2026年10月の収支", exact: true });
           await month.waitFor();
           assert.deepEqual(await month.getByRole("rowheader").allTextContents(), ["収入", "支出", "収支"]);
           assert.deepEqual(await month.getByRole("columnheader").allTextContents(), ["A", "B", "合計"]);
@@ -98,7 +98,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         }
         for (const [mode, balance, count] of [["empty", "￥0", "0"], ["balanced", "−￥1,000", "2"]]) {
           await page.goto(origin + "?balance=" + mode);
-          const month = page.getByRole("table", { name: "今月の収支", exact: true });
+          const month = page.getByRole("table", { name: "2026年10月の収支", exact: true });
           await month.waitFor();
           await assertMoney(month.getByRole("row", { name: /^収支 / }).getByRole("cell").nth(0), balance, mode === "empty" ? normal : red);
           const next = page.locator("#home .settlement-hero");
@@ -152,13 +152,13 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         async function assertEmptyMonth() {
           for (const cell of await monthlyTable.locator("tbody").getByRole("cell").all()) await assertMoney(cell, "￥0", normal);
         }
-        await assertMonth("2026-10", "今月の収支");
+        await assertMonth("2026-10", "2026年10月の収支");
         await previousMonth.click();
         await assertMonth("2026-09", "2026年9月の収支");
         assert.deepEqual(await monthlyTable.getByRole("row", { name: /^支出 / }).getByRole("cell").allTextContents(), ["−￥9,000", "￥0", "−￥9,000"]);
         assert.deepEqual(await monthlyTable.getByRole("row", { name: /^収支 / }).getByRole("cell").allTextContents(), ["−￥9,000", "￥0", "−￥9,000"]);
         await nextMonth.click();
-        await assertMonth("2026-10", "今月の収支");
+        await assertMonth("2026-10", "2026年10月の収支");
         await nextMonth.click();
         await assertMonth("2026-11", "2026年11月の収支");
         await assertEmptyMonth();
@@ -171,11 +171,11 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         await previousMonth.click();
         await assertMonth("2026-12", "2026年12月の収支");
         await resetMonth.click();
-        await assertMonth("2026-10", "今月の収支");
+        await assertMonth("2026-10", "2026年10月の収支");
         await monthInput.fill("");
-        assert.equal(await monthlyTable.locator("caption").textContent(), "今月の収支", "空の年月は集計対象へ反映しない");
+        assert.equal(await monthlyTable.locator("caption").textContent(), "2026年10月の収支", "空の年月は集計対象へ反映しない");
         await monthInput.fill("10000-01");
-        assert.equal(await monthlyTable.locator("caption").textContent(), "今月の収支", "範囲外の年月は集計対象へ反映しない");
+        assert.equal(await monthlyTable.locator("caption").textContent(), "2026年10月の収支", "範囲外の年月は集計対象へ反映しない");
         await previousMonth.click();
         await assertMonth("2026-09", "2026年9月の収支");
         await monthInput.fill("0001-01");
@@ -183,23 +183,23 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         await monthInput.fill("9999-12");
         assert.equal(await nextMonth.isDisabled(), true, "最大年月から次へ進めない");
         await resetMonth.click();
-        await assertMonth("2026-10", "今月の収支");
+        await assertMonth("2026-10", "2026年10月の収支");
         if (width < 768) {
           await swipeMonth(page, monthlyTable, -100);
           await assertMonth("2026-11", "2026年11月の収支");
           await assertEmptyMonth();
           await swipeMonth(page, monthlyTable, 100);
-          await assertMonth("2026-10", "今月の収支");
+          await assertMonth("2026-10", "2026年10月の収支");
           await swipeMonth(page, monthlyTable, -25);
-          await assertMonth("2026-10", "今月の収支");
+          await assertMonth("2026-10", "2026年10月の収支");
           await swipeMonth(page, monthlyTable, -60, -120);
-          await assertMonth("2026-10", "今月の収支");
+          await assertMonth("2026-10", "2026年10月の収支");
           await swipeMonth(page, monthlyTable, -100, 0, true);
-          await assertMonth("2026-10", "今月の収支");
+          await assertMonth("2026-10", "2026年10月の収支");
           await swipeMonth(page, monthlyTable, -100, 0, false, true);
-          await assertMonth("2026-10", "今月の収支");
+          await assertMonth("2026-10", "2026年10月の収支");
           await swipeMonth(page, monthInput, -80, 0, true);
-          await assertMonth("2026-10", "今月の収支");
+          await assertMonth("2026-10", "2026年10月の収支");
         }
         assert.equal(await home.locator(".settlement-hero").textContent(), settlementBefore, "月切替は全期間の清算対象を変えない");
         assert.equal(await allocation.textContent(), allocationBefore);
@@ -276,7 +276,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           await hero.getByText("未清算の共有収支", { exact: true }).waitFor();
         }
         await page.goto(origin + "?balance=partner");
-        const partnerMonth = page.getByRole("table", { name: "今月の収支", exact: true });
+        const partnerMonth = page.getByRole("table", { name: "2026年10月の収支", exact: true });
         await assertMoney(partnerMonth.getByRole("row", { name: /^収入 / }).getByRole("cell").nth(1), "+￥4,700", green);
         await assertMoney(partnerMonth.getByRole("row", { name: /^支出 / }).getByRole("cell").nth(1), "−￥5,400", red);
         await assertMoney(partnerMonth.getByRole("row", { name: /^収支 / }).getByRole("cell").nth(1), "−￥700", red);

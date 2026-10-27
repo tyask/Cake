@@ -67,7 +67,7 @@ export function HomePanel({ selected, pending, setTab, add, run, refreshAction, 
           <button type="button" className="secondary home-month-reset" aria-label="今月に戻る" disabled={selectedMonth === currentMonth} onClick={() => setSelectedMonth(homeMonth())}>今月</button>
         </div>
         <table className="home-summary-table">
-          <caption aria-live="polite" aria-atomic="true">{selectedMonth === currentMonth ? "今月" : monthLabel}の収支</caption>
+          <caption aria-live="polite" aria-atomic="true">{monthLabel}の収支</caption>
           <thead><tr><td />{columns.map(column => <th scope="col" key={column.id}>{column.name}</th>)}</tr></thead>
           <tbody>
             <tr><th scope="row">収入</th>{columns.map(column => <td key={column.id} className={cashflowClass(column.receiptTotal)}>{formatCashflow(column.receiptTotal)}</td>)}</tr>
