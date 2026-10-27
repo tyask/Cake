@@ -202,6 +202,14 @@ Cloudのスモークテストは管理者機能、Google OAuth、Vercel/Neonな�
 変更に必要なら既存Preview等で別途確認する。
 Cloudの結果・画像は正式Preview証拠の代わりにならず、Readyの証拠gateを省略する根拠にもならない。
 
+`dev:cloud`と`qa:cloud`はPGliteを所有するNodeプロセスに`--no-wasm-code-gc`を直接指定する。
+Node 24のWasmコード解放競合を避ける回避策で、通常のJavaScript GCは維持する。
+Wasmコードのメモリはそのプロセスが終了すると解放される。
+Next.jsの子プロセス、本番・Previewのアプリ起動・buildには適用しない。
+手動でPGliteを使う検証スクリプトを実行する場合も、`node --no-wasm-code-gc ...`と直接引数に指定する。
+詳細は[最終SHAの検証手順](development-workflow.md#最終shaの検証)に従う。
+
+
 ## 5. PR・自動Preview・本人確認
 
 次の文書をGit外へ日本語で用意する。

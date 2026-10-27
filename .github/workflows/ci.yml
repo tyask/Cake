@@ -39,8 +39,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          # Keep the test runtime reproducible. Node 24.21.0 intermittently
-          # aborts during PGlite/WASM tests on the hosted runner.
+          # Keep the test runtime reproducible. The npm test commands apply
+          # the scoped Node 24 Wasm code-GC workaround.
           node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json

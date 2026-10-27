@@ -1310,6 +1310,7 @@ BootstrapData extends BootstrapMetadata
             </tbody>
           </table></div>
           <p>テストは対象領域別の<code>tests/</code>配下に置く。<code>*.test.ts</code>は<code>npm test</code>で再帰的に実行し、<code>*.typecheck.ts</code>はTypeScriptの型検査で確認する。純粋関数、PGliteのSQL、外部コマンドのスタブ、スクリプト起動、ローカルChromiumのUIを検証する。隔離実DBの制約・同時操作と実Previewのブラウザ操作は別途確認する。</p>
+          <p>全体・領域別テスト、dev:cloud、qa:cloudのNodeプロセスには<code>--no-wasm-code-gc</code>を直接指定する。Node 24のWasm import wrapperの解放競合によるネイティブクラッシュを避けるため、Wasm機械語コードのGCを無効にする。JavaScriptのGC・SQL検証・テストの隔離と並列数は維持し、コードのメモリは各プロセス終了時に解放する。PGliteを直接実行する検証子プロセスにも同じ引数を渡す。本番・Previewのアプリ起動・buildと、Next.jsの子プロセスへは引き継がない。原因と運用上の制約は<a href="development-workflow.md#最終shaの検証">最終SHAの検証手順</a>を参照する。</p>
           <h3 id="cloud-runtime">CloudのローカルCakeとブラウザQA</h3>
           <div class="layers" role="img" aria-label="CloudのブラウザからNext.jsの画面とAPIを経由し、Node sidecar内のオンメモリPGliteへ接続する流れ">
             <div class="layer"><strong>Browser</strong><small>公式Playwright Chromium<br />PC/mobile・テストA/B</small></div>
@@ -1330,7 +1331,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td><code>npm run task:start -- &lt;タスク名&gt;</code></td><td>originを取得し、main-only Git設定を導入した最新origin/mainからcodex/ブランチと専用worktreeを作成してnpm ci。元の未コミット変更・環境設定を保持。</td></tr>
               <tr><td><code>npm run setup:cloud</code></td><td>Node版を確認し、npm ciと公式Playwright Chromiumの導入。<code>-- --with-deps</code>でシステム依存も導入する。</td></tr>
               <tr><td><code>npm run dev:cloud</code> / <code>npm run qa:cloud</code></td><td>Node + PGliteの外部DB不要Cake起動／自前サーバーでのブラウザQA。<code>-- --port 3001</code>などでNext.jsのポートを指定できる。</td></tr>
-              <tr><td><code>npm test</code></td><td><code>node --import tsx --test --test-concurrency=2 "tests/**/*.test.ts"</code>。対象領域別の回帰と依存境界検査を再帰的に実行する。</td></tr>
+              <tr><td><code>npm test</code></td><td><code>node --no-wasm-code-gc --import tsx --test --test-concurrency=2 "tests/**/*.test.ts"</code>。対象領域別の回帰と依存境界検査を再帰的に実行する。</td></tr>
               <tr><td><code>npm run lint</code> / <code>npm run build</code></td><td>ESLintとNext.js Production build・型/ルート検証。</td></tr>
               <tr><td><code>npm run db:setup</code></td><td>未適用番号付きSQLと適用履歴をatomicに追加。</td></tr>
               <tr><td><code>npm run db:seed:test</code></td><td>従来ローカルはA/Bを非管理者として登録する。新QAはdummyのAをサイト管理者・共有OWNER、Bを一般・MEMBERとする固定二人だけを使用する。空DBでは初回だけ登録し、厳密一致する継承fixtureではseed済みidentityを使用する。Previewでは独立したsamples_seeded_atにより未使用の共有workspaceへカテゴリ10件・明細8件を一度だけ登録する。同PRのデータ・名前・権限・停止状態を維持し、自動修復しない。</td></tr>

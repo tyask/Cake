@@ -9,7 +9,7 @@ import { previewFixtureCatalogSql, previewFixtureCatalogFingerprintSql } from ".
 // the repo; no env files, Neon clients or configured connections are accessed.
 const args = process.argv.slice(2);
 if (args.length !== 2 || args[0] !== "--pglite-module") {
-  throw new Error("Usage: node scripts/db/preview-fixture-generate.mjs --pglite-module /absolute/path/to/pglite/dist/index.js");
+  throw new Error("Usage: node --no-wasm-code-gc scripts/db/preview-fixture-generate.mjs --pglite-module /absolute/path/to/pglite/dist/index.js");
 }
 const moduleUrl = pathToFileURL(resolve(args[1]));
 const { PGlite } = await import(moduleUrl.href);
