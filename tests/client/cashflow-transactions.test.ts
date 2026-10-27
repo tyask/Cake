@@ -20,6 +20,27 @@ async function chooseFilter(page: Page, name: string, value: RegExp) {
   await dialog.getByRole("button", { name: "適用", exact: true }).click();
 }
 
+async function swipeMonth(page: Page, target: Locator, dx: number, dy = 0, cancel = false, multiple = false) {
+  await target.scrollIntoViewIfNeeded();
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const box = (await target.boundingBox())!;
+  const x = box.x + box.width * (dx > 0 ? .25 : .75), y = box.y + box.height / 2;
+  const session = await page.context().newCDPSession(page);
+  const points = (offsetX: number, offsetY: number) => [
+    { x: x + offsetX, y: y + offsetY, id: 0 },
+    ...(multiple ? [{ x: x + offsetX + 12, y: y + offsetY + 12, id: 1 }] : []),
+  ];
+  try {
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: points(0, 0) });
+    for (let step = 1; step <= 6; step++) {
+      await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: points(dx * step / 6, dy * step / 6) });
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+    }
+    await session.send("Input.dispatchTouchEvent", { type: cancel ? "touchCancel" : "touchEnd", touchPoints: [] });
+  } finally { await session.detach(); }
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+}
+
 test("収支・清算・明細の符号と色、種別編集と絞り込みをPC/mobileで検証する", async t => {
   const bundle = await build({ entryPoints: ["tests/client/fixtures/cashflow-transactions.tsx"], bundle: true, write: false,
     outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
@@ -34,7 +55,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
     .catch(async error => { await new Promise<void>(resolve => server.close(() => resolve())); throw error; });
   try {
     for (const width of [1440, 390, 320]) await t.test(`${width}px`, async () => {
-      const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ja-JP" });
+      const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ja-JP", hasTouch: width < 768 });
       const page = await context.newPage(), errors: string[] = [], writes: Record<string, unknown>[] = [];
       page.setDefaultTimeout(6000);
       page.on("pageerror", error => errors.push(error.message));
@@ -112,6 +133,79 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         await assertMoney(transfer.nth(1), "−￥6,000", red);
         assert.equal(await home.locator(".history strong").textContent(), "￥600", "双方に共通の送金指示・履歴は方向と絶対額を維持する");
         assert.equal(writes.length, 0);
+
+        const monthInput = home.getByLabel("収支の対象年月", { exact: true });
+        const monthlyTable = home.locator(".home-summary-table");
+        const previousMonth = home.getByRole("button", { name: "前の月", exact: true });
+        const nextMonth = home.getByRole("button", { name: "次の月", exact: true });
+        const resetMonth = home.getByRole("button", { name: "今月に戻る", exact: true });
+        const settlementBefore = await home.locator(".settlement-hero").textContent();
+        const allocationBefore = await allocation.textContent();
+        const historyBefore = await home.locator(".history").textContent();
+        const savedBefore = await page.locator("#saved-transactions").textContent();
+        async function assertMonth(value: string, caption: string) {
+          assert.equal(await monthInput.inputValue(), value);
+          assert.equal(await monthlyTable.locator("caption").textContent(), caption);
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true,
+            "年月操作欄と収支表を画面幅に収める");
+        }
+        async function assertEmptyMonth() {
+          for (const cell of await monthlyTable.locator("tbody").getByRole("cell").all()) await assertMoney(cell, "￥0", normal);
+        }
+        await assertMonth("2026-10", "今月の収支");
+        await previousMonth.click();
+        await assertMonth("2026-09", "2026年9月の収支");
+        assert.deepEqual(await monthlyTable.getByRole("row", { name: /^支出 / }).getByRole("cell").allTextContents(), ["−￥9,000", "￥0", "−￥9,000"]);
+        assert.deepEqual(await monthlyTable.getByRole("row", { name: /^収支 / }).getByRole("cell").allTextContents(), ["−￥9,000", "￥0", "−￥9,000"]);
+        await nextMonth.click();
+        await assertMonth("2026-10", "今月の収支");
+        await nextMonth.click();
+        await assertMonth("2026-11", "2026年11月の収支");
+        await assertEmptyMonth();
+        await monthInput.fill("2025-09");
+        await assertMonth("2025-09", "2025年9月の収支");
+        await assertEmptyMonth();
+        await monthInput.fill("2026-12");
+        await nextMonth.click();
+        await assertMonth("2027-01", "2027年1月の収支");
+        await previousMonth.click();
+        await assertMonth("2026-12", "2026年12月の収支");
+        await resetMonth.click();
+        await assertMonth("2026-10", "今月の収支");
+        await monthInput.fill("");
+        assert.equal(await monthlyTable.locator("caption").textContent(), "今月の収支", "空の年月は集計対象へ反映しない");
+        await monthInput.fill("10000-01");
+        assert.equal(await monthlyTable.locator("caption").textContent(), "今月の収支", "範囲外の年月は集計対象へ反映しない");
+        await previousMonth.click();
+        await assertMonth("2026-09", "2026年9月の収支");
+        await monthInput.fill("0001-01");
+        assert.equal(await previousMonth.isDisabled(), true, "最小年月から前へ進めない");
+        await monthInput.fill("9999-12");
+        assert.equal(await nextMonth.isDisabled(), true, "最大年月から次へ進めない");
+        await resetMonth.click();
+        await assertMonth("2026-10", "今月の収支");
+        if (width < 768) {
+          await swipeMonth(page, monthlyTable, -100);
+          await assertMonth("2026-11", "2026年11月の収支");
+          await assertEmptyMonth();
+          await swipeMonth(page, monthlyTable, 100);
+          await assertMonth("2026-10", "今月の収支");
+          await swipeMonth(page, monthlyTable, -25);
+          await assertMonth("2026-10", "今月の収支");
+          await swipeMonth(page, monthlyTable, -60, -120);
+          await assertMonth("2026-10", "今月の収支");
+          await swipeMonth(page, monthlyTable, -100, 0, true);
+          await assertMonth("2026-10", "今月の収支");
+          await swipeMonth(page, monthlyTable, -100, 0, false, true);
+          await assertMonth("2026-10", "今月の収支");
+          await swipeMonth(page, monthInput, -80, 0, true);
+          await assertMonth("2026-10", "今月の収支");
+        }
+        assert.equal(await home.locator(".settlement-hero").textContent(), settlementBefore, "月切替は全期間の清算対象を変えない");
+        assert.equal(await allocation.textContent(), allocationBefore);
+        assert.equal(await home.locator(".history").textContent(), historyBefore);
+        assert.equal(await page.locator("#saved-transactions").textContent(), savedBefore);
+        assert.equal(writes.length, 0, "月切替と年月選択は業務データを更新しない");
 
         if (width < 768) {
           await assertMoney(payment.getByRole("button", { name: "paymentの詳細を開く", exact: true }).locator("strong"), "−￥10,000", red);

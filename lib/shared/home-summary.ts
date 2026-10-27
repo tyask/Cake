@@ -1,14 +1,22 @@
 import { splitAmounts } from "./split-allocations";
+import { isCalendarDate, jstToday } from "./recurring-payment-calendar";
 import type { TransactionRecord, WorkspaceMember } from "./types";
 
-const japanMonth = new Intl.DateTimeFormat("sv-SE", {
-  timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit",
-});
+export function homeMonth(now = new Date()): string { return jstToday(now).slice(0, 7); }
+
+export function isHomeMonth(value: string): boolean {
+  return /^\d{4}-\d{2}$/.test(value) && isCalendarDate(`${value}-01`);
+}
+
+/** Select the entire Japanese calendar month, including settled and future entries. */
+export function transactionsInMonth(transactions: readonly TransactionRecord[], month: string): TransactionRecord[] {
+  if (!isHomeMonth(month)) throw new RangeError("対象年月が不正です。");
+  return transactions.filter(item => homeMonth(new Date(item.occurredAt)) === month);
+}
 
 /** The home indicator follows the Japanese calendar, including its year. */
 export function currentMonthTransactions(transactions: readonly TransactionRecord[], now = new Date()): TransactionRecord[] {
-  const month = japanMonth.format(now);
-  return transactions.filter(item => japanMonth.format(new Date(item.occurredAt)) === month);
+  return transactionsInMonth(transactions, homeMonth(now));
 }
 
 /** Income and spending are stored as positive yen; cashflow is income minus spending. */
