@@ -18,6 +18,15 @@
         "codex/actions-event-isolation"
       ],
       "recordDir": "aidlc/spaces/default/intents/261027-actions-event-isolation"
+    },
+    {
+      "id": "261028-chat-plan-approval",
+      "issue": 158,
+      "branch": "codex/chat-plan-approval",
+      "branches": [
+        "codex/chat-plan-approval"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261028-chat-plan-approval"
     }
   ]
 }

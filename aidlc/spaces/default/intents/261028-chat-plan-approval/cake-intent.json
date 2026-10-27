@@ -1,0 +1,51 @@
+{
+  "protocol": "cake-intent/v1",
+  "id": "261028-chat-plan-approval",
+  "repository": "tyask/Cake",
+  "issue": 158,
+  "issueUrl": "https://github.com/tyask/Cake/issues/158",
+  "branch": "codex/chat-plan-approval",
+  "branches": [
+    "codex/chat-plan-approval"
+  ],
+  "recordDir": "aidlc/spaces/default/intents/261028-chat-plan-approval",
+  "phase": "Construction",
+  "status": "frozen",
+  "planHash": "ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91",
+  "approval": {
+    "actor": "このチャットの利用者",
+    "reply": "お願いします。\n",
+    "recordedAt": "2026-10-27T15:28:20.235Z",
+    "planHash": "ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91",
+    "planFile": "plans/ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91.md"
+  },
+  "frozen": true,
+  "createdAt": "2026-10-27T15:28:19.699Z",
+  "updatedAt": "2026-10-27T15:31:39.607Z",
+  "events": [
+    {
+      "action": "CREATED",
+      "recordedAt": "2026-10-27T15:28:19.699Z",
+      "note": "Issueに対応する計画を記録した。承認は別途記録する。",
+      "planHash": "ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91"
+    },
+    {
+      "action": "APPROVE",
+      "recordedAt": "2026-10-27T15:28:20.235Z",
+      "note": "承認者：このチャットの利用者\n承認の記録日時：2026-10-27T15:28:20.235Z\n承認対象本文：[plans/ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91.md](../plans/ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91.md)\n利用者の実際の回答：\nお願いします。",
+      "planHash": "ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-27T15:28:20.766Z",
+      "note": "上記の開発計画をチャットに提示した後、利用者の「お願いします。」という承認を受領し、Issue #158と最新main 48ba771ddc85c30fa83093ea8241e7795b0416b3から専用worktreeを作成した。\n承認後、利用者から「『その方針で進めて』は前回たまたま使った表現なので、もう少し抽象化してルール化する」という補足指示を受けた。\n承認済みの目的・範囲を維持し、規約本文は特定の文言ではなく承認対象と提示順序で判定する表現へ一般化する。承認対象本文にはチャット提示時の計画を保存し、後から追記したものを当初の承認対象として扱わない。\n今回の変更はAGENTSと関連3文書・当該Intent記録のみ。コード・Actions・CLI・依存は変えない。\n文書の整合性・リンク・独立した別Agentレビュー・最終SHAのCIと自動Preview/statusを確認する。アプリの挙動に差分がないためローカル機能テスト・build・Cloud CRUD・正式ブラウザ再検証は省略し、その理由をPRへ記録する。\n",
+      "planHash": "ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-27T15:31:39.607Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "ed0589fd6a174bcd2c3cf922b6780d713143c5ec9f0ff124a7b5dd164cd18b91"
+    }
+  ]
+}
