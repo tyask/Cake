@@ -174,6 +174,10 @@ mergeだけでIssueを閉じず、merge後の確認へ引き継ぐ。
 
 Readyは開発・PR検証の完了を表す。
 mergeは利用者が行い、既存の本番デプロイと専用資源cleanupを起動する。
+mainへの`push`から対象merged PRをGitHub APIで照合し、信頼済みmainのコードでcleanup・案件確認を進める。
+PR用Preview管理は`pull_request`の受付とmainの`workflow_run`へ分離し、
+資格情報はmain限定Environment `cake-automation`へ置く。
+設定と実行経路は[Actionsのイベントと資格情報](actions-event-migration.md)を参照する。
 merge後のActionsは、PRのHEAD SHAとmerge SHAを区別して次を確認する。
 
 - merge先のmain CI。

@@ -1,5 +1,8 @@
 name: Cake Preview
-run-name: Preview ${{ inputs.action || (github.event.action == 'closed' && 'cleanup' || 'deploy') }} PR ${{ inputs.pr || github.event.pull_request.number }} ${{ inputs.operation || github.run_id }}
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && format('Preview {0} PR {1} {2}', inputs.action, inputs.pr, inputs.operation) ||
+      github.event_name == 'push' && format('Preview cleanup main {0} {1}', github.sha, github.run_id) ||
+      format('Preview request {0} {1}', github.event.workflow_run.head_branch, github.run_id) }}
 on:
   workflow_dispatch:
     inputs:
@@ -25,25 +28,68 @@ on:
         description: Exact existing READY application Deployment ID (required for verify only)
         type: string
         required: false
-  pull_request_target:
+  push:
     branches: [main]
-    types: [opened, synchronize, reopened, closed]
+  workflow_run:
+    workflows: [Cake PR Events]
+    types: [completed]
 permissions: {}
-concurrency:
-  group: cake-preview-${{ inputs.pr || github.event.pull_request.number }}
-  cancel-in-progress: false
 jobs:
-  preview:
+  prepare:
     if: >-
       github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' &&
       ((github.event_name == 'workflow_dispatch' && inputs.action != 'verify') ||
-       (github.event.pull_request.head.repo.full_name == github.repository &&
-        startsWith(github.event.pull_request.head.ref, 'codex/')))
+       github.event_name == 'push' ||
+       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        startsWith(github.event.workflow_run.head_branch, 'codex/')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    outputs:
+      targets: ${{ steps.prepare.outputs.targets }}
+    steps:
+      - name: Check out trusted main only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm run check:node
+      - run: npm ci --ignore-scripts
+      - name: Resolve PRs without provider credentials
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node --import tsx scripts/preview/preview-workflow.ts --prepare
+  preview:
+    needs: prepare
+    if: >-
+      github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' &&
+      needs.prepare.outputs.targets != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJSON(needs.prepare.outputs.targets) }}
+    name: ${{ github.event_name == 'push' && format('preview-cleanup-{0}', matrix.pr) || 'preview' }}
+    concurrency:
+      group: cake-preview-${{ matrix.pr }}
+      cancel-in-progress: false
+    environment: cake-automation
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
       contents: read
       pull-requests: read
+      actions: read
     steps:
       - name: Check out trusted main only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -60,17 +106,22 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Run the requested operation
         env:
+          CAKE_PREVIEW_PR: ${{ matrix.pr }}
           GH_TOKEN: ${{ github.token }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: node --import tsx scripts/preview/preview-workflow.ts
       - name: Publish public operation receipt notice
-        if: success()
+        if: success() || (always() && github.event_name == 'push')
         run: node --import tsx scripts/preview/preview-workflow.ts --notice
   preview-verify:
     if: >-
       github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' && inputs.action == 'verify'
+    concurrency:
+      group: cake-preview-${{ inputs.pr }}
+      cancel-in-progress: false
+    environment: cake-automation
     runs-on: ubuntu-latest
     timeout-minutes: 25
     container:

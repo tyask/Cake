@@ -2,7 +2,7 @@
 
 CakeはPRごとのVercel Preview固有URLと専用Neon Native DBで検証する。
 WSL2/Linux、Codex CloudまたはWindowsネイティブで開発し、
-通常CI・Preview/DB管理・close時cleanupはmainのActionsで実行する。PRと検証報告は日本語で書く。
+通常CIはPRの変更を検証し、Preview/DB管理・cleanupはmainのActionsで実行する。PRと検証報告は日本語で書く。
 
 着手前に[AI-DLC開発フロー](aidlc-workflow.md)に従って調査・計画・利用者の承認を揃える。
 承認後にIssueを作成・更新し、専用worktreeのIntentへ計画と実際の承認文を記録する。
@@ -121,7 +121,9 @@ CIもこの確認を先に行い、その後に全自動テストとbuildを実�
 イメージのPlaywright版を`package-lock.json`と揃え、tagとdigestを一緒に更新する。
 Nodeはイメージ同梱版に依存せず、`actions/setup-node`で`.node-version`へ揃える。
 Previewのdeploy・status・cleanupはホスト上の`preview`ジョブ、verifyはコンテナ内の`preview-verify`ジョブで実行する。
-PR単位のworkflow concurrencyを共用し、操作間の直列化を維持する。
+手動操作・PRイベントの管理・main pushのcleanup・正式QAは、PR単位のjob concurrency `cake-preview-<PR番号>`を共用する。
+資格情報を持たないprepareが対象PRを列挙し、main pushのcleanupはPRごとのmatrix jobで実行する。
+push全体を一つの待機枠にまとめず、各操作前にも対象PRの状態を再照合する。
 正式noticeは実行したジョブ内の資格情報を持たない別stepで発行する。
 受信側は操作に対応するジョブと非実行側のskippedを照合し、旧mainの単一`preview`ジョブの証拠も受理する。
 
@@ -301,10 +303,26 @@ PR本文の要約は次の形式を使う。各値は今回の実際のレビュ
 
 ## 3. 自動PreviewとDB書込
 
-同一repositoryの `codex/*` からmainへのPRのopened・synchronize・reopenedで自動deploy、closedでcleanupを行う。
+同一repositoryの `codex/*` からmainへのPRのopened・synchronize・reopenedで自動deploy、未マージclosedでcleanupを行う。
 draftも対象。PR未作成のpush、fork、別base/branch、PR本文の編集は自動deployの対象外。
  `vercel.json` の `**: false` / `main: true` はVercel Git連携からの直接feature deployを止め、
 mainのActionsにDB準備を任せる設定である。
+
+`pr-events.yml`の`Cake PR Events`は`pull_request`を受け付けるだけのWorkflowで、
+checkout・provider資格情報・artifactの受渡しを行わない。
+その完了を受けるmainの`preview.yml`が、GitHub APIで登録Workflow・通知元run・repository・PR・現在HEAD・状態を照合する。
+PR由来のコードや成果物を管理処理で実行しない。古い通知・不一致・関連が不明な実行ではproviderへ書き込まない。
+
+merge後はmainへの`push`を起点に、pushへ含まれるmerged PRをAPIで照合してcleanupする。
+1 pushのmerged PRが10件を超える場合は、provider操作前のprepareで停止する。
+`pull_request_target`は使わない。
+provider管理・正式QA・常設Preview・Deployment保持は、mainだけを許可したEnvironment `cake-automation`を使う。
+資格情報の登録・Repository Secretsからの切替と初回の実行確認は、
+[Actionsのイベントと資格情報](actions-event-migration.md)に従う。
+
+merge conflictがあるPRでは`pull_request`が起動せず、自動Preview管理も起動しない場合がある。
+競合を解消してpushし直すか、未マージclose後の資源削除は承認範囲内で既存のmain dispatchを使う。
+イベントの未起動を成功として扱わない。
 
 | 対象 | 自動で行う操作 |
 | --- | --- |
@@ -493,7 +511,7 @@ branch aliasや過去のURLから対象を推測しない。 `.cake/preview.json
 | 認証 | 使用先 |
 | --- | --- |
 | OS側の既存gh本人認証、Cloudでは連携されたGitHub権限 | PR/CI/Actions/Checksの管理・読取。 `GH_TOKEN` / `GITHUB_TOKEN` が設定されていればそちらが優先される |
-| Actionsの `VERCEL_TOKEN` ・ `NEON_API_KEY` | mainのprovider管理。値をローカルへ移さない |
+| Environment `cake-automation`の `VERCEL_TOKEN` ・ `NEON_API_KEY` | mainのprovider管理・正式QA。main以外を許可せず、旧Repository Secretsには残さない。値をローカルへ移さない |
 | WSL側の本人Vercel認証、またはWindowsの保存済み資格情報 | 同一project/teamのdevelopment OIDC取得。QA処理のメモリ内だけで扱う |
 | PreviewのテストユーザーA/B | アプリへのログイン。Vercel保護の認証とは別 |
 
@@ -600,7 +618,7 @@ main mergeはProduction deployと本番buildのDB更新を起動し得る。PR m
 closeして削除確認を依頼された場合は次を行う。
 
 1. 現在PR/SHA、generation、紐づく全Deployment ID、専用DB branch/endpoint IDをclose前に記録する。
-2. `gh pr close <PR番号> --repo tyask/Cake` を実行し、自動 `Preview cleanup PR ...` runの成功と対象を確認する。
+2. `gh pr close <PR番号> --repo tyask/Cake` を実行し、PR受付後に起動したmain側cleanup runの成功と対象を確認する。
    Git branchの削除やmain mergeは別操作である。
 3. 記録した全Deployment IDへの直接GETが404であることを確認する。401/403/timeoutは削除確認にならない。
 4. cleanupは削除前の所有権照合後に、専用DB branch/endpointの直接GETと一覧の不在を検査する。
@@ -620,7 +638,10 @@ PR専用DBや常設Previewを本番用途へ流用しない。
 
 ### merge後の案件完了
 
-利用者がmergeしたPRは`post-merge.yml`が確認する。
+mainへの`push`を受けた`post-merge.yml`が、pushへ含まれるmerged PRをGitHub APIで特定して確認する。
+同じpushに複数PRが含まれる場合も対象を分け、PRごとの結果を同じrun・attemptに結び付ける。
+prepareはprovider資格情報を持たず、1 push最大10件のmerged PRから対象PR・Issueの組を確定する。
+publishは同run内で1件ずつ実行し、runをまたいでもIssue単位のconcurrencyで固定コメント更新を直列化する。
 信頼済みmain上でPRのHEAD SHAとmerge SHAを分けて照合し、次の完了を待つ。
 
 - 対象mergeのmain CI。

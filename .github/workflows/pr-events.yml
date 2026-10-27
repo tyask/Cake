@@ -1,0 +1,20 @@
+name: Cake PR Events
+run-name: PR event ${{ github.event.action }} ${{ github.event.pull_request.number }}
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+permissions:
+  contents: read
+jobs:
+  notify:
+    if: >-
+      github.repository == 'tyask/Cake' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'codex/')
+    runs-on: ubuntu-latest
+    steps:
+      # No checkout, artifact, provider credentials, or PR-provided program.
+      # The trusted workflow_run consumer reads GitHub-owned run metadata.
+      - name: Record the PR event
+        run: echo 'Cake PR event received.'

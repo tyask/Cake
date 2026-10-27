@@ -154,15 +154,21 @@ export class PostMergeChecks {
 
   async cleanup(task: MergedTask): Promise<PostMergeCheck> {
     const run = await this.latestRun('preview.yml', run =>
-      (run.event === 'pull_request_target' && run.head_branch === task.source.branch && run.head_sha === task.source.sha
-        || run.event === 'workflow_dispatch' && run.head_branch === 'main')
-      && typeof run.display_title === 'string' && run.display_title.startsWith(`Preview cleanup PR ${task.source.pr} `));
-    const state = this.runState(run); if (state) return state;
-    const receipt = parseReceipt(await this.notice(run!, 'preview', receiptNoticeTitle));
+      run.head_branch === 'main' && (run.event === 'push' && run.head_sha === task.mergeSha
+        || run.event === 'workflow_dispatch' && typeof run.display_title === 'string'
+          && run.display_title.startsWith(`Preview cleanup PR ${task.source.pr} `)));
+    // A failed sibling matrix job does not invalidate this PR's own proof.
+    const state = run?.event === 'push'
+      ? run.status !== 'completed' ? pending('RUN_PENDING')
+        : !['success', 'failure'].includes(String(run.conclusion)) ? failure('RUN_NOT_SUCCESSFUL', { runId: Number(run.id) }) : undefined
+      : this.runState(run);
+    if (state) return state;
+    const receipt = parseReceipt(await this.notice(run!, run!.event === 'push' ? `preview-cleanup-${task.source.pr}` : 'preview', run!.event === 'push'
+      ? `cake-preview/v1 PR ${task.source.pr}` : receiptNoticeTitle));
     assertReceipt(receipt, { action: 'cleanup', source: task.source, operation: receipt.operation,
       runId: String(run!.id), runAttempt: Number(run!.run_attempt), controlSha: receipt.controlSha,
       notBefore: task.mergedAt, notAfter: new Date(Date.parse(String(run!.updated_at)) + 60_000).toISOString() });
-    if (run!.event === 'pull_request_target' && receipt.operation !== null
+    if (run!.event === 'push' && (receipt.operation !== null || receipt.controlSha !== task.mergeSha || receipt.controlSha !== run!.head_sha)
       || run!.event === 'workflow_dispatch' && (receipt.controlSha !== run!.head_sha || !receipt.operation
         || !String(run!.display_title).endsWith(receipt.operation))) return failPostMerge('CLEANUP_RECEIPT_INVALID');
     if (receipt.controlSha !== task.mergeSha) {
