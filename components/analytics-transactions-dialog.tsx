@@ -45,14 +45,14 @@ export function AnalyticsTransactionsDialog({ data, prepared, row, selection, cl
   }, [parameters, data, prepared, selection, attempt]);
 
   return <TransactionListDialog title={`${row.label}の明細`} state={state} onRetry={() => setAttempt(value => value + 1)} onClose={close}
-    amountDisplay={selection.viewMode === "self" && state.status === "success" && result?.amountsYen
-      ? { label: "自分の配分（円）", amountsYen: result.amountsYen } : undefined}
+    amountDisplay={state.status === "success" && result?.amountsYen
+      ? { label: "選択ユーザーの配分（円）", amountsYen: result.amountsYen } : undefined}
     emptyMessage="この期間・表示条件に該当する明細はありません。"
     description={<>
       <p>対象期間 {data.periods.current.from.replaceAll("-", "/")} ～ {data.periods.current.to.replaceAll("-", "/")}</p>
-      <p>{selection.viewMode === "self" ? "自分の支出" : "共有費全体"}：{formatYen(row.currentYen)}
+      <p>選択ユーザーの支出：{formatYen(row.currentYen)}
         {state.status === "success" && result?.totalYen !== row.currentYen && `（現在の明細による集計額：${formatYen(result?.totalYen ?? BigInt(0))}）`}</p>
-      <p>{selection.viewMode === "self" ? "明細の金額は自分への配分後の金額です。" : "明細の金額は取引全額です。"}清算済みを含みます。</p>
+      <p>明細の金額は選択したユーザーへの配分後の金額です。清算済みを含みます。</p>
       <p>明細は現在の保存内容で表示します。更新や削除により、取得済みの集計と異なる場合があります。</p>
     </>} />;
 }

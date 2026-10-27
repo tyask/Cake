@@ -33,6 +33,8 @@ export type AnalyticsDataset = {
 export type AnalyticsFilters = {
   memberIds: string[];
   expenseClasses: ExpenseClass[];
+  /** Income classes can be selected independently from expense classes. */
+  incomeExpenseClasses?: ExpenseClass[];
   depth: number | "all";
   /** Exact assigned categories; omitted means all, while an empty array includes none. */
   categoryIds?: readonly string[];

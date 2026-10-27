@@ -8,7 +8,7 @@ import { neonConfig } from "@neondatabase/serverless";
 import { findAnalyticsTransactions } from "../../lib/server/stores/analytics-transactions-store";
 import { UserAccessError } from "../../lib/server/errors";
 
-test("集計明細SQLは日本時間の期間・本人の公開範囲・安定順・最新認可を一つのsnapshotで保証する", async t => {
+test("集計明細SQLは日本時間の期間・所属家計の公開範囲・安定順・最新認可を一つのsnapshotで保証する", async t => {
   const memory = new PGlite({ extensions: { pgcrypto } });
   t.after(() => memory.close());
   const directory = new URL("../../db/migrations/", import.meta.url);
@@ -92,7 +92,7 @@ test("集計明細SQLは日本時間の期間・本人の公開範囲・安定�
     assert.equal(result.workspaceId, workspaceId);
     assert.deepEqual(result.period, period);
     assert.match(result.snapshotAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/);
-    assert.deepEqual(new Set(result.transactions.map(item => item.id)), new Set([startId, ...orderedIds, personalId, endId]));
+    assert.deepEqual(new Set(result.transactions.map(item => item.id)), new Set([startId, ...orderedIds, personalId, privateId, endId]));
     assert.equal(result.transactions[0].id, endId);
     assert.equal(result.transactions.at(-1)!.id, startId);
     assert.deepEqual(result.transactions.filter(item => orderedIds.includes(item.id)).map(item => item.id), [...orderedIds].reverse());
@@ -107,12 +107,13 @@ test("集計明細SQLは日本時間の期間・本人の公開範囲・安定�
     assert.equal(result.categories[1].archivedAt, "2026-10-01T00:00:00.123Z");
   });
 
-  await t.test("本人個人費だけを公開し、相手へ切り替えると公開対象を入れ替える", async () => {
+  await t.test("同じ家計の所属者は双方の個人費を参照できる", async () => {
     const own = await read(), other = await read("b");
     assert.ok(own.transactions.some(item => item.id === personalId));
-    assert.ok(own.transactions.every(item => item.id !== privateId));
+    assert.ok(own.transactions.some(item => item.id === privateId));
     assert.ok(other.transactions.some(item => item.id === privateId));
-    assert.ok(other.transactions.every(item => item.id !== personalId));
+    assert.ok(other.transactions.some(item => item.id === personalId));
+    assert.deepEqual(other.transactions, own.transactions);
   });
 
   await t.test("有効な空期間はmetadataを保持し、非所属・不在・利用停止を明細なしと区別する", async () => {

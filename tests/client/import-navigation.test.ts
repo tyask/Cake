@@ -74,7 +74,7 @@ async function openFixture(browser: Browser, origin: string, width: number, api?
     const response = page.waitForResponse(response => response.request().method() === "GET" && new URL(response.url()).pathname === "/api/app");
     await page.locator(width < 768 ? ".bottom-nav" : ".app-nav").getByRole("button", { name: new RegExp(`${tabs[tab]}$`) }).click();
     await response;
-    if (tab === "home") await page.getByRole("table", { name: "今月の自分の収支", exact: true }).waitFor();
+    if (tab === "home") await page.getByRole("table", { name: "今月の収支", exact: true }).waitFor();
     else await page.getByRole("heading", { name: tab === "import" ? "明細を取込" : tab === "analytics" ? "収支の集計" : tabs[tab], level: 1, exact: true }).waitFor();
     await stable(page);
     assert.equal(await page.locator('table[aria-label="取り込み明細"]').count(), tab === "import" ? await page.getByRole("table", { name: "取り込み明細", exact: true }).count() : 0,

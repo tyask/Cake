@@ -183,6 +183,39 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         assert.ok(writes.every(payload => payload.expenseClass !== "PERSONAL" || payload.actorUserId === "a"));
       } finally { await context.close(); }
     });
+    for (const width of [1440, 390]) await t.test(`${width}px: 相手の個人明細は閲覧のみで一括操作から除外する`, async () => {
+      const context = await browser.newContext({ viewport: { width, height: 900 } });
+      const page = await context.newPage();
+      const writes: Record<string, unknown>[] = [];
+      await page.route("**/api/**", async route => {
+        if (route.request().method() !== "GET") writes.push(route.request().postDataJSON());
+        await route.fulfill({ json: { ok: true } });
+      });
+      try {
+        await page.goto(origin + "?partnerPersonal");
+        const own = page.locator('[data-transaction-id="own-personal"]');
+        for (const id of ["partner-payment", "partner-receipt"]) {
+          const row = page.locator(`[data-transaction-id="${id}"]`);
+          await row.waitFor();
+          if (width < 768) await row.getByRole("button", { name: `${id}の詳細を開く`, exact: true }).click();
+          assert.equal(await row.getByRole("checkbox", { name: `${id}の明細を選択`, exact: true }).filter({ visible: true }).isDisabled(), true);
+          assert.equal(await row.locator("input:not([type=checkbox]), select, textarea").count(), 0, "金額・担当者・カテゴリ・メモを編集できない");
+          assert.equal(await row.locator('[data-label="メモ"]').textContent(), "相手にも見えるメモ\n2行目");
+          assert.equal(await row.locator('[data-label="カテゴリ"]').textContent(), "食費 › 生鮮食品 › 野菜");
+          assert.equal(await row.locator('[data-label="清算"]').textContent(), "対象外");
+          assert.equal(await row.getByRole("button", { name: `${id}の削除操作`, exact: true }).count(), 0);
+        }
+        if (width < 768) await own.getByRole("button", { name: "own-personalの詳細を開く", exact: true }).click();
+        assert.equal(await own.getByLabel("取引先", { exact: true }).isEnabled(), true);
+        assert.equal(await own.getByLabel("own-personalのカテゴリ", { exact: true }).isEnabled(), true);
+        assert.equal(await own.getByLabel("own-personalのメモ", { exact: true }).isEnabled(), true);
+        await page.getByRole("checkbox", { name: "表示中の未清算明細をすべて選択", exact: true }).check();
+        assert.equal(await own.getByRole("checkbox", { name: "own-personalの明細を選択", exact: true }).filter({ visible: true }).isChecked(), true);
+        await page.getByText("5件・2件選択", { exact: true }).waitFor();
+        await page.getByRole("button", { name: "更新", exact: true }).click();
+        assert.deepEqual(writes, [], "全選択・表示・更新で相手の個人明細への更新要求を作らない");
+      } finally { await context.close(); }
+    });
     await t.test("保存中に新しいカテゴリを取得した場合、旧応答を入力欄でも承認しない", async () => {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
       const page = await context.newPage();

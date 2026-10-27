@@ -94,22 +94,22 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 }
 
 type CashflowPoint = AnalyticsView["cashflow"]["months"][number];
-function CashflowTooltip({ active, payload }: { active?: boolean; payload?: readonly { payload?: CashflowPoint }[] }) {
+function CashflowTooltip({ active, payload, includeIncome }: { active?: boolean; payload?: readonly { payload?: CashflowPoint }[]; includeIncome: boolean }) {
   const row = payload?.[0]?.payload;
   if (!active || !row) return null;
   return <div className={`${styles.chartTooltip} ${styles.cashflowTooltip}`}><b>{row.month.replace("-", "/")}</b>
-    <p><span>収入</span><strong className={cashflowClass(row.incomeYen) || undefined}>{formatCashflow(row.incomeYen)}</strong></p>
+    {includeIncome && <p><span>収入</span><strong className={cashflowClass(row.incomeYen) || undefined}>{formatCashflow(row.incomeYen)}</strong></p>}
     <p><span>支出</span><strong className={cashflowClass(-row.expenseYen) || undefined}>{formatCashflow(-row.expenseYen)}</strong></p>
-    <p><span>収支</span><strong className={cashflowClass(row.balanceYen) || undefined}>{formatCashflow(row.balanceYen)}</strong></p>
+    {includeIncome && <p><span>収支</span><strong className={cashflowClass(row.balanceYen) || undefined}>{formatCashflow(row.balanceYen)}</strong></p>}
   </div>;
 }
 
-function CashflowTrend({ view, period }: { view: AnalyticsView; period: AnalyticsDataset["periods"]["trend"] }) {
+function CashflowTrend({ view, period, includeIncome }: { view: AnalyticsView; period: AnalyticsDataset["periods"]["trend"]; includeIncome: boolean }) {
   const trend = useMemo(() => view.cashflow.months.map(row => ({ ...row,
     income: Number(row.incomeYen) / yenPerMan, expense: Number(row.expenseYen) / yenPerMan, balance: Number(row.balanceYen) / yenPerMan,
   })), [view.cashflow.months]);
   const trendAxis = useMemo(() => {
-    const values = trend.flatMap(row => [row.income, row.expense, row.balance]);
+    const values = trend.flatMap(row => includeIncome ? [row.income, row.expense, row.balance] : [row.expense]);
     const dataMinimum = Math.min(0, ...values);
     const minimum = Math.floor(dataMinimum);
     const maximum = Math.max(1, Math.ceil(Math.max(...values)));
@@ -117,7 +117,7 @@ function CashflowTrend({ view, period }: { view: AnalyticsView; period: Analytic
     return { domain: [minimum, maximum] as [number, number],
       ticks: [minimum, ...getNiceTickValues([minimum, maximum], 6, false, "snap125")
         .filter(value => value > minimum && value < maximum), maximum] };
-  }, [trend]);
+  }, [trend, includeIncome]);
   const trendLabels = useMemo(() => {
     const measure = createChartAmountMeasurer();
     return view.cashflow.months.map(row => ({
@@ -125,15 +125,16 @@ function CashflowTrend({ view, period }: { view: AnalyticsView; period: Analytic
       expense: measure(formatCashflow(-row.expenseYen), "#ad433b"),
     }));
   }, [view.cashflow.months]);
-  const hasTrend = trend.some(row => row.incomeYen > BigInt(0) || row.expenseYen > BigInt(0));
+  const hasTrend = trend.some(row => (includeIncome && row.incomeYen > BigInt(0)) || row.expenseYen > BigInt(0));
+  const trendTitle = includeIncome ? "月ごとの収入・支出・収支" : "月ごとの支出";
 
   return <section className={styles.card} aria-labelledby="analytics-trend-heading">
-      <div className={styles.cardHeading}><h2 id="analytics-trend-heading">月ごとの収入・支出・収支</h2><span>直近6か月</span></div>
+      <div className={styles.cardHeading}><h2 id="analytics-trend-heading">{trendTitle}</h2><span>直近6か月</span></div>
       <p className={styles.cardSubtitle}>{analyticsRangeLabel(period)}<br />終了月までの6か月を表示します。</p>
       <ul className={`${styles.legend} ${styles.cashflowLegend}`} aria-label="収支グラフの凡例">
-        <li><i className={styles.incomeKey} aria-hidden="true" />収入</li><li><i className={styles.expenseKey} aria-hidden="true" />支出</li><li><i className={styles.balanceKey} aria-hidden="true" />収支（収入 − 支出）</li>
+        {includeIncome && <li><i className={styles.incomeKey} aria-hidden="true" />収入</li>}<li><i className={styles.expenseKey} aria-hidden="true" />支出</li>{includeIncome && <li><i className={styles.balanceKey} aria-hidden="true" />収支（収入 − 支出）</li>}
       </ul>
-      {hasTrend ? <div className={styles.cashflowTrendChart} role="group" data-testid="analytics-cashflow-chart" aria-label="月ごとの収入・支出・収支。棒は収入・支出、折れ線は収支。下の表でも確認できます。">
+      {hasTrend ? <div className={styles.cashflowTrendChart} role="group" data-testid="analytics-cashflow-chart" aria-label={`${trendTitle}。${includeIncome ? "棒は収入・支出、折れ線は収支。" : "棒は支出。"}下の表でも確認できます。`}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0}><ComposedChart data={trend} accessibilityLayer margin={{ top: 16, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="3 4" />
           <XAxis dataKey="month" tickFormatter={monthLabel} axisLine={false} tickLine={false} tick={chartStyle} />
@@ -141,8 +142,8 @@ function CashflowTrend({ view, period }: { view: AnalyticsView; period: Analytic
             domain={trendAxis.domain} ticks={trendAxis.ticks} niceTicks="none" interval="preserveStartEnd" minTickGap={4}
             tickFormatter={value => compactYen.format(Number(value) * yenPerMan)} />
           <ReferenceLine y={0} stroke="var(--muted)" />
-          <Tooltip content={<CashflowTooltip />} position={{ x: 0 }} />
-          {(["income", "expense"] as const).map(series => <Bar key={series} dataKey={series} name={series === "income" ? "収入" : "支出"}
+          <Tooltip content={<CashflowTooltip includeIncome={includeIncome} />} position={{ x: 0 }} />
+          {(includeIncome ? ["income", "expense"] as const : ["expense"] as const).map(series => <Bar key={series} dataKey={series} name={series === "income" ? "収入" : "支出"}
             className={`analytics-cashflow-${series}`} fill={series === "income" ? "#2f6b48" : "#ad433b"} maxBarSize={36} isAnimationActive={false}>
             <LabelList dataKey="month" content={geometry => {
               const index = view.cashflow.months.findIndex(row => row.month === String(geometry.value));
@@ -152,20 +153,20 @@ function CashflowTrend({ view, period }: { view: AnalyticsView; period: Analytic
               return <AmountLabel label={label} position={barAmountPosition(geometry.viewBox, label, true)} kind="trend" series={series} month={row.month} />;
             }} />
           </Bar>)}
-          <Line dataKey="balance" name="収支" className="analytics-cashflow-balance" type="linear" stroke="var(--ink)" strokeWidth={2.5}
-            dot={{ r: 4, fill: "var(--paper)", stroke: "var(--ink)", strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={false} />
+          {includeIncome && <Line dataKey="balance" name="収支" className="analytics-cashflow-balance" type="linear" stroke="var(--ink)" strokeWidth={2.5}
+            dot={{ r: 4, fill: "var(--paper)", stroke: "var(--ink)", strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={false} />}
         </ComposedChart></ResponsiveContainer>
-      </div> : <p className={styles.chartEmpty}>この6か月の収入・支出はありません。</p>}
-      <p className={styles.miniNote}>棒は収入・支出の金額の大きさ、折れ線は収入から支出を引いた収支です。すべて同じ円単位の縦軸で表示します。</p>
-      <details className={styles.tableDetails}><summary>月ごとの金額を表で見る</summary><div className={styles.tableScroll} tabIndex={0} role="region" aria-label="月ごとの収入・支出・収支の表（横スクロール可能）"><table>
-        <caption>月ごとの収入・支出・収支（円）</caption><thead><tr><th scope="col">対象月</th><th scope="col">収入</th><th scope="col">支出</th><th scope="col">収支</th></tr></thead>
-        <tbody>{view.cashflow.months.map(row => <tr key={row.month}><th scope="row">{row.month.replace("-", "/")}</th><td className={cashflowClass(row.incomeYen) || undefined}>{formatCashflow(row.incomeYen)}</td><td className={cashflowClass(-row.expenseYen) || undefined}>{formatCashflow(-row.expenseYen)}</td><td className={cashflowClass(row.balanceYen) || undefined}>{formatCashflow(row.balanceYen)}</td></tr>)}</tbody>
+      </div> : <p className={styles.chartEmpty}>{includeIncome ? "この6か月の収入・支出はありません。" : "この6か月の支出はありません。"}</p>}
+      <p className={styles.miniNote}>{includeIncome ? "棒は収入・支出の金額の大きさ、折れ線は収入から支出を引いた収支です。すべて同じ円単位の縦軸で表示します。" : "棒は支出の金額の大きさを表示します。"}</p>
+      <details className={styles.tableDetails}><summary>月ごとの金額を表で見る</summary><div className={styles.tableScroll} tabIndex={0} role="region" aria-label={`${trendTitle}の表（横スクロール可能）`}><table>
+        <caption>{trendTitle}（円）</caption><thead><tr><th scope="col">対象月</th>{includeIncome && <th scope="col">収入</th>}<th scope="col">支出</th>{includeIncome && <th scope="col">収支</th>}</tr></thead>
+        <tbody>{view.cashflow.months.map(row => <tr key={row.month}><th scope="row">{row.month.replace("-", "/")}</th>{includeIncome && <td className={cashflowClass(row.incomeYen) || undefined}>{formatCashflow(row.incomeYen)}</td>}<td className={cashflowClass(-row.expenseYen) || undefined}>{formatCashflow(-row.expenseYen)}</td>{includeIncome && <td className={cashflowClass(row.balanceYen) || undefined}>{formatCashflow(row.balanceYen)}</td>}</tr>)}</tbody>
       </table></div></details>
     </section>;
 }
 
-export default function AnalyticsCharts({ view, periods, cashflowTrend = false, onCategoryClick }: {
-  view: AnalyticsView; periods: AnalyticsDataset["periods"]; cashflowTrend?: boolean; onCategoryClick: (row: AnalyticsRow) => void;
+export default function AnalyticsCharts({ view, periods, includeIncome = true, onCategoryClick }: {
+  view: AnalyticsView; periods: AnalyticsDataset["periods"]; includeIncome?: boolean; onCategoryClick: (row: AnalyticsRow) => void;
 }) {
   // Floating point values are graph coordinates only; every amount and ratio label uses bigint.
   const labels = useMemo(() => {
@@ -173,22 +174,13 @@ export default function AnalyticsCharts({ view, periods, cashflowTrend = false, 
     return new Map(view.chartRows.map(row => [row.id, {
       current: measure(formatYen(row.currentYen), row.colorHex),
       difference: measure(signed(row.currentYen - row.comparisonYen), row.colorHex),
-      months: row.monthlyYen.map(value => measure(formatYen(value), row.colorHex)),
     }]));
   }, [view]);
   // Keep the shared ranking of the other charts and tables; only the pie follows current amounts.
   const composition = useMemo(() => view.chartRows.filter(row => row.currentYen > BigInt(0))
     .map(row => ({ row, value: Number(row.currentYen) }))
     .sort((a, b) => a.row.currentYen === b.row.currentYen ? 0 : a.row.currentYen > b.row.currentYen ? -1 : 1), [view]);
-  const trend = useMemo(() => view.months.map((month, monthIndex) => {
-    const point: Record<string, string | number | AnalyticsRow> = { month, monthIndex };
-    view.chartRows.forEach((row, index) => { point[`category${index}`] = Number(row.monthlyYen[monthIndex]); });
-    return point;
-  }), [view]);
   const differences = useMemo(() => view.chartRows.map(row => ({ row, label: row.label, difference: Number(row.currentYen - row.comparisonYen) })), [view]);
-  const monthlyTotals = useMemo(() => view.months.map((_, index) => view.rows.reduce((sum, row) => sum + row.monthlyYen[index], BigInt(0))), [view]);
-  const hasTrend = monthlyTotals.some(value => value > BigInt(0));
-
   const compositionCard = <section className={`${styles.card} ${styles.composition}`} aria-labelledby="analytics-composition-heading"><div className={styles.cardHeading}><h2 id="analytics-composition-heading">カテゴリ別の内訳</h2><span>支出額</span></div>
         <p className={styles.cardSubtitle}>{analyticsRangeLabel(periods.current)}</p>
         <div className={styles.compositionBody}>
@@ -212,39 +204,9 @@ export default function AnalyticsCharts({ view, periods, cashflowTrend = false, 
         </div>
         <p className={styles.miniNote}>グラフは主な8カテゴリを表示し、残りは「その他」にまとめます。未分類は別に表示します。</p>
       </section>;
-  const expenseTrendCard = <section className={styles.card} aria-labelledby="analytics-trend-heading"><div className={styles.cardHeading}><h2 id="analytics-trend-heading">月ごとの推移</h2><span>直近6か月</span></div>
-        <p className={styles.cardSubtitle}>{analyticsRangeLabel(periods.trend)}<br />終了月までの6か月を表示します。</p>
-        {hasTrend ? <div className={styles.trendChart} role="group" aria-label="月ごとのカテゴリ別支出額。下の表でも確認できます。">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0}><BarChart data={trend} accessibilityLayer margin={{ top: 12, right: 2, bottom: 0, left: 0 }}>
-            <CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="3 4" />
-            <XAxis dataKey="month" tickFormatter={monthLabel} axisLine={false} tickLine={false} tick={chartStyle} />
-            <YAxis width={52} axisLine={false} tickLine={false} tick={chartStyle} tickFormatter={value => compactYen.format(Number(value))} />
-            <Tooltip content={({ active, payload, label }) => active && payload?.length ? <div className={styles.chartTooltip}><b>{label}</b>{payload.map(item => {
-              const index = Number(String(item.dataKey).replace("category", "")), row = view.chartRows[index];
-              const monthIndex = (item.payload as { monthIndex: number }).monthIndex;
-              return <p key={row.id}><span>{row.label}</span><strong>{formatYen(row.monthlyYen[monthIndex])}</strong></p>;
-            })}</div> : null} />
-            {view.chartRows.map((row, index) => <Bar key={row.id} name={row.label} dataKey={`category${index}`} stackId="burden" fill={row.colorHex} maxBarSize={38} isAnimationActive={false}>
-              <LabelList dataKey="month" content={geometry => {
-                // Recharts omits zero-size bars before numbering labels, so use the source month.
-                const monthIndex = view.months.indexOf(String(geometry.value));
-                if (!row.monthlyYen[monthIndex]) return null;
-                const label = labels.get(row.id)!.months[monthIndex] ?? null;
-                return <AmountLabel label={label} position={barAmountPosition(geometry.viewBox, label, true)} kind="trend" categoryId={row.id} month={view.months[monthIndex]} />;
-              }} />
-            </Bar>)}
-          </BarChart></ResponsiveContainer>
-        </div> : <p className={styles.chartEmpty}>この6か月の支出額はありません。</p>}
-        <ul className={styles.legend} aria-label="グラフのカテゴリ">{view.chartRows.map(row => <li key={row.id}><CategoryName row={row} /></li>)}</ul>
-        <details className={styles.tableDetails}><summary>月ごとの金額を表で見る</summary><div className={styles.tableScroll} tabIndex={0} aria-label="月ごとの支出額の表（横スクロール可能）"><table>
-          <caption>月ごとの支出額（円）</caption><thead><tr><th scope="col">カテゴリ</th>{view.months.map(month => <th scope="col" key={month}>{month.replace("-", "/")}</th>)}</tr></thead>
-          <tbody>{view.rows.map(row => <tr key={row.id}><th scope="row"><CategoryName row={row} /></th>{row.monthlyYen.map((value, index) => <td key={view.months[index]}>{formatYen(value)}</td>)}</tr>)}</tbody>
-          <tfoot><tr><th scope="row">合計</th>{monthlyTotals.map((value, index) => <td key={view.months[index]}>{formatYen(value)}</td>)}</tr></tfoot>
-        </table></div></details>
-      </section>;
 
   return <>
-    {cashflowTrend ? <CashflowTrend view={view} period={periods.trend} /> : expenseTrendCard}
+    <CashflowTrend view={view} period={periods.trend} includeIncome={includeIncome} />
     {compositionCard}
     <section className={`${styles.card} ${styles.comparison}`} aria-labelledby="analytics-comparison-heading"><div className={styles.cardHeading}><h2 id="analytics-comparison-heading">カテゴリ別の増減</h2><span>同じ条件で比較</span></div>
       <p className={styles.cardSubtitle}>対象：{analyticsRangeLabel(periods.current)} ／ 比較：{analyticsRangeLabel(periods.comparison)}</p>

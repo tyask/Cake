@@ -54,18 +54,22 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           ["zero", "￥0", normal, "−￥13,500"],
         ]) {
           await page.goto(origin + "?balance=" + mode);
-          const month = page.getByRole("table", { name: "今月の自分の収支", exact: true });
+          const month = page.getByRole("table", { name: "今月の収支", exact: true });
           await month.waitFor();
-          assert.deepEqual(await month.getByRole("rowheader").allTextContents(), ["収入", "支出", "収支", "取引件数"]);
-          await assertMoney(month.getByRole("row", { name: /^収入 / }).getByRole("cell"), "+￥13,500", green);
-          await assertMoney(month.getByRole("row", { name: /^支出 / }).getByRole("cell"), payment, red);
-          await assertMoney(month.getByRole("row", { name: /^収支 / }).getByRole("cell"), expected, color);
-          assert.equal(await month.getByRole("row", { name: /^取引件数 / }).getByRole("cell").textContent(), "5件");
-          const shared = page.getByRole("table", { name: "今月の共有費", exact: true });
-          await assertMoney(shared.getByRole("row", { name: /^共有の支出 / }).getByRole("cell"), "−￥10,000", red);
-          await assertMoney(shared.getByRole("row", { name: /^うち自分の負担 / }).getByRole("cell"), "−￥5,000", red);
-          await assertMoney(shared.getByRole("row", { name: /^共有の収入 / }).getByRole("cell"), "+￥7,000", green);
-          await assertMoney(shared.getByRole("row", { name: /^うち自分の配分 / }).getByRole("cell"), "+￥3,500", green);
+          assert.deepEqual(await month.getByRole("rowheader").allTextContents(), ["収入", "支出", "収支"]);
+          assert.deepEqual(await month.getByRole("columnheader").allTextContents(), ["A", "B", "合計"]);
+          const incomes = month.getByRole("row", { name: /^収入 / }).getByRole("cell");
+          const expenses = month.getByRole("row", { name: /^支出 / }).getByRole("cell");
+          const balances = month.getByRole("row", { name: /^収支 / }).getByRole("cell");
+          await assertMoney(incomes.nth(0), "+￥13,500", green);
+          await assertMoney(incomes.nth(1), "+￥3,500", green);
+          await assertMoney(incomes.nth(2), "+￥17,000", green);
+          await assertMoney(expenses.nth(0), payment, red);
+          await assertMoney(expenses.nth(1), "−￥5,000", red);
+          await assertMoney(balances.nth(0), expected, color);
+          await assertMoney(balances.nth(1), "−￥1,500", red);
+          await assertMoney(balances.nth(2), mode === "positive" ? "+￥4,500" : mode === "negative" ? "−￥2,500" : "−￥1,500", mode === "positive" ? green : red);
+          assert.equal(await page.getByRole("table", { name: "今月の共有費", exact: true }).count(), 0);
           const next = page.locator("#home .settlement-hero");
           await assertMoney(next.locator(".unsettled-summary strong"), "−￥8,000", red);
           assert.match(await next.locator(".unsettled-summary").textContent() ?? "", /2件が対象/);
@@ -73,10 +77,9 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         }
         for (const [mode, balance, count] of [["empty", "￥0", "0"], ["balanced", "−￥1,000", "2"]]) {
           await page.goto(origin + "?balance=" + mode);
-          const month = page.getByRole("table", { name: "今月の自分の収支", exact: true });
+          const month = page.getByRole("table", { name: "今月の収支", exact: true });
           await month.waitFor();
-          await assertMoney(month.getByRole("row", { name: /^収支 / }).getByRole("cell"), balance, mode === "empty" ? normal : red);
-          assert.equal(await month.getByRole("row", { name: /^取引件数 / }).getByRole("cell").textContent(), count + "件");
+          await assertMoney(month.getByRole("row", { name: /^収支 / }).getByRole("cell").nth(0), balance, mode === "empty" ? normal : red);
           const next = page.locator("#home .settlement-hero");
           assert.match(await next.textContent() ?? "", mode === "empty" ? /現在、清算対象の共有の支払い・収入はありません/ : /清算不要/);
           assert.equal(await next.getByRole("button", { name: "清算を完了する", exact: true }).count(), mode === "empty" ? 0 : 1,
@@ -178,6 +181,12 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           assert.equal(await page.getByRole("table", { name: "共有費配分", exact: true }).count(), 0);
           await hero.getByText("未清算の共有収支", { exact: true }).waitFor();
         }
+        await page.goto(origin + "?balance=partner");
+        const partnerMonth = page.getByRole("table", { name: "今月の収支", exact: true });
+        await assertMoney(partnerMonth.getByRole("row", { name: /^収入 / }).getByRole("cell").nth(1), "+￥4,700", green);
+        await assertMoney(partnerMonth.getByRole("row", { name: /^支出 / }).getByRole("cell").nth(1), "−￥5,400", red);
+        await assertMoney(partnerMonth.getByRole("row", { name: /^収支 / }).getByRole("cell").nth(1), "−￥700", red);
+        await assertMoney(partnerMonth.getByRole("row", { name: /^収支 / }).getByRole("cell").nth(2), "+￥5,300", green);
         await page.goto(origin + "?balance=overflow");
         await page.getByRole("table", { name: "共有費配分", exact: true }).waitFor();
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true,

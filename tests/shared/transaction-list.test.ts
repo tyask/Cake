@@ -60,3 +60,15 @@ test("多数明細の非表示選択数を数え、外部追加も最新の表�
   assert.equal(view.hiddenCheckedCount, 2500);
   assert.equal(view.selectionChecked, false);
 });
+
+test("相手の個人明細は表示しても全選択・選択済み件数・一括操作へ含めない", () => {
+  const items = [item("shared"), { ...item("own"), expenseClass: "PERSONAL" as const },
+    { ...item("partner"), expenseClass: "PERSONAL" as const, actorUserId: "b" },
+    item("settled", "2026-10-07T00:00:00Z")];
+  const view = transactionListView(items, () => true, empty, empty, new Set(["shared", "own", "partner"]),
+    record => record.expenseClass === "SHARED" || record.actorUserId === "a");
+  assert.deepEqual(view.visible.map(record => record.id), ["shared", "own", "partner", "settled"]);
+  assert.deepEqual(view.visibleEditable.map(record => record.id), ["shared", "own"]);
+  assert.deepEqual(view.checkedIds, ["shared", "own"]);
+  assert.equal(view.selectionChecked, true);
+});

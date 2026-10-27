@@ -21,7 +21,7 @@ const payment = (id: string, patch: Partial<TransactionRecord> = {}): Transactio
   externalId: id, source: "MANUAL", categoryId: "shop", categoryConfirmed: true, categoryRevision: 1, ...patch,
 });
 const selection: AnalyticsTransactionSelection = {
-  rowId: "food", depth: 1, categoryIds: null, viewMode: "self", selfClasses: ["SHARED", "PERSONAL"], currentUserId: "b",
+  rowId: "food", depth: 1, categoryIds: null, memberIds: ["b"], expenseClasses: ["SHARED", "PERSONAL"],
 };
 
 test("明細も集計と同じ参加者順の余り円を配分し、個別配分0円を除外する", () => {
@@ -31,17 +31,17 @@ test("明細も集計と同じ参加者順の余り円を配分し、個別配�
   assert.deepEqual(result.transactions.map(item => item.id), ["tie", "unequal"]);
   assert.deepEqual([...result.amountsYen], [["tie", 1], ["unequal", 1431655765]]);
   assert.equal(result.totalYen, BigInt(1431655766));
-  const noShare = selectAnalyticsTransactions([entries[0]], members, period, prepared, { ...selection, currentUserId: "a" });
+  const noShare = selectAnalyticsTransactions([entries[0]], members, period, prepared, { ...selection, memberIds: ["a"] });
   assert.deepEqual(noShare.transactions, []);
   assert.equal(noShare.amountsYen.size, 0);
-  const shared = selectAnalyticsTransactions(entries, members, period, prepared, { ...selection, viewMode: "shared" });
+  const shared = selectAnalyticsTransactions(entries, members, period, prepared, { ...selection, memberIds: ["a", "b"], expenseClasses: ["SHARED"] });
   assert.deepEqual([...shared.amountsYen], [["tie", 1], ["unequal", 2147483647]]);
   assert.equal(shared.totalYen, BigInt(2147483648));
   assert.deepEqual(entries, original, "配分後の表示金額を作っても保存済みの取引全額・割合は変更しない");
   assert.equal(result.transactions[1], entries[1], "表示値は元のTransactionRecordとは別に持つ");
 });
 
-test("親集約・直接設定・選択カテゴリとJST境界を維持し、収入と相手個人を除く", () => {
+test("親集約・直接設定・選択カテゴリとJST境界を維持し、収入と未選択ユーザーの個人費を除く", () => {
   const entries = [
     payment("start", { occurredAt: "2026-09-30T15:00:00Z" }),
     payment("before", { occurredAt: "2026-09-30T14:59:59.999Z" }),
@@ -55,6 +55,26 @@ test("親集約・直接設定・選択カテゴリとJST境界を維持し、�
   assert.deepEqual(selected(), ["start", "end", "direct"]);
   assert.deepEqual(selected({ depth: "all" }), ["direct"]);
   assert.deepEqual(selected({ categoryIds: ["shop"] }), ["start", "end"]);
-  assert.deepEqual(selected({ selfClasses: ["PERSONAL"] }), []);
-  assert.deepEqual(selected({ viewMode: "shared" }), ["start", "end", "direct"]);
+  assert.deepEqual(selected({ expenseClasses: ["PERSONAL"] }), []);
+  assert.deepEqual(selected({ memberIds: ["a", "b"], expenseClasses: ["SHARED"] }), ["start", "end", "direct"]);
+});
+
+
+test("選択ユーザーの個人費は全額、共有費は整数円の配分合計を表示し、複数選択でも二重計上しない", () => {
+  const entries = [
+    payment("shared", { amountYen: 101 }),
+    payment("a-personal", { amountYen: 70, expenseClass: "PERSONAL", splitWeights: { a: 0, b: 1 } }),
+    payment("b-personal", { actorUserId: "b", amountYen: 90, expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 } }),
+  ];
+  const one = selectAnalyticsTransactions(entries, members, period, prepared, selection);
+  assert.deepEqual([...one.amountsYen], [["shared", 51], ["b-personal", 90]]);
+  assert.equal(one.totalYen, BigInt(141));
+  const both = selectAnalyticsTransactions(entries, members, period, prepared, { ...selection, memberIds: ["a", "b", "b"] });
+  assert.deepEqual([...both.amountsYen], [["shared", 101], ["a-personal", 70], ["b-personal", 90]]);
+  assert.equal(both.totalYen, BigInt(261));
+  const noUsers = selectAnalyticsTransactions(entries, members, period, prepared, { ...selection, memberIds: [] });
+  assert.equal(noUsers.totalYen, BigInt(0));
+  assert.deepEqual(noUsers.transactions, []);
+  const noExpenses = selectAnalyticsTransactions(entries, members, period, prepared, { ...selection, expenseClasses: [] });
+  assert.deepEqual(noExpenses.transactions, []);
 });
