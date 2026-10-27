@@ -1,0 +1,47 @@
+name: Cake Deployment Retention
+run-name: Deployment Retention ${{ inputs.mode || 'apply' }} ${{ github.sha }}
+on:
+  schedule:
+    # 06:00 JST (21:00 UTC on the previous day).
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: plan lists candidates without deleting; apply removes only verified old deployments
+        type: choice
+        default: plan
+        required: true
+        options: [plan, apply]
+permissions: {}
+concurrency:
+  # A separate queue never replaces a pending persistent Preview update.
+  group: cake-deployment-retention
+  cancel-in-progress: false
+jobs:
+  retention:
+    if: github.repository == 'tyask/Cake' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Check Node.js version
+        run: npm run check:node
+      - run: npm ci --ignore-scripts
+      - name: Reconcile deployment retention
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: node --import tsx scripts/preview/deployment-retention-workflow.ts
