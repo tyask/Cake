@@ -35,8 +35,10 @@ async function pages(api: Transport, path: string): Promise<Json[]> {
 
 function collectorRun(value: unknown, workflowId: number): Json {
   const run = object(value);
+  // Run names can contain the dynamic run-name. Bind identity to the registered
+  // workflow's ID and path instead of its mutable display name.
   if (!positive(run.id) || !positive(run.run_attempt) || run.workflow_id !== workflowId
-    || run.path !== collectorFile || run.name !== collectorName || run.event !== 'pull_request'
+    || run.path !== collectorFile || run.event !== 'pull_request'
     || run.status !== 'completed' || run.conclusion !== 'success'
     || !repository(run.repository) || !repository(run.head_repository)
     || !validTaskBranch(run.head_branch) || !fullSha(run.head_sha)
@@ -109,7 +111,7 @@ export async function workflowRunPullRequest(env: Environment, event: Json, api:
   for (let index = 0; index < runs.length; index++) {
     const next = runs[index];
     if (!positive(next.id) || !positive(next.run_attempt) || next.workflow_id !== workflow.id
-      || next.path !== collectorFile || next.name !== collectorName || next.event !== 'pull_request'
+      || next.path !== collectorFile || next.event !== 'pull_request'
       || next.head_branch !== selected.source.branch || !fullSha(next.head_sha)
       || !repository(next.repository) || !repository(next.head_repository)
       || !time(next.created_at) || !time(next.updated_at) || Date.parse(next.updated_at) < Date.parse(next.created_at)

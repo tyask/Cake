@@ -11,7 +11,8 @@ const prefix = `/repos/${config.repository}/`;
 const workflow = { id: 120, name: 'Cake PR Events', path: '.github/workflows/pr-events.yml', state: 'active' };
 const pr = (changes: Json = {}): Json => ({ number: 71, state: 'open', merged: false, created_at: '2026-10-26T00:00:00Z',
   head: { ref: 'codex/example', sha: head, repo }, base: { ref: 'main', repo }, ...changes });
-const run = (changes: Json = {}): Json => ({ id: 500, workflow_id: workflow.id, name: workflow.name, path: workflow.path,
+const run = (changes: Json = {}): Json => ({ id: 500, workflow_id: workflow.id, name: 'PR event opened 71',
+  display_title: 'PR event opened 71', path: workflow.path,
   run_attempt: 1, event: 'pull_request', status: 'completed', conclusion: 'success', repository: repo, head_repository: repo,
   head_branch: 'codex/example', head_sha: head, created_at: '2026-10-27T00:00:00Z', updated_at: '2026-10-27T00:00:04Z',
   url: `https://api.github.com${prefix}actions/runs/500`, pull_requests: [], ...changes });
@@ -42,6 +43,16 @@ test('PR notification resolves one current same-repository PR without downloadin
   assert.ok(f.calls.some(path => path.includes('head=tyask%3Acodex%2Fexample')));
   assert.equal(f.calls.filter(path => path.endsWith('/actions/runs/500')).length, 2);
   assert.ok(f.calls.every(path => !/artifacts|contents|download/.test(path)));
+});
+
+test('dynamic run display names do not identify or replace the registered collector workflow', async () => {
+  const f = notification();
+  f.state.announced = run({ name: 'PR event synchronize 71', display_title: 'PR event synchronize 71' });
+  f.state.fresh = run({ name: 'Arbitrary display name', display_title: '別の表示名' });
+  f.state.listed = [run({ name: 'CI', display_title: undefined })];
+  assert.equal((await workflowRunPullRequest(f.env, f.event(), f.api))!.source.pr, 71);
+  f.state.workflow.name = 'Another registered workflow';
+  await assert.rejects(workflowRunPullRequest(f.env, f.event(), f.api), /WORKFLOW_IDENTITY/);
 });
 
 test('forks and unrelated branches are ignored before any GitHub or provider operation', async () => {

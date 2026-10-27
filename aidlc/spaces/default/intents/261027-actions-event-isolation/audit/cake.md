@@ -74,3 +74,28 @@ Cake運用の記録。公式エンジンの承認receiptではない。日時は
 - 計画SHA-256：`7e964b76c5ac9d5696387a1ae53a62af873987272e8ceceaee44112f46fb401b`
 
 > 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
+
+## REOPEN
+
+- 記録日時：2026-10-27T14:05:43.216Z
+- 計画SHA-256：`7e964b76c5ac9d5696387a1ae53a62af873987272e8ceceaee44112f46fb401b`
+
+> PR #157の実際の受付run 40517564261を確認したところ、GitHub REST APIのrun.nameはrun-name指定の表示名PR event opened 157になっていた。
+> Workflowの固定名をrun.nameへ要求する条件が新経路を拒否するため、登録Workflowのid/path/nameとrunのworkflow_id/path/generationを照合し、run表示名は認可に使わないように修正する。
+> この実データ差異を回帰fixtureへ反映し、新しいHEADで再レビューと最終検証を行う。
+
+## PROGRESS
+
+- 記録日時：2026-10-27T14:07:36.861Z
+- 計画SHA-256：`7e964b76c5ac9d5696387a1ae53a62af873987272e8ceceaee44112f46fb401b`
+
+> PR #157の実際の受付run 40517564261を確認したところ、GitHub REST APIのrun.nameはrun-name指定の表示名PR event opened 157になっていた。
+> Workflowの固定名をrun.nameへ要求する条件が新経路を拒否するため、登録Workflowのid/path/nameとrunのworkflow_id/path/generationを照合し、run表示名は認可に使わないように修正する。
+> この実データ差異を回帰fixtureへ反映し、新しいHEADで再レビューと最終検証を行う。
+
+## FREEZE
+
+- 記録日時：2026-10-27T14:07:37.357Z
+- 計画SHA-256：`7e964b76c5ac9d5696387a1ae53a62af873987272e8ceceaee44112f46fb401b`
+
+> 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
