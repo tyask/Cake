@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cashflowSummary, currentMonthTransactions, personalCashflowSummary, workspaceCashflowSummary } from "../../lib/shared/home-summary";
+import { cashflowSummary, currentMonthTransactions, homeMonth, isHomeMonth, personalCashflowSummary, transactionsInMonth, workspaceCashflowSummary } from "../../lib/shared/home-summary";
 import type { TransactionRecord } from "../../lib/shared/types";
 
 function transaction(id: string, occurredAt: string): TransactionRecord {
@@ -8,6 +8,24 @@ function transaction(id: string, occurredAt: string): TransactionRecord {
     actorUserId: "a", actorName: "A", expenseClass: "PERSONAL", splitWeights: { a: 1 }, settledAt: null,
     externalId: id, source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0 };
 }
+
+test("選択した年月全体を日本時間で抽出し、年・月の境界と未来日付を区別する", () => {
+  const january = transaction("january", "2026-12-31T15:00:00Z");
+  const settled = { ...transaction("settled", "2027-01-31T14:59:59Z"), settledAt: "2027-02-01T00:00:00Z" };
+  const entries = [transaction("december", "2026-12-31T14:59:59Z"), january, settled,
+    transaction("february", "2027-01-31T15:00:00Z"), transaction("last-year", "2026-01-01T00:00:00Z")];
+  assert.deepEqual(transactionsInMonth(entries, "2027-01"), [january, settled]);
+  assert.deepEqual(transactionsInMonth(entries, "2028-01"), []);
+  assert.equal(homeMonth(new Date("2026-12-31T15:00:00Z")), "2027-01");
+});
+
+test("対象年月は4桁の実在月だけを許可する", () => {
+  for (const month of ["0001-01", "0099-12", "2026-10", "9999-12"]) assert.equal(isHomeMonth(month), true);
+  for (const month of ["", "0000-01", "2026-00", "2026-13", "2026-1", "10000-01", "2026-10-01"]) {
+    assert.equal(isHomeMonth(month), false);
+    assert.throws(() => transactionsInMonth([], month), RangeError);
+  }
+});
 
 test("home month excludes the same month in previous years", () => {
   const current = transaction("current", "2026-10-27T00:00:00+09:00");

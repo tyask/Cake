@@ -8,7 +8,7 @@ import { chromium, type Browser, type BrowserContext, type LaunchOptions, type P
 import type { BootstrapData, TransactionRecord } from '../../lib/shared/types';
 import { analyticsToday, type AnalyticsDataset } from '../../lib/shared/analytics';
 import { formatCashflow, formatYen } from '../../lib/shared/display-formatters';
-import { currentMonthTransactions, personalCashflowSummary } from '../../lib/shared/home-summary';
+import { currentMonthTransactions, homeMonth, personalCashflowSummary } from '../../lib/shared/home-summary';
 import { CloudStartupError, startCloudServer } from './dev-cloud';
 
 const executeFile = promisify(execFile);
@@ -188,9 +188,13 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
         await page.screenshot({ path: resolve(directory, filename) }); item.screenshots.push(filename);
       };
       const navigation = page.locator(item.mobile ? '.bottom-nav' : '.app-nav');
+      const currentHomeTable = () => {
+        const [year, month] = homeMonth().split('-').map(Number);
+        return page.getByRole('table', { name: `${year}年${month}月の収支`, exact: true });
+      };
       const navigate = async (name: string) => {
         await navigation.getByRole('button', { name: new RegExp(name) }).click();
-        if (name === 'ホーム') await page.getByRole('table', { name: '今月の収支', exact: true }).waitFor();
+        if (name === 'ホーム') await currentHomeTable().waitFor();
         else await page.getByRole('heading', { name: name === '集計' ? '収支の集計' : name, exact: true }).waitFor();
       };
       stage = 'navigation';
@@ -218,7 +222,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       stage = 'workspace';
       await page.locator(item.mobile ? '.mobile-header select' : '.workspace-picker select').selectOption(workspaceId);
       stage = 'home'; await navigate('ホーム');
-      const homeTable = page.getByRole('table', { name: '今月の収支', exact: true });
+      const homeTable = currentHomeTable();
       const homeMonths = initial.selected!.members.map(member => personalCashflowSummary(
         currentMonthTransactions(initial.selected!.transactions), initial.selected!.members, member.id));
       requireCondition(await homeTable.getByRole('columnheader').allTextContents().then(names =>
