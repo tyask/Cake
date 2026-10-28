@@ -303,3 +303,24 @@ Cake運用の記録。公式エンジンの承認receiptではない。日時は
 - 計画SHA-256：`900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39`
 
 > 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
+
+## REOPEN
+
+- 記録日時：2026-10-28T11:24:04.971Z
+- 計画SHA-256：`900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39`
+
+> 最終SHAの全体testで、既存CSV取込画面移動テストのモックが新GET /api/homeへ未対応のため失敗。取込入力/選択/遅い応答保持という元の検証を維持し、metadata初期状態とHomeサマリー応答をfixtureへ追加する。製品コード/計画/ACの変更なし。修正後はfreeze/commitして追加差分の独立レビュー、最終SHAで全体検証を再実施する。
+
+## PROGRESS
+
+- 記録日時：2026-10-28T11:25:35.315Z
+- 計画SHA-256：`900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39`
+
+> 最終SHAの全体testで、既存CSV取込画面移動テストのモックが新GET /api/homeへ未対応のため失敗。取込入力/選択/遅い応答保持という元の検証を維持し、metadata初期状態とHomeサマリー応答をfixtureへ追加する。製品コード/計画/ACの変更なし。修正後はfreeze/commitして追加差分の独立レビュー、最終SHAで全体検証を再実施する。
+
+## FREEZE
+
+- 記録日時：2026-10-28T11:25:35.605Z
+- 計画SHA-256：`900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39`
+
+> 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。

@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-10-28T10:28:39.470Z",
-  "updatedAt": "2026-10-28T11:17:31.107Z",
+  "updatedAt": "2026-10-28T11:25:35.605Z",
   "events": [
     {
       "action": "CREATED",
@@ -134,6 +134,24 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-10-28T11:17:31.107Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-28T11:24:04.971Z",
+      "note": "最終SHAの全体testで、既存CSV取込画面移動テストのモックが新GET /api/homeへ未対応のため失敗。取込入力/選択/遅い応答保持という元の検証を維持し、metadata初期状態とHomeサマリー応答をfixtureへ追加する。製品コード/計画/ACの変更なし。修正後はfreeze/commitして追加差分の独立レビュー、最終SHAで全体検証を再実施する。\n",
+      "planHash": "900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T11:25:35.315Z",
+      "note": "最終SHAの全体testで、既存CSV取込画面移動テストのモックが新GET /api/homeへ未対応のため失敗。取込入力/選択/遅い応答保持という元の検証を維持し、metadata初期状態とHomeサマリー応答をfixtureへ追加する。製品コード/計画/ACの変更なし。修正後はfreeze/commitして追加差分の独立レビュー、最終SHAで全体検証を再実施する。\n",
+      "planHash": "900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T11:25:35.605Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39"
     }
