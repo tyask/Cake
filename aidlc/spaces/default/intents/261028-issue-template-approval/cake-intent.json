@@ -1,0 +1,69 @@
+{
+  "protocol": "cake-intent/v1",
+  "id": "261028-issue-template-approval",
+  "repository": "tyask/Cake",
+  "issue": 166,
+  "issueUrl": "https://github.com/tyask/Cake/issues/166",
+  "branch": "codex/issue-template-approval",
+  "branches": [
+    "codex/issue-template-approval"
+  ],
+  "recordDir": "aidlc/spaces/default/intents/261028-issue-template-approval",
+  "phase": "Construction",
+  "status": "frozen",
+  "planHash": "aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7",
+  "approval": {
+    "actor": "このチャットの利用者",
+    "reply": "お願いします。\n",
+    "recordedAt": "2026-10-28T09:37:37.816Z",
+    "planHash": "aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7",
+    "planFile": "plans/aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7.md"
+  },
+  "frozen": true,
+  "createdAt": "2026-10-28T09:37:37.459Z",
+  "updatedAt": "2026-10-28T09:43:48.225Z",
+  "events": [
+    {
+      "action": "CREATED",
+      "recordedAt": "2026-10-28T09:37:37.459Z",
+      "note": "Issueに対応する計画を記録した。承認は別途記録する。",
+      "planHash": "aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7"
+    },
+    {
+      "action": "APPROVE",
+      "recordedAt": "2026-10-28T09:37:37.816Z",
+      "note": "承認者：このチャットの利用者\n承認の記録日時：2026-10-28T09:37:37.816Z\n承認対象本文：[plans/aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7.md](../plans/aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7.md)\n利用者の実際の回答：\nお願いします。",
+      "planHash": "aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T09:37:38.152Z",
+      "note": "# Issue本文の承認\n\n- Issue: https://github.com/tyask/Cake/issues/166\n- 承認者: このチャットの利用者\n- 承認の記録日時: 2026-10-28 09:37:34 UTC\n- 提示順序: 計画提示後の最初の「お願いします。」で計画を承認。その後に作成したIssue #166のURL・受入条件と「このIssueの内容で、修正を開始してよいですか？」を提示し、次の「お願いします。」でこのIssue本文の承認を確認した。\n- 利用者の実際のIssue承認発言:\n\n> お願いします。\n\n以下は、Issue承認を求める前にGitHubから再取得して確認し、利用者へ提示したIssueの本文である。\n本文内の「未承認」「承認待ち」は提示時点の記載として保持する。\n記録日時は利用者の発言日時を推測したものではない。\n\n## 承認対象のIssue本文\n\n## 目的・背景\n\nIssue #164では、起票後の標準書式に従わず、見出しの統合と受入条件のチェックリスト漏れがあった。\nAgentが対象テンプレートを実際に読み、規定の項目と書式を確認する手順を明文化する。\n\nあわせて、利用者の指定どおり「開発依頼 → 計画提示・承認 → Issue作成・提示・承認 → ブランチ作成・開発開始」の順に統一する。\n計画の承認と、GitHubに保存されたIssue本文の承認を別々に扱う。\n\n## 対象範囲・対象外\n\n変更する運用文書は次の6ファイルとし、所定の案件記録を残す。\n\n- `AGENTS.md`\n- `README.md`\n- `docs/aidlc-workflow.md`\n- `docs/development-workflow.md`\n- `docs/development-commands.md`\n- `aidlc/README.md`\n\n次の規則と手順を揃える。\n\n- 計画提示前に、案件に対応する `feature.yml`・`bug.yml`・`task.yml`を実際に読む。\n- テンプレートの該当項目を計画・Issue本文へ反映する。\n- Agentが作成・整理するIssue本文では、「目的・背景」「対象範囲・対象外」「受入条件」「関連記録」「進捗」を独立した見出しにし、受入条件を識別子付きチェックリストにする。\n- CLI・APIによる操作でも、保存前の照合と保存後の本文再取得で確認する。\n- 計画承認後にIssueを作成・更新し、保存済み本文とURLをチャットへ提示する。\n- 提示後の利用者によるIssue本文の承認を確認してから、専用branch/worktree・Intentを作成し、開発を開始する。\n- 計画承認とIssue承認の証拠を別々に記録する。\n- 同じ承認内容での再開や、進捗・検証結果・関連リンクの追記では、承認を求め直さない。\n\nアプリ・API・DB・実行スクリプト・Workflow・テンプレート自体の変更、およびIssue #164の本文修正は対象外とする。\n既存のレビュー・CI・Preview・Ready条件と、merge後のActionsによる完了確認を維持する。\n未確定事項はない。\n\n## 受入条件\n\n- [ ] AC-01: 対象テンプレートを読み、該当項目・規定の見出し・受入条件のチェックリストを照合する。\n- [ ] AC-02: 計画承認とIssue承認を区別し、Issue承認前はブランチ作成・開発へ進まない。\n- [ ] AC-03: 両方の承認を別々に記録する。同じ承認内容での再開や、進捗・検証結果の追記では承認を求め直さない。\n\n## 実装方針・工程・検証\n\n- 文書変更として、上記6ファイルの承認順序・テンプレート参照・Issue書式に関する記述を整合させる。\n- Issue承認後、専用branch/worktreeを作成し、既存のIntent操作で承認済み計画と実際の承認発言を記録する。Issue承認は計画承認と分けて記録する。\n- 文書チェック、差分・リンク・既存手順との整合性確認、自己レビューと別Agentレビューを行う。\n- 現在SHAのCI・自動Preview/statusを確認し、条件を満たしたPRをReadyにする。\n- 文書のみの変更のため、アプリの機能テスト・ブラウザ再検証を省略し、その理由を記録する。\n- 利用者によるmerge後は、既存Actionsでmain CI・Production・常設Preview・専用資源cleanupと案件完了を確認する。\n\n## 関連記録\n\n- 対象テンプレート: [開発・運用・文書の作業](https://github.com/tyask/Cake/blob/main/.github/ISSUE_TEMPLATE/task.yml)\n- 書式・承認手順: [AI-DLC開発フロー](https://github.com/tyask/Cake/blob/main/docs/aidlc-workflow.md#計画承認受入条件)\n- 背景: [Issue #164](https://github.com/tyask/Cake/issues/164)\n- 承認済み計画: このチャットで提示した更新後の計画。提示後の利用者の実際の回答「お願いします。」を確認済み。\n- Issue本文の承認: 未承認。作成後に保存済み本文とURLをチャットで提示し、別途承認を確認する。\n- Intent: Issue承認後、専用branch/worktreeで作成して関連付ける。\n- PR: Issue承認後の文書修正・レビュー・検証を経て作成する。\n\n## 進捗\n\n- 状況: 未着手。\n- 現在の工程: 計画承認済み。Issue本文の提示・承認待ち。\n- 次の作業・阻害要因: 保存済み本文とURLを提示し、利用者のIssue承認後にブランチ作成・開発開始へ進む。\n",
+      "planHash": "aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T09:40:46.512Z",
+      "note": "# 実装と自己レビュー\n\n- AGENTS.mdと5つの関連文書を更新し、依頼→計画承認→保存済みIssue本文の提示・承認→branch/worktree・Intent作成→開発の順に揃えた。\n- AC-01: 案件別テンプレートの実読、必須・該当任意項目の保持、独立した5見出しとACチェックリスト、CLI/APIでの保存前照合・保存後再取得を明記した。\n- AC-02: 計画承認とIssue承認を分離し、Issue承認前のbranch/worktree・Intent・実装・PR作成を禁止した。\n- AC-03: 計画承認はapprove、Issue承認はInceptionの工程メモへ本文の写し・URL・承認者・実際の回答・記録日時を別記録する。同じ承認範囲の再開・進捗・検証・リンク追記で再承認を求めず、目的等の変更時は計画再承認→Issue更新・再承認へ戻す。\n- 案件記録でも、実際の計画承認とIssue #166本文への別の承認を既存CLIで記録した。両回答は「お願いします。」だが、対象・提示順序を区別した。\n- 文書のみのReady対象には今回更新する運用文書aidlc/README.mdを明示し、例のパス照合にも同じ文書を追加した。アプリ・script・workflow・依存は対象外のままで、CI・Preview/status・レビュー条件と正式ブラウザ証拠のCLI検査は維持する。\n- 自己レビューで6文書の順序・参照・既存CLIの引数と記録方法を照合した。変更前検証として文書検査14ファイル・問題0件、差分の空白検査成功。\n- 文書のみの変更でアプリ・API・DB・script・Workflowを変えないため、機能テスト・build・ブラウザ再検証を省略する。最終SHAの文書検査、別Agentレビュー、CI、自動Preview/statusをこの後に確認する。\n- merge後は既存Actionsの確認へ引き継ぐ。今後のレビュー・最終SHAの検証結果はPR・Issue・Actionsへ記録する。\n",
+      "planHash": "aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T09:40:46.842Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-28T09:43:46.066Z",
+      "note": "別Agentレビューで、文書のみReadyの対象にaidlc/README.mdを明示したAGENTS.md・開発コマンド例に対し、開発・QA運用手順の同じ対象一覧が更新されていない不一致を確認した。\n今回の承認済み文書変更を同じ条件で判定できるよう、同手順の対象一覧も揃える。\n目的・範囲・受入条件と、CI・Preview/status・レビュー・アプリ変更の正式証拠の条件は維持する。\n",
+      "planHash": "aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T09:43:48.225Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7"
+    }
+  ]
+}

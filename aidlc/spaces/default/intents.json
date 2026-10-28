@@ -54,6 +54,15 @@
         "codex/analytics-filter-cache"
       ],
       "recordDir": "aidlc/spaces/default/intents/261028-analytics-filter-cache"
+    },
+    {
+      "id": "261028-issue-template-approval",
+      "issue": 166,
+      "branch": "codex/issue-template-approval",
+      "branches": [
+        "codex/issue-template-approval"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261028-issue-template-approval"
     }
   ]
 }

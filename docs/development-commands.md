@@ -27,14 +27,17 @@ env -u VERCEL_TOKEN -u VERCEL_OIDC_TOKEN -u NEON_API_KEY \
 ## 計画承認とIssue
 
 [AI-DLC開発フロー](aidlc-workflow.md)に従い、既存仕様・実装を読み取りのみで調べる。
-対象Issueテンプレートの該当内容と[計画・承認・受入条件](aidlc-workflow.md#計画承認受入条件)の項目を含め、Issue本文へ記載できる具体性・情報量の開発計画をチャット上で提示する。
+計画提示前に、案件に対応する[Issueテンプレート](../AGENTS.md#issueのテンプレートと本文確認)を実際に読む。
+その該当内容と[計画・承認・受入条件](aidlc-workflow.md#計画承認受入条件)の項目を含め、Issue本文へ記載できる具体性・情報量の開発計画をチャット上で提示する。
 未確定事項は未確定と明示し、未作成のIssue・PR番号などの事後情報を推測して埋めない。
 提示後に、その計画を対象とする利用者の承認を得てから、案件のIssueを作成・更新する。
 承認の文言は固定せず、一般的な方針への合意・作業依頼・着手指示を未提示の計画への承認として扱わない。
-承認前は専用branch/worktree・Intentの作成、実装、PR作成にも進まない。
+計画承認前はIssueの作成・更新へ進まない。
+専用branch/worktree・Intentの作成、実装、PR作成は、後述のIssue本文の承認も確認してから行う。
 既存Issueがあれば同じものを使い、相談や調査だけでは新規Issueを作らない。
 承認済みの計画に基づき、Issueの要約・受入条件・計画を`.cake/issue.md`へ用意する。
 承認対象となる要件や受入条件を、Issue化時に初めて補わない。
+作成・更新前に、対象テンプレートの該当内容・独立した5見出し・受入条件のチェックリストを照合する。
 
 ```bash
 gh issue create --repo tyask/Cake --title '今回の目的を日本語で記載' --body-file .cake/issue.md
@@ -43,13 +46,27 @@ gh issue edit <Issue番号> --repo tyask/Cake --body-file .cake/issue.md
 ```
 
 実際には作成・更新のどちらかを選び、返されたIssue番号とURLを記録する。
-計画本文は`.cake/plan.md`等へ、実際の承認発言は`.cake/approval.md`等へ保存しておく。
+続いて保存済み本文を再取得し、項目の欠落・書式の不一致がないことを確認する。
+
+```bash
+gh issue view <Issue番号> --repo tyask/Cake --json number,url,title,body
+```
+
+保存済み本文とURLをチャットへ提示し、提示後に、そのIssue本文を対象とする利用者の承認を得る。
+計画承認をIssue承認へ流用せず、Issue承認前はbranch/worktree・Intentの作成や開発へ進まない。
+CLI・APIから作成・更新した場合も、同じ照合・再取得・提示・承認を行う。
+
+計画本文は`.cake/plan.md`等へ、計画に対する実際の承認発言は`.cake/approval.md`等へ保存しておく。
+Issue承認は、IssueのURL・提示した本文そのもの・承認者・実際の承認発言・記録日時をまとめて、
+別の`.cake/issue-approval.md`等へ保存しておく。
+Issue本文は後から変更され得るため、URLや一時ファイルへの参照だけで承認対象を済ませない。
 承認文を作成・要約して置き換えたり、利用者の発言日時を推測したりしない。
-チャットで提示・承認された同じ計画を再開する場合は、計画とその承認発言を参照して同じ承認を求め直さない。
+同じ承認済み計画・Issueで再開する場合は、それぞれの対象の提示と承認発言を照合し、同じ内容の承認を求め直さない。
+進捗・検証結果・関連リンクの追記や、検証済み受入条件のチェック更新ではIssue承認を求め直さない。
 
 ## タスクの準備
 
-計画承認とIssue作成・更新の後、元のCake checkoutで実行する。
+計画承認と、作成・更新して提示したIssue本文の承認を両方確認した後、元のCake checkoutで実行する。
 初回cloneで依存がなければ、先にNode版を確認して`npm ci`を行う。
 既に作成済みの同一タスクを、同じ名前で作り直さない。
 
@@ -65,8 +82,8 @@ npm run task:start -- feature-name
 
 ## 案件記録の操作
 
-対象worktreeで、承認済み計画を使ってIntentを作る。
-元checkoutに計画と承認の下書きを置いた場合は、その公開可能な本文だけを対象worktreeの`.cake/`へ用意する。
+対象worktreeで、計画承認・Issue承認の両方を確認済みの案件についてIntentを作る。
+元checkoutに計画と両方の承認の下書きを置いた場合は、その公開可能な本文だけを対象worktreeの`.cake/`へ用意する。
 資格情報・環境ファイルはコピーしない。
 `task:intent`の入力ファイルは対象worktree内に限定し、symlinkは使わない。
 
@@ -84,10 +101,20 @@ npm run task:intent -- approve --intent "$TASK_INTENT_ID" \
 npm run task:intent -- status --intent "$TASK_INTENT_ID"
 ```
 
-`approve`は承認者・実際の承認文・計画hash・記録日時を保存する。
+`approve`は計画承認の記録として、承認者・実際の承認文・計画hash・記録日時を保存する。
 `--at <ISO日時>`を省略すると現在時刻を記録する。これは発言日時ではなく記録日時である。
 チャットで提示した計画と、その後の利用者の承認発言の対応はAgentが確認する。
-CLIへの記録だけを根拠に、未承認の計画を承認済みとして扱わない。
+Issue承認は、上で用意した`.cake/issue-approval.md`を別の工程メモとして記録する。
+
+```bash
+npm run task:intent -- progress --intent "$TASK_INTENT_ID" \
+  --phase Inception --status running --note-file .cake/issue-approval.md
+```
+
+この操作は、Issue承認の対象本文と実際の回答をIntentの監査履歴へ保持する。
+Issue承認の発言で`approve`を再実行し、計画承認を上書きしない。
+CLIはチャット上の承認の有無や提示順序を自動検証しないため、Agentが実行前に両方の承認を照合する。
+CLIへの記録だけを根拠に、未承認の計画・Issueを承認済みとして扱わない。
 
 凍結前の進捗は、現在の工程とメモを記録する。
 `status`は読み取りだけで、追跡ファイルを更新しない。
@@ -99,7 +126,9 @@ npm run task:intent -- status
 ```
 
 計画が変わる場合は次で本文を更新する。過去の承認とfreezeは無効になる。
-変更後の計画をチャット上で提示して承認を得てから、同じ`approve`手順で新たに記録する。
+変更後の計画をチャット上で提示して承認を得てからIssueへ反映する。
+保存済みIssue本文とURLを再提示してIssue承認を得た後、同じ`approve`手順で計画承認を、
+`progress`のInceptionメモでIssue承認を、それぞれ新たに記録して開発を再開する。
 
 ```bash
 npm run task:intent -- plan --intent "$TASK_INTENT_ID" --plan-file .cake/revised-plan.md
@@ -336,7 +365,7 @@ gh api repos/tyask/Cake/issues/comments/<確認したID> > .cake/review-comment.
 
 ## 文書のみのReady
 
-対象worktreeで実行する。差分がAGENTS.md・README.md・docs配下の文書、
+対象worktreeで実行する。差分がAGENTS.md・README.md・aidlc/README.md・docs配下の文書、
 またはIntentの計画・状態・監査記録だけの場合に限る。
 アプリ・script・workflow・依存・実行設定を含む変更は対象外とする。
 レビュー・必要な文書検査・現在HEADのCI・自動Preview/statusを先に完了する。
@@ -370,7 +399,7 @@ const current = source(JSON.parse(await commandOutput(executeWorkflowCommand, 'g
 assert(current.sha === head.sha && current.branch === head.branch && current.state === 'open');
 const base = await commandOutput(executeWorkflowCommand, 'git', ['merge-base', 'origin/main', 'HEAD'], head.cwd);
 const files = (await commandOutput(executeWorkflowCommand, 'git', ['diff', '--name-only', base, 'HEAD'], head.cwd)).split('\n');
-assert(files.length && files.every(file => /^(AGENTS\.md|README\.md|docs\/.+\.(md|html)|aidlc\/spaces\/default\/(intents\.json|intents\/[^/]+\/(cake-intent\.json|plan\.md|plans\/[a-f0-9]{64}\.md|aidlc-state\.md|audit\/cake\.md)))$/.test(file)));
+assert(files.length && files.every(file => /^(AGENTS\.md|README\.md|aidlc\/README\.md|docs\/.+\.(md|html)|aidlc\/spaces\/default\/(intents\.json|intents\/[^/]+\/(cake-intent\.json|plan\.md|plans\/[a-f0-9]{64}\.md|aidlc-state\.md|audit\/cake\.md)))$/.test(file)));
 const r = JSON.parse(readFileSync('.cake/preview.json', 'utf8'));
 assert(r.success && r.action === 'status' && JSON.stringify(r.source) === JSON.stringify(current));
 assert(r.deployment?.phase === 'application' && r.deployment.state === 'READY');

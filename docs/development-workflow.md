@@ -7,11 +7,17 @@ WSL2/Linux、Codex CloudまたはWindowsネイティブで開発し、
 着手前に[AI-DLC開発フロー](aidlc-workflow.md)に従って読み取りのみの調査を行い、具体的な開発計画をチャット上で提示する。
 計画はIssue本文へ記載できる具体性・情報量とし、対象Issueテンプレートの該当内容と[計画・承認・受入条件](aidlc-workflow.md#計画承認受入条件)の項目を含める。
 未確定事項は未確定と明示し、承認対象となる要件や受入条件をIssue化後に初めて補わない。
-承認は特定の文言ではなく、提示後の発言がその計画を対象としていることを確認する。
+計画承認は特定の文言ではなく、提示後の発言がその計画を対象としていることを確認する。
 一般的な方針への合意・作業依頼・着手指示を、未提示の計画への承認として扱わない。
-承認後にIssueを作成・更新し、専用branch/worktreeを作成してIntentへ計画と実際の承認文を記録し、実装・PR作成へ進む。
-チャットで提示・承認された同じ計画を再開する場合は、その発言を参照して同じ承認を求め直さない。
-目的・範囲・受入条件・重要な実装方針が変わる場合は、計画を更新して再承認を得る。
+計画承認後にIssueを作成・更新し、GitHubに保存された本文を再取得してURLとともにチャットへ提示する。
+提示後の利用者の発言がそのIssue本文を承認していることを、計画承認とは別に確認する。
+Issue本文承認前は、専用branch/worktree・Intentの作成、実装・PR作成へ進まない。
+Issue本文承認後に専用branch/worktreeを作成し、Intentへ計画と両方の実際の承認文を別々に記録して開発へ進む。
+テンプレートの選択・読取り、本文の5見出し・受入条件のチェックリスト、CLI・APIでの作成更新前後の照合は、[計画・承認・受入条件](aidlc-workflow.md#計画承認受入条件)に従う。
+
+同じ承認対象の計画・Issueで再開する場合は、提示内容とそれぞれの承認発言を参照し、承認を求め直さない。
+進捗・検証結果・リンクの追記だけでも再承認を求めない。
+目的・範囲・受入条件・重要な実装方針が変わる場合は、計画を更新して再承認を得てからIssueへ反映し、変更後の本文への承認を得る。
 相談・調査だけを根拠にIssueやPRを作らない。
 
 ## 1. 環境と作業ディレクトリ
@@ -32,7 +38,8 @@ GitHub CLIは`gh api --paginate --slurp`に対応する版を使う。
 - タスクごと、OSごとに独立したclone/worktreeを使う。既存変更を保持し、依存・build成果物・ `.cake` ・環境ファイルを分離する。資格情報を別環境からコピーしない。
 - PATH補完は当該プロセスに限定する。globalのGit/PATH・CA・proxy・セキュリティ設定は変更しない。追跡テキストのLFは `.gitattributes` に従う。
 
-元のCake checkoutで次を実行し、表示された作業先へ移動する。初回cloneで依存がなければ先に `npm ci` を行う。
+計画承認とIssue本文承認を得てから、元のCake checkoutで次を実行し、表示された作業先へ移動する。
+初回cloneで依存がなければ先に `npm ci` を行う。
 Windowsでは `npm` を `npm.cmd` に読み替える。
 
 ```bash
@@ -42,6 +49,7 @@ npm run task:start -- feature-name
 このコマンドは最新 `origin/main` から `codex/feature-name` と専用worktreeを作り、その中で `npm ci` を実行する。
 作業先を変える場合は `CAKE_WORKTREE_ROOT` をそのプロセスだけに指定する。
 対象worktreeで`task:intent`を使い、Issue・branch・承認済み計画を関連付ける。
+`approve`で計画承認を記録し、Inception工程の`progress`メモにIssue URL・承認された本文の写し・承認者・実際のIssue承認文・記録日時を別に残す。
 作成・計画更新・承認・進捗・凍結・再開のコマンドは[案件記録の操作](development-commands.md#案件記録の操作)を参照する。
 
 同じCloud環境内の並列タスクもworktree・ポートを分ける。
@@ -85,7 +93,7 @@ freeze後は追跡ファイルを更新せず、最終SHAのレビュー・検�
 
 | 工程 | 具体的な操作 |
 | --- | --- |
-| 計画承認とIssue・Intentの対応 | [案件記録の操作](development-commands.md#案件記録の操作) |
+| 計画承認・Issue本文承認とIntentの対応 | [案件記録の操作](development-commands.md#案件記録の操作) |
 | 比較元・完全SHA・clean状態の記録 | [レビュー対象の記録](development-commands.md#レビュー対象の記録) |
 | PR・remote SHA・現在HEADの両CI照合 | [対象PRとCIの確認](development-commands.md#対象prとciの確認) |
 | 信頼済みmainの別worktree準備 | [control checkoutの準備](development-commands.md#control-checkoutの準備) |
@@ -597,7 +605,7 @@ controlから別の対象worktreeを管理するときは、対象に管理CLI�
 `task:pr --remote-proof ... --target-worktree /absolute/path/target` を使う。
 target指定はremote proof必須・非draft専用で、対象コードを管理資格情報付きで実行しない。
 
-**文書のみのReady操作：** mainとの差分がAGENTS.md・README.md・docs配下の文書、
+**文書のみのReady操作：** mainとの差分がAGENTS.md・README.md・aidlc/README.md・docs配下の文書、
 またはIntentの計画・状態・監査記録だけで、
 アプリ・script・workflow・依存・設定を変更しない場合に限る。
 リンク・コマンド例・現行実装との整合性と差分全体をレビューし、上記のCI・自動Preview/statusを確認する。
