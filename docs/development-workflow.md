@@ -605,7 +605,7 @@ controlから別の対象worktreeを管理するときは、対象に管理CLI�
 `task:pr --remote-proof ... --target-worktree /absolute/path/target` を使う。
 target指定はremote proof必須・非draft専用で、対象コードを管理資格情報付きで実行しない。
 
-**文書のみのReady操作：** mainとの差分がAGENTS.md・README.md・docs配下の文書、
+**文書のみのReady操作：** mainとの差分がAGENTS.md・README.md・aidlc/README.md・docs配下の文書、
 またはIntentの計画・状態・監査記録だけで、
 アプリ・script・workflow・依存・設定を変更しない場合に限る。
 リンク・コマンド例・現行実装との整合性と差分全体をレビューし、上記のCI・自動Preview/statusを確認する。

@@ -129,3 +129,19 @@ Cake運用の記録。公式エンジンの承認receiptではない。日時は
 - 計画SHA-256：`aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7`
 
 > 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
+
+## REOPEN
+
+- 記録日時：2026-10-28T09:43:46.066Z
+- 計画SHA-256：`aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7`
+
+> 別Agentレビューで、文書のみReadyの対象にaidlc/README.mdを明示したAGENTS.md・開発コマンド例に対し、開発・QA運用手順の同じ対象一覧が更新されていない不一致を確認した。
+> 今回の承認済み文書変更を同じ条件で判定できるよう、同手順の対象一覧も揃える。
+> 目的・範囲・受入条件と、CI・Preview/status・レビュー・アプリ変更の正式証拠の条件は維持する。
+
+## FREEZE
+
+- 記録日時：2026-10-28T09:43:48.225Z
+- 計画SHA-256：`aa7c7d0bf48e2569ff31ea871b9c6efce7faf80666503bfc865c4afc94b8c6f7`
+
+> 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
