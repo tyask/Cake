@@ -29,7 +29,7 @@ const navItems: { id: Tab; label: string; icon: string }[] = [
 ];
 
 export function Dashboard({ initialData, initialTab = "home", testAuth = false }: { initialData: BootstrapMetadata; initialTab?: Tab; testAuth?: boolean }) {
-  const { data, selected, selectedTransactions, registerHomeRefresh, tab, loading, refreshing, workspaceSwitching, analyticsRevision, importHistoryRevision, notice, setNotice, refresh, refreshCurrentView, run, switchWorkspace, openTab } = useDashboardController(initialData, initialTab);
+  const { data, selected, selectedTransactions, transactionView, registerHomeRefresh, tab, loading, refreshing, workspaceSwitching, analyticsRevision, importHistoryRevision, notice, setNotice, refresh, refreshCurrentView, run, switchWorkspace, openTab } = useDashboardController(initialData, initialTab);
   const [workspaceModal, setWorkspaceModal] = useState(false);
   const [transactionModal, setTransactionModal] = useState(false);
   return (
@@ -63,7 +63,7 @@ export function Dashboard({ initialData, initialTab = "home", testAuth = false }
         {notice && <div className="notice" role="status">{notice}<button type="button" aria-label="通知を閉じる" onClick={() => setNotice(null)}>×</button></div>}
         {loading && <div className="loading-line" />}
         {selected && tab === "home" && <HomePanel selected={selected} userId={data.user.id} pending={data.pendingInvitations.length} setTab={openTab} add={() => setTransactionModal(true)} run={run} revision={analyticsRevision} suspended={workspaceSwitching} registerRefresh={registerHomeRefresh} refreshAction={<RefreshButton refreshing={refreshing} disabled={loading} onClick={() => { void refreshCurrentView(); }} />} refreshing={refreshing} />}
-        {selectedTransactions && tab === "transactions" && <TransactionsPanel key={selectedTransactions.workspace.id} selected={selectedTransactions} userId={data.user.id} add={() => setTransactionModal(true)} run={run} onRefresh={refreshCurrentView} refreshing={refreshing} />}
+        {selectedTransactions && tab === "transactions" && <TransactionsPanel key={selectedTransactions.workspace.id} selected={selectedTransactions} userId={data.user.id} add={() => setTransactionModal(true)} run={run} onRefresh={refreshCurrentView} refreshing={refreshing} view={transactionView} />}
         {selected && tab === "transactions" && !selectedTransactions && <div role="status"><p>{loading ? "取引明細を読み込んでいます。" : "取引明細を読み込めませんでした。"}</p>{!loading && <button type="button" onClick={() => { void refreshCurrentView(); }}>再試行</button>}</div>}
         {selected && <ImportPanel key={`import:${selected.workspace.id}`} selected={selected} currentUserId={data.user.id} run={run} importHistoryRevision={importHistoryRevision} active={tab === "import"} />}
         {selected && <AnalyticsPanel key={`analytics:${selected.workspace.id}`} workspaceId={selected.workspace.id} currentUserId={data.user.id} revision={analyticsRevision} active={tab === "analytics" && !workspaceSwitching} />}

@@ -1,4 +1,18 @@
 .panel { overflow: hidden; }
+.viewToolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.5rem; margin-bottom: .85rem; }
+.viewModes { display: flex; flex-wrap: wrap; gap: .3rem 1rem; min-width: 0; margin: 0; padding: 0; border: 0; }
+.viewModes label { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; color: var(--ink); font-size: .82rem; cursor: pointer; }
+.viewModes input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--accent); }
+.viewModes:disabled label { color: var(--disabled-ink); cursor: wait; }
+.visuallyHidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.monthNavigation { display: grid; grid-template-columns: 44px minmax(0, 10rem) 44px auto; align-items: center; gap: .35rem; max-width: 100%; }
+.monthNavigation > button { min-width: 44px; min-height: 44px; padding: .3rem; font-size: 1.3rem; }
+.monthNavigation > input { width: 0; min-width: 100%; max-width: 100%; min-height: 44px; padding: .4rem; border: 1px solid var(--line-strong); border-radius: .65rem; color: var(--ink); background: var(--paper); font: inherit; font-size: .85rem; }
+.monthNavigation > .currentMonth { padding: .4rem .65rem; font-size: .78rem; }
+.monthNavigation input:focus-visible, .viewModes input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.viewStatus, .viewError { margin: 0 0 .85rem; font-size: .8rem; line-height: 1.6; }
+.viewStatus { color: var(--muted); }
+.viewError { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; color: var(--red); }
 .table .mobileSummary { display: none; }
 .activeFilters { display: flex; flex-wrap: wrap; gap: .4rem; padding: .7rem 1rem; border-bottom: 1px solid var(--line); }
 .activeFilters button { max-width: 100%; padding: .3rem .55rem; border: 1px solid var(--line-strong); border-radius: 1rem; color: var(--accent); background: var(--accent-soft); font: inherit; font-size: .68rem; text-align: left; overflow-wrap: anywhere; cursor: pointer; }

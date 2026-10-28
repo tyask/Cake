@@ -8,7 +8,7 @@ import type { RunAppAction } from "@/lib/shared/schemas/app-input";
 
 import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/client/autosave";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { transactionActorPatch, transactionDateInput, transactionDateToIso, transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues } from "@/lib/shared/transaction-editing";
 import type { ExpenseClass, TransactionRecord, WorkspaceData, WorkspaceMember } from "@/lib/shared/types";
 import styles from "./transactions-panel.module.css";
@@ -26,6 +26,9 @@ import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } fro
 import { useTransactionFilters } from "./use-transaction-filters";
 import { prepareCategoryChoices, type CategoryChoices } from "./category-select";
 import { TransactionCategoryEditor, type SaveTransactionCategory, type TransactionCategoryHandle } from "./transaction-category-editor";
+import { homeMonth, isHomeMonth } from "@/lib/shared/home-summary";
+import { addMonths } from "@/lib/shared/recurring-payment-calendar";
+import { transactionMatchesView, type TransactionViewSelection } from "@/lib/shared/transaction-view";
 
 type RunAction = RunAppAction;
 type SaveTransaction = (id: string, getValues: () => { values: TransactionValues; base: TransactionValues }, accept: (values: TransactionValues) => void) => Promise<void>;
@@ -39,6 +42,12 @@ type TransactionListProps = {
   run: RunAction;
   onRefresh: (prepare: () => Promise<void>) => Promise<void>;
   refreshing: boolean;
+  view?: {
+    selection: TransactionViewSelection;
+    loading: boolean;
+    error: string | null;
+    onChange: (next: TransactionViewSelection, prepare: () => Promise<void>) => Promise<boolean>;
+  };
 };
 
 const tableColumns = [{ id: "selection", label: "選択" }, ...transactionColumns, { id: "updateStatus", label: "更新状態" }] as const;
@@ -52,7 +61,8 @@ export function TransactionsPanel(props: TransactionListProps) {
   return <TransactionList key={`${props.userId}:${props.selected.workspace.id}`} {...props} />;
 }
 
-function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: TransactionListProps) {
+function TransactionList({ selected, userId, add, run, onRefresh, refreshing, view }: TransactionListProps) {
+  const modeName = useId();
   const [columnFilters, setColumnFilters] = useTransactionFilters(userId, selected.workspace.id);
   const [filterColumn, setFilterColumn] = useState<TransactionColumn | null>(null);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => new Set());
@@ -100,13 +110,17 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
   }, []);
   const categoryChoices = useMemo(() => prepareCategoryChoices(selected.categories), [selected.categories]);
   const metadataPinnedIds = useMemo(() => new Set([...memoPinnedIds, ...categoryPinnedIds]), [memoPinnedIds, categoryPinnedIds]);
-  const matches = useMemo(() => createTransactionFilterMatcher(columnFilters, selected.members), [columnFilters, selected.members]);
+  const selection = view?.selection;
+  const matches = useMemo(() => {
+    const columnMatches = createTransactionFilterMatcher(columnFilters, selected.members);
+    return (item: TransactionRecord) => (!selection || transactionMatchesView(item, selection)) && columnMatches(item);
+  }, [columnFilters, selected.members, selection]);
   const { visible, visibleEditable, outsideFilterIds, checkedIds, hiddenCheckedCount, selectionChecked } = useMemo(
     () => transactionListView(selected.transactions, matches, pinnedIds, metadataPinnedIds, selectedIds,
       item => item.expenseClass === "SHARED" || item.actorUserId === userId),
     [selected.transactions, matches, pinnedIds, metadataPinnedIds, selectedIds, userId],
   );
-  const busy = bulkAction !== null || preparingRefresh || refreshing;
+  const busy = bulkAction !== null || preparingRefresh || refreshing || view?.loading === true;
   const filteredColumns = transactionColumns.filter(column => columnFilters[column.id] !== undefined);
   const rulesEligible = checkedIds.length > 0 && !selected.transactions.some(item => !item.settledAt && selectedIds.has(item.id) && item.type !== "PAYMENT");
 
@@ -209,14 +223,60 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing }: 
     setPreparingRefresh(true);
     try {
       await refreshTransactionEditors([...handles.current.values()], () => queue.current, onRefresh);
+    } catch (error) {
+      setBulkError(error instanceof Error ? error.message : "更新に失敗しました。入力内容は保持しています。");
     } finally {
       refreshBusyRef.current = false;
       setPreparingRefresh(false);
     }
   }
 
+  async function changeView(next: TransactionViewSelection) {
+    if (!view || busy || bulkBusyRef.current || refreshBusyRef.current
+      || (next.mode === view.selection.mode && next.month === view.selection.month)) return;
+    refreshBusyRef.current = true;
+    setPreparingRefresh(true);
+    setBulkError(null);
+    setBulkNotice(null);
+    try {
+      await refreshTransactionEditors([...handles.current.values()], () => queue.current, async prepare => {
+        if (await view.onChange(next, prepare)) {
+          setSelectedIds(new Set());
+          setFilterColumn(null);
+        }
+      });
+    } catch (error) {
+      setBulkError(error instanceof Error ? error.message : "表示を切り替えられませんでした。入力内容は保持しています。");
+    } finally {
+      refreshBusyRef.current = false;
+      setPreparingRefresh(false);
+    }
+  }
+
+  function changeMonth(offset: -1 | 1) {
+    if (!selection || (selection.month === "0001-01" && offset < 0) || (selection.month === "9999-12" && offset > 0)) return;
+    void changeView({ ...selection, month: addMonths(`${selection.month}-01`, offset).slice(0, 7) });
+  }
+
   return <>
     <div className="page-heading"><div><span>TRANSACTIONS</span><h1>取引明細</h1><p>一覧から直接編集できます。配分割合は割合・金額から選べます。欄を離れるかEnterで保存し、選択項目はすぐ保存します。</p></div><div className="page-actions"><RefreshButton refreshing={preparingRefresh || refreshing} disabled={bulkAction !== null} onClick={() => { void requestRefresh(); }} /><button className="primary" disabled={busy} onClick={add}>＋ 明細を追加</button></div></div>
+    {view && <div className={styles.viewToolbar}>
+      <fieldset className={styles.viewModes} disabled={busy}>
+        <legend className={styles.visuallyHidden}>明細の表示モード</legend>
+        <label><input type="radio" name={modeName} value="month" checked={view.selection.mode === "month"} onChange={() => { void changeView({ ...view.selection, mode: "month" }); }} />月単位明細</label>
+        <label><input type="radio" name={modeName} value="unsettled" checked={view.selection.mode === "unsettled"} onChange={() => { void changeView({ ...view.selection, mode: "unsettled" }); }} />未精算明細</label>
+      </fieldset>
+      {view.selection.mode === "month" && <div className={styles.monthNavigation} role="group" aria-label="取引明細の対象月">
+        <button type="button" className="secondary" aria-label="前の月" disabled={busy || view.selection.month === "0001-01"} onClick={() => changeMonth(-1)}>‹</button>
+        <input type="month" aria-label="取引明細の対象年月" min="0001-01" max="9999-12" required disabled={busy} value={view.selection.month} onChange={event => {
+          if (isHomeMonth(event.target.value)) void changeView({ ...view.selection, month: event.target.value });
+        }} />
+        <button type="button" className="secondary" aria-label="次の月" disabled={busy || view.selection.month === "9999-12"} onClick={() => changeMonth(1)}>›</button>
+        <button type="button" className={"secondary " + styles.currentMonth} disabled={busy || view.selection.month === homeMonth()} onClick={() => { void changeView({ ...view.selection, month: homeMonth() }); }}>今月</button>
+      </div>}
+    </div>}
+    {view?.loading && <p className={styles.viewStatus} role="status">明細を読み込んでいます…</p>}
+    {view?.error && <p className={styles.viewError} role="alert">{view.error}<button type="button" className="secondary" disabled={busy} onClick={() => { void requestRefresh(); }}>再試行</button></p>}
     <section className={"panel " + styles.panel} aria-busy={pending > 0 || busy}>
       {filteredColumns.length > 0 && <div className={styles.activeFilters}>{filteredColumns.map(column => {
         const labels = new Map(transactionFilterOptions(selected.transactions, column.id, selected.members, selected.transactions, categoryChoices.byId).map(option => [option.value, option.label]));

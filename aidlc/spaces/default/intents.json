@@ -72,6 +72,15 @@
         "codex/home-server-summary"
       ],
       "recordDir": "aidlc/spaces/default/intents/261028-home-server-summary"
+    },
+    {
+      "id": "261028-transaction-monthly-view",
+      "issue": 170,
+      "branch": "codex/transaction-monthly-view",
+      "branches": [
+        "codex/transaction-monthly-view"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261028-transaction-monthly-view"
     }
   ]
 }
