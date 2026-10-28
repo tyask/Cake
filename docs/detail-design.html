@@ -898,11 +898,29 @@
           <p>選択の保存キーは<code>cake:transaction-view:v1:{encodeURIComponent(userId)}:{encodeURIComponent(workspaceId)}</code>。modeと最後の選択monthをJSONで保存する。未設定・破損時は月単位と日本時間の今月を使い、読込・保存不可でもメモリ内の選択操作を続ける。<code>useSyncExternalStore</code>のSSR snapshotは未復元を表し、復元後に初回取得する。別タブの変更によって編集中の画面を切り替えない。自身の選択は画面往復で保持し、再読み込み時は保存値から復元する。</p>
           <p>ラジオは「月単位明細」「未精算明細」で、月単位だけ前月・type=month・翌月・今月の44px以上の操作を横並びにする。0001-01の前月と9999-12の翌月、今月表示中の今月ボタンを無効にする。month/モード変更は既存の全行freeze → 通常項目・メモ・カテゴリflush → 保存キュー完了を経て実行する。切替先取得成功後だけ表示条件を確定して保存し、行チェックを解除する。保存・取得失敗は元条件と入力を保持し、列フィルターは切替成功時も維持する。</p>
           <p>表示判定は<code>transactionMatchesView</code>の月／未精算条件と既存の列条件をANDし、編集中・保存中・保存失敗の行を既存pinで一時保持する。通常保存・メモ・カテゴリ保存の確定値は同じ<code>updateTransactionRecords</code>で表示結果とキャッシュへ反映する。日時や区分の変更で対象外になった行はpinの間だけ現在datasetに残し、キャッシュは厳密に対象view内へ絞る。通常保存を各月へ配る前に表示結果と全キャッシュの既存行から確定済みメモと最大カテゴリrevisionを照合し、同じ確定レコードを反映する。行が初めて入る移動先の月でも、先行した専用保存の値を保持する。一括削除・ルール適用・清算・取込・workspace削除とカテゴリ削除では対象workspaceの全viewを無効化する。保存開始前や別viewの遅いGETを採用せず、取得失敗と0件を区別して再試行を提供する。</p>
+          <h3 id="transaction-sort-summary">取引明細のソートとフィルタ結果の収支</h3>
+          <p><code>TransactionsPanel</code>はソート対象列と方向を画面内のStateで所有する。対象は<code>transactionColumns</code>の全11列で、初期値は取引日時の降順。別列の最初の操作は昇順、同列の操作は昇順／降順を切り替える。列名をソートボタンにし、既存のフィルタボタンを隣に分ける。対象列には方向の矢印を表示し、列見出しの<code>aria-sort</code>へ<code>ascending</code>／<code>descending</code>、他列へ<code>none</code>を設定する。各ボタンは操作対象と次の方向、または絞り込みを読み上げられる名前で区別する。</p>
+          <p><code>lib/shared/transaction-sort.ts</code>の<code>sortTransactions</code>は確定した表示行から比較用の値を一度ずつ準備し、元配列と明細を変更せず、新しい配列を安定ソートする。同値は昇順・降順とも入力順を維持する。参加者名とカテゴリの経路は現在のmetadataを使い、カテゴリは編集欄と共通の<code>prepareCategoryChoices</code>の結果を渡す。比較規則は次のとおり。</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>列</th><th>比較する値</th></tr></thead>
+            <tbody>
+              <tr><td>取引日時</td><td>秒・ミリ秒を保持した実時刻の数値。</td></tr>
+              <tr><td>金額</td><td>支払いを負、収入を正にした整数円。桁区切り後の文字列では比較しない。</td></tr>
+              <tr><td>配分割合</td><td><code>splitAmounts(1000, splitWeights, members)</code>で正規化した数値を、参加者の表示順に並べたタプル。先頭から異なる値を数値比較し、同じ割合を表す異なる重みは同値とする。</td></tr>
+              <tr><td>取引先・方法・メモ</td><td>保存済み文字列を日本語の自然順（数字部分は数値順）で比較する。</td></tr>
+              <tr><td>支払者／受取者</td><td>参加者IDではなく現在の表示名。参加者情報がなければ明細の担当者名を使う。</td></tr>
+              <tr><td>種別・区分・清算</td><td>「支払い／収入」「個人／共有」「未清算／清算済み／対象外」の表示名を日本語の自然順で比較する。</td></tr>
+              <tr><td>カテゴリ</td><td>大分類／全階層の表示切替によらず全階層の経路名を使う。未分類・利用できないカテゴリ・使用停止の表示も既存の共通ラベルに合わせる。</td></tr>
+            </tbody>
+          </table></div>
+          <p><code>transactionListView</code>は月／未精算の表示条件と列フィルタを各明細で一度だけ判定し、条件外のpin行を含む<code>visible</code>と、条件に一致する保存済み行だけの<code>matching</code>を返す。画面は<code>useMemo</code>で<code>visible</code>から表示順を導き、<code>cashflowSummary(matching)</code>で収入・支出・収支を導く。並び替えは表示順だけを変え、行IDを維持して選択・未保存入力・保存エラー・スマートフォンの展開状態を保持する。フィルタ操作・保存後反映・手動更新・月／モード切替でも並び順を保持し、ユーザー・ワークスペースの変更や画面の再表示で初期化する。Web Storage・API・DBへソート状態を保存しない。</p>
+          <p>上部の小さな合計は「フィルタ結果の収支」のグループ内に収入・支出・収支のラベルと金額を並べ、狭い表示幅では折り返す。対象は<code>matching</code>の明細全額で、共有の配分前金額と全参加者の個人明細、表示範囲内の清算済み明細を含む。既存の<code>cashflowSummary</code>でBigIntの収入・支出を一度ずつ合計し、収支は収入−支出とする。表示は共通の<code>formatCashflow</code>と<code>cashflowClass</code>を使い、収入は＋・緑、支出は−・赤、収支は結果の符号と色、0円は無符号の通常色とする。</p>
+          <p>編集・保存・保存失敗で一時表示する条件外行と、各行が持つ未保存の入力は合計に混ぜない。保存成功の確定値・追加・削除・手動更新・月／モードや列条件の変更に応じて対象と合計を再計算する。条件一致が0件なら収入・支出・収支をすべて0円にする。ソートと合計は既存の取得・保存経路から導き、追加の通信やDB変更は行わない。PCの列別表、狭いPCの折り返し、スマートフォンの要約／詳細のすべてで同じ条件と順序を使う。</p>
           <h3>PC取引明細の折り返し</h3>
-          <p><code>TransactionTable</code>の<code>wrap</code>を取引明細とCSV取込の確認表で有効にする。表のラッパーをinline-size containerとし、PC幅（48rem超）かつ表示領域90rem未満では明細行をflex-wrap、各セルを項目別の幅を基準に配置する。日時・割合・カテゴリ・メモの入力幅を確保し、既存の<code>data-label</code>を項目名として表示する。見出しのフィルタと全選択も折り返し、保存中表示・全幅のエラー行・カテゴリ色線を維持する。幅変更はCSSだけで切り替え、入力部品の再生成やデータ取得・保存は行わない。90rem以上の列別テーブル、48rem以下の要約と詳細展開、定期支払いの表示はそれぞれの既存レイアウトを使う。</p>
+          <p><code>TransactionTable</code>の<code>wrap</code>を取引明細とCSV取込の確認表で有効にする。表のラッパーをinline-size containerとし、PC幅（48rem超）かつ表示領域90rem未満では明細行をflex-wrap、各セルを項目別の幅を基準に配置する。日時・割合・カテゴリ・メモの入力幅を確保し、既存の<code>data-label</code>を項目名として表示する。見出しのソート・フィルタと全選択も折り返し、保存中表示・全幅のエラー行・カテゴリ色線を維持する。幅変更はCSSだけで切り替え、入力部品の再生成やデータ取得・保存は行わない。90rem以上の列別テーブル、48rem以下の要約と詳細展開、定期支払いの表示はそれぞれの既存レイアウトを使う。</p>
           <h3>取引明細のフィルタ保存</h3>
           <p><code>TransactionsPanel</code>は<code>useTransactionFilters(userId, workspaceId)</code>で列ごとの条件を管理し、<code>lib/client/transaction-filter-storage.ts</code>を通して<code>localStorage</code>へ保存・復元する。API・DBへは保存しない。</p>
-          <p>保存用の列条件は文字列配列のまま保持し、条件または参加者の変更時に<code>createTransactionFilterMatcher</code>が列ごとの検索用Setを準備する。同じ列はOR、列間はAND、空選択は0件とする。<code>transactionListView</code>は各明細の条件を一度だけ判定し、編集中・保存失敗・メモ編集中の条件外行を含む表示と条件外表示の印で結果を共用する。表示ID・未清算ID・選択IDの所属をSetで照合して非表示選択数と全選択状態を求め、削除済み・清算済みIDは一括操作対象から除く。絞り込みでは非表示の選択を保持する。</p>
+          <p>保存用の列条件は文字列配列のまま保持し、条件または参加者の変更時に<code>createTransactionFilterMatcher</code>が列ごとの検索用Setを準備する。同じ列はOR、列間はAND、空選択は0件とする。<code>transactionListView</code>は各明細の条件を一度だけ判定し、編集中・保存失敗・メモ編集中の条件外行を含む表示、条件外表示の印、合計用の条件一致行で結果を共用する。表示ID・未清算ID・選択IDの所属をSetで照合して非表示選択数と全選択状態を求め、削除済み・清算済みIDは一括操作対象から除く。絞り込みでは非表示の選択を保持する。</p>
           <p>カテゴリ列の候補ラベルは、カテゴリ一覧の変更時に一度準備する<code>prepareCategoryChoices</code>の結果を編集欄と共有する。候補は明細に存在する<code>categoryId</code>ごとに作り、全階層の経路と旧使用停止カテゴリの「（使用停止）」を表示する。未分類の値は空文字、ラベルは「未分類」とする。親と子は別のIDとして完全一致で判定し、<code>categoryDisplay</code>のroot/fullによらず保存済みIDを使う。候補件数は他列と同様に現在表示中の明細から数える。カテゴリ専用保存の確定値が反映されると条件を再評価し、編集中・保存中・保存失敗の条件外行と非表示選択は既存の保持規則に従う。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>項目</th><th>仕様</th></tr></thead>
@@ -1367,7 +1385,9 @@ BootstrapData extends BootstrapMetadata
               <tr><td>tests/shared/transaction-editing.test.ts / tests/client/transaction-updates.test.ts / tests/shared/transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>
               <tr><td>tests/shared/transaction-view.test.ts / tests/server/transaction-view-handler.test.ts / tests/server/transaction-view-store.test.ts</td><td>月／未精算query、未知・重複値、認証・所属、READ ONLYでの専用SQL、固定JST境界・0001/9999年、清算済み・未来・収入・双方の個人明細と全期間未精算の範囲。</td></tr>
               <tr><td>tests/client/transaction-view-storage.test.ts / tests/client/transaction-view-ui.test.ts</td><td>選択のuser/workspace分離・復元・破損・保存不可、月とモードの操作、キャッシュ通信回数、更新、保存待ち・失敗、行選択解除・列条件保持、PC/mobileのコンパクト表示。</td></tr>
-              <tr><td>tests/shared/transaction-filters.test.ts / tests/client/transaction-filter-storage.test.ts / tests/shared/transaction-list.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗、多数候補・非表示選択・条件外行の保持。</td></tr>
+              <tr><td>tests/shared/transaction-filters.test.ts / tests/client/transaction-filter-storage.test.ts / tests/shared/transaction-list.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗、多数候補・非表示選択・条件外行の保持。条件判定を一回に保ち、合計対象の一致行へ条件外のpin行を含めないことも確認する。</td></tr>
+              <tr><td>tests/shared/transaction-sort.test.ts</td><td>全11列の昇順／降順、日時のミリ秒、符号付き金額、数字入りの日本語表示名、カテゴリの全経路と使用停止、正規化した配分割合、同値の入力順保持と元配列の不変を確認する。</td></tr>
+              <tr><td>tests/client/transaction-sort-summary.test.ts</td><td>PC・狭いPC・スマートフォンで列ソートとフィルタの併用、方向表示、月／未精算条件と列条件に合う合計、0件、確定値の反映、保存失敗と条件外行の除外、選択・入力・展開状態の保持をローカルChromiumで確認する。</td></tr>
               <tr><td>tests/tooling/setup-db.test.ts / scripts/qa/db/migration-scenarios.ts</td><td>新規/一部適用/全適用時の本文読込・SQL往復数、初回Previewの原文照合と同一世代再実行、SQL/履歴のrollback、後続の不正ファイルによる適用停止。隔離PostgreSQLの独立sessionで同じ未適用一覧を取得し、advisory lock待機後の台帳再確認で二重適用を防ぐことを確認する。</td></tr>
               <tr><td>tests/server/merchant-normalization.test.ts / scripts/qa/db/merchant-normalization-scenarios.ts</td><td>固定fixtureによるNFKC・小文字化・空白集合・保持文字の照合、生成列とIndex、既存行の計算と他列の保持、保存・編集・CSV・定期生成・旧版・直接SQLの共通規則を確認する。実DBのmigration・ロック待機・rollbackは隔離環境の検証と区別する。</td></tr>
               <tr><td>tests/shared/import-category-suggestions.test.ts<br />tests/server/import-category-suggestions-handler.test.ts / import-category-suggestions-store.test.ts</td><td>取引先の共通入力制約・元表記の保持・1〜2000件の上限、認証・所属境界、最新30件と31件目の除外、最多と同率時の取引日時/作成日時/ID順、Unicode完全一致、参加者・source・清算状態を含む履歴範囲、有効カテゴリへの絞り込み、重複除去・一括SQL・部分Index・DB無更新を確認する。storeの実SQLはPGliteで検証し、実PreviewのDB/API照会とは区別する。</td></tr>

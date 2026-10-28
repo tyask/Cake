@@ -81,6 +81,15 @@
         "codex/transaction-monthly-view"
       ],
       "recordDir": "aidlc/spaces/default/intents/261028-transaction-monthly-view"
+    },
+    {
+      "id": "261029-transaction-sort-summary",
+      "issue": 172,
+      "branch": "codex/transaction-sort-summary",
+      "branches": [
+        "codex/transaction-sort-summary"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261029-transaction-sort-summary"
     }
   ]
 }

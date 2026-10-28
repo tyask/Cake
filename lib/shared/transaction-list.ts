@@ -1,6 +1,6 @@
 import type { TransactionRecord } from "./types";
 
-/** Share each filter result between visibility, selection counts and row rendering. */
+/** Share each filter result between totals, visibility, selection counts and row rendering. */
 export function transactionListView(
   items: readonly TransactionRecord[],
   matches: (item: TransactionRecord) => boolean,
@@ -9,6 +9,7 @@ export function transactionListView(
   selectedIds: ReadonlySet<string>,
   canEdit: (item: TransactionRecord) => boolean = () => true,
 ) {
+  const matching: TransactionRecord[] = [];
   const visible: TransactionRecord[] = [];
   const visibleEditable: TransactionRecord[] = [];
   const outsideFilterIds = new Set<string>();
@@ -17,6 +18,7 @@ export function transactionListView(
   let checkedVisibleCount = 0;
   for (const item of items) {
     const matched = matches(item);
+    if (matched) matching.push(item);
     const editable = !item.settledAt && canEdit(item);
     if (editable) editableIds.add(item.id);
     if (!matched && !pinnedIds.has(item.id) && !memoPinnedIds.has(item.id)) continue;
@@ -32,5 +34,5 @@ export function transactionListView(
   const hiddenCheckedCount = checkedIds.filter(id => !visibleIds.has(id)).length;
   const allVisibleChecked = visibleEditable.length > 0 && checkedVisibleCount === visibleEditable.length;
   const selectionChecked = allVisibleChecked || (visibleEditable.length === 0 && checkedIds.length > 0);
-  return { visible, visibleEditable, outsideFilterIds, checkedIds, hiddenCheckedCount, selectionChecked };
+  return { matching, visible, visibleEditable, outsideFilterIds, checkedIds, hiddenCheckedCount, selectionChecked };
 }

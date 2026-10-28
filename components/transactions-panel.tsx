@@ -1,6 +1,6 @@
 "use client";
 
-import { formatTransactionAmount, formatJstDateTime, cashflowClass } from "@/lib/shared/display-formatters";
+import { formatTransactionAmount, formatJstDateTime, formatCashflow, cashflowClass } from "@/lib/shared/display-formatters";
 
 import { expenseClassLabels, expenseClasses, transactionActorLabels, transactionTypes, transactionTypeLabels, type TransactionType, MAX_AMOUNT_YEN, MAX_MERCHANT_LENGTH, MAX_METHOD_LENGTH } from "@/lib/shared/domain-values";
 
@@ -22,11 +22,12 @@ import { refreshTransactionEditors } from "@/lib/client/transaction-refresh";
 import { transactionMemoSchema } from "@/lib/shared/schemas/transaction-memo";
 import { createTransactionFilterMatcher, transactionCategoryFilterLabel, transactionColumns, transactionFilterOptions, type TransactionColumn } from "@/lib/shared/transaction-filters";
 import { transactionListView } from "@/lib/shared/transaction-list";
+import { sortTransactions, type TransactionSort } from "@/lib/shared/transaction-sort";
 import { MobileTransactionSummary, TransactionTable, transactionSplitLabel } from "./transaction-table";
 import { useTransactionFilters } from "./use-transaction-filters";
 import { prepareCategoryChoices, type CategoryChoices } from "./category-select";
 import { TransactionCategoryEditor, type SaveTransactionCategory, type TransactionCategoryHandle } from "./transaction-category-editor";
-import { homeMonth, isHomeMonth } from "@/lib/shared/home-summary";
+import { cashflowSummary, homeMonth, isHomeMonth } from "@/lib/shared/home-summary";
 import { addMonths } from "@/lib/shared/recurring-payment-calendar";
 import { transactionMatchesView, type TransactionViewSelection } from "@/lib/shared/transaction-view";
 
@@ -65,6 +66,7 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing, vi
   const modeName = useId();
   const [columnFilters, setColumnFilters] = useTransactionFilters(userId, selected.workspace.id);
   const [filterColumn, setFilterColumn] = useState<TransactionColumn | null>(null);
+  const [sort, setSort] = useState<TransactionSort>({ column: "occurredAt", direction: "desc" });
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => new Set());
   const [memoPinnedIds, setMemoPinnedIds] = useState<Set<string>>(() => new Set());
   const [categoryPinnedIds, setCategoryPinnedIds] = useState<Set<string>>(() => new Set());
@@ -115,11 +117,14 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing, vi
     const columnMatches = createTransactionFilterMatcher(columnFilters, selected.members);
     return (item: TransactionRecord) => (!selection || transactionMatchesView(item, selection)) && columnMatches(item);
   }, [columnFilters, selected.members, selection]);
-  const { visible, visibleEditable, outsideFilterIds, checkedIds, hiddenCheckedCount, selectionChecked } = useMemo(
+  const { matching, visible, visibleEditable, outsideFilterIds, checkedIds, hiddenCheckedCount, selectionChecked } = useMemo(
     () => transactionListView(selected.transactions, matches, pinnedIds, metadataPinnedIds, selectedIds,
       item => item.expenseClass === "SHARED" || item.actorUserId === userId),
     [selected.transactions, matches, pinnedIds, metadataPinnedIds, selectedIds, userId],
   );
+  const sortedVisible = useMemo(() => sortTransactions(visible, sort, selected.members, categoryChoices.byId),
+    [visible, sort, selected.members, categoryChoices.byId]);
+  const totals = useMemo(() => cashflowSummary(matching), [matching]);
   const busy = bulkAction !== null || preparingRefresh || refreshing || view?.loading === true;
   const filteredColumns = transactionColumns.filter(column => columnFilters[column.id] !== undefined);
   const rulesEligible = checkedIds.length > 0 && !selected.transactions.some(item => !item.settledAt && selectedIds.has(item.id) && item.type !== "PAYMENT");
@@ -278,6 +283,14 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing, vi
     {view?.loading && <p className={styles.viewStatus} role="status">明細を読み込んでいます…</p>}
     {view?.error && <p className={styles.viewError} role="alert">{view.error}<button type="button" className="secondary" disabled={busy} onClick={() => { void requestRefresh(); }}>再試行</button></p>}
     <section className={"panel " + styles.panel} aria-busy={pending > 0 || busy}>
+      <div className={styles.filterSummary} role="group" aria-label="フィルタ結果の収支">
+        <span className={styles.summaryCount}>対象 {matching.length}件</span>
+        <dl>{[
+          { label: "収入", value: totals.receiptTotal },
+          { label: "支出", value: -totals.paymentTotal },
+          { label: "収支", value: totals.balanceYen },
+        ].map(({ label, value }) => <div key={label}><dt>{label}</dt><dd className={cashflowClass(value)}>{formatCashflow(value)}</dd></div>)}</dl>
+      </div>
       {filteredColumns.length > 0 && <div className={styles.activeFilters}>{filteredColumns.map(column => {
         const labels = new Map(transactionFilterOptions(selected.transactions, column.id, selected.members, selected.transactions, categoryChoices.byId).map(option => [option.value, option.label]));
         const values = columnFilters[column.id]!.map(value => column.id === "category"
@@ -294,8 +307,26 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing, vi
       {bulkError && <p role="alert" className={styles.bulkError}>{bulkError}</p>}
       {bulkNotice && <p role="status" className={styles.bulkNotice}>{bulkNotice}</p>}
       <p className={styles.note}>相手の個人明細は閲覧のみです。区分のルールは支払いのみが対象です。清算済みの明細もカテゴリとメモを編集できます。カテゴリは選択時、メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。全選択チェックを外すと非表示の選択も解除します。編集中の明細は編集を終えるまで表示します。</p>
-      <TransactionTable wrap columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => <th key={column.id}><button type="button" className={styles.columnHeader} data-active={columnFilters[column.id] !== undefined} disabled={busy} aria-label={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}><span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span><span aria-hidden="true">{columnFilters[column.id] !== undefined ? "●" : "▾"}</span></button></th>)}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
-        {visible.map((item) => <EditableTransaction key={item.id} item={item} currentUserId={userId} members={selected.members} categoryChoices={categoryChoices} categoryDisplay={categoryDisplay} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} onDelete={() => { void performBulk("deleteTransactions", [item.id]); }} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} onSaveCategory={saveCategory} onCategoryPin={onCategoryPin} />)}
+      <TransactionTable wrap columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => {
+        const active = sort.column === column.id;
+        const nextDirection = active && sort.direction === "asc" ? "desc" : "asc";
+        return <th key={column.id} aria-sort={active ? sort.direction === "asc" ? "ascending" : "descending" : "none"}>
+          <div className={styles.columnControls}>
+            <button type="button" className={styles.columnHeader} data-active={active} disabled={busy}
+              aria-label={`${column.label}で${nextDirection === "asc" ? "昇順" : "降順"}に並べ替え`}
+              onClick={() => setSort({ column: column.id, direction: nextDirection })}>
+              <span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span>
+              <span aria-hidden="true">{active ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span>
+            </button>
+            <button type="button" className={styles.columnFilter} data-active={columnFilters[column.id] !== undefined} disabled={busy}
+              aria-label={column.label + "で絞り込み"} title={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M2 3h12L9.5 8v4l-3 1V8L2 3Z" /></svg>
+              {columnFilters[column.id] !== undefined && <span className={styles.filterDot} aria-hidden="true">●</span>}
+            </button>
+          </div>
+        </th>;
+      })}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
+        {sortedVisible.map((item) => <EditableTransaction key={item.id} item={item} currentUserId={userId} members={selected.members} categoryChoices={categoryChoices} categoryDisplay={categoryDisplay} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} onDelete={() => { void performBulk("deleteTransactions", [item.id]); }} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} onSaveCategory={saveCategory} onCategoryPin={onCategoryPin} />)}
       </TransactionTable>
       {visible.length === 0 && <p className={styles.empty}>条件に一致する明細がありません。</p>}
     </section>

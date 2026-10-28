@@ -1,0 +1,57 @@
+{
+  "protocol": "cake-intent/v1",
+  "id": "261029-transaction-sort-summary",
+  "repository": "tyask/Cake",
+  "issue": 172,
+  "issueUrl": "https://github.com/tyask/Cake/issues/172",
+  "branch": "codex/transaction-sort-summary",
+  "branches": [
+    "codex/transaction-sort-summary"
+  ],
+  "recordDir": "aidlc/spaces/default/intents/261029-transaction-sort-summary",
+  "phase": "Construction",
+  "status": "frozen",
+  "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa",
+  "approval": {
+    "actor": "このチャットの利用者",
+    "reply": "ok\n",
+    "recordedAt": "2026-10-28T15:05:56.822Z",
+    "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa",
+    "planFile": "plans/520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa.md"
+  },
+  "frozen": true,
+  "createdAt": "2026-10-28T15:05:55.520Z",
+  "updatedAt": "2026-10-28T15:11:37.843Z",
+  "events": [
+    {
+      "action": "CREATED",
+      "recordedAt": "2026-10-28T15:05:55.520Z",
+      "note": "Issueに対応する計画を記録した。承認は別途記録する。",
+      "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa"
+    },
+    {
+      "action": "APPROVE",
+      "recordedAt": "2026-10-28T15:05:56.822Z",
+      "note": "承認者：このチャットの利用者\n承認の記録日時：2026-10-28T15:05:56.822Z\n承認対象本文：[plans/520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa.md](../plans/520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa.md)\n利用者の実際の回答：\nok",
+      "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T15:05:57.496Z",
+      "note": "# Issue本文の承認記録\n\n- Issue URL: https://github.com/tyask/Cake/issues/172\n- 承認者: このチャットの利用者\n- 実際の承認発言: お願いします\n- 記録日時: 2026-10-28T15:05:41.415174+00:00\n- 提示順序: 開発計画を提示 → 利用者が「ok」と計画承認 → Issue #172を作成・再取得して本文全文とURLを提示 → 利用者が「お願いします」とIssue本文を承認。\n\n## 承認対象の保存済みIssue本文\n\n## 目的・背景\n\n取引明細を探しやすくし、絞り込んだ結果の収支を確認できるようにする。\n現在は各カラムのフィルタがあるが、ソートとフィルタ結果の合計表示はない。\n\n利用者の依頼：\n\n- カラムでのソート。\n- フィルタした明細での収入・支出・収支の合計値の表示（上のほうに小さめに）。\n\n期待する表示例：一覧上部に「収入 +¥10,000 ／ 支出 −¥3,000 ／ 収支 +¥7,000」を小さく表示する。\n\n## 対象範囲・対象外\n\n対象範囲：\n\n- 取引明細の全11列で昇順・降順のソートを提供する。\n  列名をソート操作にし、隣にフィルタボタンを配置する。\n- フィルタ条件に一致する保存済み明細の収入・支出・収支を一覧上部へ小さく表示する。\n- PC・狭いPC・スマートフォンで操作できるようにする。\n- 基本・詳細設計書を更新する。\n\n主な実装方針・維持する挙動：\n\n- ソートと集計はクライアント側の表示処理として追加し、既存の収支計算・金額表示を再利用する。\n- 並び順は画面内の更新では維持し、再表示時は初期の取引日時降順に戻す。\n- ソートとフィルタを併用でき、選択・未保存入力・保存エラーを保持する。\n- 合計は配分前の明細金額を使い、編集継続のため一時表示される条件外行は除外する。\n\n対象外：\n\n- API・DBの変更。\n- 他画面へのソート追加。\n- 並び順の永続保存。\n\n採用する工程・作業単位：\n\n1. 計画承認後にIssueを作成し、保存済み本文を提示してIssue本文の承認を得る。\n2. Issue承認後に専用branch/worktreeとIntentを作成し、両方の承認を記録する。\n3. 既存画面の拡張として設計・実装・テストを一案件で進め、基本・詳細設計書を更新する。\n   独立した試作工程は省く。\n4. 自己レビュー・commit・別Agentレビューと指摘対応を行う。\n5. 最終SHAでローカル検証を行い、PR・CI・正式Preview検証を経てReadyにする。\n6. 利用者によるmerge後、既存Actionsで稼働・資源cleanupを確認する。\n\n検証方法：\n\n- 数値順・同値順・条件外行の除外・0件・保存後の再集計を自動テストで確認する。\n- PC・狭いPC・スマートフォンでソート、フィルタとの併用、合計表示と既存操作を確認する。\n- 別Agentレビュー、最終SHAのlint・型チェック・全テスト・build、CI・正式Preview検証を行う。\n- merge後の稼働・資源cleanupは既存Actionsで確認する。\n\n未確定事項・前提：\n\n- 本文はチャットで提示し、利用者が「ok」と承認した開発計画に基づく。\n- 並び順の永続保存は今回の対象外とする。\n- IntentとPRはIssue本文の承認後に作成するため、現時点では未作成。\n\n## 受入条件\n\n- [ ] AC-01: 全11列で昇順・降順を切り替えられ、対象列と方向を矢印で表示する。\n  列名をソート操作にし、隣にフィルタボタンを配置する。\n- [ ] AC-02: 初期は現在と同じ取引日時の降順。\n  日時・金額・配分割合は数値で、その他は表示名の日本語順で比較する。\n  金額は支出を負、収入を正として比較し、同値は元の順序を保つ。\n- [ ] AC-03: 一覧上部に「収入 +¥10,000 ／ 支出 −¥3,000 ／ 収支 +¥7,000」のように小さく表示する。\n  フィルタ変更に連動し、該当なしはすべて0円にする。\n- [ ] AC-04: 条件に一致する保存済み明細の全額を集計する。\n  共有・個人・清算済みも含め、配分前の金額を使う。\n  編集継続のため一時表示される条件外の行は除外し、保存成功・追加・削除・更新に追従する。\n- [ ] AC-05: ソートとフィルタを併用でき、選択・未保存入力・保存エラーを保持する。\n  PC・狭いPC・スマートフォンで操作できる。\n\n## 関連記録\n\n- 承認済み計画: このチャットで提示した開発計画。利用者の承認発言は「ok」。\n- Intent: Issue本文の承認後に作成・関連付ける。\n- PR: 未作成。\n- [基本設計](https://github.com/tyask/Cake/blob/main/docs/design.html)\n- [詳細設計](https://github.com/tyask/Cake/blob/main/docs/detail-design.html)\n- [開発・QA運用手順](https://github.com/tyask/Cake/blob/main/docs/development-workflow.md)\n- [AI-DLC開発フロー](https://github.com/tyask/Cake/blob/main/docs/aidlc-workflow.md)\n\n## 進捗\n\n- 状況: 実行中。\n- 完了: 既存仕様・実装の調査、開発計画の提示、利用者による計画承認。\n- 現在の工程: Issue本文の提示・承認。\n- 未着手: 専用branch/worktree・Intent作成、実装、テスト、レビュー、PR・CI・正式Preview検証、Ready。\n- 次の作業: 保存済みIssue本文とURLを提示し、利用者によるIssue本文の承認を得る。\n",
+      "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T15:11:28.684Z",
+      "note": "# 実装・自己レビュー\n\n- 完了: 全11列の単一カラムソート、列名/フィルタ操作の分離、方向矢印とaria-sort、上部の対象件数・収入・支出・収支。\n- 完了: matchingとvisibleを分け、月/未精算の表示範囲と列フィルタに一致する保存済み明細だけをBigIntで集計。条件外pin行とdraftを除外。\n- 完了: 共通ソート・一致行の業務契約テスト、専用Chromiumフロー、基本/詳細設計書の更新。\n- 完了: 元配列非破壊・同値順、選択/draft/error/展開保持、共有/個人/清算済み・配分前全額、API/DB変更なしを自己レビュー。\n- 完了: 対象sharedテスト、既存のレイアウト/収支回帰22件、専用ブラウザテスト6件、lint、文書参照確認。型チェックの新規テストBigIntリテラルをES2017互換へ修正。\n- 完了: 1920/1000/390/320pxの画像を作成。親AgentがPC/mobile画像を確認し、合計のコンパクト表示と操作を確認。\n- 判断: 最新origin/mainでは月単位/未精算ビューが追加済み。既存matchesのAND条件を共用し、その表示範囲も集計へ適用。承認済み計画の範囲で既存操作を維持。\n- 判断: 文字列は日本語自然順、カテゴリは全経路、配分は表示する0.1%の正規化値を参加者表示順に比較。比較値は行ごとに一度準備し、同値の元順を両方向で保持。\n- 実行中: Construction。記録をfreezeしてcommit後、別Agentレビュー・最終SHAの全体検証・PR/CI/正式Preview検証へ進む。\n- 未着手: Ready、利用者によるmerge、merge後の稼働・専用資源cleanup確認。\n- 次の記録先: freeze以後のレビュー/検証/Ready結果はPR・Issue・Actionsへ残し、Intentを変更しない。修正が必要な場合はreopenして再freeze・新SHAの再レビューを行う。\n",
+      "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T15:11:37.843Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa"
+    }
+  ]
+}
