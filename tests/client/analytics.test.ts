@@ -8,6 +8,7 @@ import { chromium, type Route } from "playwright";
 import { resolveAnalyticsPeriods, type AnalyticsDataset, type AnalyticsQuery } from "../../lib/shared/analytics";
 import { formatCashflow, formatYen } from "../../lib/shared/display-formatters";
 import type { TransactionRecord } from "../../lib/shared/types";
+import { analyticsFiltersStorageKey } from "../../lib/client/analytics-filter-storage";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const otherWorkspaceId = "22222222-2222-4222-8222-222222222222";
@@ -67,7 +68,7 @@ function detailTransactions(): TransactionRecord[] {
   ];
 }
 
-test("集計はユーザー・共有費・個人費・収入をローカルで切り替え、期間と取得世代だけをAPIへ送る", async t => {
+test("集計は保存条件を復元し、ユーザー・共有費・個人費・収入をローカルで切り替え、期間と取得世代だけをAPIへ送る", async t => {
   const bundle = await build({ entryPoints: ["tests/client/fixtures/analytics.tsx"], bundle: true, write: false,
     outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
   const server = createServer((req, res) => {
@@ -81,7 +82,9 @@ test("集計はユーザー・共有費・個人費・収入をローカルで�
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(done => server.close(() => done())); throw error; });
 
-  async function fixture(width = 1440, initialActive = true, currentUserId = "a") {
+  // Existing calculation scenarios explicitly restore the current user's selection.
+  // Persistence/default scenarios pass null to start without any saved selection.
+  async function fixture(width = 1440, initialActive = true, currentUserId = "a", stored: string | null = JSON.stringify({ memberIds: [currentUserId] }), storageUnavailable = false) {
     const context = await browser.newContext({ viewport: { width, height: width <= 768 ? 844 : 1000 }, isMobile: width <= 768, hasTouch: width <= 768, reducedMotion: "reduce", serviceWorkers: "block" });
     const page = await context.newPage(), requests: Route[] = [], urls: string[] = [], errors: string[] = [];
     const detailRequests: Route[] = [], detailUrls: string[] = [];
@@ -99,7 +102,16 @@ test("集計はユーザー・共有費・個人費・収入をローカルで�
         detailUrls.push(route.request().url()); detailRequests.push(route);
       } else await route.continue();
     });
-    await page.addInitScript(({ workspaceId, active, currentUserId }) => { window.analyticsProps = { workspaceId, currentUserId, revision: 0, active }; window.ignoreAnalyticsAbort = true; }, { workspaceId, active: initialActive, currentUserId });
+    const storageKeys = [workspaceId, otherWorkspaceId].map(id => analyticsFiltersStorageKey(currentUserId, id));
+    await page.addInitScript(({ workspaceId, active, currentUserId, stored, storageKeys, storageUnavailable }) => {
+      window.analyticsProps = { workspaceId, currentUserId, revision: 0, active };
+      window.ignoreAnalyticsAbort = true;
+      if (stored !== null && !sessionStorage.getItem("analytics-fixture-seeded")) {
+        storageKeys.forEach(key => localStorage.setItem(key, stored));
+        sessionStorage.setItem("analytics-fixture-seeded", "true");
+      }
+      if (storageUnavailable) Object.defineProperty(window, "localStorage", { get() { throw new DOMException("Storage disabled", "SecurityError"); } });
+    }, { workspaceId, active: initialActive, currentUserId, stored, storageKeys, storageUnavailable });
     await page.goto(origin);
     await page.waitForFunction(() => !!window.updateAnalytics);
     async function take() {
@@ -136,6 +148,190 @@ test("集計はユーザー・共有費・個人費・収入をローカルで�
     return { context, page, requests, urls, errors, take, reply, total, stable, chartOrder, detailRequests, detailUrls, takeDetails, replyDetails };
   }
   try {
+    await t.test("別タブの保存変更を復元し、表示条件・巨大な階層値は通信せず確定期間だけ再取得する", async () => {
+      const f = await fixture(1440, true, "a", null);
+      try {
+        await f.reply(await f.take()); await f.total("−￥150");
+        const peer = await f.context.newPage();
+        await peer.route("**/*", route => route.fulfill({ contentType: "text/html", body: "<html><body>条件保存用タブ</body></html>" }));
+        await peer.goto(`${origin}/storage-peer`);
+        const key = analyticsFiltersStorageKey("a", workspaceId);
+        await peer.evaluate(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+          key: analyticsFiltersStorageKey("a", otherWorkspaceId),
+          value: { memberIds: [], period: { period: "month", month: "2026-09" } },
+        });
+        await f.stable(); await f.total("−￥150");
+        assert.equal(f.urls.length, 1, "別家計の保存イベントは無視する");
+        assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), true);
+
+        const selection = { memberIds: ["b"], includeIncome: false, expenseClasses: ["SHARED"], depth: Number.MAX_SAFE_INTEGER };
+        await peer.evaluate(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key, value: selection });
+        await f.total("−￥40");
+        const depth = f.page.getByLabel("カテゴリの細かさ", { exact: true });
+        assert.equal(await depth.inputValue(), String(Number.MAX_SAFE_INTEGER));
+        assert.equal(await depth.locator("option").count(), 4, "巨大な保存階層値から無数の選択肢を生成しない");
+        assert.equal(await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).isChecked(), false);
+        assert.equal(await f.page.getByRole("checkbox", { name: "収入", exact: true }).isChecked(), false);
+        assert.equal(f.urls.length, 1, "表示条件のstorageイベントは取得済みデータだけで反映する");
+
+        const period = { period: "range", from: "2026-07-10", to: "2026-07-20" };
+        await peer.evaluate(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key, value: { ...selection, period } });
+        const changed = await f.take();
+        assert.deepEqual(queryFromRoute(changed), { workspaceId, ...period });
+        await f.reply(changed); await f.total("−￥40");
+        assert.equal(await f.page.getByLabel("開始日", { exact: true }).inputValue(), period.from);
+        assert.equal(await f.page.getByLabel("終了日", { exact: true }).inputValue(), period.to);
+        await f.stable(); assert.equal(f.urls.length, 2, "別タブの確定期間変更で1回だけ取得する");
+
+        await peer.evaluate(() => localStorage.clear());
+        const cleared = await f.take();
+        assert.deepEqual(queryFromRoute(cleared), { workspaceId, period: "month", month: "2026-10" });
+        await f.reply(cleared); await f.total("−￥150");
+        assert.equal(await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).isChecked(), true);
+        assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), true);
+        assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
+    for (const width of [1440, 390]) {
+      await t.test(`${width}px: 未保存なら共有家計の両方を選び、個人家計では本人を選ぶ`, async () => {
+        const f = await fixture(width, true, "a", null);
+        try {
+          await f.reply(await f.take()); await f.total("−￥150");
+          assert.equal(await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).isChecked(), true);
+          assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), true);
+          assert.equal(await f.page.getByTestId("analytics-income").textContent(), "+￥700");
+          await f.page.evaluate(id => window.updateAnalytics({ workspaceId: id }), otherWorkspaceId);
+          const request = await f.take(), personal = dataset(queryFromRoute(request));
+          personal.members = personal.members.filter(member => member.id === "a");
+          personal.buckets = personal.buckets.filter(bucket => bucket.memberId === "a");
+          personal.receiptBuckets = personal.receiptBuckets.filter(bucket => bucket.memberId === "a");
+          await f.reply(request, personal); await f.total("−￥80");
+          assert.equal(await f.page.getByRole("group", { name: "表示対象", exact: true }).getByRole("checkbox").count(), 1);
+          assert.equal(await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).isChecked(), true);
+          assert.deepEqual(f.errors, []);
+        } finally { await f.context.close(); }
+      });
+
+      await t.test(`${width}px: 月・表示対象・収支・カテゴリ・細かさを再読込で復元し家計と利用者で分ける`, async () => {
+        const f = await fixture(width, true, "a", null);
+        try {
+          await f.reply(await f.take()); await f.total("−￥150");
+          await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).uncheck();
+          await f.page.getByRole("checkbox", { name: "収入", exact: true }).uncheck();
+          await f.page.getByRole("checkbox", { name: "個人費", exact: true }).uncheck();
+          await f.page.getByLabel("カテゴリの細かさ", { exact: true }).selectOption("all");
+          await f.page.locator("summary").filter({ hasText: "集計に含めるカテゴリ" }).click();
+          await f.page.getByRole("button", { name: "すべて解除", exact: true }).click();
+          await f.page.getByRole("group", { name: "集計に含めるカテゴリ", exact: true }).getByRole("checkbox", { name: "食費 › スーパー", exact: true }).check();
+          await f.total("−￥40");
+          assert.equal(f.urls.length, 1, "表示フィルタの保存で追加通信しない");
+          await f.page.getByLabel("集計する月", { exact: true }).fill("2026-09");
+          await f.reply(await f.take()); await f.total("−￥40");
+          await f.page.reload();
+          const restored = await f.take();
+          assert.deepEqual(queryFromRoute(restored), { workspaceId, period: "month", month: "2026-09" });
+          await f.reply(restored); await f.total("−￥40");
+          assert.equal(f.urls.length, 3, "再読込は復元した月の要求だけを1回行う");
+          assert.equal(await f.page.getByLabel("集計する月", { exact: true }).inputValue(), "2026-09");
+          assert.equal(await f.page.getByLabel("カテゴリの細かさ", { exact: true }).inputValue(), "all");
+          assert.equal(await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).isChecked(), false);
+          assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), true);
+          assert.equal(await f.page.getByRole("checkbox", { name: "収入", exact: true }).isChecked(), false);
+          assert.equal(await f.page.getByRole("checkbox", { name: "個人費", exact: true }).isChecked(), false);
+          assert.match(await f.page.locator("summary").filter({ hasText: "集計に含めるカテゴリ" }).textContent() ?? "", /1/);
+          await f.page.evaluate(id => window.updateAnalytics({ workspaceId: id }), otherWorkspaceId);
+          await f.reply(await f.take()); await f.total("−￥150");
+          assert.equal(await f.page.getByLabel("集計する月", { exact: true }).inputValue(), "2026-10");
+          await f.page.getByRole("checkbox", { name: "個人費", exact: true }).uncheck(); await f.total("−￥100");
+          await f.page.evaluate(id => window.updateAnalytics({ workspaceId: id }), workspaceId);
+          const returned = await f.take();
+          assert.equal(queryFromRoute(returned).period, "month");
+          assert.deepEqual(queryFromRoute(returned), { workspaceId, period: "month", month: "2026-09" });
+          await f.reply(returned); await f.total("−￥40");
+          await f.page.evaluate(() => window.updateAnalytics({ currentUserId: "b" }));
+          await f.reply(await f.take()); await f.total("−￥150");
+          await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck(); await f.total("−￥80");
+          await f.page.evaluate(() => window.updateAnalytics({ currentUserId: "a" }));
+          await f.reply(await f.take()); await f.total("−￥40");
+          assert.deepEqual(f.errors, []);
+        } finally { await f.context.close(); }
+      });
+
+      await t.test(`${width}px: 適用済み期間だけ復元し未適用・不正な日付で置換しない`, async () => {
+        const f = await fixture(width, true, "a", null);
+        try {
+          await f.reply(await f.take()); await f.total("−￥150");
+          await f.page.getByLabel("集計する月", { exact: true }).fill("2026-09");
+          await f.reply(await f.take()); await f.total("−￥150");
+          await f.page.getByLabel("集計する期間", { exact: true }).selectOption("range");
+          await f.page.getByLabel("開始日", { exact: true }).fill("2026-07-10");
+          await f.page.getByLabel("終了日", { exact: true }).fill("2026-07-20");
+          await f.stable(); assert.equal(f.urls.length, 2, "未適用の期間は通信しない");
+          await f.page.reload();
+          const month = await f.take();
+          assert.deepEqual(queryFromRoute(month), { workspaceId, period: "month", month: "2026-09" });
+          await f.reply(month); await f.total("−￥150");
+          await f.page.getByLabel("集計する月", { exact: true }).fill("2026-11");
+          await f.page.getByRole("alert").filter({ hasText: "未来の月は選択できません。" }).waitFor();
+          await f.stable(); assert.equal(f.urls.length, 3, "不正な月でAPIを要求しない");
+          await f.page.getByLabel("集計する期間", { exact: true }).selectOption("range");
+          await f.page.getByLabel("開始日", { exact: true }).fill("2026-07-10");
+          await f.page.getByLabel("終了日", { exact: true }).fill("2026-07-20");
+          await f.page.getByRole("button", { name: "この期間で表示", exact: true }).click();
+          await f.reply(await f.take()); await f.total("−￥150");
+          await f.page.getByLabel("開始日", { exact: true }).fill("2026-07-21");
+          await f.page.getByRole("checkbox", { name: "収入", exact: true }).uncheck();
+          await f.page.reload();
+          const range = await f.take();
+          assert.deepEqual(queryFromRoute(range), { workspaceId, period: "range", from: "2026-07-10", to: "2026-07-20" });
+          await f.reply(range); await f.total("−￥150");
+          assert.equal(await f.page.getByLabel("開始日", { exact: true }).inputValue(), "2026-07-10");
+          assert.equal(await f.page.getByLabel("終了日", { exact: true }).inputValue(), "2026-07-20");
+          assert.equal(await f.page.getByRole("checkbox", { name: "収入", exact: true }).isChecked(), false);
+          assert.equal(f.urls.length, 5, "各適用と再読込だけ要求する");
+          assert.deepEqual(f.errors, []);
+        } finally { await f.context.close(); }
+      });
+
+      await t.test(`${width}px: ユーザー・収支・カテゴリの全解除を空選択として保存する`, async () => {
+        const f = await fixture(width, true, "a", null);
+        try {
+          await f.reply(await f.take()); await f.total("−￥150");
+          await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).uncheck();
+          await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).uncheck();
+          await f.page.reload(); await f.reply(await f.take());
+          await f.page.getByText("表示対象のユーザーを1人以上選んでください。", { exact: true }).waitFor();
+          assert.equal(await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).isChecked(), false);
+          assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), false);
+          await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).check();
+          for (const name of ["収入", "共有費", "個人費"]) await f.page.getByRole("checkbox", { name, exact: true }).uncheck();
+          await f.page.reload(); await f.reply(await f.take());
+          await f.page.getByText("収支に含める内容を1つ以上選んでください。", { exact: true }).waitFor();
+          for (const name of ["収入", "共有費", "個人費"]) assert.equal(await f.page.getByRole("checkbox", { name, exact: true }).isChecked(), false);
+          await f.page.getByRole("checkbox", { name: "共有費", exact: true }).check();
+          await f.page.locator("summary").filter({ hasText: "集計に含めるカテゴリ" }).click();
+          await f.page.getByRole("button", { name: "すべて解除", exact: true }).click();
+          await f.page.reload(); await f.reply(await f.take());
+          await f.page.getByText("集計に含めるカテゴリを1つ以上選んでください。", { exact: true }).waitFor();
+          assert.equal(await f.page.getByTestId("analytics-total").count(), 0);
+          assert.deepEqual(f.errors, []);
+        } finally { await f.context.close(); }
+      });
+
+      for (const unavailable of [false, true]) await t.test(`${width}px: ${unavailable ? "保存不可" : "壊れた保存値"}でも既定値で表示し条件を操作できる`, async () => {
+        const f = await fixture(width, true, "a", unavailable ? null : "{broken", unavailable);
+        try {
+          await f.reply(await f.take()); await f.total("−￥150");
+          assert.equal(await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).isChecked(), true);
+          assert.equal(await f.page.getByRole("checkbox", { name: "Bさん", exact: true }).isChecked(), true);
+          await f.page.getByRole("checkbox", { name: "Aさん", exact: true }).uncheck(); await f.total("−￥70");
+          await f.page.getByRole("checkbox", { name: "個人費", exact: true }).uncheck(); await f.total("−￥40");
+          assert.equal(f.urls.length, 1);
+          assert.deepEqual(f.errors, []);
+        } finally { await f.context.close(); }
+      });
+    }
     for (const width of [1440, 390]) await t.test(`${width}px: 内訳のカテゴリ名から期間・表示条件に合う明細を開き、閉じると操作元へ戻る`, async () => {
       const f = await fixture(width);
       try {
@@ -599,7 +795,7 @@ test("集計はユーザー・共有費・個人費・収入をローカルで�
       } finally { await f.context.close(); }
     });
 
-    await t.test("カテゴリは取得中・期間変更・再入場でも保持し、workspace切替で初期化する", async () => {
+    await t.test("カテゴリは取得中・期間変更・再入場でも保持し、別workspaceではその家計の保存条件を使う", async () => {
       const f = await fixture();
       try {
         await f.reply(await f.take()); await f.total("−￥80");
@@ -900,7 +1096,7 @@ test("集計はユーザー・共有費・個人費・収入をローカルで�
       } finally { await f.context.close(); }
     });
 
-    await t.test("相手のアカウントでも自分の配分と個人費を初期表示する", async () => {
+    await t.test("相手のアカウントでも保存済み本人選択から自分の配分と個人費を復元する", async () => {
       const f = await fixture(390, true, "b");
       try {
         await f.reply(await f.take()); await f.total("−￥70");

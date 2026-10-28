@@ -249,7 +249,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
         && [...dataset.buckets, ...dataset.receiptBuckets].every(bucket => dataset.members.some(member => member.id === bucket.memberId))
         && dataset.buckets.some(bucket => bucket.expenseClass === 'PERSONAL' && bucket.memberId !== `test-user-${item.user}`));
       const memberGroup = page.getByRole('group', { name: '表示対象', exact: true });
-      const selectedMembers = new Set([`test-user-${item.user}`]);
+      const selectedMembers = new Set(dataset.members.map(member => member.id));
       const selectMembers = async (memberIds: readonly string[]) => {
         selectedMembers.clear();
         for (const id of memberIds) selectedMembers.add(id);
@@ -306,6 +306,10 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
         requireCondition(await page.locator('#analytics-trend-heading').evaluate(element =>
           Boolean(element.compareDocumentPosition(document.getElementById('analytics-composition-heading')!) & Node.DOCUMENT_POSITION_FOLLOWING)));
       };
+      await assertSelectedCashflow(['SHARED', 'PERSONAL']);
+      await assertSelectedTrend();
+      check('analytics-default-all-members-selected-and-total-cashflow');
+      await selectMembers([`test-user-${item.user}`]);
       requireCondition(await page.getByTestId('analytics-total').textContent() === formatCashflow(-ownTotal));
       await assertSelectedCashflow(['SHARED', 'PERSONAL']);
       await page.getByRole('checkbox', { name: '共有費', exact: true }).uncheck();
@@ -416,10 +420,34 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
         && !await foodCheckbox.isChecked());
       await assertSelectedCashflow(['SHARED', 'PERSONAL'], unclassified);
       await assertSelectedTrend(BigInt(0), ['SHARED', 'PERSONAL'], unclassified);
+      check('analytics-category-selection-preserved-between-tabs');
+      await page.getByRole('checkbox', { name: '共有費', exact: true }).uncheck();
+      await page.getByRole('checkbox', { name: '収入', exact: true }).uncheck();
+      await page.reload({ waitUntil: 'networkidle', timeout: 60_000 });
+      await page.locator('.app-shell').waitFor();
+      await page.locator(item.mobile ? '.mobile-header select' : '.workspace-picker select').selectOption(workspaceId);
+      await navigate('集計');
+      await page.getByTestId('analytics-total').waitFor();
+      for (const member of dataset.members) requireCondition(
+        await memberGroup.getByRole('checkbox', { name: member.name, exact: true }).isChecked() === selectedMembers.has(member.id));
+      requireCondition(!await page.getByRole('checkbox', { name: '収入', exact: true }).isChecked()
+        && !await page.getByRole('checkbox', { name: '共有費', exact: true }).isChecked()
+        && await page.getByRole('checkbox', { name: '個人費', exact: true }).isChecked()
+        && await page.getByRole('combobox', { name: 'カテゴリの細かさ', exact: true }).inputValue() === 'all'
+        && await page.getByTestId('analytics-income').count() === 0
+        && await page.getByTestId('analytics-balance').count() === 0
+        && await page.getByTestId('analytics-total').textContent() === formatCashflow(-sumAnalytics(dataset.buckets, 'current', ['PERSONAL'], unclassified)));
+      await openCategories();
+      requireCondition(await categoryGroup.getByRole('checkbox', { name: '未分類', exact: true }).isChecked()
+        && !await foodCheckbox.isChecked());
+      await screenshot('analytics-restored-filters');
+      check('analytics-member-income-class-category-depth-restored-after-reload');
+      await page.getByRole('checkbox', { name: '収入', exact: true }).check();
+      await page.getByRole('checkbox', { name: '共有費', exact: true }).check();
+      await assertSelectedCashflow(['SHARED', 'PERSONAL'], unclassified);
       await chooseAllCategories();
       await page.getByRole('combobox', { name: 'カテゴリの細かさ', exact: true }).selectOption('1');
       await assertSelectedCashflow(['SHARED', 'PERSONAL']);
-      check('analytics-category-selection-preserved-between-tabs');
       stage = 'settings'; await navigate('設定'); await screenshot('settings'); check('settings-navigation');
       stage = 'transactions'; await navigate('取引明細');
       stage = 'create';
