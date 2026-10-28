@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-10-28T15:05:55.520Z",
-  "updatedAt": "2026-10-28T15:11:37.843Z",
+  "updatedAt": "2026-10-28T15:16:26.804Z",
   "events": [
     {
       "action": "CREATED",
@@ -50,6 +50,24 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-10-28T15:11:37.843Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-28T15:15:43.476Z",
+      "note": "別AgentレビューでP3の仕様不一致を1件確認し採用した。\nメモのソートが空文字をフィルタ候補の「（空白）」へ置換していたため、保存済み文字列の日本語自然順と異なる。\nメモ列はitem.memoをそのまま比較し、空文字・空白・記号入りメモの順序回帰を追加する。\n承認済み計画の変更はなく、実装修正と回帰テスト後に再freeze・commitし、新HEADで再レビューと最終検証を行う。\n",
+      "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T15:16:26.430Z",
+      "note": "- 完了: 別AgentレビューのP3指摘1件を採用し、メモ列はフィルタ候補ラベルではなく保存済みのitem.memoを直接比較するよう修正した。\n- 完了: 空文字・空白・記号・数字・日本語を含むメモの昇降順回帰を追加し、ソートの対象テスト11件が成功した。\n- 受入条件・計画の変更はない。保存済み文字列を自然順にする承認済み仕様へ合わせた。\n- 次: 再freeze・commit後、新しい完全SHAを同じレビュー担当へ渡し、差分と影響範囲を再レビューする。その後に最終SHAの全体検証へ進む。\n",
+      "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T15:16:26.804Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa"
     }

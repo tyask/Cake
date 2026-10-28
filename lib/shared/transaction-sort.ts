@@ -20,6 +20,7 @@ export function sortTransactions(
     switch (sort.column) {
       case "occurredAt": return [Date.parse(item.occurredAt)];
       case "amountYen": return [item.type === "PAYMENT" ? -item.amountYen : item.amountYen];
+      case "memo": return [item.memo];
       case "actorUserId": return [memberNames.get(item.actorUserId) ?? item.actorName];
       case "splitWeights": {
         const shares = splitAmounts(1000, item.splitWeights, members);

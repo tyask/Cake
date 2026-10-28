@@ -68,6 +68,13 @@ test("担当者はIDや明細に残る古い名前ではなく参加者の表示
   assertOrder("actorUserId", items, ["two", "fallback", "three", "ten"], ["ten", "fallback", "three", "two"]);
 });
 
+test("空メモはフィルタ候補のラベルへ置換せず、空白や記号とともに保存文字列で比較する", () => {
+  const memos = ["あ", "0", "(メモ)", "!メモ", "-メモ", "_メモ", " ", ""];
+  const items = memos.map((memo, index) => record(String(index), { memo }));
+  const ascending = ["7", "6", "5", "4", "3", "2", "1", "0"];
+  assertOrder("memo", items, ascending, [...ascending].reverse());
+});
+
 test("種別・区分・清算状態は画面の日本語ラベル順に並べる", () => {
   assertOrder("type", [record("receipt", { type: "RECEIPT" }), record("payment")], ["payment", "receipt"], ["receipt", "payment"]);
   assertOrder("expenseClass", [record("personal", { expenseClass: "PERSONAL" }), record("shared")], ["shared", "personal"], ["personal", "shared"]);
