@@ -900,6 +900,7 @@
           <p>表示判定は<code>transactionMatchesView</code>の月／未精算条件と既存の列条件をANDし、編集中・保存中・保存失敗の行を既存pinで一時保持する。通常保存・メモ・カテゴリ保存の確定値は同じ<code>updateTransactionRecords</code>で表示結果とキャッシュへ反映する。日時や区分の変更で対象外になった行はpinの間だけ現在datasetに残し、キャッシュは厳密に対象view内へ絞る。通常保存を各月へ配る前に表示結果と全キャッシュの既存行から確定済みメモと最大カテゴリrevisionを照合し、同じ確定レコードを反映する。行が初めて入る移動先の月でも、先行した専用保存の値を保持する。一括削除・ルール適用・清算・取込・workspace削除とカテゴリ削除では対象workspaceの全viewを無効化する。保存開始前や別viewの遅いGETを採用せず、取得失敗と0件を区別して再試行を提供する。</p>
           <h3 id="transaction-sort-summary">取引明細のソートとフィルタ結果の収支</h3>
           <p><code>TransactionsPanel</code>はソート対象列と方向を画面内のStateで所有する。対象は<code>transactionColumns</code>の全11列で、初期値は取引日時の降順。別列の最初の操作は昇順、同列の操作は昇順／降順を切り替える。列名をソートボタンにし、既存のフィルタボタンを隣に分ける。対象列には方向の矢印を表示し、列見出しの<code>aria-sort</code>へ<code>ascending</code>／<code>descending</code>、他列へ<code>none</code>を設定する。各ボタンは操作対象と次の方向、または絞り込みを読み上げられる名前で区別する。</p>
+          <p>フィルタボタンは列名より控えめな枠とし、PCでは幅1.25rem・最小高さ1.375rem、幅48rem以下では28px四方にする。スマートフォンの列名ソートボタンは最小高さ44pxを保ち、フィルタ操作の間隔・フォーカス表示・読み上げ名を維持する。</p>
           <p><code>lib/shared/transaction-sort.ts</code>の<code>sortTransactions</code>は確定した表示行から比較用の値を一度ずつ準備し、元配列と明細を変更せず、新しい配列を安定ソートする。同値は昇順・降順とも入力順を維持する。参加者名とカテゴリの経路は現在のmetadataを使い、カテゴリは編集欄と共通の<code>prepareCategoryChoices</code>の結果を渡す。比較規則は次のとおり。</p>
           <div class="table-wrap"><table>
             <thead><tr><th>列</th><th>比較する値</th></tr></thead>
