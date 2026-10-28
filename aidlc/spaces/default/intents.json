@@ -29,6 +29,15 @@
       "recordDir": "aidlc/spaces/default/intents/261028-chat-plan-approval"
     },
     {
+      "id": "261028-home-summary-column-width",
+      "issue": 160,
+      "branch": "codex/home-summary-column-width",
+      "branches": [
+        "codex/home-summary-column-width"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261028-home-summary-column-width"
+    },
+    {
       "id": "261028-preview-skipped-job-receipt",
       "issue": 162,
       "branch": "codex/preview-skipped-job-receipt",

@@ -1,0 +1,20 @@
+# 261028-home-summary-column-width
+
+Cake運用層の進捗表示。公式AI-DLCエンジンのstate/receiptではない。
+正本は cake-intent.json。
+
+- 関連Issue：https://github.com/tyask/Cake/issues/160
+- Intent：`aidlc/spaces/default/intents/261028-home-summary-column-width`
+- 承認済み計画SHA-256：`c6db7d18fad414361c07cc70bd069c789f736bf073c8676717eba9ebaa7b840f`
+- Primary branch：`codex/home-summary-column-width`
+- Branches：`codex/home-summary-column-width`
+- Phase：Construction
+- Status：frozen
+- 記録更新日時：2026-10-28T03:49:18.244Z
+- 計画承認：記録あり（対象計画のhash一致はCLIで検査）
+- 記録凍結：済み。以後の検証・Ready・Operation結果はIssue/PR/Actionsに保存する。
+
+## 再開
+
+計画・承認・直近の監査記録を確認し、statusで状態を読み取る。
+凍結後の修正はreopen、計画変更はplanで記録し、必要な再承認・再レビュー・再検証を行う。
