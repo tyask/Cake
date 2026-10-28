@@ -69,17 +69,27 @@ async function stable(page: Page) {
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
-async function assertPanel(page: Page, tab: DashboardTab, loading = false) {
+async function assertPanel(page: Page, tab: DashboardTab, loading = false, transactionLoading = false) {
   const main = page.locator(".app-main"), expected = panels[tab].heading;
-  if (tab === "transactions" && loading) {
-    await main.getByRole("status").filter({ hasText: "取引明細を読み込んでいます。" }).waitFor();
-    assert.equal(await main.getByRole("table", { name: "取引明細", exact: true }).count(), 0);
-    return;
-  }
   if (expected) await main.getByRole("heading", { name: expected, level: 1, exact: true }).waitFor();
   else await main.getByRole("table", { name: "2026年10月の収支", exact: true }).waitFor();
   if (!loading) await page.waitForFunction(() => !document.querySelector(".loading-line"));
   if (tab === "analytics") await main.getByTestId("analytics-total").waitFor();
+  if (tab === "transactions") {
+    assert.equal(await main.getByRole("radio", { name: "月単位明細", exact: true }).count(), 1);
+    assert.equal(await main.getByRole("radio", { name: "未精算明細", exact: true }).count(), 1);
+    assert.equal(await main.getByRole("group", { name: "取引明細の対象月", exact: true }).count(), 1,
+      "一覧取得中も表示モードと対象月の操作欄を表示する");
+    if (transactionLoading) {
+      await main.getByRole("status").filter({ hasText: "明細を読み込んでいます…" }).waitFor();
+      assert.equal(await main.locator("[data-transaction-id]").count(), 0, "取得前の一覧に他画面の古い行を表示しない");
+      assert.equal(await main.getByRole("radio", { name: "月単位明細", exact: true }).isDisabled(), true);
+    } else if (!loading) {
+      await main.getByRole("radio", { name: "月単位明細", exact: true }).waitFor();
+      await page.waitForFunction(() => document.querySelector<HTMLInputElement>('input[type="radio"][value="month"]')?.disabled === false);
+      assert.equal(await main.locator("[data-transaction-id]").count(), 12, "独立した一覧GETの成功後に対象月の明細を表示する");
+    }
+  }
   await stable(page);
 
   assert.equal(await page.locator(".app-shell").count(), 1);
@@ -121,7 +131,7 @@ test("実DashboardのPC・mobileタブ移動で見出しとパネルが重複・
       const context = await browser.newContext({ viewport: { width, height: width < 768 ? 844 : 1000 },
         isMobile: width < 768, hasTouch: width < 768, reducedMotion: "reduce", serviceWorkers: "block" });
       try {
-        const page = await context.newPage(), errors: string[] = [], requests: string[] = [], appRequests: Route[] = [];
+        const page = await context.newPage(), errors: string[] = [], requests: string[] = [], appRequests: Route[] = [], transactionRequests: Route[] = [];
         const data = bootstrap();
         page.setDefaultTimeout(10000);
         page.on("pageerror", error => errors.push(error.message));
@@ -134,6 +144,8 @@ test("実DashboardのPC・mobileタブ移動で見出しとパネルが重複・
           if (route.request().method() !== "GET") { errors.push("想定外の更新API"); await route.abort(); return; }
           if (url.pathname === "/api/app") {
             appRequests.push(route);
+          } else if (url.pathname === "/api/transactions") {
+            transactionRequests.push(route);
           } else if (url.pathname === "/api/home") {
             await route.fulfill({ json: home(data, url.searchParams.get("month")!) });
           } else if (url.pathname === "/api/analytics") {
@@ -153,18 +165,37 @@ test("実DashboardのPC・mobileタブ移動で見出しとパネルが重複・
         assert.equal(await nav.getByRole("button", { name: /清算$/ }).count(), 0, "清算操作はホームへ統合する");
         const sequence: DashboardTab[] = ["transactions", "settings", "home", "analytics", "import", "home", "transactions",
           "analytics", "transactions", "import", "home", "settings", "transactions", "home"];
+        let transactionsLoaded = false;
         for (const tab of sequence) {
+          const transactionLoading = tab === "transactions" && !transactionsLoaded;
+          const firstTransactions = transactionLoading
+            ? page.waitForRequest(request => new URL(request.url()).pathname === "/api/transactions") : null;
           await nav.getByRole("button", { name: new RegExp(`${panels[tab].navigation}$`) }).click();
+          if (firstTransactions) await firstTransactions;
           await page.locator(".loading-line").waitFor({ state: "visible" });
-          await assertPanel(page, tab, true);
+          await assertPanel(page, tab, true, transactionLoading);
           assert.deepEqual(errors, []);
           assert.equal(appRequests.length, 1, "タブ移動のGETを1件ずつ制御する");
           const request = appRequests.shift()!, url = new URL(request.request().url());
-          assert.equal(url.searchParams.get("scope"), tab === "transactions" ? null : "metadata", "全件取得は明細画面に限定する");
-          await request.fulfill({ json: url.searchParams.get("scope") === "metadata" ? metadata(data) : data });
+          assert.equal(url.searchParams.get("scope"), "metadata", "全タブで共通情報だけを取得する");
+          await request.fulfill({ json: metadata(data) });
+          if (transactionLoading) {
+            await page.locator(".loading-line").waitFor({ state: "hidden" });
+            await assertPanel(page, tab, true, true);
+            assert.equal(transactionRequests.length, 1, "明細一覧のGETを共通情報とは独立して制御する");
+            const list = transactionRequests.shift()!, listUrl = new URL(list.request().url());
+            assert.equal(listUrl.searchParams.get("workspaceId"), workspaceId);
+            assert.equal(listUrl.searchParams.get("mode"), "month");
+            assert.equal(listUrl.searchParams.get("month"), "2026-10");
+            await list.fulfill({ json: { workspaceId, mode: "month", month: "2026-10", transactions: data.selected!.transactions } });
+            transactionsLoaded = true;
+          }
           await assertPanel(page, tab);
           assert.deepEqual(errors, []);
         }
+        assert.equal(requests.filter(path => path === "/api/transactions").length, 1,
+          "同じ月の明細はタブ往復後もキャッシュを再利用する");
+        assert.equal(transactionRequests.length, 0);
         assert.equal(requests.filter(path => path === "/api/analytics").length, sequence.filter(tab => tab === "analytics").length,
           "集計は再入場ごとに1回取得し、保持用パネルの重複取得を起こさない");
         assert.equal(requests.filter(path => path === "/api/import/history").length, sequence.filter(tab => tab === "import").length,

@@ -65,7 +65,12 @@ async function openFixture(browser: Browser, origin: string, width: number, api?
     requests.push(request);
     if (method === "GET" && url.pathname === "/api/app") {
       const data = bootstrap(url.searchParams.get("workspaceId") ?? workspaceId);
-      await route.fulfill({ json: url.searchParams.get("scope") === "metadata" ? metadata(data) : data });
+      assert.equal(url.searchParams.get("scope"), "metadata", "画面移動では全期間の明細を取得しない");
+      await route.fulfill({ json: metadata(data) });
+    } else if (method === "GET" && url.pathname === "/api/transactions") {
+      const mode = url.searchParams.get("mode");
+      await route.fulfill({ json: { workspaceId: url.searchParams.get("workspaceId"), mode,
+        month: mode === "month" ? url.searchParams.get("month") : null, transactions: [] } });
     } else if (method === "GET" && url.pathname === "/api/home") {
       await route.fulfill({ json: home(url.searchParams.get("workspaceId")!, url.searchParams.get("month")!) });
     } else if (url.pathname === "/api/import/history") await route.fulfill({ json: { history: [] } });
@@ -88,13 +93,19 @@ async function openFixture(browser: Browser, origin: string, width: number, api?
     const response = page.waitForResponse(response => response.request().method() === "GET" && new URL(response.url()).pathname === "/api/app");
     await page.locator(width < 768 ? ".bottom-nav" : ".app-nav").getByRole("button", { name: new RegExp(`${tabs[tab]}$`) }).click();
     const refreshed = await response;
-    assert.equal(new URL(refreshed.url()).searchParams.get("scope"), tab === "transactions" ? null : "metadata",
-      "明細画面だけ全件取得し、他の画面では共通情報を取得する");
+    assert.equal(new URL(refreshed.url()).searchParams.get("scope"), "metadata",
+      "明細画面を含む全タブで共通情報を取得する");
     if (tab === "home") {
       await page.getByRole("table", { name: "2026年10月の収支", exact: true }).waitFor();
       await page.locator('.home-month-summary[aria-busy="false"]').waitFor();
     }
     else await page.getByRole("heading", { name: tab === "import" ? "明細を取込" : tab === "analytics" ? "収支の集計" : tabs[tab], level: 1, exact: true }).waitFor();
+    if (tab === "transactions") {
+      await page.getByRole("group", { name: "取引明細の対象月", exact: true }).waitFor();
+      await page.waitForFunction(() => document.querySelector<HTMLInputElement>('input[type="radio"][value="month"]')?.disabled === false);
+      assert.equal(await page.getByRole("table", { name: "取引明細", exact: true }).count(), 1,
+        "共通情報とは別に一覧GETを完了し、明細パネルを表示する");
+    }
     await stable(page);
     assert.equal(await page.locator('table[aria-label="取り込み明細"]').count(), tab === "import" ? await page.getByRole("table", { name: "取り込み明細", exact: true }).count() : 0,
       "取込画面を離れると確認表のDOMを残さない");

@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-10-28T13:48:15.821Z",
-  "updatedAt": "2026-10-28T14:27:24.221Z",
+  "updatedAt": "2026-10-28T14:32:36.714Z",
   "events": [
     {
       "action": "CREATED",
@@ -50,6 +50,24 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-10-28T14:27:24.221Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-28T14:30:17.455Z",
+      "note": "全タブ往復とCSV取込の既存ブラウザ回帰に、取引明細だけfullを取得する旧経路の前提が残っていることを確認した。\n専用一覧APIとmetadata取得へ合わせ、読込中の上部UI・キャッシュ再利用を含めて既存の画面残留/入力保持の契約を維持する。\n目的・範囲・受入条件は承認済み計画のまま変更しない。\n",
+      "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T14:32:36.465Z",
+      "note": "別AgentレビューのP2指摘1件へ対応した。\n\n- 全タブ往復とCSV取込の既存ブラウザ回帰2本をmetadata＋専用一覧APIへ更新した。\n- 一覧応答を独立制御し、取得中の操作欄表示・成功後の12行反映・同月キャッシュ1 GETを確認する。\n- パネル重複防止とCSVの入力/選択/未登録/遅延処理/ワークスペース分離の検証を維持した。\n- 関連回帰10件成功（約13.6秒）、対象ESLint成功。\n- 新HEADの追加差分レビュー後に最終SHA検証へ進む。\n",
+      "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T14:32:36.714Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557"
     }
