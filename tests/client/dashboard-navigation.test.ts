@@ -5,6 +5,9 @@ import type { AddressInfo } from "node:net";
 import { build } from "esbuild";
 import { chromium, type Page, type Route } from "playwright";
 import { resolveAnalyticsPeriods, type AnalyticsDataset, type AnalyticsQuery } from "../../lib/shared/analytics";
+import type { HomeData } from "../../lib/shared/home-data";
+import { cashflowSummary, transactionsInMonth, workspaceCashflowSummary } from "../../lib/shared/home-summary";
+import { calculateSettlement } from "../../lib/shared/settlement";
 import type { BootstrapData, BootstrapMetadata, DashboardTab } from "../../lib/shared/types";
 
 const now = new Date("2026-10-23T02:00:00Z");
@@ -38,6 +41,21 @@ function metadata(data: BootstrapData): BootstrapMetadata {
   return { ...data, selected: { workspace, members, categories, rules } };
 }
 
+function home(data: BootstrapData, month: string): HomeData {
+  const selected = data.selected!;
+  const monthly = workspaceCashflowSummary(transactionsInMonth(selected.transactions, month), selected.members);
+  const totals = (value: ReturnType<typeof cashflowSummary>) => ({ paymentTotal: String(value.paymentTotal), receiptTotal: String(value.receiptTotal), balanceYen: String(value.balanceYen) });
+  const unsettled = selected.transactions.filter(transaction => transaction.expenseClass === "SHARED" && !transaction.settledAt);
+  const result = calculateSettlement(selected.members, selected.transactions);
+  return {
+    workspaceId, month, members: selected.members.map(({ id, name }) => ({ id, name })),
+    monthly: { people: selected.members.map(member => ({ userId: member.id, ...totals(monthly.people.get(member.id)!) })), total: totals(monthly.total) },
+    unsettled: { count: unsettled.length, ...totals(cashflowSummary(unsettled)) },
+    settlement: result ? (({ transactionIds, ...summary }) => { void transactionIds; return summary; })(result) : null,
+    settlementHistory: selected.settlementHistory,
+  };
+}
+
 function analytics(query: AnalyticsQuery): AnalyticsDataset {
   return { workspaceId, snapshotAt: now.toISOString(), timeZone: "Asia/Tokyo", periods: resolveAnalyticsPeriods(query, now),
     members: [{ id: "a", name: "Aさん" }, { id: "b", name: "Bさん" }], categories: [], receiptBuckets: [],
@@ -53,6 +71,11 @@ async function stable(page: Page) {
 
 async function assertPanel(page: Page, tab: DashboardTab, loading = false) {
   const main = page.locator(".app-main"), expected = panels[tab].heading;
+  if (tab === "transactions" && loading) {
+    await main.getByRole("status").filter({ hasText: "取引明細を読み込んでいます。" }).waitFor();
+    assert.equal(await main.getByRole("table", { name: "取引明細", exact: true }).count(), 0);
+    return;
+  }
   if (expected) await main.getByRole("heading", { name: expected, level: 1, exact: true }).waitFor();
   else await main.getByRole("table", { name: "2026年10月の収支", exact: true }).waitFor();
   if (!loading) await page.waitForFunction(() => !document.querySelector(".loading-line"));
@@ -111,6 +134,8 @@ test("実DashboardのPC・mobileタブ移動で見出しとパネルが重複・
           if (route.request().method() !== "GET") { errors.push("想定外の更新API"); await route.abort(); return; }
           if (url.pathname === "/api/app") {
             appRequests.push(route);
+          } else if (url.pathname === "/api/home") {
+            await route.fulfill({ json: home(data, url.searchParams.get("month")!) });
           } else if (url.pathname === "/api/analytics") {
             const query: AnalyticsQuery = { workspaceId, period: "month", month: url.searchParams.get("month")! };
             await route.fulfill({ json: analytics(query) });
@@ -120,7 +145,7 @@ test("実DashboardのPC・mobileタブ移動で見出しとパネルが重複・
             await route.fulfill({ json: { history: [] } });
           } else { errors.push(`想定外のAPI: ${url.pathname}`); await route.abort(); }
         });
-        await page.addInitScript(data => { window.navigationInitialData = data; }, data);
+        await page.addInitScript(data => { window.navigationInitialData = data; }, metadata(data));
         await page.goto(origin);
         await assertPanel(page, "home");
         const nav = page.locator(width < 768 ? ".bottom-nav" : ".app-nav");
@@ -135,6 +160,7 @@ test("実DashboardのPC・mobileタブ移動で見出しとパネルが重複・
           assert.deepEqual(errors, []);
           assert.equal(appRequests.length, 1, "タブ移動のGETを1件ずつ制御する");
           const request = appRequests.shift()!, url = new URL(request.request().url());
+          assert.equal(url.searchParams.get("scope"), tab === "transactions" ? null : "metadata", "全件取得は明細画面に限定する");
           await request.fulfill({ json: url.searchParams.get("scope") === "metadata" ? metadata(data) : data });
           await assertPanel(page, tab);
           assert.deepEqual(errors, []);
@@ -143,6 +169,37 @@ test("実DashboardのPC・mobileタブ移動で見出しとパネルが重複・
           "集計は再入場ごとに1回取得し、保持用パネルの重複取得を起こさない");
         assert.equal(requests.filter(path => path === "/api/import/history").length, sequence.filter(tab => tab === "import").length,
           "取込履歴は取込画面への入場時だけ取得する");
+        const homeRequests = () => requests.filter(path => path === "/api/home").length;
+        async function selectHomeMonth(month: string) {
+          await page.getByLabel("収支の対象年月", { exact: true }).fill(month);
+          const [year, number] = month.split("-").map(Number);
+          await page.getByRole("table", { name: `${year}年${number}月の収支`, exact: true }).waitFor();
+          await page.locator('.home-month-summary[aria-busy="false"]').waitFor();
+          await stable(page);
+        }
+        for (const status of [503, 403]) {
+          await selectHomeMonth("2026-11");
+          const cached = homeRequests();
+          await selectHomeMonth("2026-10");
+          await selectHomeMonth("2026-11");
+          assert.equal(homeRequests(), cached, "手動更新前は取得済み2か月をキャッシュから表示する");
+          await page.locator(".home-actions").getByRole("button", { name: "更新", exact: true }).click();
+          await page.locator(".loading-line").waitFor({ state: "visible" });
+          await stable(page);
+          assert.equal(appRequests.length, 1, "手動更新の共通情報GETを制御する");
+          const request = appRequests.shift()!;
+          assert.equal(new URL(request.request().url()).searchParams.get("scope"), "metadata");
+          const error = `共通情報の更新に失敗しました（${status}）。`;
+          await request.fulfill({ status, json: { error } });
+          await page.locator(".loading-line").waitFor({ state: "hidden" });
+          await page.locator('.home-month-summary[aria-busy="false"]').waitFor();
+          await page.getByRole("status").filter({ hasText: error }).waitFor();
+          await stable(page);
+          assert.equal(homeRequests(), cached + 1, `共通情報が${status}でも現在月の強制再取得を行う`);
+          await selectHomeMonth("2026-10");
+          assert.equal(homeRequests(), cached + 2, `共通情報が${status}でも旧月キャッシュを破棄し、戻った月を再取得する`);
+          assert.equal(appRequests.length, 0);
+        }
         assert.deepEqual(errors, []);
       } finally { await context.close(); }
     });

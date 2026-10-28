@@ -17,9 +17,9 @@ function data(id = "a", merchant = "initial"): BootstrapData {
       memo: "original", externalId: "manual-" + id, source: "MANUAL", categoryId: null, categoryConfirmed: false, categoryRevision: 0 }], settlement: null, settlementHistory: [],
   } };
 }
-function metadata(id = "a"): BootstrapMetadata {
+function metadata(id = "a", name = "metadata"): BootstrapMetadata {
   const full = data(id), { workspace, members, rules, categories } = full.selected!;
-  return { ...full, selected: { workspace: { ...workspace, name: "metadata" }, members, rules, categories } };
+  return { ...full, selected: { workspace: { ...workspace, name }, members, rules, categories } };
 }
 async function expectState(page: Page, expected: Record<string, unknown>) {
   await page.waitForFunction(expected => Object.entries(expected).every(([path, wanted]) => {
@@ -40,14 +40,14 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(done => server.close(() => done())); throw error; });
-  async function scenario(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) => Promise<void>, initialTab?: DashboardTab) {
+  async function scenario(name: string, run: (f: Awaited<ReturnType<typeof fixture>>) => Promise<void>, initialTab: DashboardTab = "transactions", initial: BootstrapMetadata = data()) {
     await t.test(name, async () => {
-      const f = await fixture(initialTab);
+      const f = await fixture(initialTab, initial);
       try { await run(f); assert.deepEqual(f.errors, []); }
       finally { await f.context.close(); }
     });
   }
-  async function fixture(initialTab?: DashboardTab) {
+  async function fixture(initialTab: DashboardTab, initial: BootstrapMetadata) {
     const context = await browser.newContext({ serviceWorkers: "block" }), page = await context.newPage();
     const requests: Route[] = [], errors: string[] = [];
     page.setDefaultTimeout(5000);
@@ -57,7 +57,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       if (url.origin !== origin) { errors.push("unexpected origin"); await route.abort(); return; }
       if (url.pathname === "/api/app") requests.push(route); else await route.continue();
     });
-    await page.addInitScript(({ initial, initialTab }) => { window.initialData = initial; window.initialTab = initialTab; }, { initial: data(), initialTab });
+    await page.addInitScript(({ initial, initialTab }) => { window.initialData = initial; window.initialTab = initialTab; }, { initial, initialTab });
     await page.goto(origin);
     await page.waitForFunction(() => !!window.controller);
     async function take(method = "GET") {
@@ -70,6 +70,155 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
     return { context, page, requests, errors, take, reply };
   }
   try {
+    await scenario("ホームの未取得明細を0件と偽装せず、明細保存後もサマリーの世代だけを更新する", async f => {
+      await expectState(f.page, { tab: "home", selectedTransactions: null, "selected.transactions": undefined, analyticsRevision: 0 });
+      assert.equal(f.requests.length, 0);
+      await f.page.evaluate(() => {
+        window.operation = window.controller.run({ action: "saveTransaction", workspaceId: "a", occurredAt: "2026-10-18T00:00:42.123Z",
+          merchant: "ホームで追加", method: "現金", type: "PAYMENT", amountYen: 200, actorUserId: "user" }, "明細を保存しました。");
+      });
+      await f.reply(await f.take("POST"), { ok: true, transaction: { ...data().selected!.transactions[0], id: "new", amountYen: 200 } });
+      await f.page.evaluate(() => window.operation);
+      await expectState(f.page, { selectedTransactions: null, "selected.transactions": undefined, analyticsRevision: 1,
+        notice: "明細を保存しました。", loading: false });
+      assert.equal(f.requests.length, 0, "保存成功後もホームから全件取得しない");
+    }, "home", metadata());
+    await scenario("ホームでの手動更新は共通情報とサマリーの取得完了を待って成功を通知する", async f => {
+      await f.page.evaluate(() => {
+        window.homeRefreshCount = 0;
+        window.controller.registerHomeRefresh(() => { window.homeRefreshCount++; return new Promise<void>(resolve => { window.releasePrepare = resolve; }); });
+        window.operation = window.controller.refreshCurrentView();
+      });
+      const get = await f.take();
+      assert.equal(new URL(get.request().url()).searchParams.get("scope"), "metadata");
+      await f.page.waitForFunction(() => window.homeRefreshCount === 1);
+      await expectState(f.page, { refreshing: true, notice: null });
+      await f.reply(get, metadata());
+      await expectState(f.page, { refreshing: true, notice: null, "selected.transactions": undefined });
+      await f.page.evaluate(() => window.releasePrepare());
+      await f.page.evaluate(() => window.operation);
+      await expectState(f.page, { refreshing: false, loading: false, notice: "最新状態に更新しました。" });
+      assert.equal(f.requests.length, 0);
+      await f.page.evaluate(() => {
+        window.controller.registerHomeRefresh(async () => { throw new Error("収支を取得できませんでした。"); });
+        window.operation = window.controller.refreshCurrentView();
+      });
+      await expectState(f.page, { refreshing: true, notice: null });
+      await f.reply(await f.take(), metadata());
+      await f.page.evaluate(() => window.operation);
+      await expectState(f.page, { refreshing: false, loading: false, notice: "収支を取得できませんでした。", "selected.transactions": undefined });
+      assert.equal(f.requests.length, 0);
+      await f.page.evaluate(() => {
+        window.controller.registerHomeRefresh(() => { window.homeRefreshCount++; return new Promise<void>(resolve => { window.releasePrepare = resolve; }); });
+        window.operation = window.controller.refreshCurrentView();
+      });
+      await f.reply(await f.take(), metadata());
+      await f.page.waitForFunction(() => window.homeRefreshCount === 2);
+      await f.page.evaluate(() => {
+        window.controller.registerHomeRefresh(async () => {});
+        window.releasePrepare();
+      });
+      await f.page.evaluate(() => window.operation);
+      await expectState(f.page, { refreshing: false, loading: false, notice: null });
+      assert.equal(f.requests.length, 0, "更新対象が入れ替わった後に古いサマリーの成功を通知しない");
+    }, "home", metadata());
+    for (const status of [503, 403]) await scenario(`ホームの手動更新は共通情報が${status}でもサマリー更新を開始し、両方の終了を待って失敗を通知する`, async f => {
+      await f.page.evaluate(() => {
+        window.homeRefreshCount = 0;
+        window.controller.registerHomeRefresh(() => { window.homeRefreshCount++; return new Promise<void>(resolve => { window.releasePrepare = resolve; }); });
+        window.operation = window.controller.refreshCurrentView();
+      });
+      const get = await f.take();
+      assert.equal(new URL(get.request().url()).searchParams.get("scope"), "metadata");
+      await f.page.waitForFunction(() => window.homeRefreshCount === 1);
+      await expectState(f.page, { refreshing: true, loading: true, notice: null });
+      const delivered = f.page.waitForResponse(response => response.url() === get.request().url() && response.status() === status);
+      const error = `共通情報を取得できませんでした（${status}）。`;
+      await f.reply(get, { error }, status);
+      await (await delivered).finished();
+      await f.page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      await expectState(f.page, { refreshing: true, loading: true, notice: null, "selected.transactions": undefined });
+      assert.equal(await f.page.evaluate(() => window.homeRefreshCount), 1, "共通情報の失敗がサマリーの強制更新を妨げない");
+      await f.page.evaluate(() => window.releasePrepare());
+      await f.page.evaluate(() => window.operation);
+      await expectState(f.page, { refreshing: false, loading: false, notice: error, "selected.transactions": undefined });
+      assert.equal(f.requests.length, 0);
+    }, "home", metadata());
+    await scenario("ホームから一覧を初めて開くと全件を取得し、未取得と読込失敗を空の一覧として表示しない", async f => {
+      await f.page.evaluate(() => window.controller.openTab("transactions"));
+      const first = await f.take();
+      assert.equal(new URL(first.request().url()).searchParams.has("scope"), false);
+      await expectState(f.page, { tab: "transactions", selectedTransactions: null, "selected.transactions": undefined, loading: true });
+      await f.reply(first, { error: "明細を取得できませんでした。" }, 503);
+      await expectState(f.page, { selectedTransactions: null, "selected.transactions": undefined, loading: false, notice: "明細を取得できませんでした。" });
+      await f.page.evaluate(() => { window.operation = window.controller.refreshCurrentView(); });
+      await f.reply(await f.take(), data());
+      await expectState(f.page, { "selectedTransactions.transactions.0.id": "transaction-a", loading: false, notice: "最新状態に更新しました。" });
+    }, "home", metadata());
+    await scenario("共通情報だけの設定で開始した保存が一覧の初回GETを追い越しても、最新の全件を再取得して一覧を表示する", async f => {
+      await expectState(f.page, { tab: "settings", selectedTransactions: null, "data.selected.transactions": undefined });
+      await f.page.evaluate(() => {
+        window.operation = window.controller.run({ action: "createCategory", workspaceId: "a", parentId: null, name: "食費", colorHex: "#f97316" }, "追加しました。");
+      });
+      const post = await f.take("POST");
+      await f.page.evaluate(() => window.controller.openTab("transactions"));
+      const older = await f.take();
+      assert.equal(new URL(older.request().url()).searchParams.get("workspaceId"), "a");
+      assert.equal(new URL(older.request().url()).searchParams.has("scope"), false);
+      const category = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+      await f.reply(post, { ok: true, category });
+      await f.page.evaluate(() => window.operation);
+      await expectState(f.page, { "selected.categories": [category], selectedTransactions: null, loading: true });
+      await f.reply(older, data("a", "保存前の一覧"));
+      const retry = await f.take();
+      const retryUrl = new URL(retry.request().url());
+      assert.equal(retryUrl.searchParams.get("workspaceId"), "a");
+      assert.equal(retryUrl.searchParams.has("scope"), false);
+      await expectState(f.page, { "selected.categories": [category], selectedTransactions: null, "data.selected.transactions": undefined, loading: true });
+      const latest = data("a", "最新の一覧"); latest.selected!.categories = [category];
+      await f.reply(retry, latest);
+      await expectState(f.page, { "selectedTransactions.transactions.0.merchant": "最新の一覧", "data.selected.transactions.0.merchant": "最新の一覧",
+        "selected.categories": [category], loading: false });
+      assert.equal(f.requests.length, 0, "保存後の新しい全件取得が採用されたら再取得を繰り返さない");
+    }, "settings", metadata());
+    await scenario("ホームのworkspace切替は共通情報だけを取得し、遅い別workspaceの応答を捨てる", async f => {
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
+      const older = await f.take();
+      assert.equal(new URL(older.request().url()).searchParams.get("scope"), "metadata");
+      await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("a"); });
+      const latest = await f.take();
+      assert.equal(new URL(latest.request().url()).searchParams.get("scope"), "metadata");
+      await f.reply(latest, metadata("a", "現在の家計"));
+      await expectState(f.page, { "selected.workspace.id": "a", "selected.workspace.name": "現在の家計", "selected.transactions": undefined });
+      await f.reply(older, metadata("b"));
+      await expectState(f.page, { "selected.workspace.id": "a", "selected.workspace.name": "現在の家計", "selected.transactions": undefined, loading: false });
+      assert.equal(f.requests.length, 0);
+    }, "home", metadata());
+    await scenario("ホームで外部カテゴリ削除を検知したら全件を取り直さず、保持していた明細を無効にする", async f => {
+      await f.page.evaluate(() => {
+        window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: "food" }, "");
+      });
+      const assignment = await f.take("POST");
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
+      const lightweight = await f.take();
+      assert.equal(new URL(lightweight.request().url()).searchParams.get("scope"), "metadata");
+      await f.reply(lightweight, metadata());
+      await expectState(f.page, { "selected.categories": [], "selected.transactions": undefined, selectedTransactions: null });
+      await f.reply(assignment, { ok: true, transactionId: "transaction-a", categoryId: "food", categoryConfirmed: true, categoryRevision: 2 });
+      await expectState(f.page, { "selected.categories": [], "selected.transactions": undefined, selectedTransactions: null, loading: false });
+      assert.equal(f.requests.length, 0, "カテゴリの実revisionは一覧を次に開くまで取得しない");
+      await f.page.evaluate(() => window.controller.openTab("transactions"));
+      const full = await f.take();
+      assert.equal(new URL(full.request().url()).searchParams.has("scope"), false);
+      const detached = data(); detached.selected!.transactions[0].categoryRevision = 3;
+      await f.reply(full, detached);
+      await expectState(f.page, { "selected.transactions.0.categoryId": null, "selected.transactions.0.categoryRevision": 3, loading: false });
+    }, "home", (() => {
+      const initial = data();
+      initial.selected!.categories = [{ id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null }];
+      initial.selected!.transactions[0] = { ...initial.selected!.transactions[0], categoryId: "food", categoryConfirmed: true, categoryRevision: 1 };
+      return initial;
+    })());
     await scenario("集計はmetadataを取得し、保存成功の世代とworkspace切替中を公開する", async f => {
       await expectState(f.page, { analyticsRevision: 0, workspaceSwitching: false });
       await f.page.evaluate(() => window.controller.openTab("analytics"));
@@ -104,46 +253,44 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.reply(older, olderFails ? { error: "古い要求の失敗" } : data("b"), olderFails ? 500 : 200);
       await expectState(f.page, { tab: "analytics", workspaceSwitching: true, "selected.workspace.id": "a", notice: null });
       await f.reply(lightweight, metadata("b"));
-      const full = await f.take();
-      await expectState(f.page, { workspaceSwitching: true, "selected.workspace.id": "a" });
-      await f.reply(full, data("b"));
       await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "b", loading: false, notice: null });
+      assert.equal(f.requests.length, 0, "集計への切替は共通情報だけで完了する");
     });
     await scenario("切替中の集計タブ取得が失敗したら元の家計へ戻り、遅い切替応答も破棄する", async f => {
       await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
       const older = await f.take();
       await f.page.evaluate(() => window.controller.openTab("analytics"));
-      await f.reply(await f.take(), metadata("b"));
-      const latest = await f.take();
-      await f.reply(latest, { error: "切替先を取得できませんでした。" }, 500);
+      await f.reply(await f.take(), { error: "切替先を取得できませんでした。" }, 500);
       await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "a", notice: "切替先を取得できませんでした。" });
       await f.reply(older, data("b"));
       await expectState(f.page, { workspaceSwitching: false, "selected.workspace.id": "a", loading: false });
     });
-    await scenario("取込から開始すると初回描画からimportを選び、更新はmetadata、homeへの移動はfullを要求する", async f => {
+    await scenario("取込から開始すると初回描画からimportを選び、更新もhomeへの移動もmetadataを要求する", async f => {
       await expectState(f.page, { tab: "import", loading: false }); assert.equal(f.requests.length, 0);
       await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
       let request = await f.take(); assert.equal(new URL(request.request().url()).searchParams.get("scope"), "metadata");
-      await f.reply(request, metadata()); await expectState(f.page, { tab: "import", "selected.workspace.name": "metadata", "selected.transactions.0.merchant": "initial" });
+      await f.reply(request, metadata()); await expectState(f.page, { tab: "import", "selected.workspace.name": "metadata", "selected.transactions": undefined });
       await f.page.evaluate(() => window.controller.openTab("home"));
-      request = await f.take(); assert.equal(new URL(request.request().url()).searchParams.has("scope"), false);
-      await f.reply(request, data("a", "home")); await expectState(f.page, { tab: "home", "selected.transactions.0.merchant": "home", loading: false });
-    }, "import");
-    await scenario("metadataは同一家計の明細を保持し、homeとworkspace切替はfullを要求する", async f => {
+      request = await f.take(); assert.equal(new URL(request.request().url()).searchParams.get("scope"), "metadata");
+      await f.reply(request, metadata()); await expectState(f.page, { tab: "home", "selected.transactions": undefined, loading: false });
+      assert.equal(f.requests.length, 0);
+    }, "import", metadata());
+    await scenario("metadataは同一家計の取得済み明細を保持し、homeとworkspace切替で追加の全件取得をしない", async f => {
       await expectState(f.page, { tab: "home" });
       await f.page.evaluate(() => window.controller.openTab("settings"));
       let request = await f.take(); assert.equal(new URL(request.request().url()).searchParams.get("scope"), "metadata");
       await f.reply(request, metadata()); await expectState(f.page, { "selected.workspace.name": "metadata", "selected.transactions.0.merchant": "initial", loading: false });
       await f.page.evaluate(() => window.controller.openTab("home"));
-      request = await f.take(); assert.equal(new URL(request.request().url()).searchParams.has("scope"), false);
-      await f.reply(request, data("a", "full")); await expectState(f.page, { "selected.transactions.0.merchant": "full" });
+      request = await f.take(); assert.equal(new URL(request.request().url()).searchParams.get("scope"), "metadata");
+      await f.reply(request, metadata()); await expectState(f.page, { "selected.transactions.0.merchant": "initial" });
       await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
-      request = await f.take(); assert.equal(new URL(request.request().url()).searchParams.get("workspaceId"), "b"); assert.equal(new URL(request.request().url()).searchParams.has("scope"), false);
-      await f.reply(request, data("b")); await expectState(f.page, { "selected.workspace.id": "b", loading: false });
-    });
+      request = await f.take(); assert.equal(new URL(request.request().url()).searchParams.get("workspaceId"), "b"); assert.equal(new URL(request.request().url()).searchParams.get("scope"), "metadata");
+      await f.reply(request, metadata("b")); await expectState(f.page, { "selected.workspace.id": "b", "selected.transactions": undefined, loading: false });
+      assert.equal(f.requests.length, 0);
+    }, "home");
     await scenario("GETが逆順に完了しても後から要求したタブのデータを保持する", async f => {
       await f.page.evaluate(() => window.controller.openTab("settings")); const older = await f.take();
-      await f.page.evaluate(() => window.controller.openTab("home")); const newer = await f.take();
+      await f.page.evaluate(() => window.controller.openTab("transactions")); const newer = await f.take();
       await f.reply(newer, data("a", "newest")); await expectState(f.page, { "selected.transactions.0.merchant": "newest", loading: true });
       await f.reply(older, metadata()); await expectState(f.page, { "selected.transactions.0.merchant": "newest", "selected.workspace.name": "a", loading: false });
     });
@@ -230,6 +377,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       const committed = data();
       committed.selected!.transactions[0] = { ...committed.selected!.transactions[0], categoryId: "c1", categoryConfirmed: true, categoryRevision: 1 };
       await f.reply(await f.take(), committed);
+      await expectState(f.page, { "selectedTransactions.transactions.0.categoryId": "c1", "selectedTransactions.transactions.0.categoryRevision": 1 });
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: "c2" }, ""); });
       await f.reply(await f.take("POST"), { ok: true, transactionId: "transaction-a", categoryId: "c2", categoryConfirmed: true, categoryRevision: 2 });
       await f.reply(older, { ok: true, transactionId: "transaction-a", categoryId: "c1", categoryConfirmed: true, categoryRevision: 1 });
@@ -253,7 +401,11 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.reply(staleGet, initial);
       await expectState(f.page, { "selected.categories.0.sortOrder": 0, "selected.categories.1.sortOrder": 1,
         "selected.categories.2.parentId": "daily", "selected.categories.2.revision": 3, loading: false });
-      assert.equal(f.requests.length, 0, "移動確定後の追加GETは不要");
+      const latest = data(); latest.selected!.categories = [food, daily, { ...child, parentId: "daily" }].map(category => ({ ...category, revision: 3 }));
+      await f.reply(await f.take(), latest);
+      await expectState(f.page, { "selected.categories.0.sortOrder": 0, "selected.categories.1.sortOrder": 1,
+        "selected.categories.2.parentId": "daily", "selected.categories.2.revision": 3, loading: false });
+      assert.equal(f.requests.length, 0, "保存と競合したGETは最新snapshotの取得後に再取得を繰り返さない");
     });
     await scenario("カテゴリ編集・停止も確定祖先を直接反映し、他ブラウザの親子移動と古い親を混ぜない", async f => {
       const z = { id: "z", revision: 1, parentId: null, name: "Z", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
@@ -317,7 +469,15 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.reply(assignment, { ok: true, transactionId: "transaction-a", categoryId: "food", categoryConfirmed: true, categoryRevision: 2 });
       const transaction = { ...initial.selected!.transactions[0], id: "new-transaction", occurredAt: "2026-10-19T00:00:00Z" };
       await f.reply(insert, { ok: true, transaction });
+      await expectState(f.page, { "selected.transactions.0.id": "new-transaction", "selected.transactions.0.categoryRevision": 2,
+        "selected.transactions.1.categoryRevision": 3, loading: false });
       await f.reply(get, initial);
+      const latest = data(); latest.selected!.categories = [other];
+      latest.selected!.transactions = [
+        { ...transaction, categoryId: null, categoryConfirmed: false, categoryRevision: 2 },
+        { ...initial.selected!.transactions[0], categoryId: null, categoryConfirmed: false, categoryRevision: 3 },
+      ];
+      await f.reply(await f.take(), latest);
       await expectState(f.page, { "selected.categories": [other], "selected.transactions.0.id": "new-transaction", "selected.transactions.0.categoryId": null,
         "selected.transactions.0.categoryRevision": 2, "selected.transactions.1.categoryId": null, "selected.transactions.1.categoryRevision": 3, loading: false });
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: "other" }, ""); });
@@ -345,7 +505,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.reply(await f.take(), old);
       await expectState(f.page, { "selected.workspace.id": "a", "selected.categories": [], "selected.transactions.0.categoryId": null, "selected.transactions.0.categoryRevision": 2, notice: null, loading: false });
     });
-    await scenario("metadataで別ブラウザのカテゴリ削除を検知したらfullで実際の明細revisionを取得する", async f => {
+    await scenario("明細画面のmetadataで別ブラウザのカテゴリ削除を検知したらfullで実際の明細revisionを取得する", async f => {
       const initial = data(); initial.selected!.categories = [{ id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null }];
       initial.selected!.transactions[0] = { ...initial.selected!.transactions[0], categoryId: "food", categoryConfirmed: true, categoryRevision: 1 };
       await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
@@ -355,7 +515,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       const update = await f.take("POST");
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: "food" }, ""); });
       const assignment = await f.take("POST");
-      await f.page.evaluate(() => window.controller.openTab("settings"));
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(undefined, undefined, "metadata"); });
       const metadataRequest = await f.take();
       assert.equal(new URL(metadataRequest.request().url()).searchParams.get("scope"), "metadata");
       await f.reply(metadataRequest, metadata());
@@ -375,7 +535,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.page.evaluate(() => { window.operation = window.controller.refresh(); });
       await f.reply(await f.take(), initial);
       await expectState(f.page, { "selected.transactions.0.categoryId": "food" });
-      await f.page.evaluate(() => window.controller.openTab("settings"));
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(undefined, undefined, "metadata").catch(error => window.controller.setNotice(error.message)); });
       await f.reply(await f.take(), metadata());
       await f.reply(await f.take(), { error: "最新の明細を取得できませんでした。" }, 400);
       await expectState(f.page, { "selected.categories": initial.selected!.categories, "selected.transactions.0.categoryId": "food",
@@ -395,7 +555,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       const move = await f.take("POST");
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransaction", workspaceId: "a", occurredAt: "2026-10-19T00:00:00Z", merchant: "新規", method: "現金", type: "PAYMENT", amountYen: 200, actorUserId: "user", categoryId: "food" }, ""); });
       const insert = await f.take("POST");
-      await f.page.evaluate(() => window.controller.openTab("settings"));
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(undefined, undefined, "metadata"); });
       const nextMetadata = metadata(); nextMetadata.selected!.categories = [{ ...survivor, parentId: null, revision: 2 }];
       await f.reply(await f.take(), nextMetadata);
       const full = await f.take();
@@ -450,7 +610,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await expectState(f.page, { "selected.categories": [], notice: "変更は保存されました。最新の状態を取得できないため、画面を更新してください。", loading: false });
       assert.equal(f.requests.length, 0);
     });
-    await scenario("カテゴリ照合GETが別保存で無効になったら旧カテゴリを採用せず、再取得を案内する", async f => {
+    await scenario("カテゴリ照合GETが別保存で無効になったら旧カテゴリを採用せず、最新snapshotを再取得する", async f => {
       const food = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "deleteCategory", workspaceId: "a", categoryId: "food" }, ""); });
       await f.reply(await f.take("POST"), { ok: true, deletedCategoryIds: ["food"], detachedTransactions: [] });
@@ -472,16 +632,23 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.page.evaluate(() => window.operation);
       const old = data(); old.selected!.categories = [{ ...food, id: "unknown-category" }];
       await f.reply(reconciliation, old);
+      await expectState(f.page, { "selected.categories": [], "selected.transactions.0.memo": "確定メモ" });
+      const latest = data(); latest.selected!.transactions[0].memo = "確定メモ";
+      await f.reply(await f.take(), latest);
       await expectState(f.page, { "selected.categories": [], "selected.transactions.0.memo": "確定メモ",
-        notice: "変更は保存されました。画面を更新して最新の状態を確認してください。", loading: false });
+        notice: "移動しました。", loading: false });
       assert.equal(f.requests.length, 0);
     });
     await scenario("保存開始前のGETは保存確定後の明細を上書きしない", async f => {
-      await f.page.evaluate(() => window.controller.openTab("transactions")); const older = await f.take();
+      await f.page.evaluate(() => { window.operation = window.controller.refresh(); }); const older = await f.take();
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransaction", workspaceId: "a", occurredAt: "2026-10-18T00:00:42.123Z", merchant: "saved", method: "現金", type: "PAYMENT", amountYen: 200, actorUserId: "user" }, "saved"); });
       const post = await f.take("POST"), transaction: TransactionRecord = { ...data().selected!.transactions[0], merchant: "saved", amountYen: 200 };
       await f.reply(post, { ok: true, transaction }); await expectState(f.page, { "selected.transactions.0.amountYen": 200, notice: "saved" });
-      await f.reply(older, data("a", "old")); await expectState(f.page, { "selected.transactions.0.merchant": "saved", loading: false }); assert.equal(f.requests.length, 0);
+      await f.reply(older, data("a", "old")); await expectState(f.page, { "selected.transactions.0.merchant": "saved", loading: false });
+      const latest = data(); latest.selected!.transactions = [transaction];
+      await f.reply(await f.take(), latest);
+      await expectState(f.page, { "selectedTransactions.transactions.0.merchant": "saved", "selected.transactions.0.amountYen": 200, loading: false });
+      assert.equal(f.requests.length, 0);
     });
     await scenario("別workspaceへ移動した後の保存応答は現在の家計と通知へ反映しない", async f => {
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionMemo", workspaceId: "a", transactionId: "transaction-a", memo: "old save" }, "stale notice"); }); const post = await f.take("POST");
@@ -493,7 +660,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionMemo", workspaceId: "a", transactionId: "transaction-a", memo: "saved" }, "old notice"); }); const post = await f.take("POST");
       await f.page.evaluate(() => window.controller.openTab("settings")); const settings = await f.take();
       await f.page.evaluate(() => window.controller.openTab("home")); const home = await f.take();
-      await f.reply(settings, metadata()); await f.reply(home, data()); await expectState(f.page, { tab: "home" });
+      await f.reply(settings, metadata()); await f.reply(home, metadata()); await expectState(f.page, { tab: "home" });
       await f.reply(post, { ok: true, transactionId: "transaction-a", memo: "saved" }); await expectState(f.page, { "selected.transactions.0.memo": "saved", notice: null, loading: false });
     });
     await scenario("手動更新はprepare完了までGETせず、二重実行を抑える", async f => {
@@ -513,7 +680,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
     await scenario("手動更新の保存待ちにタブを往復したら古い更新と通知を中止する", async f => {
       await f.page.evaluate(() => { window.operation = window.controller.refreshCurrentView(() => new Promise<void>(resolve => { window.releasePrepare = resolve; })); });
       await f.page.evaluate(() => window.controller.openTab("settings")); const settings = await f.take();
-      await f.page.evaluate(() => window.controller.openTab("home")); const home = await f.take();
+      await f.page.evaluate(() => window.controller.openTab("transactions")); const home = await f.take();
       await f.reply(settings, metadata()); await f.reply(home, data("a", "current"));
       await f.page.evaluate(() => window.releasePrepare()); await expectState(f.page, { refreshing: false, loading: false, notice: null, "selected.transactions.0.merchant": "current" }); assert.equal(f.requests.length, 0);
     });
@@ -523,10 +690,20 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.reply(current, data("b", "current")); await expectState(f.page, { "selected.workspace.id": "b" });
       await f.reply(oldRefresh, data("a", "old refresh")); await expectState(f.page, { "selected.workspace.id": "b", notice: null, refreshing: false, loading: false });
     });
-    await scenario("metadataの選択先が変わるとfullを追加取得し、以前の家計の明細を混ぜない", async f => {
-      await f.page.evaluate(() => window.controller.openTab("settings")); await f.reply(await f.take(), metadata("b"));
-      const full = await f.take(); assert.equal(new URL(full.request().url()).searchParams.get("workspaceId"), "b"); assert.equal(new URL(full.request().url()).searchParams.has("scope"), false);
-      await expectState(f.page, { "selected.workspace.id": "a" }); await f.reply(full, data("b", "other")); await expectState(f.page, { "selected.workspace.id": "b", "selected.transactions.0.merchant": "other", loading: false });
+    await scenario("metadataの選択先が変わってもfullを追加取得せず、一覧に入ると新しい家計の明細を取得する", async f => {
+      await f.page.evaluate(() => window.controller.openTab("settings"));
+      const lightweight = await f.take();
+      assert.equal(new URL(lightweight.request().url()).searchParams.get("scope"), "metadata");
+      await f.reply(lightweight, metadata("b"));
+      await expectState(f.page, { "selected.workspace.id": "b", "selected.transactions": undefined, selectedTransactions: null, loading: false });
+      assert.equal(f.requests.length, 0);
+      await f.page.evaluate(() => window.controller.openTab("transactions"));
+      const full = await f.take();
+      assert.equal(new URL(full.request().url()).searchParams.get("workspaceId"), "b");
+      assert.equal(new URL(full.request().url()).searchParams.has("scope"), false);
+      await expectState(f.page, { selectedTransactions: null });
+      await f.reply(full, data("b", "other"));
+      await expectState(f.page, { "selectedTransactions.workspace.id": "b", "selected.transactions.0.merchant": "other", loading: false });
     });
     await scenario("workspace読込失敗は元の家計へ戻り、保存失敗は呼出し元にも伝える", async f => {
       await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); }); await f.reply(await f.take(), { error: "読込失敗" }, 503);

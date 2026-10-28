@@ -4,6 +4,7 @@ import { HomePanel } from "../../../components/home-panel";
 import { TransactionsPanel } from "../../../components/transactions-panel";
 import { postAction } from "../../../lib/client/app-client";
 import { calculateSettlement } from "../../../lib/shared/settlement";
+import { cashflowSummary, transactionsInMonth, workspaceCashflowSummary } from "../../../lib/shared/home-summary";
 import type { RunAppAction } from "../../../lib/shared/schemas/app-input";
 import type { TransactionRecord, WorkspaceData } from "../../../lib/shared/types";
 import "../../../app/globals.css";
@@ -59,18 +60,43 @@ if (mode === "overflow") {
   workspace.transactions = Array.from({ length: 3 }, (_, i) => transaction(`limit-${i}`, { amountYen: 2147483647 }));
 }
 
+let confirmedTransactions = workspace.transactions;
+const realFetch = window.fetch.bind(window);
+window.fetch = async (input, init) => {
+  const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+  if (url.pathname !== "/api/home") return realFetch(input, init);
+  const month = url.searchParams.get("month")!;
+  const monthly = workspaceCashflowSummary(transactionsInMonth(confirmedTransactions, month), workspace.members);
+  const unsettled = confirmedTransactions.filter(item => item.expenseClass === "SHARED" && !item.settledAt);
+  const result = workspace.workspace.type === "SHARED" ? calculateSettlement(workspace.members, confirmedTransactions) : null;
+  return new Response(JSON.stringify({
+    workspaceId: workspace.workspace.id, month,
+    members: workspace.members.map(({ id, name }) => ({ id, name })),
+    monthly: { people: [...monthly.people].map(([userId, totals]) => ({ userId, ...totals })), total: monthly.total },
+    unsettled: { count: unsettled.length, ...cashflowSummary(unsettled) },
+    settlement: result, settlementHistory: workspace.settlementHistory,
+  }, (key, value) => key === "transactionIds" ? undefined : typeof value === "bigint" ? value.toString() : value), {
+    headers: { "Content-Type": "application/json" },
+  });
+};
+
 function Harness() {
   const [transactions, setTransactions] = useState(workspace.transactions);
+  const [revision, setRevision] = useState(0);
   const selected = { ...workspace, transactions, settlement: calculateSettlement(workspace.members, transactions) };
   const run: RunAppAction = async payload => {
     const result = await postAction(payload);
-    if (payload.action === "saveTransaction") setTransactions(current => current.map(row => row.id === payload.transactionId
-      ? { ...row, ...result.transaction } : row));
+    if (payload.action === "saveTransaction") {
+      confirmedTransactions = confirmedTransactions.map(row => row.id === payload.transactionId
+        ? { ...row, ...result.transaction } : row);
+      setTransactions(confirmedTransactions);
+      setRevision(current => current + 1);
+    }
     return result;
   };
   return <main style={{ padding: 12, maxWidth: 1600 }}>
     <section id="home"><HomePanel selected={selected} userId="a" pending={0} setTab={() => {}} add={() => {}}
-      run={run} refreshAction={null} refreshing={mode === "refreshing"} /></section>
+      run={run} revision={revision} refreshAction={null} refreshing={mode === "refreshing"} /></section>
     <section id="transactions"><TransactionsPanel selected={selected} userId="a" add={() => {}} run={run}
       onRefresh={async prepare => { await prepare(); }} refreshing={false} /></section>
     <output id="saved-transactions" hidden>{JSON.stringify(transactions)}</output>

@@ -120,6 +120,11 @@ export interface WorkspaceData extends WorkspaceMetadata {
   settlementHistory: SettlementHistory[];
 }
 
+/** Metadata responses genuinely omit the transaction dataset until the list is loaded. */
+export function isWorkspaceData(selected: WorkspaceMetadata | null): selected is WorkspaceData {
+  return selected !== null && "transactions" in selected;
+}
+
 export interface BootstrapMetadata {
   user: AppUser;
   workspaces: WorkspaceSummary[];

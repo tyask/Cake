@@ -1,18 +1,19 @@
 import { useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { useDashboardController } from "../../../components/use-dashboard-controller";
-import type { BootstrapData } from "../../../lib/shared/types";
+import type { BootstrapMetadata } from "../../../lib/shared/types";
 import type { DashboardTab } from "../../../lib/shared/types";
 
 declare global {
   interface Window {
-    initialData: BootstrapData;
+    initialData: BootstrapMetadata;
     initialTab?: DashboardTab;
     controller: ReturnType<typeof useDashboardController>;
     operation: Promise<unknown>;
     operationError?: string;
     releasePrepare: () => void;
     prepareCount: number;
+    homeRefreshCount: number;
   }
 }
 

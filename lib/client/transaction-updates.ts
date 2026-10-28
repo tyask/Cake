@@ -1,13 +1,13 @@
 import { calculateSettlement } from "../shared/settlement";
-import type { BootstrapData, TransactionRecord } from "../shared/types";
+import { isWorkspaceData, type BootstrapMetadata, type TransactionRecord } from "../shared/types";
 
 type TransactionUpdate = { transaction: TransactionRecord } | { transactionId: string; memo: string }
   | { transactionId: string; categoryId: string | null; categoryConfirmed: boolean; categoryRevision: number };
 
 /** Apply confirmed server values to the current workspace without a full reload. */
-export function applyTransactionUpdate(data: BootstrapData, workspaceId: string, update: TransactionUpdate): BootstrapData {
+export function applyTransactionUpdate<T extends BootstrapMetadata>(data: T, workspaceId: string, update: TransactionUpdate): T {
   const selected = data.selected;
-  if (!selected || selected.workspace.id !== workspaceId) return data;
+  if (!isWorkspaceData(selected) || selected.workspace.id !== workspaceId) return data;
   if ("transaction" in update) {
     const exists = selected.transactions.some(item => item.id === update.transaction.id);
     const transactions = (exists

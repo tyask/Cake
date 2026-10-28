@@ -8,7 +8,9 @@ import { chromium, type Browser, type BrowserContext, type LaunchOptions, type P
 import type { BootstrapData, TransactionRecord } from '../../lib/shared/types';
 import { analyticsToday, type AnalyticsDataset } from '../../lib/shared/analytics';
 import { formatCashflow, formatYen } from '../../lib/shared/display-formatters';
-import { currentMonthTransactions, homeMonth, personalCashflowSummary } from '../../lib/shared/home-summary';
+import { homeMonth, personalCashflowSummary, transactionsInMonth } from '../../lib/shared/home-summary';
+import type { HomeData } from '../../lib/shared/home-data';
+import { addMonths } from '../../lib/shared/recurring-payment-calendar';
 import { CloudStartupError, startCloudServer } from './dev-cloud';
 
 const executeFile = promisify(execFile);
@@ -166,7 +168,15 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       let routeFailed = false;
       const page = await context.newPage(); activePage = page; page.setDefaultTimeout(30_000);
       let analyticsRequestCount = 0;
-      page.on('request', request => { if (new URL(request.url()).pathname === '/api/analytics') analyticsRequestCount++; });
+      let homeRequestCount = 0;
+      let observeHomeRequests = false;
+      const homeAppRequests: URL[] = [];
+      page.on('request', request => {
+        const url = new URL(request.url());
+        if (url.pathname === '/api/analytics') analyticsRequestCount++;
+        if (request.method() === 'GET' && url.pathname === '/api/home') homeRequestCount++;
+        if (observeHomeRequests && request.method() === 'GET' && url.pathname === '/api/app') homeAppRequests.push(url);
+      });
       stage = 'boundary';
       // Playwright routes only the first URL in a redirect chain; CDP checks every hop.
       const interception = await context.newCDPSession(page);
@@ -188,13 +198,16 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
         await page.screenshot({ path: resolve(directory, filename) }); item.screenshots.push(filename);
       };
       const navigation = page.locator(item.mobile ? '.bottom-nav' : '.app-nav');
-      const currentHomeTable = () => {
-        const [year, month] = homeMonth().split('-').map(Number);
+      const homeTableForMonth = (value = homeMonth()) => {
+        const [year, month] = value.split('-').map(Number);
         return page.getByRole('table', { name: `${year}年${month}月の収支`, exact: true });
       };
       const navigate = async (name: string) => {
         await navigation.getByRole('button', { name: new RegExp(name) }).click();
-        if (name === 'ホーム') await currentHomeTable().waitFor();
+        if (name === 'ホーム') {
+          await homeTableForMonth().waitFor();
+          await page.locator('.home-month-summary[aria-busy="false"]').waitFor();
+        }
         else await page.getByRole('heading', { name: name === '集計' ? '収支の集計' : name, exact: true }).waitFor();
       };
       stage = 'navigation';
@@ -220,23 +233,83 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       const sharedIds = ids(initial.selected!.transactions.filter(transaction => transaction.expenseClass === 'SHARED'));
       if (sharedBaseline) requireCondition(sameIds(sharedIds, sharedBaseline)); else sharedBaseline = sharedIds;
       stage = 'workspace';
+      // readApp's explicit full GET above is a verification read, not a UI request.
+      // Observe only home UI operations until the transaction list is opened.
+      observeHomeRequests = true;
       await page.locator(item.mobile ? '.mobile-header select' : '.workspace-picker select').selectOption(workspaceId);
       stage = 'home'; await navigate('ホーム');
-      const homeTable = currentHomeTable();
-      const homeMonths = initial.selected!.members.map(member => personalCashflowSummary(
-        currentMonthTransactions(initial.selected!.transactions), initial.selected!.members, member.id));
-      requireCondition(await homeTable.getByRole('columnheader').allTextContents().then(names =>
-        JSON.stringify(names) === JSON.stringify([...initial.selected!.members.map(member => member.name), '合計'])));
-      for (const [name, values] of [
-        ['収入', homeMonths.map(month => month.receiptTotal)],
-        ['支出', homeMonths.map(month => -month.paymentTotal)],
-        ['収支', homeMonths.map(month => month.balanceYen)],
-      ] as const) {
-        const expected = [...values, values.reduce((total, value) => total + value, BigInt(0))].map(formatCashflow);
-        requireCondition(JSON.stringify(await homeTable.getByRole('row', { name: new RegExp(`^${name} `) })
-          .getByRole('cell').allTextContents()) === JSON.stringify(expected));
-      }
+      const assertHomeMonth = async (month: string, summary?: HomeData) => {
+        const table = homeTableForMonth(month);
+        await table.waitFor();
+        await page.locator('.home-month-summary[aria-busy="false"]').waitFor();
+        const expectedPeople = initial.selected!.members.map(member => personalCashflowSummary(
+          transactionsInMonth(initial.selected!.transactions, month), initial.selected!.members, member.id));
+        requireCondition(await table.getByRole('columnheader').allTextContents().then(names =>
+          JSON.stringify(names) === JSON.stringify([...initial.selected!.members.map(member => member.name), '合計'])));
+        for (const [name, values, key, sign] of [
+          ['収入', expectedPeople.map(person => person.receiptTotal), 'receiptTotal', BigInt(1)],
+          ['支出', expectedPeople.map(person => -person.paymentTotal), 'paymentTotal', BigInt(-1)],
+          ['収支', expectedPeople.map(person => person.balanceYen), 'balanceYen', BigInt(1)],
+        ] as const) {
+          const amounts = [...values, values.reduce((total, value) => total + value, BigInt(0))];
+          requireCondition(JSON.stringify(await table.getByRole('row', { name: new RegExp(`^${name} `) })
+            .getByRole('cell').allTextContents()) === JSON.stringify(amounts.map(formatCashflow)));
+          if (summary) requireCondition(JSON.stringify([
+            ...initial.selected!.members.map(member => BigInt(summary.monthly.people.find(person => person.userId === member.id)![key]) * sign),
+            BigInt(summary.monthly.total[key]) * sign,
+          ].map(String)) === JSON.stringify(amounts.map(String)));
+        }
+      };
+      await assertHomeMonth(homeMonth());
       await screenshot('home'); check('home-per-member-and-total-cashflow');
+      const settlementBeforeMonthChanges = await page.locator('.settlement-hero').innerText();
+      const readHomeFromUi = async (month: string, action: () => Promise<unknown>) => {
+        const requestCount = homeRequestCount;
+        const [response] = await Promise.all([
+          page.waitForResponse(response => {
+            const url = new URL(response.url());
+            return response.request().method() === 'GET' && url.pathname === '/api/home'
+              && url.searchParams.get('workspaceId') === workspaceId && url.searchParams.get('month') === month;
+          }),
+          action(),
+        ]);
+        requireCondition(response.status() === 200 && response.headers()['cache-control'] === 'no-store');
+        const summary = await response.json() as HomeData;
+        requireCondition(summary.workspaceId === workspaceId && summary.month === month
+          && Array.isArray(summary.monthly?.people) && Array.isArray(summary.members)
+          && !/"(?:transactions|transactionIds)"\s*:/.test(JSON.stringify(summary)));
+        await assertHomeMonth(month, summary);
+        requireCondition(homeRequestCount > requestCount);
+        requireCondition(await page.locator('.settlement-hero').innerText() === settlementBeforeMonthChanges);
+      };
+      const chooseCachedHomeMonth = async (month: string) => {
+        const requestCount = homeRequestCount;
+        await page.locator('input[type="month"][aria-label="収支の対象年月"]').fill(month);
+        await assertHomeMonth(month);
+        // Let the committed view's effects settle without a fixed-duration sleep.
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        requireCondition(homeRequestCount === requestCount);
+        requireCondition(await page.locator('.settlement-hero').innerText() === settlementBeforeMonthChanges);
+      };
+      const currentHomeMonth = homeMonth();
+      const previousHomeMonth = addMonths(`${currentHomeMonth}-01`, -1).slice(0, 7);
+      const futureHomeMonth = addMonths(`${currentHomeMonth}-01`, 1).slice(0, 7);
+      for (const month of [previousHomeMonth, futureHomeMonth]) {
+        await readHomeFromUi(month, () => page.locator('input[type="month"][aria-label="収支の対象年月"]').fill(month));
+      }
+      check('home-server-month-switch-cashflow-and-independent-settlement');
+      await chooseCachedHomeMonth(currentHomeMonth);
+      await chooseCachedHomeMonth(previousHomeMonth);
+      check('home-month-cache-reuses-initial-and-visited-months-without-fetch');
+      await readHomeFromUi(previousHomeMonth, () => page.locator('.home-actions').getByRole('button', { name: '更新', exact: true }).click());
+      check('home-manual-refresh-force-fetches-and-clears-month-cache');
+      await readHomeFromUi(currentHomeMonth, () => page.locator('input[type="month"][aria-label="収支の対象年月"]').fill(currentHomeMonth));
+      await chooseCachedHomeMonth(previousHomeMonth);
+      await chooseCachedHomeMonth(currentHomeMonth);
+      check('home-after-refresh-other-month-fetch-and-refreshed-month-cache-reuse');
+      requireCondition(homeAppRequests.length > 0 && homeAppRequests.every(url => url.searchParams.get('scope') === 'metadata'));
+      observeHomeRequests = false;
+      check('home-ui-requests-metadata-and-summary-without-full-transactions');
       stage = 'transactions'; await navigate('取引明細'); await screenshot('transactions'); check('transactions-navigation');
       stage = 'analytics'; await navigate('集計');
       await page.getByTestId('analytics-total').waitFor();

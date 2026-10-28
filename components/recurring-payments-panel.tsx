@@ -11,7 +11,7 @@ import { recurringFormConfig, recurringFormDefaults, recurringFormPreview } from
 import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/shared/schemas/transaction-memo";
 import { blockedReasonLabel, recurringPaymentStateLabel, type RecurringServiceErrorCode } from "@/lib/shared/recurring-payment-types";
 import type { RecurringPaymentMutation, RecurringPaymentMutationDraft, RecurringPayment, RecurringPaymentConfig, RecurringPaymentMutationResult, RecurringPaymentsResponse } from "@/lib/shared/recurring-payment-types";
-import type { ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/shared/types";
+import type { ExpenseClass, WorkspaceMetadata, WorkspaceMember } from "@/lib/shared/types";
 import { SwipeDelete } from "./swipe-delete";
 import { RefreshButton } from "./refresh-button";
 import { SplitEditor } from "./split-editor";
@@ -33,7 +33,7 @@ async function readResponse<T>(response: Response): Promise<T> {
   return result as T;
 }
 
-export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: WorkspaceData; currentUserId: string }) {
+export function RecurringPaymentsPanel({ selected, currentUserId }: { selected: WorkspaceMetadata; currentUserId: string }) {
   const [data, setData] = useState<RecurringPaymentsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -180,7 +180,7 @@ function RecurringSplit({ config, members }: { config: RecurringPaymentConfig; m
 }
 
 function RecurringPaymentForm({ selected, currentUserId, data, payment, close, save, reloadLatest }: {
-  selected: WorkspaceData; currentUserId: string; data: RecurringPaymentsResponse; payment?: RecurringPayment; close: () => void;
+  selected: WorkspaceMetadata; currentUserId: string; data: RecurringPaymentsResponse; payment?: RecurringPayment; close: () => void;
   save: (payload: RecurringPaymentMutationDraft) => Promise<RecurringPaymentMutationResult>; reloadLatest: (payment: RecurringPayment) => Promise<void>;
 }) {
   const matchRule = useMemo(() => prepareDefaultRuleMatcher(selected.rules), [selected.rules]);

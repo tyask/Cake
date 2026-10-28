@@ -30,6 +30,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<Hom
     );
   }
 
-  const initialData = await getBootstrap(user, workspaceId);
+  const initialData = await getBootstrap(user, workspaceId, "metadata");
   return <Dashboard initialData={initialData} initialTab={initialTab} testAuth={testAuth} />;
 }

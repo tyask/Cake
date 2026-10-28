@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { build } from "esbuild";
 import { chromium, type Browser, type Page, type Route } from "playwright";
 import { resolveAnalyticsPeriods, type AnalyticsQuery } from "../../lib/shared/analytics";
+import type { HomeData } from "../../lib/shared/home-data";
 import type { BootstrapData, BootstrapMetadata, DashboardTab } from "../../lib/shared/types";
 
 const now = new Date("2026-10-23T02:00:00Z");
@@ -34,6 +35,16 @@ function metadata(data: BootstrapData): BootstrapMetadata {
   return { ...data, selected: { workspace, members, categories, rules } };
 }
 
+function home(id: string, month: string): HomeData {
+  const members = bootstrap(id).selected!.members.map(({ id, name }) => ({ id, name }));
+  const totals = { paymentTotal: "0", receiptTotal: "0", balanceYen: "0" };
+  return {
+    workspaceId: id, month, members,
+    monthly: { people: members.map(member => ({ userId: member.id, ...totals })), total: totals },
+    unsettled: { count: 0, ...totals }, settlement: null, settlementHistory: [],
+  };
+}
+
 async function stable(page: Page) {
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
@@ -55,6 +66,8 @@ async function openFixture(browser: Browser, origin: string, width: number, api?
     if (method === "GET" && url.pathname === "/api/app") {
       const data = bootstrap(url.searchParams.get("workspaceId") ?? workspaceId);
       await route.fulfill({ json: url.searchParams.get("scope") === "metadata" ? metadata(data) : data });
+    } else if (method === "GET" && url.pathname === "/api/home") {
+      await route.fulfill({ json: home(url.searchParams.get("workspaceId")!, url.searchParams.get("month")!) });
     } else if (url.pathname === "/api/import/history") await route.fulfill({ json: { history: [] } });
     else if (url.pathname === "/api/recurring-payments") await route.fulfill({ json: {
       now: now.toISOString(), today: "2026-10-23", eligibleActorUserIds: ["a", "b"], payments: [],
@@ -68,13 +81,19 @@ async function openFixture(browser: Browser, origin: string, width: number, api?
     else if (url.pathname === "/api/import/duplicates") await route.fulfill({ json: { transactions: [] } });
     else { errors.push(`想定外のAPI: ${method} ${url.pathname}`); await route.abort(); }
   });
-  await page.addInitScript(data => { window.navigationInitialData = data; }, bootstrap());
+  await page.addInitScript(data => { window.navigationInitialData = data; }, metadata(bootstrap()));
   await page.goto(origin);
+  await page.locator('.home-month-summary[aria-busy="false"]').waitFor();
   const navigate = async (tab: DashboardTab) => {
     const response = page.waitForResponse(response => response.request().method() === "GET" && new URL(response.url()).pathname === "/api/app");
     await page.locator(width < 768 ? ".bottom-nav" : ".app-nav").getByRole("button", { name: new RegExp(`${tabs[tab]}$`) }).click();
-    await response;
-    if (tab === "home") await page.getByRole("table", { name: "2026年10月の収支", exact: true }).waitFor();
+    const refreshed = await response;
+    assert.equal(new URL(refreshed.url()).searchParams.get("scope"), tab === "transactions" ? null : "metadata",
+      "明細画面だけ全件取得し、他の画面では共通情報を取得する");
+    if (tab === "home") {
+      await page.getByRole("table", { name: "2026年10月の収支", exact: true }).waitFor();
+      await page.locator('.home-month-summary[aria-busy="false"]').waitFor();
+    }
     else await page.getByRole("heading", { name: tab === "import" ? "明細を取込" : tab === "analytics" ? "収支の集計" : tabs[tab], level: 1, exact: true }).waitFor();
     await stable(page);
     assert.equal(await page.locator('table[aria-label="取り込み明細"]').count(), tab === "import" ? await page.getByRole("table", { name: "取り込み明細", exact: true }).count() : 0,
