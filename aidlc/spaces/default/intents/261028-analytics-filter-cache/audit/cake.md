@@ -40,3 +40,30 @@ Cake運用の記録。公式エンジンの承認receiptではない。日時は
 - 計画SHA-256：`cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28`
 
 > 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
+
+## REOPEN
+
+- 記録日時：2026-10-28T08:11:34.926Z
+- 計画SHA-256：`cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28`
+
+> 最終SHA029d480の全体テスト1245件・buildは成功したが、Cloud QAの追加reload確認で停止した。
+> 独立scratch診断によりカテゴリ欄open時の「収入」checkboxが収支欄とカテゴリ欄の2件に一致するstrict mode違反と判明した。
+> アプリ保存処理に問題はなく、QAの収支checkboxを「収支に含める内容」groupへ限定して衝突を防ぐ。
+> 計画・受入条件は変更しない。修正後に再freeze/commit、同Agentの差分再レビューと最終SHAの所定検証を行う。
+
+## PROGRESS
+
+- 記録日時：2026-10-28T08:11:35.352Z
+- 計画SHA-256：`cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28`
+
+> 最終SHA029d480の全体テスト1245件・buildは成功したが、Cloud QAの追加reload確認で停止した。
+> 独立scratch診断によりカテゴリ欄open時の「収入」checkboxが収支欄とカテゴリ欄の2件に一致するstrict mode違反と判明した。
+> アプリ保存処理に問題はなく、QAの収支checkboxを「収支に含める内容」groupへ限定して衝突を防ぐ。
+> 計画・受入条件は変更しない。修正後に再freeze/commit、同Agentの差分再レビューと最終SHAの所定検証を行う。
+
+## FREEZE
+
+- 記録日時：2026-10-28T08:11:35.677Z
+- 計画SHA-256：`cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28`
+
+> 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。

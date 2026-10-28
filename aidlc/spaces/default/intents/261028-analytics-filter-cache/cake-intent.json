@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-10-28T07:52:44.933Z",
-  "updatedAt": "2026-10-28T07:59:10.825Z",
+  "updatedAt": "2026-10-28T08:11:35.677Z",
   "events": [
     {
       "action": "CREATED",
@@ -44,6 +44,24 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-10-28T07:59:10.825Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-28T08:11:34.926Z",
+      "note": "最終SHA029d480の全体テスト1245件・buildは成功したが、Cloud QAの追加reload確認で停止した。\n独立scratch診断によりカテゴリ欄open時の「収入」checkboxが収支欄とカテゴリ欄の2件に一致するstrict mode違反と判明した。\nアプリ保存処理に問題はなく、QAの収支checkboxを「収支に含める内容」groupへ限定して衝突を防ぐ。\n計画・受入条件は変更しない。修正後に再freeze/commit、同Agentの差分再レビューと最終SHAの所定検証を行う。\n",
+      "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T08:11:35.352Z",
+      "note": "最終SHA029d480の全体テスト1245件・buildは成功したが、Cloud QAの追加reload確認で停止した。\n独立scratch診断によりカテゴリ欄open時の「収入」checkboxが収支欄とカテゴリ欄の2件に一致するstrict mode違反と判明した。\nアプリ保存処理に問題はなく、QAの収支checkboxを「収支に含める内容」groupへ限定して衝突を防ぐ。\n計画・受入条件は変更しない。修正後に再freeze/commit、同Agentの差分再レビューと最終SHAの所定検証を行う。\n",
+      "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T08:11:35.677Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28"
     }
