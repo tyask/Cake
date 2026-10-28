@@ -30,6 +30,31 @@ test('legacy and split workflows accept deploy, status and closed-PR cleanup rec
   }
 });
 
+test('an unevaluated management name cannot identify a deploy, status or cleanup operation job', async () => {
+  const name = "github.event_name == 'push' && format('preview-cleanup-{0}', matrix.pr) || 'preview'";
+  for (const action of ['deploy', 'status', 'cleanup'] as const) for (const splitJobs of [false, true]) {
+    const f = checksFixture(action, splitJobs);
+    if (action === 'cleanup') {
+      f.request.source = { ...f.request.source, state: 'closed' };
+      f.annotation.message = JSON.stringify({ ...f.receipt, source: f.request.source });
+    }
+    f.job.name = f.check.name = name;
+    await assert.rejects(readPreviewReceipt(f.get, 123, f.request), /PREVIEW_JOB_AMBIGUOUS/);
+    assert.equal(f.calls.some(path => path.startsWith('check-runs/')), false);
+  }
+});
+
+test('a non-verify operation does not promote an unknown management-name job to a peer', async () => {
+  const f = checksFixture();
+  Object.assign(f.peer, {
+    name: "github.event_name == 'push' && format('preview-cleanup-{0}', matrix.pr) || 'preview'",
+    status: 'in_progress', conclusion: 'cancelled',
+  });
+  f.jobs.jobs.push(f.peer); f.jobs.total_count = 2;
+  assert.deepEqual(await readPreviewReceipt(f.get, 123, f.request), f.receipt);
+  assert.equal(f.calls.includes('check-runs/346'), false);
+});
+
 test('split operation jobs require unique known names and never use a skipped selected job', async () => {
   for (const inventory of ['missing-preview', 'duplicate-preview', 'duplicate-verify', 'skipped-preview'] as const) {
     const f = checksFixture('status', true);
