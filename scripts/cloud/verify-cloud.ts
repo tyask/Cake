@@ -168,11 +168,13 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       let routeFailed = false;
       const page = await context.newPage(); activePage = page; page.setDefaultTimeout(30_000);
       let analyticsRequestCount = 0;
+      let homeRequestCount = 0;
       let observeHomeRequests = false;
       const homeAppRequests: URL[] = [];
       page.on('request', request => {
         const url = new URL(request.url());
         if (url.pathname === '/api/analytics') analyticsRequestCount++;
+        if (request.method() === 'GET' && url.pathname === '/api/home') homeRequestCount++;
         if (observeHomeRequests && request.method() === 'GET' && url.pathname === '/api/app') homeAppRequests.push(url);
       });
       stage = 'boundary';
@@ -262,6 +264,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       await screenshot('home'); check('home-per-member-and-total-cashflow');
       const settlementBeforeMonthChanges = await page.locator('.settlement-hero').innerText();
       const readHomeFromUi = async (month: string, action: () => Promise<unknown>) => {
+        const requestCount = homeRequestCount;
         const [response] = await Promise.all([
           page.waitForResponse(response => {
             const url = new URL(response.url());
@@ -276,15 +279,34 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
           && Array.isArray(summary.monthly?.people) && Array.isArray(summary.members)
           && !/"(?:transactions|transactionIds)"\s*:/.test(JSON.stringify(summary)));
         await assertHomeMonth(month, summary);
+        requireCondition(homeRequestCount > requestCount);
+        requireCondition(await page.locator('.settlement-hero').innerText() === settlementBeforeMonthChanges);
+      };
+      const chooseCachedHomeMonth = async (month: string) => {
+        const requestCount = homeRequestCount;
+        await page.locator('input[type="month"][aria-label="収支の対象年月"]').fill(month);
+        await assertHomeMonth(month);
+        // Let the committed view's effects settle without a fixed-duration sleep.
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        requireCondition(homeRequestCount === requestCount);
         requireCondition(await page.locator('.settlement-hero').innerText() === settlementBeforeMonthChanges);
       };
       const currentHomeMonth = homeMonth();
-      for (const month of [addMonths(`${currentHomeMonth}-01`, -1).slice(0, 7),
-        addMonths(`${currentHomeMonth}-01`, 1).slice(0, 7), currentHomeMonth]) {
+      const previousHomeMonth = addMonths(`${currentHomeMonth}-01`, -1).slice(0, 7);
+      const futureHomeMonth = addMonths(`${currentHomeMonth}-01`, 1).slice(0, 7);
+      for (const month of [previousHomeMonth, futureHomeMonth]) {
         await readHomeFromUi(month, () => page.locator('input[type="month"][aria-label="収支の対象年月"]').fill(month));
       }
       check('home-server-month-switch-cashflow-and-independent-settlement');
-      await readHomeFromUi(currentHomeMonth, () => page.locator('.home-actions').getByRole('button', { name: '更新', exact: true }).click());
+      await chooseCachedHomeMonth(currentHomeMonth);
+      await chooseCachedHomeMonth(previousHomeMonth);
+      check('home-month-cache-reuses-initial-and-visited-months-without-fetch');
+      await readHomeFromUi(previousHomeMonth, () => page.locator('.home-actions').getByRole('button', { name: '更新', exact: true }).click());
+      check('home-manual-refresh-force-fetches-and-clears-month-cache');
+      await readHomeFromUi(currentHomeMonth, () => page.locator('input[type="month"][aria-label="収支の対象年月"]').fill(currentHomeMonth));
+      await chooseCachedHomeMonth(previousHomeMonth);
+      await chooseCachedHomeMonth(currentHomeMonth);
+      check('home-after-refresh-other-month-fetch-and-refreshed-month-cache-reuse');
       requireCondition(homeAppRequests.length > 0 && homeAppRequests.every(url => url.searchParams.get('scope') === 'metadata'));
       observeHomeRequests = false;
       check('home-ui-requests-metadata-and-summary-without-full-transactions');

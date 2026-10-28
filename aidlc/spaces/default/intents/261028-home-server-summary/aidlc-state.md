@@ -5,12 +5,12 @@ Cake運用層の進捗表示。公式AI-DLCエンジンのstate/receiptではな
 
 - 関連Issue：https://github.com/tyask/Cake/issues/168
 - Intent：`aidlc/spaces/default/intents/261028-home-server-summary`
-- 承認済み計画SHA-256：`e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1`
+- 承認済み計画SHA-256：`900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39`
 - Primary branch：`codex/home-server-summary`
 - Branches：`codex/home-server-summary`
 - Phase：Construction
 - Status：frozen
-- 記録更新日時：2026-10-28T10:50:51.009Z
+- 記録更新日時：2026-10-28T11:11:08.707Z
 - 計画承認：記録あり（対象計画のhash一致はCLIで検査）
 - 記録凍結：済み。以後の検証・Ready・Operation結果はIssue/PR/Actionsに保存する。
 
