@@ -353,6 +353,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       const committed = data();
       committed.selected!.transactions[0] = { ...committed.selected!.transactions[0], categoryId: "c1", categoryConfirmed: true, categoryRevision: 1 };
       await f.reply(await f.take(), committed);
+      await expectState(f.page, { "selectedTransactions.transactions.0.categoryId": "c1", "selectedTransactions.transactions.0.categoryRevision": 1 });
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: "c2" }, ""); });
       await f.reply(await f.take("POST"), { ok: true, transactionId: "transaction-a", categoryId: "c2", categoryConfirmed: true, categoryRevision: 2 });
       await f.reply(older, { ok: true, transactionId: "transaction-a", categoryId: "c1", categoryConfirmed: true, categoryRevision: 1 });

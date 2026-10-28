@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-10-28T10:28:39.470Z",
-  "updatedAt": "2026-10-28T10:45:55.011Z",
+  "updatedAt": "2026-10-28T10:50:51.009Z",
   "events": [
     {
       "action": "CREATED",
@@ -68,6 +68,24 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-10-28T10:45:55.011Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-28T10:50:25.009Z",
+      "note": "独立再レビューで、既存のカテゴリ保存回帰が一覧GETのReact採用を待たず次の保存を開始するため、新しい再取得要求をモックが未応答にするテスト競合を検出。元シナリオどおり一覧を開き直した状態の採用を待ってから次の保存を開始するようテストを安定化する。製品コード・計画変更なし。\n",
+      "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T10:50:50.718Z",
+      "note": "独立再レビューで、既存のカテゴリ保存回帰が一覧GETのReact採用を待たず次の保存を開始するため、新しい再取得要求をモックが未応答にするテスト競合を検出。元シナリオどおり一覧を開き直した状態の採用を待ってから次の保存を開始するようテストを安定化する。製品コード・計画変更なし。\n",
+      "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T10:50:51.009Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
     }
