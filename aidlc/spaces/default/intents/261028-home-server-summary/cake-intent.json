@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-10-28T10:28:39.470Z",
-  "updatedAt": "2026-10-28T10:38:57.848Z",
+  "updatedAt": "2026-10-28T10:45:55.011Z",
   "events": [
     {
       "action": "CREATED",
@@ -50,6 +50,24 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-10-28T10:38:57.848Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-28T10:42:20.226Z",
+      "note": "独立レビューで、metadataの設定画面で保存中に一覧へ移動した場合、保存完了のdataRevisionにより必須full GETが破棄され一覧未取得のまま残るP2競合を再現。AC-05/06の範囲内で、同じworkspace世代・最新requestのrevisionだけが変化した必須一覧GETを再取得し、回帰テストを追加する。計画・受入条件の変更なし。\n",
+      "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T10:45:54.735Z",
+      "note": "独立レビューのP2を修正。metadata状態で保存中に取引一覧へ移動したとき、保存によるrevision更新だけで初回full GETが破棄された場合に、現在の一覧へ必要なfull GETを自動再取得する。workspace世代・最新request ID・現在tab・scopeを確認し、別画面/別workspace/旧要求を復活させない。\n\nsettings→createCategory保留→transactions初回GET→POST成功→旧GET成功→新GET→最新一覧採用の実React/Chromium回帰を追加。既存の保存済み値・カテゴリ削除墓標・request逆転の4ケースも、古いsnapshot不採用と再取得後の確定値保持を検証。controller 46テスト成功。\n\n修正箇所と関連テストのeslint・全体typecheck・diff整合性を確認。再freeze/commit後の新しいHEADを独立レビューし、その後に最終SHAの全検証へ進む。計画・ACの変更なし。\n",
+      "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T10:45:55.011Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
     }

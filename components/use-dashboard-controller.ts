@@ -96,7 +96,17 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
       if (!canApplyBootstrapResponse(
         { workspaceId: desiredWorkspaceId, generation, revision, requestId },
         { ...workspaceView.current, revision: dataRevision.current, requestId: refreshRequest.current },
-      )) return false;
+      )) {
+        // The list may have no dataset yet. A save that completed after its GET
+        // started requires a new snapshot, not a permanently empty loading view.
+        // Superseded tabs/workspaces/requests must never restart old work.
+        if (scope === "full" && currentTab.current === "transactions"
+          && requestId === refreshRequest.current && revision !== dataRevision.current
+          && isWorkspaceViewCurrent({ workspaceId: desiredWorkspaceId, generation }, workspaceView.current)) {
+          return refresh(workspaceView.current.workspaceId, generation, "full");
+        }
+        return false;
+      }
       let nextData: BootstrapMetadata = scope === "metadata"
         ? mergeBootstrapMetadata(currentData.current, next as BootstrapMetadata) ?? next as BootstrapMetadata
         : next as BootstrapData;

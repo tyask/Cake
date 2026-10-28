@@ -131,6 +131,32 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.reply(await f.take(), data());
       await expectState(f.page, { "selectedTransactions.transactions.0.id": "transaction-a", loading: false, notice: "最新状態に更新しました。" });
     }, "home", metadata());
+    await scenario("共通情報だけの設定で開始した保存が一覧の初回GETを追い越しても、最新の全件を再取得して一覧を表示する", async f => {
+      await expectState(f.page, { tab: "settings", selectedTransactions: null, "data.selected.transactions": undefined });
+      await f.page.evaluate(() => {
+        window.operation = window.controller.run({ action: "createCategory", workspaceId: "a", parentId: null, name: "食費", colorHex: "#f97316" }, "追加しました。");
+      });
+      const post = await f.take("POST");
+      await f.page.evaluate(() => window.controller.openTab("transactions"));
+      const older = await f.take();
+      assert.equal(new URL(older.request().url()).searchParams.get("workspaceId"), "a");
+      assert.equal(new URL(older.request().url()).searchParams.has("scope"), false);
+      const category = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
+      await f.reply(post, { ok: true, category });
+      await f.page.evaluate(() => window.operation);
+      await expectState(f.page, { "selected.categories": [category], selectedTransactions: null, loading: true });
+      await f.reply(older, data("a", "保存前の一覧"));
+      const retry = await f.take();
+      const retryUrl = new URL(retry.request().url());
+      assert.equal(retryUrl.searchParams.get("workspaceId"), "a");
+      assert.equal(retryUrl.searchParams.has("scope"), false);
+      await expectState(f.page, { "selected.categories": [category], selectedTransactions: null, "data.selected.transactions": undefined, loading: true });
+      const latest = data("a", "最新の一覧"); latest.selected!.categories = [category];
+      await f.reply(retry, latest);
+      await expectState(f.page, { "selectedTransactions.transactions.0.merchant": "最新の一覧", "data.selected.transactions.0.merchant": "最新の一覧",
+        "selected.categories": [category], loading: false });
+      assert.equal(f.requests.length, 0, "保存後の新しい全件取得が採用されたら再取得を繰り返さない");
+    }, "settings", metadata());
     await scenario("ホームのworkspace切替は共通情報だけを取得し、遅い別workspaceの応答を捨てる", async f => {
       await f.page.evaluate(() => { window.operation = window.controller.switchWorkspace("b"); });
       const older = await f.take();
@@ -350,7 +376,11 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.reply(staleGet, initial);
       await expectState(f.page, { "selected.categories.0.sortOrder": 0, "selected.categories.1.sortOrder": 1,
         "selected.categories.2.parentId": "daily", "selected.categories.2.revision": 3, loading: false });
-      assert.equal(f.requests.length, 0, "移動確定後の追加GETは不要");
+      const latest = data(); latest.selected!.categories = [food, daily, { ...child, parentId: "daily" }].map(category => ({ ...category, revision: 3 }));
+      await f.reply(await f.take(), latest);
+      await expectState(f.page, { "selected.categories.0.sortOrder": 0, "selected.categories.1.sortOrder": 1,
+        "selected.categories.2.parentId": "daily", "selected.categories.2.revision": 3, loading: false });
+      assert.equal(f.requests.length, 0, "保存と競合したGETは最新snapshotの取得後に再取得を繰り返さない");
     });
     await scenario("カテゴリ編集・停止も確定祖先を直接反映し、他ブラウザの親子移動と古い親を混ぜない", async f => {
       const z = { id: "z", revision: 1, parentId: null, name: "Z", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
@@ -414,7 +444,15 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.reply(assignment, { ok: true, transactionId: "transaction-a", categoryId: "food", categoryConfirmed: true, categoryRevision: 2 });
       const transaction = { ...initial.selected!.transactions[0], id: "new-transaction", occurredAt: "2026-10-19T00:00:00Z" };
       await f.reply(insert, { ok: true, transaction });
+      await expectState(f.page, { "selected.transactions.0.id": "new-transaction", "selected.transactions.0.categoryRevision": 2,
+        "selected.transactions.1.categoryRevision": 3, loading: false });
       await f.reply(get, initial);
+      const latest = data(); latest.selected!.categories = [other];
+      latest.selected!.transactions = [
+        { ...transaction, categoryId: null, categoryConfirmed: false, categoryRevision: 2 },
+        { ...initial.selected!.transactions[0], categoryId: null, categoryConfirmed: false, categoryRevision: 3 },
+      ];
+      await f.reply(await f.take(), latest);
       await expectState(f.page, { "selected.categories": [other], "selected.transactions.0.id": "new-transaction", "selected.transactions.0.categoryId": null,
         "selected.transactions.0.categoryRevision": 2, "selected.transactions.1.categoryId": null, "selected.transactions.1.categoryRevision": 3, loading: false });
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionCategory", workspaceId: "a", transactionId: "transaction-a", categoryId: "other" }, ""); });
@@ -547,7 +585,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await expectState(f.page, { "selected.categories": [], notice: "変更は保存されました。最新の状態を取得できないため、画面を更新してください。", loading: false });
       assert.equal(f.requests.length, 0);
     });
-    await scenario("カテゴリ照合GETが別保存で無効になったら旧カテゴリを採用せず、再取得を案内する", async f => {
+    await scenario("カテゴリ照合GETが別保存で無効になったら旧カテゴリを採用せず、最新snapshotを再取得する", async f => {
       const food = { id: "food", revision: 1, parentId: null, name: "食費", colorHex: "#f97316", sortOrder: 0, archivedAt: null };
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "deleteCategory", workspaceId: "a", categoryId: "food" }, ""); });
       await f.reply(await f.take("POST"), { ok: true, deletedCategoryIds: ["food"], detachedTransactions: [] });
@@ -569,8 +607,11 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.page.evaluate(() => window.operation);
       const old = data(); old.selected!.categories = [{ ...food, id: "unknown-category" }];
       await f.reply(reconciliation, old);
+      await expectState(f.page, { "selected.categories": [], "selected.transactions.0.memo": "確定メモ" });
+      const latest = data(); latest.selected!.transactions[0].memo = "確定メモ";
+      await f.reply(await f.take(), latest);
       await expectState(f.page, { "selected.categories": [], "selected.transactions.0.memo": "確定メモ",
-        notice: "変更は保存されました。画面を更新して最新の状態を確認してください。", loading: false });
+        notice: "移動しました。", loading: false });
       assert.equal(f.requests.length, 0);
     });
     await scenario("保存開始前のGETは保存確定後の明細を上書きしない", async f => {
@@ -578,7 +619,11 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransaction", workspaceId: "a", occurredAt: "2026-10-18T00:00:42.123Z", merchant: "saved", method: "現金", type: "PAYMENT", amountYen: 200, actorUserId: "user" }, "saved"); });
       const post = await f.take("POST"), transaction: TransactionRecord = { ...data().selected!.transactions[0], merchant: "saved", amountYen: 200 };
       await f.reply(post, { ok: true, transaction }); await expectState(f.page, { "selected.transactions.0.amountYen": 200, notice: "saved" });
-      await f.reply(older, data("a", "old")); await expectState(f.page, { "selected.transactions.0.merchant": "saved", loading: false }); assert.equal(f.requests.length, 0);
+      await f.reply(older, data("a", "old")); await expectState(f.page, { "selected.transactions.0.merchant": "saved", loading: false });
+      const latest = data(); latest.selected!.transactions = [transaction];
+      await f.reply(await f.take(), latest);
+      await expectState(f.page, { "selectedTransactions.transactions.0.merchant": "saved", "selected.transactions.0.amountYen": 200, loading: false });
+      assert.equal(f.requests.length, 0);
     });
     await scenario("別workspaceへ移動した後の保存応答は現在の家計と通知へ反映しない", async f => {
       await f.page.evaluate(() => { window.operation = window.controller.run({ action: "saveTransactionMemo", workspaceId: "a", transactionId: "transaction-a", memo: "old save" }, "stale notice"); }); const post = await f.take("POST");

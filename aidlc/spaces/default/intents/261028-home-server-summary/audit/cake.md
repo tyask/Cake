@@ -118,3 +118,28 @@ Cake運用の記録。公式エンジンの承認receiptではない。日時は
 - 計画SHA-256：`e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1`
 
 > 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
+
+## REOPEN
+
+- 記録日時：2026-10-28T10:42:20.226Z
+- 計画SHA-256：`e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1`
+
+> 独立レビューで、metadataの設定画面で保存中に一覧へ移動した場合、保存完了のdataRevisionにより必須full GETが破棄され一覧未取得のまま残るP2競合を再現。AC-05/06の範囲内で、同じworkspace世代・最新requestのrevisionだけが変化した必須一覧GETを再取得し、回帰テストを追加する。計画・受入条件の変更なし。
+
+## PROGRESS
+
+- 記録日時：2026-10-28T10:45:54.735Z
+- 計画SHA-256：`e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1`
+
+> 独立レビューのP2を修正。metadata状態で保存中に取引一覧へ移動したとき、保存によるrevision更新だけで初回full GETが破棄された場合に、現在の一覧へ必要なfull GETを自動再取得する。workspace世代・最新request ID・現在tab・scopeを確認し、別画面/別workspace/旧要求を復活させない。
+> 
+> settings→createCategory保留→transactions初回GET→POST成功→旧GET成功→新GET→最新一覧採用の実React/Chromium回帰を追加。既存の保存済み値・カテゴリ削除墓標・request逆転の4ケースも、古いsnapshot不採用と再取得後の確定値保持を検証。controller 46テスト成功。
+> 
+> 修正箇所と関連テストのeslint・全体typecheck・diff整合性を確認。再freeze/commit後の新しいHEADを独立レビューし、その後に最終SHAの全検証へ進む。計画・ACの変更なし。
+
+## FREEZE
+
+- 記録日時：2026-10-28T10:45:55.011Z
+- 計画SHA-256：`e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1`
+
+> 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
