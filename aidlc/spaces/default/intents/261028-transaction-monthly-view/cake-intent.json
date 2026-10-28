@@ -1,0 +1,75 @@
+{
+  "protocol": "cake-intent/v1",
+  "id": "261028-transaction-monthly-view",
+  "repository": "tyask/Cake",
+  "issue": 170,
+  "issueUrl": "https://github.com/tyask/Cake/issues/170",
+  "branch": "codex/transaction-monthly-view",
+  "branches": [
+    "codex/transaction-monthly-view"
+  ],
+  "recordDir": "aidlc/spaces/default/intents/261028-transaction-monthly-view",
+  "phase": "Construction",
+  "status": "frozen",
+  "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557",
+  "approval": {
+    "actor": "このチャットの利用者",
+    "reply": "お願いします。\n",
+    "recordedAt": "2026-10-28T13:48:31.945Z",
+    "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557",
+    "planFile": "plans/f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557.md"
+  },
+  "frozen": true,
+  "createdAt": "2026-10-28T13:48:15.821Z",
+  "updatedAt": "2026-10-28T14:32:36.714Z",
+  "events": [
+    {
+      "action": "CREATED",
+      "recordedAt": "2026-10-28T13:48:15.821Z",
+      "note": "Issueに対応する計画を記録した。承認は別途記録する。",
+      "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557"
+    },
+    {
+      "action": "APPROVE",
+      "recordedAt": "2026-10-28T13:48:31.945Z",
+      "note": "承認者：このチャットの利用者\n承認の記録日時：2026-10-28T13:48:31.945Z\n承認対象本文：[plans/f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557.md](../plans/f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557.md)\n利用者の実際の回答：\nお願いします。",
+      "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T14:09:48.816Z",
+      "note": "Issue本文の承認記録\n\nIssue URL: https://github.com/tyask/Cake/issues/170\n承認者: このチャットの利用者\n実際の回答: はい、この方針で実装を進めてください。\n記録日時: 2026-10-28T14:09:48.492805+00:00\n\n承認対象の保存済みIssue本文（直前にチャットへ提示）:\n\n## 目的・背景\n\n取引明細を月ごとに確認し、全期間の未精算明細にも切り替えられるようにする。\n利用者がチャットで提示済みの具体的計画に「お願いします。」と承認した。\n\n## 対象範囲・対象外\n\n- 上部ラジオボタンとコンパクトな年月選択。\n- 対象月または全期間の未清算共有明細の取得、月別メモリキャッシュ。\n- ユーザー・ワークスペースごとのモード・月のブラウザ保存。\n- 更新・モード変更でキャッシュ無効化と選択先の再取得。\n- 保存待ち・失敗時の入力保持、遅延応答排除、更新後のキャッシュ整合。\n- ホーム・既存列フィルター・認可を維持。DB構造変更は想定しない。\n- 基本設計・詳細設計の更新。\n\n### 明細取得API\n\n- 一覧専用の `GET /api/transactions` を1本追加し、取得範囲をqueryで切り替える。\n- 月単位: `/api/transactions?workspaceId=…&mode=month&month=2026-10`。\n  `month`は必須。日本時間の指定月全体を対象に、収入・支出、共有・個人、清算済み・未来日付を含める。\n- 未精算: `/api/transactions?workspaceId=…&mode=unsettled`。\n  月指定は不要。全期間の `expenseClass=SHARED` かつ `settledAt=null` の明細を対象にする。\n- 応答は `workspaceId`・`mode`・`month`・`transactions`。\n  `month`は月単位なら `YYYY-MM`、未精算なら `null`。\n  明細は既存の `TransactionRecord` 形式を使い、日時の新しい順に返す。\n- サーバーで認証・利用可否・ワークスペース所属・queryを検証し、SQLで対象を絞り込む。\n- 取引明細画面の一覧取得先をこのAPIへ切り替える。\n  参加者・カテゴリ等の共通情報は既存の `/api/app?scope=metadata` から取得する。\n- `/api/home`・集計用API・既存APIのレスポンス仕様を維持する。DB構造の変更は不要。\n- API応答は `Cache-Control: no-store` とする。\n  月別キャッシュはブラウザのメモリに持ち、「更新」とモード変更ではキャッシュを無効化して再取得する。\n\n## 受入条件\n\n- [ ] AC-01: 上部ラジオボタンで月単位明細・未精算明細を選べ、初期値は月単位・日本時間の今月。\n- [ ] AC-02: 日本時間の選択月の支払い・収入を、清算済み・未来日付を含めて表示。\n- [ ] AC-03: 月単位時のみ前月・年月指定・翌月・今月の操作をコンパクトに表示。\n- [ ] AC-04: 未精算は全期間の未清算共有明細。個人明細は既存どおり清算対象外。\n- [ ] AC-05: モードと月をユーザー・ワークスペースごとに記憶し、画面移動・再読み込みで復元。\n- [ ] AC-06: 取得済み月はメモリキャッシュを再利用。更新とモード変更では無効化・再取得。\n- [ ] AC-07: 月・モード変更前に未保存入力を保存。保存失敗では入力・表示条件を保持。切り替え成功時は行選択解除、列フィルター維持。\n\n## 工程・検証\n\n標準の機能変更としてIssue・専用branch/worktree・Intentで追跡する。\n月境界・状態復元・通信回数・保存失敗・応答逆転の回帰テスト、PC/mobileブラウザ確認、自己レビュー・別Agentレビューを行う。\n最終SHAのlint・型チェック・自動テスト・build、PRのCI・自動Preview・正式ブラウザ検証を揃えてReadyとする。\nmergeは利用者が行い、既存Actionsが本番反映と専用資源cleanupを確認する。\n\n## 関連記録\n\n- 承認済み計画: この案件のチャットで提示・承認済み。\n- Intent: `261028-transaction-monthly-view`（作成済み・未commit）\n- PR: 作成後に追記\n\n## 進捗\n\n- 状況: 実行中\n- 現在の工程: API方針を追記した保存済みIssue本文の提示・承認待ち\n- 次の作業: 実装・テスト・レビュー・PR検証\n\n\n経緯: 元checkoutの規定で計画承認後にworktree/Intentを作成した後、最新mainの独立Issue承認規定を認識した。実装は開始せず、API方針を説明・Issue本文へ反映して再取得・提示し、上記承認を得た。既存の同一案件worktree/Intentを継続する。\nAPIの詳細は承認済み計画の取得処理を具体化したもので、目的・範囲・受入条件の変更はない。\n",
+      "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T14:27:23.969Z",
+      "note": "実装・自己レビュー・関連テストを完了し、別Agentレビューへ進む。\n\n- AC-01〜03: 上部ラジオ・コンパクトな月移動/指定/今月。月別の収入・支出、清算済み・未来日付を含む。\n- AC-04: 未精算は全期間の未清算共有明細。既存の個人=清算対象外を維持。\n- AC-05〜06: user/workspace別localStorageとメモリ内24view LRU。更新・モード変更で再取得。\n- AC-07: 保存待ち・失敗時の入力保持、切替成功時の選択解除、列条件保持。\n- API/shared/server、controller・storage・実UIの回帰を追加。自己レビューでworkspace切替後の保存ackと手動更新時のカテゴリ無効化競合を修正。別月への日時変更と専用保存の応答逆転も回帰で再現し、移動先キャッシュの確定メモ・カテゴリを保持するよう修正。\n- 日本時間の月境界・認可のPGliteテスト、実UIの320/390pxレイアウト等、実Next+PGliteのPC/mobile × A/Bによる4ケースの機能確認が成功。\n- 基本/詳細設計を現行のAPI・取得・キャッシュ・保存・遅延応答採用条件へ更新。\n- 最終SHAの別Agentレビュー・全ローカル検証・正式Preview/CIの結果は凍結後にPR/Issueへ記録する。\n\n計画の工程は標準の機能変更として要件・設計・実装・検証を採用する。独立した比較案検討や段階分割は、取得条件と既存UIの拡張に範囲が限定されるため省略し、別Agentレビュー・最終SHA検証・CI・Preview・Ready条件は維持する。\n",
+      "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T14:27:24.221Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-28T14:30:17.455Z",
+      "note": "全タブ往復とCSV取込の既存ブラウザ回帰に、取引明細だけfullを取得する旧経路の前提が残っていることを確認した。\n専用一覧APIとmetadata取得へ合わせ、読込中の上部UI・キャッシュ再利用を含めて既存の画面残留/入力保持の契約を維持する。\n目的・範囲・受入条件は承認済み計画のまま変更しない。\n",
+      "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T14:32:36.465Z",
+      "note": "別AgentレビューのP2指摘1件へ対応した。\n\n- 全タブ往復とCSV取込の既存ブラウザ回帰2本をmetadata＋専用一覧APIへ更新した。\n- 一覧応答を独立制御し、取得中の操作欄表示・成功後の12行反映・同月キャッシュ1 GETを確認する。\n- パネル重複防止とCSVの入力/選択/未登録/遅延処理/ワークスペース分離の検証を維持した。\n- 関連回帰10件成功（約13.6秒）、対象ESLint成功。\n- 新HEADの追加差分レビュー後に最終SHA検証へ進む。\n",
+      "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T14:32:36.714Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "f33b888625241e4bb533c95f28e4b55503cfc80d8a5de06b825b476123a5a557"
+    }
+  ]
+}

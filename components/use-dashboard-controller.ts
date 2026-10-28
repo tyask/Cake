@@ -8,7 +8,8 @@ import { applyCategoryUpdate, type CategoryDeletion } from "@/lib/shared/categor
 import { bootstrapScopeForTab, mergeBootstrapMetadata } from "@/lib/client/bootstrap";
 import type { DashboardTab as Tab } from "@/lib/shared/types";
 import { canApplyBootstrapResponse, isDashboardViewCurrent, isWorkspaceViewCurrent } from "@/lib/client/dashboard-requests";
-import { isWorkspaceData, type BootstrapData, type BootstrapMetadata, type BootstrapScope, type Category } from "@/lib/shared/types";
+import { isWorkspaceData, type BootstrapData, type BootstrapMetadata, type BootstrapScope, type Category, type TransactionRecord } from "@/lib/shared/types";
+import { useTransactionView } from "./use-transaction-view";
 
 const NOTICE_DURATION_MS = 2_000;
 type CategorySnapshot = { ids: ReadonlySet<string>; generation: number };
@@ -17,7 +18,6 @@ type CategoryDeletionState = CategoryDeletion & { categorySnapshot?: CategorySna
 export function useDashboardController(initialData: BootstrapMetadata, initialTab: Tab = "home") {
   const [data, setData] = useState<BootstrapMetadata>(initialData);
   const currentData = useRef<BootstrapMetadata>(initialData);
-  const [transactionsReady, setTransactionsReady] = useState(initialTab === "transactions" && isWorkspaceData(initialData.selected));
   const homeRefresh = useRef<(() => Promise<void>) | null>(null);
   const registerHomeRefresh = useCallback((refresh: (() => Promise<void>) | null) => { homeRefresh.current = refresh; }, []);
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -39,6 +39,26 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
   // Deleted UUIDs cannot become live again. Keep acknowledgements across tab,
   // GET and workspace changes, including responses for not-yet-visible rows.
   const categoryDeletions = useRef(new Map<string, CategoryDeletionState>());
+  const reconcileTransactionCategories = useCallback((workspaceId: string, records: TransactionRecord[]) => {
+    const deletion = categoryDeletions.current.get(workspaceId);
+    if (!deletion || (!deletion.deletedCategoryIds.length && !deletion.detachedTransactions.length)) return records;
+    const deleted = new Set(deletion.deletedCategoryIds);
+    const detached = new Map(deletion.detachedTransactions.map(item => [item.transactionId, item]));
+    const reconciled = records.map(item => {
+      const acknowledged = detached.get(item.id);
+      if (item.categoryId === null && (!acknowledged || item.categoryRevision > acknowledged.categoryRevision)) {
+        detached.set(item.id, { transactionId: item.id, categoryId: null, categoryConfirmed: false, categoryRevision: item.categoryRevision });
+        return item;
+      }
+      if ((acknowledged && acknowledged.categoryRevision >= item.categoryRevision) || (item.categoryId && deleted.has(item.categoryId))) {
+        return { ...item, categoryId: null, categoryConfirmed: false, categoryRevision: Math.max(item.categoryRevision, acknowledged?.categoryRevision ?? 0) };
+      }
+      return item;
+    });
+    categoryDeletions.current.set(workspaceId, { ...deletion, detachedTransactions: [...detached.values()] });
+    return reconciled;
+  }, []);
+  const transactionsView = useTransactionView(data.user.id, selected?.workspace.id ?? "", tab === "transactions" && !workspaceSwitching, reconcileTransactionCategories);
 
   function setNotice(message: string | null) {
     setNoticeState(message ? { message } : null);
@@ -97,14 +117,6 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
         { workspaceId: desiredWorkspaceId, generation, revision, requestId },
         { ...workspaceView.current, revision: dataRevision.current, requestId: refreshRequest.current },
       )) {
-        // The list may have no dataset yet. A save that completed after its GET
-        // started requires a new snapshot, not a permanently empty loading view.
-        // Superseded tabs/workspaces/requests must never restart old work.
-        if (scope === "full" && currentTab.current === "transactions"
-          && requestId === refreshRequest.current && revision !== dataRevision.current
-          && isWorkspaceViewCurrent({ workspaceId: desiredWorkspaceId, generation }, workspaceView.current)) {
-          return refresh(workspaceView.current.workspaceId, generation, "full");
-        }
         return false;
       }
       let nextData: BootstrapMetadata = scope === "metadata"
@@ -112,16 +124,12 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
         : next as BootstrapData;
       if (scope === "metadata" && nextData.selected) {
         const categoryIds = new Set(nextData.selected.categories.map(category => category.id));
-        // A category snapshot cannot acknowledge transaction revisions. Drop the
-        // retained list; its next visit loads real revisions without a home full GET.
+        // Reload scoped datasets when another browser removed a category.
         const previous = currentData.current.selected;
         const categoryDisappeared = previous?.workspace.id === nextData.selected.workspace.id
           && previous.categories.some(category => !categoryIds.has(category.id));
         if (categoryDisappeared || (isWorkspaceData(nextData.selected) && nextData.selected.transactions.some(transaction => transaction.categoryId && !categoryIds.has(transaction.categoryId)))) {
-          if (currentTab.current === "transactions") {
-            setTransactionsReady(false);
-            return refresh(nextData.selected.workspace.id, generation, "full");
-          }
+          transactionsView.invalidate(nextData.selected.workspace.id);
           const { workspace, members, rules, categories } = nextData.selected;
           nextData = { ...nextData, selected: { workspace, members, rules, categories } };
         }
@@ -145,7 +153,6 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
       }
       workspaceView.current.workspaceId = nextData.selected?.workspace.id;
       updateData(nextData);
-      setTransactionsReady(scope === "full" && currentTab.current === "transactions" && isWorkspaceData(nextData.selected));
       setWorkspaceSwitching(false);
       return true;
     } catch (error) {
@@ -154,7 +161,6 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
         const previousWorkspaceId = currentData.current.selected?.workspace.id;
         if (workspaceView.current.workspaceId !== previousWorkspaceId) {
           workspaceView.current = { workspaceId: previousWorkspaceId, generation: generation + 1 };
-          setTransactionsReady(currentTab.current === "transactions" && isWorkspaceData(currentData.current.selected));
           setNotice(error instanceof Error ? error.message : "読込に失敗しました。");
         }
         setWorkspaceSwitching(false);
@@ -179,13 +185,20 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
       await prepare?.();
       if (!isCurrentView()) return;
       const refreshHome = currentTab.current === "home" ? homeRefresh.current : null;
+      const refreshTransactions = currentTab.current === "transactions" ? transactionsView.refresh : null;
       // Force home invalidation even when the independent metadata request fails.
       // Settle both operations before ending the refresh indicator or notifying.
       const [bootstrap, home] = await Promise.allSettled([
         refresh(workspaceId, generation), refreshHome?.(),
       ]);
+      // A metadata snapshot may invalidate category revisions. Refresh the list
+      // after that decision, including when metadata failed, so its final request
+      // cannot be cancelled by the earlier metadata response.
+      const transactions = await Promise.allSettled([isCurrentView() ? refreshTransactions?.() : undefined]);
       if (bootstrap.status === "rejected") throw bootstrap.reason;
       if (home.status === "rejected") throw home.reason;
+      if (transactions[0].status === "rejected") throw transactions[0].reason;
+      if (refreshTransactions && isCurrentView() && transactions[0].value !== true) throw new Error("取引明細を取得できませんでした。再度お試しください。");
       if (bootstrap.value && isCurrentView() && (!refreshHome || homeRefresh.current === refreshHome)) setNotice("最新状態に更新しました。");
     } catch (error) {
       if (isCurrentView()) setNotice(error instanceof Error ? error.message : "更新に失敗しました。もう一度お試しください。");
@@ -208,7 +221,10 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
     const shouldNotify = () => isCurrentView() && originTabGeneration === tabGeneration.current && !manualRefreshPending.current;
     async function synchronizeCategoryMetadata(categoryIds: string[]) {
       try {
-        const applied = await refresh(originWorkspaceId, generation);
+        let applied = await refresh(originWorkspaceId, generation);
+        // Another confirmed save can supersede this metadata snapshot. The
+        // category response still needs an authoritative membership snapshot.
+        if (!applied && isCurrentView()) applied = await refresh(originWorkspaceId, generation);
         const deletion = originWorkspaceId ? categoryDeletions.current.get(originWorkspaceId) : undefined;
         const snapshot = deletion?.categorySnapshot;
         if (applied && isCurrentView() && originWorkspaceId && snapshot) {
@@ -241,6 +257,19 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
       }
       if (payload.action === "deleteCategory" && result.deletedCategoryIds && result.detachedTransactions && originWorkspaceId) {
         rememberCategoryDeletion(originWorkspaceId, result);
+        transactionsView.applyCategoryDeletion(originWorkspaceId, result);
+      }
+      if (originWorkspaceId) {
+        if (payload.action === "saveTransaction" && result.transaction) transactionsView.applyUpdate(originWorkspaceId, { transaction: result.transaction });
+        else if (payload.action === "saveTransactionMemo" && result.transactionId && typeof result.memo === "string") {
+          transactionsView.applyUpdate(originWorkspaceId, { transactionId: result.transactionId, memo: result.memo });
+        } else if (payload.action === "saveTransactionCategory" && result.transactionId) {
+          transactionsView.applyUpdate(originWorkspaceId, { transactionId: result.transactionId, categoryId: result.categoryId,
+            categoryConfirmed: result.categoryConfirmed, categoryRevision: result.categoryRevision });
+        } else if (payload.action === "deleteTransactions" || payload.action === "applyTransactionRules"
+          || payload.action === "completeSettlement" || payload.action === "bulkImport" || payload.action === "deleteWorkspace") {
+          transactionsView.invalidate(originWorkspaceId);
+        }
       }
       if (isCurrentView()) {
         dataRevision.current += 1;
@@ -322,7 +351,6 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
     const generation = workspaceView.current.generation + 1;
     workspaceView.current = { workspaceId, generation };
     setWorkspaceSwitching(true);
-    setTransactionsReady(false);
     startLoading(); setNotice(null);
     const pending = refresh(workspaceId, generation);
     const requestId = refreshRequest.current;
@@ -339,7 +367,6 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
     const originTabGeneration = ++tabGeneration.current;
     currentTab.current = next;
     setTab(next);
-    setTransactionsReady(false);
     startLoading();
     const generation = workspaceView.current.generation;
     void refresh().catch(error => {
@@ -347,7 +374,10 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
     }).finally(finishLoading);
   }
 
-  const selectedTransactions = tab === "transactions" && transactionsReady && isWorkspaceData(selected) ? selected : null;
+  const selectedTransactions = tab === "transactions" && selected && !workspaceSwitching ? { ...selected,
+    transactions: transactionsView.data?.transactions ?? [], settlement: null, settlementHistory: [] } : null;
+  const transactionView = { selection: transactionsView.selection, loading: transactionsView.loading,
+    error: transactionsView.error, onChange: transactionsView.onChange };
   const importHistoryRevision = selected ? importHistoryRevisions[selected.workspace.id] ?? 0 : 0;
-  return { data, selected, selectedTransactions, registerHomeRefresh, tab, loading, refreshing, workspaceSwitching, analyticsRevision, importHistoryRevision, notice, setNotice, refresh, refreshCurrentView, run, switchWorkspace, openTab };
+  return { data, selected, selectedTransactions, transactionView, registerHomeRefresh, tab, loading, refreshing, workspaceSwitching, analyticsRevision, importHistoryRevision, notice, setNotice, refresh, refreshCurrentView, run, switchWorkspace, openTab };
 }

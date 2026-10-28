@@ -306,11 +306,11 @@
                 <div class="dfd-arrow"><b>→</b><small>rows</small></div>
                 <div class="dfd-node process"><strong>getBootstrap</strong><small>集約JSON → DTO変換<br />full時にcalculateSettlement</small></div>
                 <div class="dfd-arrow"><b>→</b><small>typed object</small></div>
-                <div class="dfd-node output"><strong>BootstrapMetadata / Data</strong><small>共通情報と選択workspace<br />初期表示はmetadata<br />明細は一覧を開くときだけfull</small></div>
+                <div class="dfd-node output"><strong>BootstrapMetadata / Data</strong><small>共通情報と選択workspace<br />初期表示はmetadata<br />明細は専用APIで別取得</small></div>
                 <div class="dfd-arrow"><b>→</b><small>initialData<br />or GET JSON</small></div>
                 <div class="dfd-node output"><strong>Dashboard / hook</strong><small>initialDataでhookを初期化<br />確定データを画面へ渡す</small></div>
               </div>
-              <div class="dfd-boundary"><b>サーバー境界:</b> Session CookieとDB行はブラウザへ直接渡さず、必要項目だけをscope別のBootstrapへ変換する。ホームは描画後に専用サマリーを取得し、全明細を初期Propsへ含めない。</div>
+              <div class="dfd-boundary"><b>サーバー境界:</b> Session CookieとDB行はブラウザへ直接渡さず、必要項目だけをscope別のBootstrapへ変換する。ホームは描画後に専用サマリー、取引明細は選択した月または未精算の一覧を専用APIで取得し、全明細を初期Propsへ含めない。</div>
             </div>
 
             <div class="data-flow">
@@ -373,6 +373,7 @@
               <tr><td>app/invite/[token]/page.tsx</td><td><code>InvitePage</code>でトークン・ログイン状態・テスト認証設定をInviteCardへ渡す。</td></tr>
               <tr><td>app/api/app/route.ts</td><td><code>GET</code>でscope別参照、<code>POST</code>でアクション別入力検証・所属確認・更新。</td></tr>
               <tr><td>app/api/admin/users/route.ts</td><td>管理者専用の利用者一覧・登録・利用停止。毎回DB権限を確認。</td></tr>
+              <tr><td>app/api/transactions/route.ts</td><td>取引明細用GET。月単位または全期間の未清算共有明細の取得条件を検証・認可して専用storeへ渡す。</td></tr>
               <tr><td>app/api/import/transactions/route.ts</td><td>取込ID・形式・workspaceを検証し、本人の所属範囲内で対象の取込明細とカテゴリを返す。</td></tr>
               <tr><td>app/api/import/history/route.ts</td><td>履歴用GETの認証・入力検証と選択workspaceの認可を配線し、形式ごと・取込者ごとの最近の履歴を返す。</td></tr>
               <tr><td>app/api/import/duplicates/route.ts</td><td>選択workspace内の外部IDを照合し、既存の金額・取引先・sourceを返す。</td></tr>
@@ -389,7 +390,7 @@
               <tr><td>components/home-panel.tsx / import-panel.tsx / workspace-settings-panel.tsx</td><td>ホームの収支・清算・共有費配分・履歴、CSV選択/重複照合/カテゴリ補完/取込、workspace設定の表示と各画面の入力状態を担当する。</td></tr>
               <tr><td>components/workspace-modal.tsx / new-transaction-modal.tsx / dashboard-ui.tsx</td><td>workspace/新規明細のフォームと共通の見出し・空表示・Modalを分離する。フォームの保存時期と再マウント用keyを保持する。</td></tr>
               <tr><td>lib/client/app-client.ts</td><td><code>postAction()</code>でJSONのPOSTと非2xx応答の例外化を共用する。</td></tr>
-              <tr><td>components/transactions-panel.tsx / transaction-table.tsx</td><td>明細一覧のインライン編集、行ごとの保存状態、一括選択・削除・ルール適用。<code>TransactionTable</code>は明細/取込の共通表枠とモバイル要約。</td></tr>
+              <tr><td>components/transactions-panel.tsx / transaction-table.tsx</td><td>月単位／未精算の選択、コンパクトな年月操作、表示範囲内の列フィルタ、明細一覧のインライン編集、行ごとの保存状態、一括選択・削除・ルール適用。<code>TransactionTable</code>は明細/取込の共通表枠とモバイル要約。</td></tr>
               <tr><td>components/transaction-filter-dialog.tsx / use-transaction-filters.ts</td><td>列候補の選択、列内OR・列間AND条件、ユーザー/workspace別のブラウザ保存。</td></tr>
               <tr><td>components/transaction-memo-editor.tsx</td><td>清算済みを含むメモ専用の編集・保存・再試行。</td></tr>
               <tr><td>components/split-editor.tsx / import-preview-table.tsx / selection-checkbox.tsx</td><td>割合または円での分担入力、CSVプレビュー編集、選択チェック。SelectionCheckboxの任意mobileLabelで取引明細・CSV取込のヘッダーだけをラベル付きにし、48rem以下で全選択／全解除を表示する。44px以上のlabel全体をクリック可能とし、横スクロール中はヘッダーの選択セルを左端に固定。取引明細の全選択は表示中の未清算明細を追加選択し、全解除は非表示分を含む全選択状態を空にする。表示対象なし・非表示選択ありの場合も全解除のチェックを有効にし、非表示選択だけで表示対象ありならpartialを表示する。上部の選択解除ボタンは設けない。取込の対象除外とフィルターダイアログのチェックには影響しない。</td></tr>
@@ -409,6 +410,8 @@
               <tr><td>lib/server/auth/current-user.ts / auth-callbacks.ts / auth-mode.ts</td><td><code>getCurrentUser()</code>、<code>resolveSessionUser()</code>、<code>createAuthCallbacks()</code>、Productionでのテスト認証無効化。</td></tr>
               <tr><td>lib/server/auth/user-access.ts<br />lib/shared/schemas/user-profile.ts<br />lib/shared/test-users.ts</td><td>登録・有効状態・管理者権限のDB確認、表示名更新・入力schema、固定テストユーザー定義。</td></tr>
               <tr><td>lib/server/handlers/app-handlers.ts<br />lib/server/services/<br />lib/server/stores/app-store.ts / settlement-store.ts</td><td>HTTPの認証・入力/応答、actionの振分け、workspace/招待・明細・ルール・取込・清算の業務条件、SQL実行を分離する。サービスは差し替え可能なstoreを受け取る。</td></tr>
+              <tr><td>components/use-transaction-view.ts / use-transaction-view-selection.ts<br />lib/client/transaction-view-storage.ts</td><td>ユーザー・workspace別のモードと月の保存・復元、最大24viewのメモリキャッシュ、専用一覧取得、確定応答反映、保存revisionと要求世代による遅延応答の排除。</td></tr>
+              <tr><td>lib/server/handlers/transaction-view-handler.ts / lib/server/stores/transaction-view-store.ts<br />lib/shared/transaction-view.ts</td><td>一覧GETの認証・query schema、同一SQL snapshot内の有効利用者・所属確認、月／未精算に限定した明細取得、共通DTOと表示範囲判定。</td></tr>
               <tr><td>lib/server/stores/repository.ts<br />lib/client/bootstrap.ts</td><td><code>getBootstrap()</code>の集約SQL・DTO構築、<code>requireWorkspaceMember()</code>、タブ別scopeとmetadataの併合。</td></tr>
               <tr><td>components/use-home-data.ts<br />lib/shared/home-data.ts<br />lib/server/handlers/home-handler.ts<br />lib/server/stores/home-store.ts</td><td>ホームサマリーの取得状態・要求採用条件・最大12か月のLRUメモリキャッシュと最新の清算情報の分離、共有query schema・DTO、認証・入力境界、月次のDB集計とサーバー清算結果への縮約。</td></tr>
               <tr><td>lib/shared/expense-splits.ts / split-allocations.ts / settlement.ts</td><td>参加者別保存割合・デフォルトルール、整数円への配分・円入力からの割合、正確な分数集計による清算。</td></tr>
@@ -438,6 +441,7 @@
               <tr><td><code>/invite/[token]</code></td><td>RSC + Client Component。64文字の招待トークン。</td><td>InviteCardを描画。承認後は対象workspaceId付きの<code>/</code>へ遷移。</td></tr>
               <tr><td><code>/api/auth/[...nextauth]</code></td><td>Auth.js Handler。OAuth / Credentials。</td><td>ログイン、コールバック、セッション、ログアウト。</td></tr>
               <tr><td><code>/api/app</code> GET</td><td>Node.js Route Handler。<code>workspaceId?</code>、<code>scope=full|metadata</code>（既定full）。</td><td>認証・利用可否を確認し、BootstrapDataまたはBootstrapMetadataを返す。</td></tr>
+              <tr><td><code>/api/transactions</code> GET</td><td>Node.js。workspace UUIDと<code>mode=month&amp;month=YYYY-MM</code>または<code>mode=unsettled</code>。</td><td>有効利用者・現在の所属・queryを検証し、指定月の全明細または全期間の未清算共有明細を返す。月全体は日本時間の半開区間、収入・支出・個人・共有・清算済み・未来日付を含む。Cache-Control: no-store、業務DB更新なし。</td></tr>
               <tr><td><code>/api/home</code> GET</td><td>Node.js。queryはworkspace UUIDと<code>month=YYYY-MM</code>。</td><td>有効利用者・現在の所属・実在する年月を検証。月次収支、全期間の未清算共有収支と清算結果、最新20件の清算履歴を返す。明細・清算対象ID配列を含めず、Cache-Control: no-store。</td></tr>
               <tr><td><code>/api/app</code> POST</td><td>Node.js Route Handler。JSON <code>{ action, ... }</code>。</td><td>入力・認可・業務条件を検証し、アクション別成功JSONまたは<code>{ error }</code>。</td></tr>
               <tr><td><code>/api/import/duplicates</code> POST</td><td>Node.js Route Handler。workspace UUID、外部ID配列1〜2000件。</td><td>所属を確認し、指定IDに一致するexternalIdsと既存明細の最小照合情報を返す。</td></tr>
@@ -590,13 +594,13 @@
                 <div class="dfd-node store"><strong>store → DB</strong><small>INSERT / UPDATE / DELETE<br />操作ごとのTransaction境界</small></div>
               </div>
               <p class="dfd-lane">POST成功応答 / hookでの反映分岐</p>
-              <p>応答の業務結果を受け取ると、まず操作元workspace IDと世代を現在値と比較する。不一致なら現在画面のdataへ反映せず、結果を呼出元へ返す。一致した場合は次の3経路に分かれる。</p>
+              <p>応答の業務結果を受け取ると、取込履歴revisionと操作元workspaceの一覧キャッシュへ確定値反映・無効化を行う。現在画面のdataへの反映は操作元workspace IDと世代の一致を確認し、不一致なら現在dataを変更せず結果を呼出元へ返す。一致した場合は次の3経路に分かれる。</p>
               <div class="flow-branches" role="group" aria-label="POST成功時の3つの反映経路">
-                <div class="dfd-node process"><strong>① saveTransaction＋transaction</strong><p>DB → <code>{ ok, transaction }</code> → 一覧データを取得済みの場合だけ<code>applyTransactionUpdate</code>で対象行を追加・差し替え → data更新。ホームのサマリーは更新世代を進めて再取得する。</p><small>一覧の全件GETを省き、確定済みの日時・金額・割合を採用する。ホームの未取得明細を空配列へ仮挿入しない。</small></div>
-                <div class="dfd-node process"><strong>② saveTransactionMemo＋ID・memo</strong><p>DB → <code>{ ok, transactionId, memo }</code> → <code>applyTransactionUpdate</code> → 対象明細のメモだけ差し替え → data更新。</p><small>通常は追加GETなし。清算計算は変わらない。</small></div>
-                <div class="dfd-node output"><strong>③ それ以外</strong><p>DB → <code>{ ok, … }</code> → <code>refresh</code> → 現在タブのscopeでGET → 採用判定 → data更新。</p><small>CSV登録、設定・ルール変更、清算完了など。取得先IDは明示引数 → 応答workspaceId → 操作元IDの順に選ぶ。</small></div>
+                <div class="dfd-node process"><strong>① saveTransaction＋transaction</strong><p>DB → <code>{ ok, transaction }</code> → 専用一覧hookの表示結果・月別キャッシュを<code>updateTransactionRecords</code>で更新。互換full取得済みなら<code>applyTransactionUpdate</code>も適用する。ホームのサマリーは更新世代を進めて再取得する。</p><small>一覧の全件GETを省き、確定済みの日時・金額・割合を採用する。ホームの未取得明細を空配列へ仮挿入しない。</small></div>
+                <div class="dfd-node process"><strong>② メモ・カテゴリの専用保存</strong><p>DB → ID・メモまたはカテゴリrevisionの確定応答 → 専用一覧hookと取得済み互換fullの対象項目だけ更新。通常保存の遅い応答から専用保存の確定値を保護する。</p><small>通常は追加GETなし。清算計算は変わらない。</small></div>
+                <div class="dfd-node output"><strong>③ それ以外</strong><p>DB → <code>{ ok, … }</code> → 必要な一覧キャッシュ無効化 → <code>refresh</code>でmetadata GET → 採用判定 → data更新。現在表示中の専用一覧は独立して再取得する。</p><small>CSV登録、設定・ルール変更、清算完了など。取得先IDは明示引数 → 応答workspaceId → 操作元IDの順に選ぶ。</small></div>
               </div>
-              <div class="dfd-boundary"><b>反映と保存の違い:</b> 古いPOST応答の画面反映を止めても、DBで確定した保存は取り消さない。同一workspaceでタブだけ変わった場合はdataへ反映し、古いタブ向け通知は抑止する。通知にはworkspace世代・tab世代一致と手動更新中でないことが必要。エラーは<code>postAction</code>から例外となり、runが条件に合う通知を出して呼出元へ再throwし、画面側で入力・再試行を保持する。</div>
+              <div class="dfd-boundary"><b>反映と保存の違い:</b> 古いPOST応答の画面反映を止めても、DBで確定した保存は取り消さない。同一workspaceでタブだけ変わった場合はdataへ反映し、古いタブ向け通知は抑止する。別workspaceへ移動していても操作元workspaceの一覧キャッシュには確定値を反映する。通知にはworkspace世代・tab世代一致と手動更新中でないことが必要。エラーは<code>postAction</code>から例外となり、runが条件に合う通知を出して呼出元へ再throwし、画面側で入力・再試行を保持する。</div>
             </div>
 
             <div class="data-flow" id="flow-read">
@@ -612,8 +616,8 @@
               </div>
               <div class="flow-branches" role="group" aria-label="GET応答の不一致、full、metadataの反映分岐">
                 <div class="dfd-node source"><strong>不一致 → 反映せず終了</strong><p>古いworkspace、保存開始前のGET、後続GETより遅れた応答をdataへ適用しない。</p><small>タブ世代はこの関数の比較項目に含めない。タブ切替で新しいGET要求IDが発行され、以前のGETを抑止する。同じタブの再選択は取得しない。</small></div>
-                <div class="dfd-node output"><strong>一致＋full → dataを置換</strong><p>利用者・workspace一覧・招待・選択先情報・参加者・ルール・カテゴリ・明細・清算結果・履歴を受け取る。</p><small>取引一覧への入場・手動更新・同タブでのworkspace切替だけがfullを要求する。</small></div>
-                <div class="dfd-node output"><strong>一致＋metadata → 共通情報を更新</strong><p>利用者・workspace一覧・招待・選択先情報・参加者・ルール・カテゴリを更新。同じworkspaceの取得済み一覧だけを併合し、未取得状態は明示して保持する。</p><small>home / import / settings / analyticsで使用。別workspaceなら以前の一覧を引き継がず、選択先なしならselectedをnullにする。明細の再取得が必要な場合も、一覧を開くまでfullを要求しない。</small></div>
+                <div class="dfd-node output"><strong>一致＋full → dataを置換</strong><p>利用者・workspace一覧・招待・選択先情報・参加者・ルール・カテゴリ・明細・清算結果・履歴を受け取る。</p><small>公開済みAPIの互換経路として維持する。通常の画面操作はmetadataと画面専用APIを使い、取引一覧もfullを要求しない。</small></div>
+                <div class="dfd-node output"><strong>一致＋metadata → 共通情報を更新</strong><p>利用者・workspace一覧・招待・選択先情報・参加者・ルール・カテゴリを更新。同じworkspaceの取得済み一覧だけを併合し、未取得状態は明示して保持する。</p><small>すべてのタブで使用。別workspaceなら以前の一覧を引き継がず、選択先なしならselectedをnullにする。取引明細の一覧はC3の専用API・キャッシュで管理する。</small></div>
               </div>
               <div class="dfd-boundary"><b>失敗・初期表示:</b> GET失敗は例外となり、既存dataを置き換えず呼出元で通知等を処理する。初回の<code>GET /</code>はサーバーが直接getBootstrapを呼ぶ経路で、このブラウザGETを経由しない。所属workspaceが0件の場合の初期workspace作成はサーバー側の処理であり、GETだけを理由にDB無変更とは扱わない。</div>
             </div>
@@ -638,8 +642,27 @@
               <p>月次収支は明細ごとの整数円配分をDBで合計し、ホームの生存期間内だけ月別に保持する。清算は必要列だけの全期間の未清算SHAREDをサーバーで既存の分数計算へ渡し、合計後に丸める。両者の計算方式を混同しない。保存成功後は月別キャッシュを破棄してサマリーを再取得し、失敗しても保存を取り消したり同じ明細の再登録を促したりしない。</p>
             </div>
 
+            <div class="data-flow" id="flow-transaction-view">
+              <div class="data-flow-head"><h4>C3. 取引明細の月単位・未精算一覧</h4><small>保存後に切替先を取得し、成功した表示条件だけを記憶</small></div>
+              <div class="dfd-track" role="img" aria-label="月またはモードの変更前に各行を保存し、キャッシュまたは専用APIから対象一覧を取得して現在条件へ反映する">
+                <div class="dfd-node source"><strong>月・モードの選択</strong><small>ラジオ／年月・前後月・今月<br />通常項目・メモ・カテゴリの下書き</small></div>
+                <div class="dfd-arrow"><b>→</b><small>freeze → prepare<br />flush・保存キュー待機</small></div>
+                <div class="dfd-node process"><strong>useTransactionView</strong><small>user・workspace・対象view<br />最大24viewのLRUを確認</small></div>
+                <div class="dfd-arrow"><b>→</b><small>未取得／強制更新<br />GET /api/transactions</small></div>
+                <div class="dfd-node store"><strong>認証・query → DB</strong><small>有効本人・現在所属を同時照合<br />対象月／全期間未清算SHARED</small></div>
+                <div class="dfd-arrow"><b>→</b><small>TransactionViewDataset<br />世代・revision・要求を照合</small></div>
+                <div class="dfd-node output"><strong>現在一覧へ採用</strong><small>成功条件をlocalStorageへ保存<br />行選択解除・列条件保持</small></div>
+              </div>
+              <div class="flow-branches" role="group" aria-label="取引明細のキャッシュ再利用、強制再取得、切替失敗の分岐">
+                <div class="dfd-node output"><strong>取得済み月 → 通信せず切替</strong><p>ユーザー・workspace・mode・monthに対応するdatasetをLRUから読み、参照順を更新する。タブやworkspaceを往復してもDashboardの生存期間内で再利用する。</p></div>
+                <div class="dfd-node process"><strong>更新・モード変更 → 全view破棄</strong><p>対象workspaceの全月・未精算キャッシュを無効化して現在または切替先の一覧を取得する。取得失敗時も破棄したキャッシュを復活させない。</p></div>
+                <div class="dfd-node source"><strong>保存失敗・取得失敗 → 元の条件</strong><p>入力不正・保存失敗ではGETへ進まず入力と行選択を保持する。切替先の取得失敗でも選択条件を確定せず、エラーと再試行を表示する。</p></div>
+              </div>
+              <div class="dfd-boundary"><b>確定データの所有:</b> hookが取得結果・キャッシュ・変更revisionを所有し、各行のdraftはTransactionsPanel内に置く。現在user・workspace・active世代・要求ID・変更revisionと一致し、中止されていない応答だけを採用する。401/403は対象workspaceのキャッシュと表示データを解除する。未精算のキーに最後の選択月を含めず、全期間の一覧として扱う。</div>
+            </div>
+
             <div class="data-flow" id="flow-manual-refresh">
-              <div class="data-flow-head"><h4>D. 取引明細の「更新」</h4><small>未保存入力・メモを保存してからfull GET</small></div>
+              <div class="data-flow-head"><h4>D. 取引明細の「更新」</h4><small>未保存入力・メモを保存してから専用一覧GET</small></div>
               <div class="dfd-track" role="img" aria-label="更新ボタンから編集欄をfreezeし、hookへprepareを渡して各行とメモのflush、保存キューの完了を待つ">
                 <div class="dfd-node source"><strong>「更新」をクリック</strong><small>TransactionsPanel<br />requestRefresh</small></div>
                 <div class="dfd-arrow"><b>→</b><small>編集handle一覧</small></div>
@@ -650,9 +673,9 @@
                 <div class="dfd-node process"><strong>各行・メモのflush</strong><small>必要な保存POSTを実行<br />保存キュー完了まで待機</small></div>
               </div>
               <div class="flow-branches" role="group" aria-label="保存失敗、画面変更、保存成功時の手動更新の分岐">
-                <div class="dfd-node source"><strong>入力不正・保存失敗</strong><p>prepareが失敗 → full GETへ進まない → 下書きと再試行を保持。開始時の画面のままならエラー通知。</p></div>
+                <div class="dfd-node source"><strong>入力不正・保存失敗</strong><p>prepareが失敗 → metadata・一覧GETへ進まない → 下書きと再試行を保持。開始時の画面のままならエラー通知。</p></div>
                 <div class="dfd-node source"><strong>保存後に画面が変わっている</strong><p>workspace ID・世代またはtab世代が不一致 → 手動更新のGETを中止。元のタブへ戻っても旧世代の処理は継続しない。</p></div>
-                <div class="dfd-node output"><strong>保存成功＋画面が同じ</strong><p>refresh(full) → CのGET採用判定 → data更新。適用成功かつ開始時の画面のままなら完了通知を表示。</p></div>
+                <div class="dfd-node output"><strong>保存成功＋画面が同じ</strong><p>metadata GETを完了させてから、対象workspaceの全viewキャッシュを破棄して現在条件の一覧GETを実行する。metadataが失敗しても一覧GETは実行し、両方の終了と現在画面への採用を確認して完了通知を表示。</p></div>
               </div>
               <div class="dfd-boundary"><b>終了処理:</b> 成否・中止にかかわらずfinallyでfreezeを解除し、更新中状態を戻す。GET中のworkspace/tab切替でもCの採用条件と通知条件を適用する。ホームの「更新」は編集欄のprepareを使わず、metadataとホーム専用サマリーの強制再取得を同時に開始する。Promise.allSettledで両方の完了を待ち、一方が失敗してももう一方を実行・確認してから成功または失敗を通知する。</div>
             </div>
@@ -678,7 +701,7 @@
                 <div class="dfd-arrow"><b>→</b><small>run(bulkImport)<br />fileName / items（categoryId含む）</small></div>
                 <div class="dfd-node store"><strong>POST /api/app → DB</strong><small>明細・batchをTransaction保存<br />カテゴリ付き新規行は確認済み</small></div>
                 <div class="dfd-arrow"><b>→</b><small>POST成功で家計別revision更新<br />metadata GETは別に成否を扱う</small></div>
-                <div class="dfd-node output"><strong>保存済み・プレビュー解除</strong><small>履歴は専用GETで更新<br />明細タブを押すとfull GET</small></div>
+                <div class="dfd-node output"><strong>保存済み・プレビュー解除</strong><small>履歴は専用GETで更新<br />明細タブを押すと対象view GET</small></div>
               </div>
               <div class="dfd-boundary"><b>送信範囲:</b> CSV本文はブラウザ内だけで解析する。重複照会はworkspace IDと外部ID、候補照会はworkspace IDと取引先、登録は登録可能な明細・ファイル名・件数を送る。読取と補完は要求とworkspaceを照合し、古い非同期結果を破棄する。補完中は入力を固定し、全batchの成功前は反映しない。本文はURL・Web Storageへ保存せず、画面起動時のクリップボード読取も行わない。</div>
             </div>
@@ -703,8 +726,10 @@
               <tr><td>ホームの「清算を完了する」</td><td>confirm → run(completeSettlement)：workspaceId。</td><td>B → サーバーで対象明細を計算・再照合してDB確定 → metadataとホームサマリーを更新。画面の計算額を送金・保存指示として送らない。</td></tr>
               <tr><td>workspace作成フォームの「作成する」</td><td>run(createWorkspace)：name・type。</td><td>B → DB → 応答workspaceIdを現在タブのscopeで取得。ホームなどはmetadataと画面専用データを取得し、fullへの追加取得をしない。</td></tr>
               <tr><td>ホームの年月入力・前月／翌月・スワイプ・今月</td><td>ローカル選択月を変更し、取得済みなら月別メモリキャッシュ、未取得ならworkspace ID・対象月でホームサマリーを取得。</td><td>C2。キャッシュヒットは通信せず参照順を更新。成功したAPI応答だけを保存し、清算情報は最新取得値を維持する。</td></tr>
-              <tr><td>タブ／workspaceの選択</td><td>openTab(tab)／switchWorkspace(workspaceId)。</td><td>C。取引一覧だけfull、他タブはmetadata。ホームはそのworkspace・選択月のサマリーも取得する。</td></tr>
-              <tr><td>ホーム・取引明細の「更新」</td><td>refreshCurrentView。取引明細はprepareも渡す。</td><td>ホームはmetadataと、全月キャッシュを破棄した現在月のサマリー強制取得を同時開始し、両方の完了を待つ。metadata失敗でもキャッシュ破棄・サマリー取得を実行する。取引明細はD → full GET。保存失敗時はGETへ進まない。</td></tr>
+              <tr><td>取引明細の年月・前月／翌月・今月</td><td>refreshTransactionEditors → view.onChange(next, prepare)。</td><td>C3。保存成功後、取得済み月はキャッシュを再利用し未取得月だけGET。切替成功時に月を記憶して行選択を解除し、列フィルターを保持する。</td></tr>
+              <tr><td>取引明細の月単位／未精算ラジオ</td><td>保存待ち後、modeと最後の選択月をview.onChangeへ渡す。</td><td>C3。対象workspaceの全viewを破棄し、切替先をGET。月単位は日本時間の月全体、未精算は全期間SHAREDかつsettledAtなし。</td></tr>
+              <tr><td>タブ／workspaceの選択</td><td>openTab(tab)／switchWorkspace(workspaceId)。</td><td>C。全タブmetadata。取引一覧はC3の対象view、ホームはそのworkspace・選択月のサマリーも取得する。</td></tr>
+              <tr><td>ホーム・取引明細の「更新」</td><td>refreshCurrentView。取引明細はprepareも渡す。</td><td>ホームはmetadataと、全月キャッシュを破棄した現在月のサマリー強制取得を同時開始し、両方の完了を待つ。metadata失敗でもキャッシュ破棄・サマリー取得を実行する。取引明細はD → metadata完了後に全view破棄・一覧GET。metadata失敗でも一覧GETを実行し、保存失敗時はGETへ進まない。</td></tr>
             </tbody>
           </table></div>
           <h4>共通runを経由しない操作</h4>
@@ -734,14 +759,14 @@
           <div class="table-wrap"><table>
             <thead><tr><th>State / Ref</th><th>用途</th></tr></thead>
             <tbody>
-              <tr><td><code>data</code> / <code>currentData</code></td><td>initialDataで初期化するmetadata / fullのBootstrap。確定応答の局所更新、full置換、metadata併合。明細プロパティの有無で未取得と取得済み0件を区別する。</td></tr>
+              <tr><td><code>data</code> / <code>currentData</code></td><td>initialDataで初期化する共通metadata。公開済みfullの互換型・併合と確定応答の局所更新も維持する。通常一覧の取得済み状態は独立したtransactionsViewが管理し、未取得と成功した0件を区別する。</td></tr>
               <tr><td><code>tab</code> / <code>currentTab</code> / <code>tabGeneration</code></td><td>home / transactions / import / analytics / settings。初期home。タブ切替ごとに世代を進め、元のタブへ戻っても古い通知を抑制する。</td></tr>
               <tr><td><code>workspaceModal</code> / <code>transactionModal</code></td><td>Dashboardが保持するワークスペース作成、新規明細登録ダイアログの開閉。既存明細は一覧で編集。</td></tr>
               <tr><td><code>loading</code> / <code>pendingRequests</code></td><td>同時API要求数を管理し、処理が一件でも残ればローディング表示を維持。</td></tr>
               <tr><td><code>refreshing</code> / <code>manualRefreshPending</code></td><td>手動更新の保存待ち・取得中の表示と二重実行防止。更新前の個別保存通知を抑え、手動更新の完了・失敗通知へまとめる。</td></tr>
               <tr><td><code>noticeState</code> / <code>notice</code></td><td>成功・エラーの共通ポップアップ。通知ごとに新しいStateを作り、表示から2秒後に自動で消す。同じ文言の再通知でもタイマーをリセットし、再通知・手動閉じる・アンマウント時は古いタイマーを解除する。「×」で手動閉じる。各編集画面の保存状態・エラー・再試行は個別に保持する。</td></tr>
               <tr><td><code>importHistoryRevisions</code> / <code>importHistoryRevision</code></td><td>controllerが家計IDごとの取込保存revisionを所有する。bulkImportのPOST成功直後、現在のタブ・選択家計・世代によらずoriginWorkspaceIdの値を増やす。選択家計のrevisionをDashboard → ImportPanelの必須prop → ImportHistoryPanelのrefreshKeyへ渡し、保存中に離脱して戻ったパネルにも保存完了を伝える。</td></tr>
-              <tr><td><code>transactionsReady</code></td><td>取引一覧向けのfull応答を現在の表示に採用済みかを表す。workspace切替中・カテゴリ再照合待ち・未取得では一覧に古い行を渡さない。</td></tr>
+              <tr><td><code>transactionsView</code> / <code>transactionView</code> / <code>selectedTransactions</code></td><td>独立hookがモード・月、取得結果・loading・error、最大24viewのLRU、workspace別の変更revision・要求世代を保持する。共通metadataと現在条件の明細配列を画面用に組み合わせ、workspace切替中や別条件の応答を現在一覧へ混ぜない。</td></tr>
               <tr><td>ホームhookの月別LRU / 最新清算情報</td><td>HomePanelの生存期間内で月次を最大12か月保持する。清算・未清算収支・履歴は最後の取得値を別に保持し、キャッシュヒットで巻き戻さない。workspace・参加者構成・更新revisionの変化、手動更新・再試行・退出で破棄する。</td></tr>
               <tr><td><code>homeRefresh</code> / <code>registerHomeRefresh</code></td><td>HomePanelが専用hookの強制再取得関数を登録する。ホーム手動更新はprepare完了と現在画面との一致を確認し、metadata取得とこの関数をPromise.allSettledで同時に開始する。metadataの成否に関係なく全月を破棄し、両方の完了後に通知する。成功通知には現在の画面と登録関数も開始時と一致することが必要。</td></tr>
               <tr><td><code>workspaceView</code> / <code>dataRevision</code> / <code>refreshRequest</code></td><td>workspace ID・世代・データ変更revision・要求IDで、古い家計/保存前/先行GETの遅延応答が現在の画面を置換しないよう検証。</td></tr>
@@ -753,13 +778,13 @@
             <li><code>run()</code>が要求開始時のworkspace・世代を保持し、現在のworkspace向けの成功応答だけを画面のdataへ反映する。取込履歴の家計別revisionはPOST成功時に独立して更新する。通知はタブ世代も一致し、手動更新中でない場合だけ表示する。</li>
             <li><code>saveTransaction</code>はサーバーの確定TransactionRecordを一覧へ追加し、既存行では専用保存で確定したメモを保持し、カテゴリはcategoryRevisionが新しい方を採用して通常項目を反映する。日時で並び替える。一覧未取得時は明細を仮生成せず、ホームサマリーの更新世代を進める。<code>saveTransactionMemo</code>と<code>saveTransactionCategory</code>はそれぞれ確定した項目だけ反映し、直後の全件GETを省く。</li>
             <li><code>bulkImport</code>はPOST成功時に対象家計の履歴revisionを進める。現在のタブ・家計・世代が変わっていてもこの更新は行い、現在表示と一致する場合だけ通知する。保存後のmetadata GETで失敗した場合は、保存済みで家計情報だけを取得できなかった旨を通知し、保存結果を正常に返す。確認表は保存済みとして解除し、再送を促す登録失敗にはしない。</li>
-            <li>その他の更新とタブ切替は<code>refresh()</code>で再取得。home/import/settings/analyticsはmetadata、transactionsだけfull。workspace切替・手動更新・保存後更新も現在タブのscopeを使い、ホームではサマリーの取得も更新する。</li>
-            <li>metadataは同一workspaceの取得済み一覧だけを保持して併合する。選択workspaceが変化した場合やカテゴリの整合性確認で一覧が古くなった場合は一覧を無効化し、次に取引一覧を開いたときにfullを取得する。ホームなどの表示中に全件取得へ切り替えない。</li>
+            <li>その他の更新とタブ切替は<code>refresh()</code>で共通metadataを再取得する。取引明細は専用hookが対象viewを、ホームはサマリーを独立取得する。一括削除・ルール適用・清算・取込・workspace削除・カテゴリ削除の成功では対象workspaceの全viewキャッシュを無効化する。</li>
+            <li>metadataは同一workspaceの取得済みデータだけを保持して併合する。選択workspaceの変化やカテゴリ消失の検出では対象viewを無効化する。明細の実revisionは専用一覧GETで確認し、ホームなどの表示中に全件取得へ切り替えない。</li>
           </ol>
           <h3>画面の手動更新</h3>
           <ul>
             <li>ホーム・取引明細に「↻ 更新」を表示する。ホームは指標上部、取引明細は見出し右側の追加ボタン左。白背景・薄いベージュ枠・茶色文字、高さ44px、角丸10〜12pxとし、スマートフォンでは見出し・説明の下に文字付きの操作行を右寄せする。</li>
-            <li>保存待ちのprepare成功後、ホームはmetadataと、月別キャッシュを全破棄した現在月のサマリー強制取得をPromise.allSettledで同時に開始する。metadataが503や403で失敗してもサマリー取得とキャッシュ破棄を実行し、両方の終了まで更新中表示を維持する。失敗時も旧キャッシュを再利用しない。取引明細は現在workspaceの<code>full</code>を再取得する。画面遷移やコンポーネントの再マウントを行わず、選択月・フィルタ・スクロール位置を保持する。</li>
+            <li>保存待ちのprepare成功後、ホームはmetadataと、月別キャッシュを全破棄した現在月のサマリー強制取得をPromise.allSettledで同時に開始する。metadataが503や403で失敗してもサマリー取得とキャッシュ破棄を実行し、両方の終了まで更新中表示を維持する。失敗時も旧キャッシュを再利用しない。取引明細はmetadataの取得完了後に対象workspaceの全viewを破棄し、現在条件の一覧を取得する。metadataの失敗でも一覧GETは実行し、両方の結果を確認して通知する。カテゴリ消失の検出による無効化が新しい一覧GETを中止しないよう、この順序を保つ。画面遷移やコンポーネントの再マウントを行わず、選択月・フィルタ・スクロール位置を保持する。</li>
             <li>取引明細は全行の未保存入力・メモ・カテゴリを保存し、保存キューの完了を待ってからGETする。入力検証・保存に失敗した場合はGETせず、下書きと再試行を保持する。</li>
             <li>保存待ちから取得終了まで回転アイコンと「更新中…」を表示し、二重実行と競合する操作を抑制する。<code>notice</code>で成功・エラーを通知する。</li>
             <li>開始時のworkspace・世代とタブ世代を保持し、現在の表示と一致する場合だけ応答と通知を適用する。途中でタブやworkspaceが変わった場合、元のタブへ戻っても古い処理の完了で現在の画面を置換しない。</li>
@@ -768,7 +793,7 @@
             <thead><tr><th>タブ</th><th>参照・操作</th></tr></thead>
             <tbody>
               <tr><td>ホーム</td><td>対象年月の収支の表（caption付きtable、行は収入・支出・収支、列は参加者のユーザー名・合計）、次の清算、未清算共有収支と対象件数、共有費配分、最新20件の清算履歴、保留招待数、主要操作を表示する。共通情報はmetadata、月次収支と清算はGET /api/homeのサマリーを使う。月次は日本時間の月全体の清算済み・未来日付も含め、保存割合を明細単位で整数円配分してDBで合計する。清算は全期間の未清算SHAREDをサーバーで分数合計した後に丸める。月次と清算の丸め方を混同しない。PCは月次表と次の清算を2列、スマートフォンは1列で表示する。</td></tr>
-              <tr><td>取引明細</td><td>共有と全参加者の個人明細の列フィルタ（相手の個人明細は参照のみ）、共有・本人の個人明細の未清算行をインライン保存し、清算済みもメモ・カテゴリ保存、選択削除/ルール適用。</td></tr>
+              <tr><td>取引明細</td><td>月単位／未精算の切替、月単位だけ年月・前月・翌月・今月の操作、対象view内の共有と全参加者の個人明細の列フィルタ（相手の個人明細は参照のみ）、共有・本人の個人明細の未清算行をインライン保存し、清算済みもメモ・カテゴリ保存、選択削除/ルール適用。</td></tr>
               <tr><td>CSV取込</td><td>ファイルまたは貼り付け本文を、metadataのルール・参加者で共通解析し、外部IDを専用APIで照合。カテゴリ補完はボタン押下時に未分類行の取引先だけを候補APIへ送る。選択行の区分・カテゴリの一括変更、行ごとの割合・カテゴリの編集を経て、最終値を確認してbulkImport。</td></tr>
               <tr><td>設定</td><td>本人表示名、workspace名・デフォルト割合・招待・削除、共有ルール、定期支払い、管理者だけの利用者登録/停止。</td></tr>
             </tbody>
@@ -799,7 +824,7 @@
           <p>「共有費配分」はcaptionまたは関連付けた見出し付きのtableとし、列見出しは各ユーザー名（th scope="col"）、行見出しは「現在の収支」「配分後の収支」「精算額」（th scope="row"）とする。計算結果のpeopleを参加者順に表示し、精算額は＋が受取、−が支払と表の近くに説明する。計算結果がない場合は配分表を表示しない。履歴は同じホームの下部で確認できる。</p>
           <h3>金額・日時の表示と入力</h3>
           <p>幅48rem以下の取引明細では、datetime-local入力の幅を0、最小幅・最大幅をセル幅の100%にして、ブラウザ固有の日時コントロールの固有幅によるはみ出しを防ぐ。WebKitの日時表示は左寄せにし、内部編集領域の最小幅と余白を抑える。秒・ミリ秒の入力値と保存処理は維持する。</p>
-          <p>サーバーは日時をミリ秒付きUTC ISO文字列としてブラウザへ返す。明細の保存応答・full再取得の取引日時と清算日時、清算履歴の完了日時、full/metadataの招待期限では秒への切捨てを行わない。DB driverのDateは文字列化を挟まずISOへ変換する。ブラウザは表示時にJSTと秒・分の書式を適用し、日時入力・再保存ではミリ秒を保持する。DBスキーマとクエリ回数・並び順・期限判定は変えない。</p>
+          <p>サーバーは日時をミリ秒付きUTC ISO文字列としてブラウザへ返す。明細の保存応答・専用一覧GET・互換full再取得の取引日時と清算日時、清算履歴の完了日時、full/metadataの招待期限では秒への切捨てを行わない。DB driverのDateは文字列化を挟まずISOへ変換する。ブラウザは表示時にJSTと秒・分の書式を適用し、日時入力・再保存ではミリ秒を保持する。DBスキーマとクエリ回数・並び順・期限判定は変えない。</p>
           <p>DB/APIの<code>amountYen</code>は正の整数と<code>type=PAYMENT|RECEIPT</code>を保持し、表示のために保存値を負数へ変換しない。<code>formatCashflow</code>は収支値を「−¥5,000」「+¥5,000」、0円を符号なしで表示する。<code>formatTransactionAmount</code>はPAYMENTを負、RECEIPTを正に変換して同じ書式を使い、<code>cashflowClass</code>は正にpositive（緑）、負にnegative（赤）、0に通常色を返す。ホーム・明細・CSV確認表・定期支払い・配分金額・集計の収支表で共用する。集計のカテゴリ別支出グラフ・内訳表は、通常の通貨書式で無符号・通常色を維持する。月次表・ツールチップ・棒の金額ラベルは収支表と同じ符号を使う。CSVの非有限金額を「—」にする補正は確認表に残す。</p>
           <p>金額入力は正の整数とし、符号を入力欄の外側に表示する。<code>SplitEditor</code>は種別を受け取り、円モードの符号と補足の配分金額へ反映する。%は無符号とする。清算の送金指示・履歴は双方に共通の金額なので、<code>formatYen</code>による絶対額と送金方向で示す。支払い時は「支払者」、収入時は「受取者」、一覧共通見出しは「支払者／受取者」とし、「区分」（個人／共有）と「配分割合」は両種別で統一する。</p>
           <p><code>formatJstDateTime</code>は<code>DateTimePrecision.Minute</code>／<code>Second</code>で表示精度を指定し（既定は秒）、Asia/Tokyo固定で、ホーム・清算履歴・清算済み明細では秒まで、スマートフォンの明細要約では分まで表示する。CSVの元日時と定期支払いの日付表示は各画面で保持する。表示関数はdatetime-local入力には使わない。明細編集の<code>transactionDateInput</code>／<code>transactionDateToIso</code>は秒・ミリ秒を保持し、UTCへ変換する。新規明細の入力初期値は専用formatterを再利用して分まで表示する。</p>
@@ -866,6 +891,13 @@
           <h3>ルール編集</h3>
           <p>有効なルールを上から評価し、取引先の部分一致が最初に成立する一件を使う。文字・割合はblur/Enter、区分・デフォルト利用・有効状態は即保存。追加は末尾、ドラッグまたはスペース/上下キーで並び替え、選択したルールをまとめて削除する。操作キューは並び替え・削除と行編集を直列化し、失敗した入力や構造操作の再試行を保持する。ルール変更だけでは保存済み明細を変更しない。</p>
           <p><code>orderedWorkspaceRules</code>はID→ルールのMapと出力済みIDのSetを用い、楽観的な順序に現在存在するルールを一度ずつ配置する。未知・外部削除済みIDは除外し、外部追加は最新取得順で末尾に残す。順序保存の成功時は最新取得順へ戻し、失敗時は操作前の順序へ戻す。選択IDの所属判定にもSetを使う。取引先の部分一致・優先順によるルール適用判定は変更しない。</p>
+          <h3 id="transaction-view">月単位・未精算の明細取得と表示状態</h3>
+          <p><code>GET /api/transactions</code>のqueryは<code>workspaceId</code>と<code>mode=month&amp;month=YYYY-MM</code>、または<code>mode=unsettled</code>。月単位のmonthは0001-01〜9999-12の実在年月を必須とする。未精算ではmonthを指定しても絞り込みに使わず、応答のmonthはnullとする。未知・重複queryや不正なUUID・モード・年月は400、未ログイン・無効利用者は401、未所属は403。すべての応答に<code>Cache-Control: no-store</code>を付け、API内で業務データを更新しない。</p>
+          <p><code>transaction-view-store.ts</code>は有効利用者・現在の所属・対象明細を同じ1 SQL snapshotで取得する。月の開始以上・翌月開始未満を固定UTC+09:00で求め、ホームと同じ暦月判定にする。翌月はSQLで加算するため9999-12も取得できる。月単位は収入・支出、共有・全参加者の個人、清算済み・未来日付を含む。未精算は全期間のSHAREDかつsettled_at IS NULLだけを対象とし、個人明細は含めない。occurred_at DESC・created_at DESC・id DESCで並べ、ミリ秒を保持した既存TransactionRecordへ変換する。</p>
+          <p><code>useTransactionView</code>はDashboard内で呼び、共通metadataとは独立して取得結果と最大24viewのLRUを保持する。キーはuser ID・workspace ID・mode・月（未精算はnull）で、成功した一覧だけを保存する。上限超過は最後の参照が古いviewから破棄する。「更新」・モード変更は対象workspaceの全viewを破棄してGETし、通常の月移動はキャッシュを再利用する。アプリ再読み込み・ログアウトでキャッシュを破棄し、明細本体をWeb Storageへ保存しない。</p>
+          <p>選択の保存キーは<code>cake:transaction-view:v1:{encodeURIComponent(userId)}:{encodeURIComponent(workspaceId)}</code>。modeと最後の選択monthをJSONで保存する。未設定・破損時は月単位と日本時間の今月を使い、読込・保存不可でもメモリ内の選択操作を続ける。<code>useSyncExternalStore</code>のSSR snapshotは未復元を表し、復元後に初回取得する。別タブの変更によって編集中の画面を切り替えない。自身の選択は画面往復で保持し、再読み込み時は保存値から復元する。</p>
+          <p>ラジオは「月単位明細」「未精算明細」で、月単位だけ前月・type=month・翌月・今月の44px以上の操作を横並びにする。0001-01の前月と9999-12の翌月、今月表示中の今月ボタンを無効にする。month/モード変更は既存の全行freeze → 通常項目・メモ・カテゴリflush → 保存キュー完了を経て実行する。切替先取得成功後だけ表示条件を確定して保存し、行チェックを解除する。保存・取得失敗は元条件と入力を保持し、列フィルターは切替成功時も維持する。</p>
+          <p>表示判定は<code>transactionMatchesView</code>の月／未精算条件と既存の列条件をANDし、編集中・保存中・保存失敗の行を既存pinで一時保持する。通常保存・メモ・カテゴリ保存の確定値は同じ<code>updateTransactionRecords</code>で表示結果とキャッシュへ反映する。日時や区分の変更で対象外になった行はpinの間だけ現在datasetに残し、キャッシュは厳密に対象view内へ絞る。通常保存を各月へ配る前に表示結果と全キャッシュの既存行から確定済みメモと最大カテゴリrevisionを照合し、同じ確定レコードを反映する。行が初めて入る移動先の月でも、先行した専用保存の値を保持する。一括削除・ルール適用・清算・取込・workspace削除とカテゴリ削除では対象workspaceの全viewを無効化する。保存開始前や別viewの遅いGETを採用せず、取得失敗と0件を区別して再試行を提供する。</p>
           <h3>PC取引明細の折り返し</h3>
           <p><code>TransactionTable</code>の<code>wrap</code>を取引明細とCSV取込の確認表で有効にする。表のラッパーをinline-size containerとし、PC幅（48rem超）かつ表示領域90rem未満では明細行をflex-wrap、各セルを項目別の幅を基準に配置する。日時・割合・カテゴリ・メモの入力幅を確保し、既存の<code>data-label</code>を項目名として表示する。見出しのフィルタと全選択も折り返し、保存中表示・全幅のエラー行・カテゴリ色線を維持する。幅変更はCSSだけで切り替え、入力部品の再生成やデータ取得・保存は行わない。90rem以上の列別テーブル、48rem以下の要約と詳細展開、定期支払いの表示はそれぞれの既存レイアウトを使う。</p>
           <h3>取引明細のフィルタ保存</h3>
@@ -888,7 +920,7 @@
             <li><code>formatYen()</code>: <code>Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" })</code>。収支・明細金額は<code>formatCashflow()</code>／<code>formatTransactionAmount()</code>で符号を追加し、清算送金の絶対額と集計の支出額は<code>formatYen()</code>を使う。</li>
             <li><code>formatJstDateTime()</code>: <code>Asia/Tokyo</code>で年月日時分秒を表示。</li>
             <li>新規入力の<code>inputDate()</code>/<code>jstInputToIso()</code>はJSTのdatetime-localとUTC ISOを変換。</li>
-            <li>一覧の<code>transactionDateInput()</code>/<wbr><code>transactionDateToIso()</code>は秒・ミリ秒を維持し、存在しない日付/時刻を拒否。Repositoryのfull取得は従来互換の秒精度を保ち、SQL内の順序判定には元の日時精度を使用する。</li>
+            <li>一覧の<code>transactionDateInput()</code>/<wbr><code>transactionDateToIso()</code>は秒・ミリ秒を維持し、存在しない日付/時刻を拒否。専用一覧GETとRepositoryの互換full取得は保存値のミリ秒を保持し、SQL内の順序判定にも元の日時精度を使用する。</li>
           </ul>
         </section>
 
@@ -928,7 +960,7 @@
           <p>新規手動明細は<code>saveTransaction</code>にcategoryIdを指定でき、カテゴリありの場合は先頭SQLで共有の集合検証を行ってからINSERTする。アプリのSQLはカテゴリなしと同じ2本を維持する。既存明細の同actionではcategoryIdを拒否し、専用保存を使用する。カテゴリを選んだ手動操作はサーバーでcategoryConfirmed=true、解除はfalseとする。CSVは補完・手動変更後のプレビュー最終値を「確認して登録」で確定し、未指定は未分類にする。カテゴリありの新規行はcategoryConfirmed=true、未分類はfalse。定期生成は未分類で登録し、一覧から手動設定できる。カテゴリ候補の照合用正規化はDBの共通関数を使う。通常の取引先編集時の確認状態は既存処理を維持する。</p>
           <p><code>moveCategory</code>はnullable parentIdとbeforeCategoryIdで移動先と挿入位置を受け取る。parentId=nullは最上位、beforeCategoryId=nullは兄弟末尾。workspaceロック後の最新の所属、移動対象・親・挿入先兄弟の同workspaceと使用可否、自身・子孫への移動と同親同名を検証する。元と先の兄弟をsortOrder・id順に準備し、対象を除いた移動先の指定位置へ挿入する。親と両側の兄弟順の更新は同じTransactionで確定し、値が変わった行だけrevisionを加算する。応答は使用停止済みを含む元と先の兄弟と各行から最上位までの最新祖先を含む完全なCategoryをmovedCategoriesに返し、変更行だけの応答による取りこぼしを防ぐ。移動対象のID・色と子孫のID・親参照、明細の割当は変更しない。追加migrationで旧APIの署名とカテゴリ追加・編集・停止・割当を維持する。追加・編集・停止のstoreは同じ引数のwrapper関数から旧関数を呼び、workspaceロックを保持した同じTransactionで祖先DTOを追加する。明細への割当では祖先を取得しない。</p>
           <p>カテゴリ操作はworkspace行→membership行の順でロックし、最新の所属・対象の同workspaceを同じTransactionで確認する。<code>deleteCategory</code>はrecursive CTEで対象と子孫を一度列挙し、参照する全明細のcategoryIdをnull・categoryConfirmedをfalseへ一括更新してから、カテゴリを集合単位でDELETEする。categoryRevisionは既存triggerで加算し、金額・メモ・割合・清算日時と清算履歴には触れない。停止済みの旧カテゴリも削除可能。対象不存在・越境・権限喪失や途中の失敗では全体をrollbackする。削除応答はdeletedCategoryIdsと、更新した明細のtransactionId/null/false/実categoryRevisionをdetachedTransactionsに返す。</p>
-          <p>controllerはworkspace別に削除済みIDと明細の解除応答の最大revisionを保持し、すべての取得・保存応答の採用後に同じ規則を適用する。後着の追加・編集・移動応答やGETで削除済みカテゴリを復活させない。まだ画面にない新規明細の古い保存応答にも実際の解除revisionを適用し、その後別カテゴリへ保存した新しいrevisionは保持する。採用可能な全カテゴリ取得で既知IDの消失を確認した場合も削除済みIDへ加える。metadata取得で既知カテゴリの消失を検出した場合は取得済み一覧を無効化し、古い明細と新しいカテゴリを混ぜない。非一覧画面はmetadataで整合性を確認し、取引一覧を開くときにfullから明細の実revisionを取得する。失敗時は取得失敗を案内する。保存開始後、または削除後に採用した全カテゴリ取得（full / metadata）にない未知IDを部分応答が返す場合や、未取得カテゴリの親が削除済みの場合は、現在タブのscopeでカテゴリの実在と最新の親を照合してから反映する。カテゴリが最初から空でも全カテゴリ取得の世代とIDを記憶し、未取得だった新規カテゴリの削除も古い保存応答で復活させない。通常の追加・編集は確定応答を局所反映し、照合が必要な競合時だけ再取得する。古い応答の親参照だけで生存カテゴリを削除しない。照合が競合で破棄された場合は古い応答を採用せず、再取得を案内する。workspaceの自動切替・応答破棄の条件は既存の世代・dataRevision・requestIdで確認する。</p>
+          <p>controllerはworkspace別に削除済みIDと明細の解除応答の最大revisionを保持し、すべての取得・保存応答の採用後に同じ規則を適用する。後着の追加・編集・移動応答やGETで削除済みカテゴリを復活させない。まだ画面にない新規明細の古い保存応答にも実際の解除revisionを適用し、その後別カテゴリへ保存した新しいrevisionは保持する。採用可能な全カテゴリ取得で既知IDの消失を確認した場合も削除済みIDへ加える。metadata取得で既知カテゴリの消失を検出した場合は取得済み一覧を無効化し、古い明細と新しいカテゴリを混ぜない。非一覧画面はmetadataで整合性を確認し、取引一覧を開くときに専用一覧GETから明細の実revisionを取得する。失敗時は取得失敗を案内する。保存開始後、または削除後に採用した全カテゴリ取得（full / metadata）にない未知IDを部分応答が返す場合や、未取得カテゴリの親が削除済みの場合は、現在タブのscopeでカテゴリの実在と最新の親を照合してから反映する。カテゴリが最初から空でも全カテゴリ取得の世代とIDを記憶し、未取得だった新規カテゴリの削除も古い保存応答で復活させない。通常の追加・編集は確定応答を局所反映し、照合が必要な競合時だけ再取得する。古い応答の親参照だけで生存カテゴリを削除しない。照合が競合で破棄された場合は古い応答を採用せず、再取得を案内する。workspaceの自動切替・応答破棄の条件は既存の世代・dataRevision・requestIdで確認する。</p>
           <div class="data-flow">
             <div class="dfd-track" role="img" aria-label="カテゴリ削除の確認後、同じTransactionで全明細を未分類へ戻して子孫を削除し、削除済みIDと明細の実revisionを画面へ反映する">
               <div class="dfd-node source"><strong>対象と子孫の削除を確認</strong><small>取り消しは入力と表示を保持<br />確認後deleteCategoryを送信</small></div>
@@ -940,7 +972,7 @@
             <div class="dfd-track" role="img" aria-label="metadataでカテゴリが消失した場合、または部分応答が削除後の未知IDや削除済みの親を返す場合は、現在タブのscopeで取得し要求世代を確認して反映する。非一覧タブはmetadataで照合し、古い一覧は無効化する">
               <div class="dfd-node source"><strong>取得・保存応答を受信</strong><small>通常は確定値を局所反映<br />消失・未知ID・削除済み親なら再照合</small></div>
               <div class="dfd-arrow"><b>→</b><small>現在タブのscopeで再照合</small></div>
-              <div class="dfd-node store"><strong>GET /api/app</strong><small>最新カテゴリ／一覧時は明細の実revision<br />workspace・世代・要求・dataRevisionを確認</small></div>
+              <div class="dfd-node store"><strong>GET /api/app＋/api/transactions</strong><small>metadataの最新カテゴリ／専用一覧の実revision<br />workspace・世代・要求・dataRevisionを確認</small></div>
               <div class="dfd-arrow"><b>→</b><small>成功・採用条件を分岐</small></div>
               <div class="dfd-node output"><strong>整合した状態を反映</strong><small>失敗・破棄では古い応答を採用しない<br />保存済みなら再送せず画面更新を案内</small></div>
             </div>
@@ -1057,7 +1089,7 @@ amountYen         = abs(payer.balance)</div>
           <p><code>GET /api/home</code>は<code>workspaceId</code>と<code>month</code>だけを受け取り、未知・重複queryや不正なUUID・年月を拒否する。未来月も選択でき、日本時間の月初以上・翌月初未満の半開区間で検索する。今月も月末までを対象とし、集計画面の本日上限・比較期間・推移期間は適用しない。レスポンスはno-storeとする。</p>
           <p><code>home-store.ts</code>は有効本人・現在所属・参加者・月次集計・未清算共有明細・最新20件の清算履歴を一つのSQL snapshotで読む。月次は保存済み割合を検証し、明細ごとの最大剰余方式と参加順・user IDの同順位規則で整数円配分してから参加者別に合計する。個人費は担当者へ全額を配分する。合計列は各参加者の合計と一致し、正確な整数の十進文字列として返す。workspace/date Indexを使える時刻範囲の条件とし、全期間の明細本文を読み出してJavaScriptで月別に絞り込まない。</p>
           <p>清算用にDBからサーバーへ渡すのは全期間の未清算SHAREDのID・担当者・種別・金額・区分・保存割合だけとする。既存の<code>calculateSettlement()</code>で分数合計後の丸め・送金方向・配分を維持し、ブラウザへの応答では<code>transactionIds</code>と対象明細を除外する。未清算の収入・支出・収支と対象件数は別サマリーとし、月選択で対象を変えない。清算完了POSTのSnapshot再照合・関連保存は従来どおり行う。履歴は日時・payer/payee名・金額を最新20件返す。</p>
-          <p>通常ホーム・取込直リンクの初期表示と、ホーム・取込・設定・集計への移動はmetadataを明示指定し、明細の取得済み状態を偽装しない。公開済み<code>GET /api/app</code>のscope省略時fullとscope別の返却形式は互換用に維持する。ホーム表示中だけ最大12か月の月次結果をLRUメモリキャッシュに保持し、取得済み月への再訪は通信しない。永続化・サーバー側キャッシュ・事前集計テーブル・migrationは追加しない。APIの通信量は明細件数に比例せず、清算のサーバー処理量は未清算件数に応じて増える。</p>
+          <p>通常ホーム・取込直リンクの初期表示と、すべてのタブへの移動はmetadataを明示指定し、明細の取得済み状態を偽装しない。公開済み<code>GET /api/app</code>のscope省略時fullとscope別の返却形式は互換用に維持する。ホーム表示中だけ最大12か月の月次結果をLRUメモリキャッシュに保持し、取得済み月への再訪は通信しない。永続化・サーバー側キャッシュ・事前集計テーブル・migrationは追加しない。APIの通信量は明細件数に比例せず、清算のサーバー処理量は未清算件数に応じて増える。</p>
           <h3>アプリAPIの処理境界</h3>
           <p><code>app/api/app/route.ts</code>は実装を配線し、<code>appHandlers()</code>が認証、共有schemaによるparse、サービス呼出し、HTTP応答を担当する。<code>createAppService(store)</code>はactionを用途別サービスへ振り分け、所属・担当者・割合・招待条件・清算Snapshotを検証する。DB依存はstoreから注入し、SQLは<code>createAppStore()</code>と既存のrepository・user-access・paypay-importが実行する。サービスはRequest/ResponseやSQL clientを扱わない。</p>
           <p>GETの通常2 SQL、各操作の所属確認、表示名更新時の有効利用者再確認、DB関数内の最新権限・清算Snapshot照合を維持する。明細保存のworkspace更新と明細更新、ルール更新/再採番、清算のSnapshot照合・履歴・関連・明細更新は従来のTransaction境界で実行する。単件・複数ルール削除は共通storeから<code>cake_delete_default_rules</code>を一回呼び、workspace行更新ロック→actorのmember行FOR SHARE→対象ID順FOR UPDATE→全対象確認→削除→残存順序再採番を同じTransactionで行う。全対象不足や後続エラーはworkspace更新も含めてrollbackする。単件不存在だけは0件成功とする。workspace削除は、対象清算の関連行を先に除去するCTEの結果を消費してからworkspaceを削除し、明細・清算などのCASCADEを同じ一回のSQLで完了する。途中で制約違反が起きれば関連行の削除もrollbackする。</p>
@@ -1263,6 +1295,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>SettlementPerson</code> / <code>SettlementResult</code></td><td>一人分のuserId/name/weight/payments/receipts/actual/target/balance。結果はtransactionIds、paymentTotal/receiptTotal/netTotal、people、nullable payerUserId/payerName/payeeUserId/payeeName、amountYen。</td></tr>
               <tr><td><code>SettlementHistory</code> / <code>PendingInvitation</code></td><td>履歴はid/nullable payerName・payeeName/amountYen/completedAt。招待はid/workspaceName/inviterName/expiresAt。</td></tr>
               <tr><td><code>HomeData</code></td><td>workspaceId、month、members、monthly（参加者別peopleとtotalのpaymentTotal/receiptTotal/balanceYen）、unsettled（countと同じ収支合計）、transactionIdsを除いたsettlement、settlementHistory。月次・未清算の金額は整数の十進文字列で通信し、表示境界でBigIntへ変換する。</td></tr>
+              <tr><td><code>TransactionViewSelection</code> / <code>TransactionViewDataset</code></td><td>選択はmode（month | unsettled）と最後の選択month。取得結果はworkspaceId、mode、month（月単位ならYYYY-MM、未精算ならnull）、既存TransactionRecordのtransactions配列。共通metadataや清算結果は含めない。</td></tr>
               <tr><td><code>BootstrapScope</code></td><td>full | metadata。</td></tr>
               <tr><td><code>PayPayPreviewRow</code></td><td>key、selected、CSVのJST occurredAt、merchant/memo/method/amountYen/externalId、expenseClass/splitWeights、nullable categoryId、duplicate、nullable error。</td></tr>
               <tr><td><code>ImportFormat / ImportHistoryEntry / ImportHistoryResponse</code></td><td>形式はPAYPAY。履歴はid、format、importedBy、importedByName、fileName、totalRows、importedRows、skippedRows、精度を保持したUTC ISO createdAt。応答はhistory配列。BootstrapMetadata・WorkspaceDataへは含めない。</td></tr>
@@ -1287,7 +1320,7 @@ BootstrapData extends BootstrapMetadata
    ├─ transactions: TransactionRecord[]
    ├─ settlement: SettlementResult | null
    └─ settlementHistory: SettlementHistory[]</div>
-          <p><code>getBootstrap</code>はscope別に返却型をoverloadする。metadata JSONへ空の明細/履歴/清算を付けず、同一workspaceの取得済みfullとの併合はクライアントで行う。選択先の型で明細未取得を識別し、TransactionsPanelにはfullが揃うまで読込中・取得失敗を表示する。HomeDataはBootstrapと独立して保持する。<code>types/next-auth.d.ts</code>はSession Userの必須idをDeclaration Mergingする。</p>
+          <p><code>getBootstrap</code>はscope別に返却型をoverloadする。metadata JSONへ空の明細/履歴/清算を付けず、同一workspaceの取得済みfullとの併合はクライアントで行う。選択先の型で明細未取得を識別し、TransactionsPanelには専用一覧hookの現在条件の取得結果・読込中・取得失敗を渡し、成功した0件と区別する。HomeDataとTransactionViewDatasetはBootstrapと独立して保持する。<code>types/next-auth.d.ts</code>はSession Userの必須idをDeclaration Mergingする。</p>
         </section>
 
         <section id="errors">
@@ -1332,6 +1365,8 @@ BootstrapData extends BootstrapMetadata
               <tr><td>tests/client/home-navigation.test.ts</td><td>取込直リンクとworkspace指定の安全な内部URL化、未知・複数tabのhomeへのフォールバック、Google/テストログイン双方への復帰先引き渡しを確認する。実認証後の復帰はPreviewで別途確認する。</td></tr>
               <tr><td>tests/shared/settlement.test.ts / tests/shared/expense-splits.test.ts / tests/shared/split-allocations.test.ts</td><td>明細ごとに異なる保存割合、0の割合、個人費actor追従、ルール順、デフォルト変更後の固定、収入、正確な分数合算・一度だけ丸める端数、円配分合計。</td></tr>
               <tr><td>tests/shared/transaction-editing.test.ts / tests/client/transaction-updates.test.ts / tests/shared/transaction-memo.test.ts</td><td>JST秒/ミリ秒・不正日時、割合/担当者変更、確定値の局所反映・清算再計算、専用メモschemaと清算後の計算不変。</td></tr>
+              <tr><td>tests/shared/transaction-view.test.ts / tests/server/transaction-view-handler.test.ts / tests/server/transaction-view-store.test.ts</td><td>月／未精算query、未知・重複値、認証・所属、READ ONLYでの専用SQL、固定JST境界・0001/9999年、清算済み・未来・収入・双方の個人明細と全期間未精算の範囲。</td></tr>
+              <tr><td>tests/client/transaction-view-storage.test.ts / tests/client/transaction-view-ui.test.ts</td><td>選択のuser/workspace分離・復元・破損・保存不可、月とモードの操作、キャッシュ通信回数、更新、保存待ち・失敗、行選択解除・列条件保持、PC/mobileのコンパクト表示。</td></tr>
               <tr><td>tests/shared/transaction-filters.test.ts / tests/client/transaction-filter-storage.test.ts / tests/shared/transaction-list.test.ts</td><td>列内OR/列間AND、候補と件数、割合正規化、清算状態・メモ、localStorage分離・空選択・破損/保存失敗、多数候補・非表示選択・条件外行の保持。</td></tr>
               <tr><td>tests/tooling/setup-db.test.ts / scripts/qa/db/migration-scenarios.ts</td><td>新規/一部適用/全適用時の本文読込・SQL往復数、初回Previewの原文照合と同一世代再実行、SQL/履歴のrollback、後続の不正ファイルによる適用停止。隔離PostgreSQLの独立sessionで同じ未適用一覧を取得し、advisory lock待機後の台帳再確認で二重適用を防ぐことを確認する。</td></tr>
               <tr><td>tests/server/merchant-normalization.test.ts / scripts/qa/db/merchant-normalization-scenarios.ts</td><td>固定fixtureによるNFKC・小文字化・空白集合・保持文字の照合、生成列とIndex、既存行の計算と他列の保持、保存・編集・CSV・定期生成・旧版・直接SQLの共通規則を確認する。実DBのmigration・ロック待機・rollbackは隔離環境の検証と区別する。</td></tr>

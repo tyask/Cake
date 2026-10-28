@@ -87,11 +87,11 @@ test("選択先がなくなった場合は取得済みの明細も外し、最�
   assert.equal(current.selected?.transactions.length, 1);
 });
 
-test("ホーム・取込・設定・集計を軽量取得にし、明細だけ全データを要求する", () => {
+test("各画面の共通情報は軽量取得し、明細は専用APIへ分離する", () => {
   for (const tab of ["home", "import", "settings", "analytics"] satisfies DashboardTab[]) {
     assert.equal(bootstrapScopeForTab(tab), "metadata");
   }
-  assert.equal(bootstrapScopeForTab("transactions"), "full");
+  assert.equal(bootstrapScopeForTab("transactions"), "metadata");
 });
 
 test("明細未取得の家計を更新しても、空の明細配列を補わない", () => {
