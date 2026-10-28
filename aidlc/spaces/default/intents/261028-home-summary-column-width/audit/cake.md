@@ -38,3 +38,30 @@ Cake運用の記録。公式エンジンの承認receiptではない。日時は
 - 計画SHA-256：`c6db7d18fad414361c07cc70bd069c789f736bf073c8676717eba9ebaa7b840f`
 
 > 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
+
+## REOPEN
+
+- 記録日時：2026-10-28T03:46:38.259Z
+- 計画SHA-256：`c6db7d18fad414361c07cc70bd069c789f736bf073c8676717eba9ebaa7b840f`
+
+> 修正PR #163のmain merge（89878efdbc54b0fc46bb9e1800dd6f9420116128）により、元PR #161の案件registryが競合したため再開する。
+> 両案件の記録を保持してorigin/mainをmergeし、計画・UI仕様は変更せず、新HEADで別Agent再レビューと所定検証・CI・Preview・正式QAを揃える。
+
+## PROGRESS
+
+- 記録日時：2026-10-28T03:49:17.829Z
+- 計画SHA-256：`c6db7d18fad414361c07cc70bd069c789f736bf073c8676717eba9ebaa7b840f`
+
+> 完了: 修正PR #163のmerge SHA89878efdbc54b0fc46bb9e1800dd6f9420116128をorigin/mainとして取り込み、案件registryだけに生じた競合を解消した。
+> 両案件（Issue160/162）の登録を保持し、共通既存行の内容一致・Issue重複なしを確認。Intent160は同じ承認済み計画を維持してreopenした。
+> 自己レビュー: origin/mainとの差分はホーム月次収支表のCSS・関連設計・Intent160の9ファイル。CSSとHomePanelは前回レビュー対象31f04a403d76b8c074ae1018152b8d8eea6d6bfeから変更なし。自動mergeされた詳細設計はホーム列幅方針とmainの検証修正契約の両方を保持している。
+> 完了: 案件registryの構造・planApproved状態・git diff --checkとcached checkを確認。計画・受入条件・UI仕様の追加変更はない。
+> 未着手: merge commitの新HEADで別Agent再レビュー、所定ローカル検証・CloudQA・列幅実測、push/CI・自動Preview/status、修正後mainの正式qa:verify:ci、Ready。
+> 前回HEADの成功記録はGit外へ退避し、新HEADの成功証拠として使い回さない。修正PR #163のmerge後確認とIssue162の手動確認は正式QA成功後に結果を記録する。
+
+## FREEZE
+
+- 記録日時：2026-10-28T03:49:18.244Z
+- 計画SHA-256：`c6db7d18fad414361c07cc70bd069c789f736bf073c8676717eba9ebaa7b840f`
+
+> 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。

@@ -10,7 +10,7 @@ Cake運用層の進捗表示。公式AI-DLCエンジンのstate/receiptではな
 - Branches：`codex/home-summary-column-width`
 - Phase：Construction
 - Status：frozen
-- 記録更新日時：2026-10-28T01:54:25.066Z
+- 記録更新日時：2026-10-28T03:49:18.244Z
 - 計画承認：記録あり（対象計画のhash一致はCLIで検査）
 - 記録凍結：済み。以後の検証・Ready・Operation結果はIssue/PR/Actionsに保存する。
 

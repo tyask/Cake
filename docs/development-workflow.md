@@ -130,6 +130,10 @@ Previewのdeploy・status・cleanupはホスト上の`preview`ジョブ、verify
 push全体を一つの待機枠にまとめず、各操作前にも対象PRの状態を再照合する。
 正式noticeは実行したジョブ内の資格情報を持たない別stepで発行する。
 受信側は操作に対応するジョブと非実行側のskippedを照合し、旧mainの単一`preview`ジョブの証拠も受理する。
+verifyで管理側のmatrixジョブがスキップされると、GitHub APIの名前が未評価の条件式になる場合がある。
+受信側はverify操作で`preview-verify`が一意に存在する場合に限り、現在のworkflowの条件式と完全一致する名前も管理側の候補とする。
+相手ジョブのcompleted/skipped・run/attempt/main SHA・URLの照合は維持し、通常名との重複も拒否する。
+名前は正規化せず、取得前後のmetadata比較に元の値を含める。
 
 ```bash
 npm run check:fast

@@ -11,6 +11,8 @@ export type VerifyReadRequest = Omit<VerifyReceiptRequest, 'runId' | 'runAttempt
 type RunRequest = ReceiptRequest | VerifyReadRequest;
 type OperationJobs = { job: Record<string, unknown>; peer?: Record<string, unknown> };
 const workflowPath = '.github/workflows/preview.yml';
+// GitHub leaves this matrix job name unevaluated when verify skips the management job.
+const skippedPreviewJobName = "github.event_name == 'push' && format('preview-cleanup-{0}', matrix.pr) || 'preview'";
 const apiUrl = (path: string) => `https://api.github.com/repos/${config.repository}/${path}`;
 const positiveId = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) > 0;
 const timestamp = (v: unknown): v is string => typeof v === 'string' && Number.isFinite(Date.parse(v));
@@ -73,7 +75,9 @@ async function operationJob(get: PreviewGet, run: Record<string, unknown>, expec
   }
   if (jobs.some(job => !positiveId(job.id)) || new Set(jobs.map(job => job.id)).size !== jobs.length
     || new Set(jobs.map(job => job.check_run_url)).size !== jobs.length) throw new Error('PREVIEW_JOBS_INCOMPLETE');
-  const previews = jobs.filter(job => job.name === 'preview'), verifies = jobs.filter(job => job.name === 'preview-verify');
+  const verifies = jobs.filter(job => job.name === 'preview-verify');
+  const splitVerify = expected.action === 'verify' && verifies.length === 1;
+  const previews = jobs.filter(job => job.name === 'preview' || splitVerify && job.name === skippedPreviewJobName);
   if (previews.length !== 1 || verifies.length > 1) throw new Error('PREVIEW_JOB_AMBIGUOUS');
   // Old runs have one preview job for every action; a split run must retain both known jobs.
   const job = verifies.length && expected.action === 'verify' ? verifies[0] : previews[0];
