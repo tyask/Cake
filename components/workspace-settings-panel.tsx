@@ -4,14 +4,14 @@ import { useState } from "react";
 import type { RunAppAction } from "@/lib/shared/schemas/app-input";
 import { postAction } from "@/lib/client/app-client";
 import { defaultSplitWeights, validateSplitWeights } from "@/lib/shared/expense-splits";
-import type { SplitWeights, WorkspaceData } from "@/lib/shared/types";
+import type { SplitWeights, WorkspaceMetadata } from "@/lib/shared/types";
 import { SplitEditor } from "./split-editor";
 import { RecurringPaymentsPanel } from "./recurring-payments-panel";
 import { WorkspaceRules } from "./workspace-rules";
 import { CategorySettings } from "./category-settings";
 import { SettingsSection } from "./settings-section";
 
-export function SettingsPanel({ selected, currentUserId, run, afterDelete }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction; afterDelete: () => Promise<void> }) {
+export function SettingsPanel({ selected, currentUserId, run, afterDelete }: { selected: WorkspaceMetadata; currentUserId: string; run: RunAppAction; afterDelete: () => Promise<void> }) {
   const [name, setName] = useState(selected.workspace.name);
   const [email, setEmail] = useState("");
   const [inviteLink, setInviteLink] = useState("");

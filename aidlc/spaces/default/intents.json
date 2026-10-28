@@ -63,6 +63,15 @@
         "codex/issue-template-approval"
       ],
       "recordDir": "aidlc/spaces/default/intents/261028-issue-template-approval"
+    },
+    {
+      "id": "261028-home-server-summary",
+      "issue": 168,
+      "branch": "codex/home-server-summary",
+      "branches": [
+        "codex/home-server-summary"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261028-home-server-summary"
     }
   ]
 }

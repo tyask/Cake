@@ -13,7 +13,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { defaultSplitWeights, validateSplitWeights } from "@/lib/shared/expense-splits";
 import { ruleMerchantSchema } from "@/lib/shared/schemas/domain-schemas";
 import { orderedWorkspaceRules } from "@/lib/shared/rule-order";
-import type { DefaultRule, ExpenseClass, WorkspaceData, WorkspaceMember } from "@/lib/shared/types";
+import type { DefaultRule, ExpenseClass, WorkspaceMetadata, WorkspaceMember } from "@/lib/shared/types";
 import { SwipeDelete } from "./swipe-delete";
 import { SettingsSection } from "./settings-section";
 import styles from "./workspace-rules.module.css";
@@ -40,11 +40,11 @@ function validateRule(values: RuleValues, members: WorkspaceMember[]): RuleValue
   return { ...values, merchantContains, splitWeights: values.expenseClass === "PERSONAL" || values.splitWeights === null ? null : validateSplitWeights(values.splitWeights, members) };
 }
 
-export function WorkspaceRules({ selected, run }: { selected: WorkspaceData; run: RunAction }) {
+export function WorkspaceRules({ selected, run }: { selected: WorkspaceMetadata; run: RunAction }) {
   return <RulesEditor key={selected.workspace.id} selected={selected} run={run} />;
 }
 
-function RulesEditor({ selected, run }: { selected: WorkspaceData; run: RunAction }) {
+function RulesEditor({ selected, run }: { selected: WorkspaceMetadata; run: RunAction }) {
   const dragContextId = useId();
   const queue = useRef<Promise<void>>(Promise.resolve());
   const structuralLock = useRef(false);

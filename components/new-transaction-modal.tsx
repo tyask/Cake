@@ -6,7 +6,7 @@ import { commonExpenseClassLabels, expenseClasses, MAX_AMOUNT_YEN, MAX_MERCHANT_
 import { defaultSplitWeights, personalSplitWeights, prepareDefaultRuleMatcher, transactionDefaults, validateSplitWeights } from "@/lib/shared/expense-splits";
 import { MAX_TRANSACTION_MEMO_LENGTH } from "@/lib/shared/schemas/transaction-memo";
 import { cashflowClass } from "@/lib/shared/display-formatters";
-import type { ExpenseClass, SplitWeights, TransactionType, WorkspaceData } from "@/lib/shared/types";
+import type { ExpenseClass, SplitWeights, TransactionType, WorkspaceMetadata } from "@/lib/shared/types";
 import { SplitEditor } from "./split-editor";
 import { Modal } from "./dashboard-ui";
 import { CategorySelect, prepareCategoryChoices } from "./category-select";
@@ -22,7 +22,7 @@ const inputDate = (value?: string) => {
 };
 const jstInputToIso = (value: string) => new Date(`${value.length === 16 ? `${value}:00` : value}+09:00`).toISOString();
 
-export function NewTransactionModal({ selected, currentUserId, close, run }: { selected: WorkspaceData; currentUserId: string; close: () => void; run: RunAppAction }) {
+export function NewTransactionModal({ selected, currentUserId, close, run }: { selected: WorkspaceMetadata; currentUserId: string; close: () => void; run: RunAppAction }) {
   const matchRule = useMemo(() => prepareDefaultRuleMatcher(selected.rules), [selected.rules]);
   const categoryChoices = useMemo(() => prepareCategoryChoices(selected.categories), [selected.categories]);
   const initialActor = selected.members.some((member) => member.id === currentUserId) ? currentUserId : selected.members[0]?.id ?? "";

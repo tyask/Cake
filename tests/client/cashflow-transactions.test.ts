@@ -12,6 +12,10 @@ async function assertMoney(locator: Locator, text: string, color: string) {
   assert.equal(await locator.evaluate(element => getComputedStyle(element).color), color);
 }
 
+async function waitHome(page: Page) {
+  await page.waitForFunction(() => document.querySelector("#home .home-month-summary")?.getAttribute("aria-busy") === "false");
+}
+
 async function chooseFilter(page: Page, name: string, value: RegExp) {
   await page.locator("#transactions").getByRole("button", { name: name + "で絞り込み", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: name + "で絞り込み", exact: true });
@@ -77,6 +81,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           await page.goto(origin + "?balance=" + mode);
           const month = page.getByRole("table", { name: "2026年10月の収支", exact: true });
           await month.waitFor();
+          await waitHome(page);
           assert.deepEqual(await month.getByRole("rowheader").allTextContents(), ["収入", "支出", "収支"]);
           assert.deepEqual(await month.getByRole("columnheader").allTextContents(), ["A", "B", "合計"]);
           const incomes = month.getByRole("row", { name: /^収入 / }).getByRole("cell");
@@ -100,6 +105,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           await page.goto(origin + "?balance=" + mode);
           const month = page.getByRole("table", { name: "2026年10月の収支", exact: true });
           await month.waitFor();
+          await waitHome(page);
           await assertMoney(month.getByRole("row", { name: /^収支 / }).getByRole("cell").nth(0), balance, mode === "empty" ? normal : red);
           const next = page.locator("#home .settlement-hero");
           assert.match(await next.textContent() ?? "", mode === "empty" ? /現在、清算対象の共有の支払い・収入はありません/ : /清算不要/);
@@ -115,6 +121,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         const receipt = transactions.locator('[data-transaction-id="receipt"]');
         const settled = transactions.locator('[data-transaction-id="settled-receipt"]');
         await payment.waitFor();
+        await waitHome(page);
         assert.equal(await home.getByRole("heading", { name: "最近の取引", exact: true }).count(), 0);
         assert.equal(await home.getByRole("heading", { name: "計算の内訳", exact: true }).count(), 0);
         assert.deepEqual(await home.locator(".people-flow b").allTextContents(), ["B", "A"]);
@@ -145,6 +152,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         const savedBefore = await page.locator("#saved-transactions").textContent();
         async function assertMonth(value: string, caption: string) {
           assert.equal(await monthInput.inputValue(), value);
+          await waitHome(page);
           assert.equal(await monthlyTable.locator("caption").textContent(), caption);
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true,
             "年月操作欄と収支表を画面幅に収める");
@@ -276,6 +284,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           await hero.getByText("未清算の共有収支", { exact: true }).waitFor();
         }
         await page.goto(origin + "?balance=partner");
+        await waitHome(page);
         const partnerMonth = page.getByRole("table", { name: "2026年10月の収支", exact: true });
         await assertMoney(partnerMonth.getByRole("row", { name: /^収入 / }).getByRole("cell").nth(1), "+￥4,700", green);
         await assertMoney(partnerMonth.getByRole("row", { name: /^支出 / }).getByRole("cell").nth(1), "−￥5,400", red);

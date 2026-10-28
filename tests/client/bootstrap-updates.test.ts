@@ -35,7 +35,7 @@ function fixture(): { current: BootstrapData; metadata: BootstrapMetadata } {
   return { current, metadata };
 }
 
-test("同じ家計の取込・設定用データは更新し、取得済みの明細・清算情報と元データを保持する", () => {
+test("同じ家計の共通情報は更新し、取得済みの明細・清算情報と元データを保持する", () => {
   const { current, metadata } = fixture();
   const originalCurrent = structuredClone(current);
   const originalMetadata = structuredClone(metadata);
@@ -50,6 +50,7 @@ test("同じ家計の取込・設定用データは更新し、取得済みの�
   assert.strictEqual(merged.selected.workspace, metadata.selected!.workspace);
   assert.strictEqual(merged.selected.members, metadata.selected!.members);
   assert.strictEqual(merged.selected.rules, metadata.selected!.rules);
+  assert.ok("transactions" in merged.selected);
   assert.strictEqual(merged.selected.transactions, current.selected!.transactions);
   assert.strictEqual(merged.selected.settlement, current.selected!.settlement);
   assert.strictEqual(merged.selected.settlementHistory, current.selected!.settlementHistory);
@@ -57,7 +58,7 @@ test("同じ家計の取込・設定用データは更新し、取得済みの�
   assert.deepEqual(metadata, originalMetadata);
 });
 
-test("別の家計のデータには以前の明細を混ぜず、全データ取得が必要なことを返す", () => {
+test("別の家計の共通情報に以前の明細を混ぜず、呼出し元へ独立した取得状態での採用を求める", () => {
   const { current, metadata } = fixture();
   const previous = structuredClone(current);
   metadata.selected!.workspace = { ...metadata.selected!.workspace, id: "other-workspace" };
@@ -66,7 +67,7 @@ test("別の家計のデータには以前の明細を混ぜず、全データ�
   assert.deepEqual(current, previous);
 });
 
-test("初めて家計を選択したときは取込・設定用データだけで全データを組み立てない", () => {
+test("初めて家計を選択したときは共通情報から全データを組み立てない", () => {
   const { current, metadata } = fixture();
   const empty: BootstrapData = { ...current, selected: null };
 
@@ -86,11 +87,19 @@ test("選択先がなくなった場合は取得済みの明細も外し、最�
   assert.equal(current.selected?.transactions.length, 1);
 });
 
-test("取込・設定・集計を軽量取得にし、ホーム・明細には全データを要求する", () => {
-  for (const tab of ["import", "settings", "analytics"] satisfies DashboardTab[]) {
+test("ホーム・取込・設定・集計を軽量取得にし、明細だけ全データを要求する", () => {
+  for (const tab of ["home", "import", "settings", "analytics"] satisfies DashboardTab[]) {
     assert.equal(bootstrapScopeForTab(tab), "metadata");
   }
-  for (const tab of ["home", "transactions"] satisfies DashboardTab[]) {
-    assert.equal(bootstrapScopeForTab(tab), "full");
-  }
+  assert.equal(bootstrapScopeForTab("transactions"), "full");
+});
+
+test("明細未取得の家計を更新しても、空の明細配列を補わない", () => {
+  const { metadata } = fixture();
+  const current = structuredClone(metadata);
+  const merged = mergeBootstrapMetadata(current, metadata);
+  assert.deepEqual(merged, metadata);
+  assert.ok(merged?.selected);
+  assert.equal("transactions" in merged.selected, false);
+  assert.equal("settlement" in merged.selected, false);
 });

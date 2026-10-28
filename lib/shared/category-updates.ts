@@ -1,4 +1,4 @@
-import type { BootstrapData, Category } from "./types";
+import { isWorkspaceData, type BootstrapMetadata, type Category } from "./types";
 
 export type CategoryDeletion = {
   deletedCategoryIds: string[];
@@ -9,7 +9,7 @@ type CategoryUpdate = ({ category: Category } | { archivedCategories: Category[]
   & { ancestorCategories?: Category[] };
 
 /** Adopt acknowledged metadata without a GET that another save could invalidate. */
-export function applyCategoryUpdate(data: BootstrapData, workspaceId: string, update: CategoryUpdate): BootstrapData {
+export function applyCategoryUpdate<T extends BootstrapMetadata>(data: T, workspaceId: string, update: CategoryUpdate): T {
   const selected = data.selected;
   if (!selected || selected.workspace.id !== workspaceId) return data;
   if ("deletedCategoryIds" in update) {
@@ -17,12 +17,12 @@ export function applyCategoryUpdate(data: BootstrapData, workspaceId: string, up
     const detached = new Map(update.detachedTransactions.map(transaction => [transaction.transactionId, transaction]));
     return { ...data, selected: { ...selected,
       categories: selected.categories.filter(category => !deleted.has(category.id)),
-      transactions: selected.transactions.map(transaction => {
+      ...(isWorkspaceData(selected) ? { transactions: selected.transactions.map(transaction => {
         const acknowledged = detached.get(transaction.id);
         return acknowledged && acknowledged.categoryRevision > transaction.categoryRevision
           ? { ...transaction, categoryId: null, categoryConfirmed: false, categoryRevision: acknowledged.categoryRevision }
           : transaction;
-      }),
+      }) } : {}),
     } };
   }
   const categories = new Map(selected.categories.map(category => [category.id, category]));

@@ -1,0 +1,57 @@
+{
+  "protocol": "cake-intent/v1",
+  "id": "261028-home-server-summary",
+  "repository": "tyask/Cake",
+  "issue": 168,
+  "issueUrl": "https://github.com/tyask/Cake/issues/168",
+  "branch": "codex/home-server-summary",
+  "branches": [
+    "codex/home-server-summary"
+  ],
+  "recordDir": "aidlc/spaces/default/intents/261028-home-server-summary",
+  "phase": "Construction",
+  "status": "frozen",
+  "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1",
+  "approval": {
+    "actor": "このチャットの利用者",
+    "reply": "mainに別の変更をマージしたので取り込んでおいてください。計画はOKなので、Issueの作成に進んでください\n",
+    "recordedAt": "2026-10-28T10:28:39.803Z",
+    "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1",
+    "planFile": "plans/e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1.md"
+  },
+  "frozen": true,
+  "createdAt": "2026-10-28T10:28:39.470Z",
+  "updatedAt": "2026-10-28T10:38:57.848Z",
+  "events": [
+    {
+      "action": "CREATED",
+      "recordedAt": "2026-10-28T10:28:39.470Z",
+      "note": "Issueに対応する計画を記録した。承認は別途記録する。",
+      "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
+    },
+    {
+      "action": "APPROVE",
+      "recordedAt": "2026-10-28T10:28:39.803Z",
+      "note": "承認者：このチャットの利用者\n承認の記録日時：2026-10-28T10:28:39.803Z\n承認対象本文：[plans/e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1.md](../plans/e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1.md)\n利用者の実際の回答：\nmainに別の変更をマージしたので取り込んでおいてください。計画はOKなので、Issueの作成に進んでください",
+      "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T10:28:40.119Z",
+      "note": "Issue URL: https://github.com/tyask/Cake/issues/168\n承認者: このチャットの利用者\n実際のIssue承認文: お願いします。\n記録日時: 2026-10-28T10:28:39.063273+00:00\n\n承認対象: チャットでURLとともに提示し、GitHubから再取得して一致を確認した以下の保存済みIssue本文。\n\n## 目的・背景\n\nホームは現在、選択中ワークスペースの全期間の取引明細を初期取得し、ブラウザで対象月の収入・支出・収支を計算している。\n明細が増えると初期通信量・ブラウザのメモリ使用量・集計処理量が増えるため、ホームで必要な集計結果だけを取得する構成へ変更する。\n\n初期表示では共通情報と今月のサマリーを取得する。\n月を変更したときは、その月をDBで集計し、ユーザー別・合計の収入、支出、収支を表示する。\n清算は選択月とは独立して、全期間の未清算共有明細を対象にサーバーで計算する。\n\n## 対象範囲・対象外\n\n対象範囲:\n\n- ホームの月次収支・清算サマリーの取得と表示。\n- 初期表示、更新ボタン、ワークスペース切替、保存後更新、カテゴリ同期での取得経路の見直し。\n- 清算額、共有費配分、未清算共有明細の収支・対象件数、清算履歴最新20件、清算完了操作の維持。\n- 取引一覧を開いたときに従来の全件データを取得するための接続調整。\n- API・画面の取得処理・関連設計書・回帰テストの更新。\n\n対象外・制約:\n\n- 取引一覧のページ分割は別タスクとする。画面・検索・並べ替え・全件取得方式は維持する。\n- キャッシュや事前集計テーブルは追加せず、既存の取得・計算処理とインデックスを活用する。\n- 月次収支は日本時間の月単位とし、清算済み・未来日付を含む対象範囲と共有費の端数配分を維持する。\n- 清算履歴は利用者の確認により表示・取得を維持する。清算と対象明細の既存の紐づけも維持する。\n- 清算のサーバー処理量は未清算件数に応じて増えるが、ブラウザへ送るデータは集計結果に限定する。\n\n## 受入条件\n\n- [ ] AC-01: ホームの初期表示・更新・月変更で、全明細や清算対象IDの配列をブラウザへ返さない。\n- [ ] AC-02: 日本時間の月単位、清算済み・未来日付を含む対象範囲、共有費の端数配分を維持し、従来と同じ収支になる。\n- [ ] AC-03: 月変更が清算対象に影響せず、清算額・共有費配分・履歴・清算完了操作が従来どおり動く。\n- [ ] AC-04: 明細保存・取込・清算後にサマリーを更新する。保存後の取得失敗は「保存済み・表示未更新」と扱う。\n- [ ] AC-05: 月やワークスペースを素早く切り替えても、遅い応答で表示が戻らない。\n- [ ] AC-06: 取引一覧・取込・設定・既存の集計画面が継続して動作する。\n\n## 関連記録\n\n- 承認済み計画: このチャットで提示済みの「ホームの集計とデータ取得の改善」。本Issueへ目的・範囲・受入条件を反映済み。\n- 計画承認文: 「mainに別の変更をマージしたので取り込んでおいてください。計画はOKなので、Issueの作成に進んでください」\n- 清算履歴の維持についての確認: 「ではそれは残していいです。」\n- 基準main: `0784af02c248176fd1d615fb2a64d8e78a91897e`（PR #167取り込み済み）。\n- Intent: Issue本文の承認後、専用branch/worktreeで作成し、承認済み計画と計画承認・Issue承認それぞれの証拠を保存する。\n- PR: 未作成。実装・検証後に関連付ける。\n\n実施・検証:\n\n1. Issue本文の承認後、専用branch/worktree・Intentを作成する。\n2. API・画面の取得処理・関連設計書と回帰テストを更新する。\n3. 件数を増やしたデータで取得範囲と応答量を確認し、月境界・端数処理・保存後更新・通信失敗・応答逆転を検証する。\n4. 別Agentレビュー、lint・型チェック・全自動テスト・build・CloudブラウザQA、CI・専用Previewでの確認を終え、PRをReadyにする。\n5. 利用者によるmerge後、既存Actionsが稼働と専用資源cleanupを確認する。\n\n## 進捗\n\n- 状況: 未着手（計画承認・最新main取り込み完了）。\n- 現在の工程: Issue作成・保存済み本文の提示。\n- 次の作業: Issue本文の承認後、専用branch/worktree・Intentを作成して実装へ進む。\n- 未実施: 実装、テスト、レビュー、PR作成、CI・Preview検証。\n",
+      "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T10:38:57.536Z",
+      "note": "Issue #168: ホームのサーバー集計・用途別取得の実装と関連回帰テストを完了。\n\n採用工程: Initialization（main・Issue・worktree照合）、Ideation/Inception（承認済み目的・範囲・受入条件と設計）、Construction（実装・関連テスト・自己レビュー、今後の独立レビュー・最終検証）、Operation（今後のPR・CI・正式Preview・Ready・merge後Actions）。単一Issue/Intent/PRとし分割工程は省略する。\n\n実装判断:\n- GET /api/homeは認可済みの1 SQL snapshotで月次のDB集計と全期間未清算共有明細の必要列・最新20件履歴を取得。月次の最大剰余配分と清算の分数合算後丸めを維持。清算対象IDはサーバー内のみ。\n- 通常home/取込直リンク初期はmetadata。全件取得は取引一覧を開く時に限定し、未取得状態を明細0件と区別。取引一覧UI/検索/並べ替え/全件方式は維持。\n- 非一覧のカテゴリ同期ではmetadataと削除済みIDの記録で整合性を保ち、一覧データが不確かなら無効化。次の一覧訪問で実revisionを再取得。\n- Home専用hookでworkspace/月/revision/要求順序とabortを確認。手動更新はmetadataとHome実取得をawait。保存成功後のGET失敗を保存失敗へ戻さない。\n- DB schema変更・キャッシュ・事前集計テーブルは追加していない。既存index・計算規則とshared fixtureを使用。\n\n自己レビュー: 操作→API→SQL→DTO→画面、月境界、端数処理、認可、外部カテゴリ削除と遅い保存応答、新規明細・取込・清算後の更新、初期未取得と読込失敗の表示を照合。関連のChromium/PGlite回帰とcheck:fast成功。\n\nこの凍結後に実施する検証: 独立した別Agentレビュー、最終SHAでcheck:node/lint/typecheck/check:docs/npm test/build/qa:cloud、push/PR CI・正式Preview QA。これらの結果はPR/Issue/Actionsへ記録する。未実施の結果を成功とは扱わない。\n",
+      "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T10:38:57.848Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "e93498bba8e0d488846ccdf8e174fb2574fcda2b6ba9920c4403020dfa0225f1"
+    }
+  ]
+}

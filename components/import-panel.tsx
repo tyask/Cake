@@ -6,7 +6,7 @@ import { defaultSplitWeights, personalSplitWeights, validateSplitWeights } from 
 import { isPayPayRowImportable, payPayPreviewEditError, parsePayPayCsv, payPayDateToIso, type PayPayPreviewRow } from "@/lib/shared/paypay";
 import { applyPayPayDuplicateChecks, MAX_DUPLICATE_CHECK_IDS, type ExistingPayPayTransaction } from "@/lib/shared/import-duplicates";
 import { MAX_IMPORT_CATEGORY_SUGGESTION_MERCHANTS, type ImportCategorySuggestionsResponse } from "@/lib/shared/import-category-suggestions";
-import type { ExpenseClass, WorkspaceData } from "@/lib/shared/types";
+import type { ExpenseClass, WorkspaceMetadata } from "@/lib/shared/types";
 import { merchantSchema } from "@/lib/shared/schemas/domain-schemas";
 import { IMPORT_FORMATS, type ImportFormat } from "@/lib/shared/import-history";
 import { ImportPreviewTable } from "./import-preview-table";
@@ -62,7 +62,7 @@ function CategorySuggestionButton({ disabled, working, onClick }: { disabled: bo
   </div>;
 }
 
-export function ImportPanel({ selected, currentUserId, run, importHistoryRevision, active = true }: { selected: WorkspaceData; currentUserId: string; run: RunAppAction; importHistoryRevision: number; active?: boolean }) {
+export function ImportPanel({ selected, currentUserId, run, importHistoryRevision, active = true }: { selected: WorkspaceMetadata; currentUserId: string; run: RunAppAction; importHistoryRevision: number; active?: boolean }) {
   const isSafari = useSyncExternalStore(subscribeToBrowser, getSafariSnapshot, getServerSafariSnapshot);
   const inputRef = useRef<HTMLInputElement>(null);
   const [format, setFormat] = useState<ImportFormat>("PAYPAY");
