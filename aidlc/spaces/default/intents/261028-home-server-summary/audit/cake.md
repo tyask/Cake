@@ -280,3 +280,26 @@ Cake運用の記録。公式エンジンの承認receiptではない。日時は
 - 計画SHA-256：`900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39`
 
 > 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
+
+## REOPEN
+
+- 記録日時：2026-10-28T11:14:31.430Z
+- 計画SHA-256：`900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39`
+
+> 独立した2Agentが同一P2を再現。Homeの手動更新で先行metadata GETが503/403になるとhomeRefreshに到達せず月cacheが残る。AC08/09の範囲でmetadataとHome強制取得を同時開始して全cacheを必ず先に破棄し、両方の完了/失敗を待って通知するよう修正。統合経路の回帰と関連設計を更新する。計画変更なし。
+
+## PROGRESS
+
+- 記録日時：2026-10-28T11:17:30.824Z
+- 計画SHA-256：`900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39`
+
+> 独立2Agentが同じP2を指摘したmetadata失敗時のcache未破棄を修正。Home手動更新はprepare完了後、共通情報GETとHomeforce取得を同時開始しPromise.allSettledで両方の終了を待つ。503/403でも全月clearとHome取得を実行し、片側失敗を成功扱いせず、月/workspace/登録関数が変わった要求の成功通知を抑止する。
+> controller回帰48件成功、実DashboardのPC/mobile統合回帰3件成功。metadata503/403時に現在月forceGETが増え、旧月へ戻るとcacheが残らず再GETになることを実UIで検証。型/lint/docs/source差分チェック成功。関連設計の直列取得記述も並行取得へ更新。自己レビューで取得失敗・世代変更・prepare保存待ち・片側未完了の通知を確認。
+> 再freeze/commit後、独立再レビューを終え、最終SHAで全体test/build/CloudQAと正式CI/Preview検証を実施する。計画/ACの変更なし。
+
+## FREEZE
+
+- 記録日時：2026-10-28T11:17:31.107Z
+- 計画SHA-256：`900c773c0f4af459c61c6e1ec89e942e987f435c6f885eb61a1a53d82a12bc39`
+
+> 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。

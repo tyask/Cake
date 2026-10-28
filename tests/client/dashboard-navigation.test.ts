@@ -169,6 +169,37 @@ test("実DashboardのPC・mobileタブ移動で見出しとパネルが重複・
           "集計は再入場ごとに1回取得し、保持用パネルの重複取得を起こさない");
         assert.equal(requests.filter(path => path === "/api/import/history").length, sequence.filter(tab => tab === "import").length,
           "取込履歴は取込画面への入場時だけ取得する");
+        const homeRequests = () => requests.filter(path => path === "/api/home").length;
+        async function selectHomeMonth(month: string) {
+          await page.getByLabel("収支の対象年月", { exact: true }).fill(month);
+          const [year, number] = month.split("-").map(Number);
+          await page.getByRole("table", { name: `${year}年${number}月の収支`, exact: true }).waitFor();
+          await page.locator('.home-month-summary[aria-busy="false"]').waitFor();
+          await stable(page);
+        }
+        for (const status of [503, 403]) {
+          await selectHomeMonth("2026-11");
+          const cached = homeRequests();
+          await selectHomeMonth("2026-10");
+          await selectHomeMonth("2026-11");
+          assert.equal(homeRequests(), cached, "手動更新前は取得済み2か月をキャッシュから表示する");
+          await page.locator(".home-actions").getByRole("button", { name: "更新", exact: true }).click();
+          await page.locator(".loading-line").waitFor({ state: "visible" });
+          await stable(page);
+          assert.equal(appRequests.length, 1, "手動更新の共通情報GETを制御する");
+          const request = appRequests.shift()!;
+          assert.equal(new URL(request.request().url()).searchParams.get("scope"), "metadata");
+          const error = `共通情報の更新に失敗しました（${status}）。`;
+          await request.fulfill({ status, json: { error } });
+          await page.locator(".loading-line").waitFor({ state: "hidden" });
+          await page.locator('.home-month-summary[aria-busy="false"]').waitFor();
+          await page.getByRole("status").filter({ hasText: error }).waitFor();
+          await stable(page);
+          assert.equal(homeRequests(), cached + 1, `共通情報が${status}でも現在月の強制再取得を行う`);
+          await selectHomeMonth("2026-10");
+          assert.equal(homeRequests(), cached + 2, `共通情報が${status}でも旧月キャッシュを破棄し、戻った月を再取得する`);
+          assert.equal(appRequests.length, 0);
+        }
         assert.deepEqual(errors, []);
       } finally { await context.close(); }
     });

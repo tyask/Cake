@@ -178,10 +178,15 @@ export function useDashboardController(initialData: BootstrapMetadata, initialTa
     try {
       await prepare?.();
       if (!isCurrentView()) return;
-      const applied = await refresh(workspaceId, generation);
       const refreshHome = currentTab.current === "home" ? homeRefresh.current : null;
-      if (applied && isCurrentView()) await refreshHome?.();
-      if (applied && isCurrentView() && (!refreshHome || homeRefresh.current === refreshHome)) setNotice("最新状態に更新しました。");
+      // Force home invalidation even when the independent metadata request fails.
+      // Settle both operations before ending the refresh indicator or notifying.
+      const [bootstrap, home] = await Promise.allSettled([
+        refresh(workspaceId, generation), refreshHome?.(),
+      ]);
+      if (bootstrap.status === "rejected") throw bootstrap.reason;
+      if (home.status === "rejected") throw home.reason;
+      if (bootstrap.value && isCurrentView() && (!refreshHome || homeRefresh.current === refreshHome)) setNotice("最新状態に更新しました。");
     } catch (error) {
       if (isCurrentView()) setNotice(error instanceof Error ? error.message : "更新に失敗しました。もう一度お試しください。");
     } finally {

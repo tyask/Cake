@@ -654,7 +654,7 @@
                 <div class="dfd-node source"><strong>保存後に画面が変わっている</strong><p>workspace ID・世代またはtab世代が不一致 → 手動更新のGETを中止。元のタブへ戻っても旧世代の処理は継続しない。</p></div>
                 <div class="dfd-node output"><strong>保存成功＋画面が同じ</strong><p>refresh(full) → CのGET採用判定 → data更新。適用成功かつ開始時の画面のままなら完了通知を表示。</p></div>
               </div>
-              <div class="dfd-boundary"><b>終了処理:</b> 成否・中止にかかわらずfinallyでfreezeを解除し、更新中状態を戻す。GET中のworkspace/tab切替でもCの採用条件と通知条件を適用する。ホームの「更新」は編集欄のprepareを使わず、metadataとホーム専用サマリーを再取得し、両方の成功・失敗を確認する。</div>
+              <div class="dfd-boundary"><b>終了処理:</b> 成否・中止にかかわらずfinallyでfreezeを解除し、更新中状態を戻す。GET中のworkspace/tab切替でもCの採用条件と通知条件を適用する。ホームの「更新」は編集欄のprepareを使わず、metadataとホーム専用サマリーの強制再取得を同時に開始する。Promise.allSettledで両方の完了を待ち、一方が失敗してももう一方を実行・確認してから成功または失敗を通知する。</div>
             </div>
 
             <div class="data-flow" id="flow-csv-actions">
@@ -704,7 +704,7 @@
               <tr><td>workspace作成フォームの「作成する」</td><td>run(createWorkspace)：name・type。</td><td>B → DB → 応答workspaceIdを現在タブのscopeで取得。ホームなどはmetadataと画面専用データを取得し、fullへの追加取得をしない。</td></tr>
               <tr><td>ホームの年月入力・前月／翌月・スワイプ・今月</td><td>ローカル選択月を変更し、取得済みなら月別メモリキャッシュ、未取得ならworkspace ID・対象月でホームサマリーを取得。</td><td>C2。キャッシュヒットは通信せず参照順を更新。成功したAPI応答だけを保存し、清算情報は最新取得値を維持する。</td></tr>
               <tr><td>タブ／workspaceの選択</td><td>openTab(tab)／switchWorkspace(workspaceId)。</td><td>C。取引一覧だけfull、他タブはmetadata。ホームはそのworkspace・選択月のサマリーも取得する。</td></tr>
-              <tr><td>ホーム・取引明細の「更新」</td><td>refreshCurrentView。取引明細はprepareも渡す。</td><td>ホームはmetadataと、全月キャッシュを破棄した現在月のサマリー強制取得の完了を待つ。取引明細はD → full GET。保存失敗時はGETへ進まない。</td></tr>
+              <tr><td>ホーム・取引明細の「更新」</td><td>refreshCurrentView。取引明細はprepareも渡す。</td><td>ホームはmetadataと、全月キャッシュを破棄した現在月のサマリー強制取得を同時開始し、両方の完了を待つ。metadata失敗でもキャッシュ破棄・サマリー取得を実行する。取引明細はD → full GET。保存失敗時はGETへ進まない。</td></tr>
             </tbody>
           </table></div>
           <h4>共通runを経由しない操作</h4>
@@ -743,7 +743,7 @@
               <tr><td><code>importHistoryRevisions</code> / <code>importHistoryRevision</code></td><td>controllerが家計IDごとの取込保存revisionを所有する。bulkImportのPOST成功直後、現在のタブ・選択家計・世代によらずoriginWorkspaceIdの値を増やす。選択家計のrevisionをDashboard → ImportPanelの必須prop → ImportHistoryPanelのrefreshKeyへ渡し、保存中に離脱して戻ったパネルにも保存完了を伝える。</td></tr>
               <tr><td><code>transactionsReady</code></td><td>取引一覧向けのfull応答を現在の表示に採用済みかを表す。workspace切替中・カテゴリ再照合待ち・未取得では一覧に古い行を渡さない。</td></tr>
               <tr><td>ホームhookの月別LRU / 最新清算情報</td><td>HomePanelの生存期間内で月次を最大12か月保持する。清算・未清算収支・履歴は最後の取得値を別に保持し、キャッシュヒットで巻き戻さない。workspace・参加者構成・更新revisionの変化、手動更新・再試行・退出で破棄する。</td></tr>
-              <tr><td><code>homeRefresh</code> / <code>registerHomeRefresh</code></td><td>HomePanelが専用hookの再取得関数を登録する。ホーム手動更新はmetadataの成功・現在画面との一致を確認してからこの関数の完了を待ち、サマリー取得失敗を成功通知にしない。</td></tr>
+              <tr><td><code>homeRefresh</code> / <code>registerHomeRefresh</code></td><td>HomePanelが専用hookの強制再取得関数を登録する。ホーム手動更新はprepare完了と現在画面との一致を確認し、metadata取得とこの関数をPromise.allSettledで同時に開始する。metadataの成否に関係なく全月を破棄し、両方の完了後に通知する。成功通知には現在の画面と登録関数も開始時と一致することが必要。</td></tr>
               <tr><td><code>workspaceView</code> / <code>dataRevision</code> / <code>refreshRequest</code></td><td>workspace ID・世代・データ変更revision・要求IDで、古い家計/保存前/先行GETの遅延応答が現在の画面を置換しないよう検証。</td></tr>
             </tbody>
           </table></div>
@@ -759,7 +759,7 @@
           <h3>画面の手動更新</h3>
           <ul>
             <li>ホーム・取引明細に「↻ 更新」を表示する。ホームは指標上部、取引明細は見出し右側の追加ボタン左。白背景・薄いベージュ枠・茶色文字、高さ44px、角丸10〜12pxとし、スマートフォンでは見出し・説明の下に文字付きの操作行を右寄せする。</li>
-            <li>ホームはmetadataと、月別キャッシュを全破棄した現在月のサマリーを強制取得する。失敗時も旧キャッシュを再利用しない。取引明細は現在workspaceの<code>full</code>を再取得する。画面遷移やコンポーネントの再マウントを行わず、選択月・フィルタ・スクロール位置を保持する。</li>
+            <li>保存待ちのprepare成功後、ホームはmetadataと、月別キャッシュを全破棄した現在月のサマリー強制取得をPromise.allSettledで同時に開始する。metadataが503や403で失敗してもサマリー取得とキャッシュ破棄を実行し、両方の終了まで更新中表示を維持する。失敗時も旧キャッシュを再利用しない。取引明細は現在workspaceの<code>full</code>を再取得する。画面遷移やコンポーネントの再マウントを行わず、選択月・フィルタ・スクロール位置を保持する。</li>
             <li>取引明細は全行の未保存入力・メモ・カテゴリを保存し、保存キューの完了を待ってからGETする。入力検証・保存に失敗した場合はGETせず、下書きと再試行を保持する。</li>
             <li>保存待ちから取得終了まで回転アイコンと「更新中…」を表示し、二重実行と競合する操作を抑制する。<code>notice</code>で成功・エラーを通知する。</li>
             <li>開始時のworkspace・世代とタブ世代を保持し、現在の表示と一致する場合だけ応答と通知を適用する。途中でタブやworkspaceが変わった場合、元のタブへ戻っても古い処理の完了で現在の画面を置換しない。</li>
@@ -1354,7 +1354,7 @@ BootstrapData extends BootstrapMetadata
               <tr><td>tests/client/import-category-suggestions.test.ts</td><td>PC/mobileでボタンの明示実行、チェックを見ない未分類全行の補完、設定済み・重複・エラー行の保持、カテゴリ操作の先頭への集約、PCの説明用「ⓘ」非表示、スマートフォンの小さいテキスト状操作とキーボード操作、短い説明のhover/focus・「ⓘ」タップと閉じ方、補完中の入力固定、候補なしと失敗からの再試行、複数batch失敗時の部分反映なし、削除・停止カテゴリ除外、workspace切替・unmount後の応答破棄、「確認して登録」の最終payloadと失敗時保持をローカルChromiumで確認する。</td></tr>
               <tr><td>tests/client/swipe-delete.test.ts</td><td>スマートフォンの取引明細・CSV取込・定期支払い・ルールでスワイプ削除とキーボード補助操作、確認・取消・失敗を確認する。CSVでは上部一括操作欄・下部登録操作欄がスクロールして中間の行を覆わないことと、PCの登録操作欄が手前に固定され操作できることをローカルChromiumで確認する。</td></tr>
               <tr><td>tests/client/import-equal-split.test.ts</td><td>実ImportPanelと定期支払いの追加/編集をPC/mobileのChromiumで操作し、常に3択であること、割合/円から1:1、奇数円と手動再編集、対象行・未選択状態・デフォルト割合の保持、個人費/エラー/重複/保存中/一人参加時の制限を確認。選択時の追加POSTなしと、bulkImportの保存重み1:1を検証する。</td></tr>
-              <tr><td>tests/client/dashboard-controller.test.ts / tests/client/transaction-refresh.test.ts / tests/client/bootstrap-updates.test.ts</td><td>esbuildで実hookをbundleし、ローカルChromium/Reactで要求逆順、workspace/tab往復、保存前GET、手動更新の保存待ち・二重実行・失敗・古い応答破棄、metadata/fullの使い分け・同一家計の保持、通知2秒を検証する。実Preview/DB検証とは区別する。</td></tr>
+              <tr><td>tests/client/dashboard-controller.test.ts / tests/client/transaction-refresh.test.ts / tests/client/bootstrap-updates.test.ts</td><td>esbuildで実hookをbundleし、ローカルChromium/Reactで要求逆順、workspace/tab往復、保存前GET、手動更新の保存待ち・二重実行・失敗・古い応答破棄、ホームのmetadata失敗時もサマリー強制取得・全月破棄を実行し両方の完了を待つこと、metadata/fullの使い分け・同一家計の保持、通知2秒を検証する。実Preview/DB検証とは区別する。</td></tr>
               <tr><td>tests/client/dashboard-navigation.test.ts</td><td>実Dashboard全体をローカルChromiumのPC/mobileで操作し、読み込み完了と全タブの往復後に見出し・明細一覧・取込・設定が重複または残留しないことと、集計panelの状態保持・再入場時の取得を確認する。実Preview/DB検証とは区別する。</td></tr>
               <tr><td>tests/client/import-navigation.test.ts</td><td>実DashboardのPC/mobileで全タブを往復し、取込確認表の入力・選択・削除結果、読込・補完・登録中の状態と失敗時の入力を保持することを確認する。明示取消・登録成功での解除、非選択中の取込DOMと履歴取得の抑止、workspace切替後の古い読込結果の破棄も検証する。</td></tr>
               <tr><td>tests/shared/recurring-payment-calendar.test.ts / tests/client/recurring-payment-form.test.ts / tests/server/recurring-payments.test.ts / tests/server/recurring-payment-handlers.test.ts</td><td>日本時間09:00の直前/境界、未来日・過去日・月末、追加履歴を参照しない予定計算、保存・再開・認可・入力検証、当日処理・処理開始日時・実行APIの環境制限。</td></tr>

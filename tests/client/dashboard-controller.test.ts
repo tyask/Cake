@@ -91,8 +91,9 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       });
       const get = await f.take();
       assert.equal(new URL(get.request().url()).searchParams.get("scope"), "metadata");
-      await f.reply(get, metadata());
       await f.page.waitForFunction(() => window.homeRefreshCount === 1);
+      await expectState(f.page, { refreshing: true, notice: null });
+      await f.reply(get, metadata());
       await expectState(f.page, { refreshing: true, notice: null, "selected.transactions": undefined });
       await f.page.evaluate(() => window.releasePrepare());
       await f.page.evaluate(() => window.operation);
@@ -102,6 +103,7 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
         window.controller.registerHomeRefresh(async () => { throw new Error("収支を取得できませんでした。"); });
         window.operation = window.controller.refreshCurrentView();
       });
+      await expectState(f.page, { refreshing: true, notice: null });
       await f.reply(await f.take(), metadata());
       await f.page.evaluate(() => window.operation);
       await expectState(f.page, { refreshing: false, loading: false, notice: "収支を取得できませんでした。", "selected.transactions": undefined });
@@ -119,6 +121,28 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
       await f.page.evaluate(() => window.operation);
       await expectState(f.page, { refreshing: false, loading: false, notice: null });
       assert.equal(f.requests.length, 0, "更新対象が入れ替わった後に古いサマリーの成功を通知しない");
+    }, "home", metadata());
+    for (const status of [503, 403]) await scenario(`ホームの手動更新は共通情報が${status}でもサマリー更新を開始し、両方の終了を待って失敗を通知する`, async f => {
+      await f.page.evaluate(() => {
+        window.homeRefreshCount = 0;
+        window.controller.registerHomeRefresh(() => { window.homeRefreshCount++; return new Promise<void>(resolve => { window.releasePrepare = resolve; }); });
+        window.operation = window.controller.refreshCurrentView();
+      });
+      const get = await f.take();
+      assert.equal(new URL(get.request().url()).searchParams.get("scope"), "metadata");
+      await f.page.waitForFunction(() => window.homeRefreshCount === 1);
+      await expectState(f.page, { refreshing: true, loading: true, notice: null });
+      const delivered = f.page.waitForResponse(response => response.url() === get.request().url() && response.status() === status);
+      const error = `共通情報を取得できませんでした（${status}）。`;
+      await f.reply(get, { error }, status);
+      await (await delivered).finished();
+      await f.page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      await expectState(f.page, { refreshing: true, loading: true, notice: null, "selected.transactions": undefined });
+      assert.equal(await f.page.evaluate(() => window.homeRefreshCount), 1, "共通情報の失敗がサマリーの強制更新を妨げない");
+      await f.page.evaluate(() => window.releasePrepare());
+      await f.page.evaluate(() => window.operation);
+      await expectState(f.page, { refreshing: false, loading: false, notice: error, "selected.transactions": undefined });
+      assert.equal(f.requests.length, 0);
     }, "home", metadata());
     await scenario("ホームから一覧を初めて開くと全件を取得し、未取得と読込失敗を空の一覧として表示しない", async f => {
       await f.page.evaluate(() => window.controller.openTab("transactions"));
