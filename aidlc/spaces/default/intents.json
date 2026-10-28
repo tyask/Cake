@@ -45,6 +45,15 @@
         "codex/preview-skipped-job-receipt"
       ],
       "recordDir": "aidlc/spaces/default/intents/261028-preview-skipped-job-receipt"
+    },
+    {
+      "id": "261028-analytics-filter-cache",
+      "issue": 164,
+      "branch": "codex/analytics-filter-cache",
+      "branches": [
+        "codex/analytics-filter-cache"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261028-analytics-filter-cache"
     }
   ]
 }

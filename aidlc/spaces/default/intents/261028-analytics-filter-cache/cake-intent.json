@@ -1,0 +1,69 @@
+{
+  "protocol": "cake-intent/v1",
+  "id": "261028-analytics-filter-cache",
+  "repository": "tyask/Cake",
+  "issue": 164,
+  "issueUrl": "https://github.com/tyask/Cake/issues/164",
+  "branch": "codex/analytics-filter-cache",
+  "branches": [
+    "codex/analytics-filter-cache"
+  ],
+  "recordDir": "aidlc/spaces/default/intents/261028-analytics-filter-cache",
+  "phase": "Construction",
+  "status": "frozen",
+  "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28",
+  "approval": {
+    "actor": "このチャットの利用者",
+    "reply": "お願いします\n",
+    "recordedAt": "2026-10-28T07:53:45.765Z",
+    "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28",
+    "planFile": "plans/cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28.md"
+  },
+  "frozen": true,
+  "createdAt": "2026-10-28T07:52:44.933Z",
+  "updatedAt": "2026-10-28T08:11:35.677Z",
+  "events": [
+    {
+      "action": "CREATED",
+      "recordedAt": "2026-10-28T07:52:44.933Z",
+      "note": "Issueに対応する計画を記録した。承認は別途記録する。",
+      "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28"
+    },
+    {
+      "action": "APPROVE",
+      "recordedAt": "2026-10-28T07:53:45.765Z",
+      "note": "承認者：このチャットの利用者\n承認の記録日時：2026-10-28T07:53:45.765Z\n承認対象本文：[plans/cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28.md](../plans/cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28.md)\n利用者の実際の回答：\nお願いします",
+      "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T07:59:01.755Z",
+      "note": "AC-01: 未保存時は参加者全員を選択する。共有/個人のブラウザ検証を追加した。\nAC-02: 確定期間と表示条件をユーザー・家計別localStorageへ保存する。未適用draftはpanel内に保持する。復元完了前はAPI取得を抑制する。\nAC-03: 全解除・不正保存値・保存不可を検証する。別タブ更新を同期し、巨大な保存階層でも候補数を増やし過ぎない。\n既存テストは本人選択を明示保存して計算の回帰を維持した。Cloud QAは初期全員と実ページreloadでの条件復元を確認するよう更新した。\n基本/詳細設計を現行仕様へ更新した。API・SQL・DB migrationは変更しない。\n小規模変更として要件・設計・実装をまとめ、追加の企画工程は省略した。別Agentレビュー、最終SHA検証、CI、Preview、Ready条件は維持する。\n自己レビュー: データ所有者、draftと確定期間、既存schema再利用、保存失敗、古い応答破棄、追加通信、Reactのsnapshot安定性・hook・accessibilityを確認した。\n関連テストと自己レビュー後に凍結し、最終SHAの別Agentレビュー・検証結果はPRへ記録する。\n",
+      "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T07:59:10.825Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-28T08:11:34.926Z",
+      "note": "最終SHA029d480の全体テスト1245件・buildは成功したが、Cloud QAの追加reload確認で停止した。\n独立scratch診断によりカテゴリ欄open時の「収入」checkboxが収支欄とカテゴリ欄の2件に一致するstrict mode違反と判明した。\nアプリ保存処理に問題はなく、QAの収支checkboxを「収支に含める内容」groupへ限定して衝突を防ぐ。\n計画・受入条件は変更しない。修正後に再freeze/commit、同Agentの差分再レビューと最終SHAの所定検証を行う。\n",
+      "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-28T08:11:35.352Z",
+      "note": "最終SHA029d480の全体テスト1245件・buildは成功したが、Cloud QAの追加reload確認で停止した。\n独立scratch診断によりカテゴリ欄open時の「収入」checkboxが収支欄とカテゴリ欄の2件に一致するstrict mode違反と判明した。\nアプリ保存処理に問題はなく、QAの収支checkboxを「収支に含める内容」groupへ限定して衝突を防ぐ。\n計画・受入条件は変更しない。修正後に再freeze/commit、同Agentの差分再レビューと最終SHAの所定検証を行う。\n",
+      "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-28T08:11:35.677Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "cb70b5ecc85e35fd4c08ef5712ef91d29f052ce35266e9ecb59ee6cd35201f28"
+    }
+  ]
+}

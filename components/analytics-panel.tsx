@@ -9,6 +9,7 @@ import { PageHeading } from "./dashboard-ui";
 import { AnalyticsCategoryFilter } from "./analytics-category-filter";
 import { AnalyticsTransactionsDialog } from "./analytics-transactions-dialog";
 import { useAnalytics } from "./use-analytics";
+import { useAnalyticsFilters } from "./use-analytics-filters";
 import styles from "./analytics-panel.module.css";
 
 const AnalyticsCharts = lazy(() => import("./analytics-charts"));
@@ -20,21 +21,29 @@ export function analyticsRangeLabel(range: AnalyticsRange) {
 export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }: { workspaceId: string; currentUserId: string; revision: number; active: boolean }) {
   const today = analyticsToday();
   const currentMonth = today.slice(0, 7);
-  const [periodMode, setPeriodMode] = useState<"month" | "range">("month");
-  const [query, setQuery] = useState<AnalyticsQuery>(() => ({ workspaceId, period: "month", month: currentMonth }));
-  const [draftMonth, setDraftMonth] = useState(currentMonth);
-  const [draftFrom, setDraftFrom] = useState(`${currentMonth}-01`);
-  const [draftTo, setDraftTo] = useState(today);
+  const [filters, setFilters, ready] = useAnalyticsFilters(currentUserId, workspaceId);
+  const { includeIncome, expenseClasses, categoryIds, depth } = filters;
+  const query: AnalyticsQuery = { workspaceId, ...(filters.period ?? { period: "month", month: currentMonth }) };
+  const periodKey = JSON.stringify([currentUserId, query]);
+  const [previousPeriodKey, setPreviousPeriodKey] = useState(periodKey);
+  const [periodMode, setPeriodMode] = useState(query.period);
+  const [draftMonth, setDraftMonth] = useState(query.period === "month" ? query.month : currentMonth);
+  const [draftFrom, setDraftFrom] = useState(query.period === "range" ? query.from : `${currentMonth}-01`);
+  const [draftTo, setDraftTo] = useState(query.period === "range" ? query.to : today);
   const [periodError, setPeriodError] = useState<string | null>(null);
-  const [memberIds, setMemberIds] = useState<string[]>([currentUserId]);
-  const [includeIncome, setIncludeIncome] = useState(true);
-  const [expenseClasses, setExpenseClasses] = useState<ExpenseClass[]>(["SHARED", "PERSONAL"]);
-  const [categoryIds, setCategoryIds] = useState<string[] | null>(null);
   const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
-  const [depth, setDepth] = useState<number | "all">(1);
   const [details, setDetails] = useState<{ row: AnalyticsRow; data: AnalyticsDataset; view: AnalyticsView } | null>(null);
-  const { data, loading, error, refresh } = useAnalytics(query, revision, active);
+  // Restore committed dates after hydration or another tab's update, keeping drafts local.
+  if (previousPeriodKey !== periodKey) {
+    setPreviousPeriodKey(periodKey);
+    setPeriodMode(query.period);
+    if (query.period === "month") setDraftMonth(query.month);
+    else { setDraftFrom(query.from); setDraftTo(query.to); }
+    setPeriodError(null);
+  }
+  const { data, loading, error, refresh } = useAnalytics(query, revision, active && ready);
   const prepared = useMemo(() => data ? prepareAnalyticsDataset(data) : null, [data]);
+  const memberIds = useMemo(() => filters.memberIds ?? data?.members.map(member => member.id) ?? [], [filters.memberIds, data?.members]);
   const classSelectionEmpty = expenseClasses.length === 0 && !includeIncome;
   const memberSelectionEmpty = data !== null && !data.members.some(member => memberIds.includes(member.id));
   const categorySelectionEmpty = prepared !== null && categoryIds !== null
@@ -49,14 +58,16 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
     [details, depth, categoryIds, memberIds, expenseClasses]);
 
   function toggleClass(expenseClass: ExpenseClass, checked: boolean) {
-    setExpenseClasses(current => checked ? [...current, expenseClass] : current.filter(value => value !== expenseClass));
+    setFilters(current => ({ ...current, expenseClasses: checked ? [...current.expenseClasses, expenseClass] : current.expenseClasses.filter(value => value !== expenseClass) }));
   }
 
   function applyPeriod(next: AnalyticsQuery) {
     const parsed = analyticsQuerySchema.safeParse(next);
     if (!parsed.success) { setPeriodError(parsed.error.issues[0]?.message ?? "期間を確認してください。"); return; }
     setPeriodError(null);
-    setQuery(parsed.data);
+    const period = parsed.data.period === "month" ? { period: "month" as const, month: parsed.data.month }
+      : { period: "range" as const, from: parsed.data.from, to: parsed.data.to };
+    setFilters(current => ({ ...current, period }));
   }
 
   return <div hidden={!active} className={styles.analytics}>
@@ -75,21 +86,31 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
           applyPeriod({ workspaceId, period: "month", month: event.target.value });
         }} /></label>}
       </div>
-      <label className={styles.field}>カテゴリの細かさ<select aria-label="カテゴリの細かさ" value={depth} onChange={event => setDepth(event.target.value === "all" ? "all" : Number(event.target.value))}>
-        <option value="1">大分類</option>{Array.from({ length: Math.max(0, Math.max(prepared?.maxDepth ?? 1, depth === "all" ? 1 : depth) - 1) }, (_, index) => index + 2).map(level => <option key={level} value={level}>{level}階層まで</option>)}<option value="all">全階層</option>
+      <label className={styles.field}>カテゴリの細かさ<select aria-label="カテゴリの細かさ" value={depth} onChange={event => {
+        const nextDepth = event.target.value === "all" ? "all" : Number(event.target.value);
+        setFilters(current => ({ ...current, depth: nextDepth }));
+      }}>
+        <option value="1">大分類</option>{Array.from({ length: Math.max(0, (prepared?.maxDepth ?? 1) - 1) }, (_, index) => index + 2).map(level => <option key={level} value={level}>{level}階層まで</option>)}
+        {depth !== "all" && depth > (prepared?.maxDepth ?? 1) && <option value={depth}>{depth}階層まで</option>}<option value="all">全階層</option>
       </select></label>
       <fieldset className={styles.checkGroup}><legend>表示対象</legend><div className={styles.checks}>
         {data?.members.map(member => <label key={member.id}><input type="checkbox" checked={memberIds.includes(member.id)} onChange={event => {
           const checked = event.target.checked;
-          setMemberIds(current => checked ? [...current, member.id] : current.filter(id => id !== member.id));
+          setFilters(current => {
+            const ids = current.memberIds ?? data.members.map(value => value.id);
+            return { ...current, memberIds: checked ? [...ids, member.id] : ids.filter(id => id !== member.id) };
+          });
         }} />{member.name}</label>)}
       </div></fieldset>
       <fieldset className={styles.checkGroup}><legend>収支に含める内容</legend><div className={styles.checks}>
-        <label><input type="checkbox" checked={includeIncome} onChange={event => setIncludeIncome(event.target.checked)} />収入</label>
+        <label><input type="checkbox" checked={includeIncome} onChange={event => {
+          const checked = event.target.checked;
+          setFilters(current => ({ ...current, includeIncome: checked }));
+        }} />収入</label>
         <label><input type="checkbox" checked={expenseClasses.includes("SHARED")} onChange={event => toggleClass("SHARED", event.target.checked)} />共有費</label>
         <label><input type="checkbox" checked={expenseClasses.includes("PERSONAL")} onChange={event => toggleClass("PERSONAL", event.target.checked)} />個人費</label>
       </div></fieldset>
-      {prepared && <AnalyticsCategoryFilter prepared={prepared} selectedIds={categoryIds} onChange={setCategoryIds} open={categoryFilterOpen} onOpenChange={setCategoryFilterOpen} />}
+      {prepared && <AnalyticsCategoryFilter prepared={prepared} selectedIds={categoryIds} onChange={ids => setFilters(current => ({ ...current, categoryIds: ids }))} open={categoryFilterOpen} onOpenChange={setCategoryFilterOpen} />}
       {periodMode === "range" && <form className={styles.customDates} onSubmit={event => { event.preventDefault(); applyPeriod({ workspaceId, period: "range", from: draftFrom, to: draftTo }); }}>
         <label className={styles.field}>開始日<input type="date" max={today} value={draftFrom} onChange={event => setDraftFrom(event.target.value)} required /></label>
         <span aria-hidden="true">～</span><label className={styles.field}>終了日<input type="date" max={today} value={draftTo} onChange={event => setDraftTo(event.target.value)} required /></label>
