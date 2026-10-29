@@ -191,7 +191,7 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         const allIds = ["first", "settled", "category-food", "category-fresh", "category-leaf"];
         await visible(allIds);
         const dialog = await openFilter("カテゴリ");
-        assert.equal(await dialog.getByRole("combobox").inputValue(), "category");
+        assert.equal(await dialog.getByRole("combobox", { name: "列", exact: true }).inputValue(), "category");
         for (const label of ["未分類", "以前のカテゴリ（使用停止）", "食費", "食費 › 生鮮食品", "食費 › 生鮮食品 › 野菜"]) {
           await dialog.getByText(label, { exact: true }).waitFor();
         }

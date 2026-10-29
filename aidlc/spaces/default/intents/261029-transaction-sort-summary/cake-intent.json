@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-10-28T15:05:55.520Z",
-  "updatedAt": "2026-10-29T00:55:12.830Z",
+  "updatedAt": "2026-10-29T01:01:55.991Z",
   "events": [
     {
       "action": "CREATED",
@@ -140,6 +140,24 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-10-29T00:55:12.830Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-29T01:01:13.616Z",
+      "note": "最終全体検証で、既存カテゴリUIテストがTransactionFilterDialog内のcomboboxを無指定で1件として取得していたため、追加したソート順selectとのstrict mode違反を再現した。\n製品側のソート・フィルタ動作ではなく、テスト対象の列選択selectをアクセシブルな名前「列」で明示する1行の修正を行う。他の無指定combobox前提はtests/scripts/componentsを検索し存在しないことを確認した。\n修正後に対象カテゴリテスト、再freeze・commit・新HEADの差分レビューと所定の最終検証を行う。旧SHAの失敗を成功として流用しない。\n",
+      "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-29T01:01:55.599Z",
+      "note": "- 完了: カテゴリUI回帰の列選択selectをgetByRole(combobox, name=列, exact=true)で指定する1行へ更新した。製品コード・受入条件の変更なし。\n- 完了: PC/mobileを含む当該カテゴリテスト10件が成功し、名前を省略したcombobox前提は他にないことを確認した。\n- 次: 記録を再freezeしてcommitし、この差分と影響範囲を新HEADで再レビューする。その後、新しい最終SHAの全体検証を行う。\n",
+      "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-29T01:01:55.991Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
     }

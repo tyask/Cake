@@ -352,3 +352,28 @@ Cake運用の記録。公式エンジンの承認receiptではない。日時は
 - 計画SHA-256：`72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117`
 
 > 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
+
+## REOPEN
+
+- 記録日時：2026-10-29T01:01:13.616Z
+- 計画SHA-256：`72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117`
+
+> 最終全体検証で、既存カテゴリUIテストがTransactionFilterDialog内のcomboboxを無指定で1件として取得していたため、追加したソート順selectとのstrict mode違反を再現した。
+> 製品側のソート・フィルタ動作ではなく、テスト対象の列選択selectをアクセシブルな名前「列」で明示する1行の修正を行う。他の無指定combobox前提はtests/scripts/componentsを検索し存在しないことを確認した。
+> 修正後に対象カテゴリテスト、再freeze・commit・新HEADの差分レビューと所定の最終検証を行う。旧SHAの失敗を成功として流用しない。
+
+## PROGRESS
+
+- 記録日時：2026-10-29T01:01:55.599Z
+- 計画SHA-256：`72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117`
+
+> - 完了: カテゴリUI回帰の列選択selectをgetByRole(combobox, name=列, exact=true)で指定する1行へ更新した。製品コード・受入条件の変更なし。
+> - 完了: PC/mobileを含む当該カテゴリテスト10件が成功し、名前を省略したcombobox前提は他にないことを確認した。
+> - 次: 記録を再freezeしてcommitし、この差分と影響範囲を新HEADで再レビューする。その後、新しい最終SHAの全体検証を行う。
+
+## FREEZE
+
+- 記録日時：2026-10-29T01:01:55.991Z
+- 計画SHA-256：`72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117`
+
+> 最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。
