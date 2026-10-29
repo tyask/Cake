@@ -51,7 +51,8 @@
 .filterActions > button:first-child { padding: .4rem 0; border: 0; color: var(--muted); background: transparent; font: inherit; font-size: .7rem; cursor: pointer; }
 .bulkBar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .7rem 1rem; border-bottom: 1px solid var(--line); background: var(--accent-soft); font-size: .7rem; }
 .bulkBar > span { margin-right: auto; color: var(--accent); font-weight: 800; }
-.bulkBar > button { min-height: 2rem; padding: .35rem .55rem; border: 1px solid var(--line-strong); border-radius: .5rem; color: var(--accent); background: var(--paper); cursor: pointer; font-size: .67rem; }
+.bulkBar > button, .resetActions > button { min-height: 2rem; padding: .35rem .55rem; border: 1px solid var(--line-strong); border-radius: .5rem; color: var(--accent); background: var(--paper); cursor: pointer; font-size: .67rem; }
+.resetActions { display: flex; flex-shrink: 0; align-items: center; gap: .5rem; }
 .bulkBar > .bulkDelete { color: var(--red); }
 .categoryDisplay { display: flex; align-items: center; gap: .4rem; color: var(--muted); font-size: .67rem; }
 .categoryDisplay select { min-height: 2rem; padding: .3rem .4rem; border: 1px solid var(--line-strong); border-radius: .45rem; color: var(--ink); background: var(--paper); font: inherit; }
@@ -146,7 +147,7 @@
   .columnHeader { padding: 0; }
   .bulkBar { padding: .85rem; }
   .bulkBar > span { flex-basis: 100%; }
-  .bulkBar > button { min-height: 2.3rem; font-size: .72rem; }
+  .bulkBar > button, .resetActions > button { min-height: 2.3rem; font-size: .72rem; }
   .note, .bulkError, .bulkNotice { margin-left: .85rem; margin-right: .85rem; }
   .tableWrap { overflow: visible; padding: .45rem; }
   .table { display: block; width: 100%; min-width: 0; }

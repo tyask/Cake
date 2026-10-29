@@ -223,7 +223,7 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         await choose("カテゴリ", []);
         await visible([]);
         await page.getByText("条件に一致する明細がありません。", { exact: true }).waitFor();
-        await page.getByRole("button", { name: "絞り込みをすべて解除", exact: true }).click();
+        await page.getByRole("button", { name: "絞り込み解除", exact: true }).click();
         await visible(allIds);
         assert.equal(await page.evaluate(() => localStorage.getItem("cake:transaction-filters:v1:a:workspace")), null);
         assert.equal(writes.length, 0, "絞り込み・表示範囲切替・再読み込み・解除だけでは業務更新しない");

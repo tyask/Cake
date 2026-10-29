@@ -301,7 +301,10 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing, vi
         <span>{visible.length}件・{checkedIds.length}件選択{hiddenCheckedCount > 0 && "（非表示" + hiddenCheckedCount + "件を含む）"}</span>
         <label className={styles.categoryDisplay}>カテゴリ表示<select aria-label="カテゴリの表示範囲" disabled={busy} value={categoryDisplay} onChange={event => setCategoryDisplay(event.target.value as "root" | "full")}><option value="root">大分類</option><option value="full">小分類（全階層）</option></select></label>
         <button type="button" disabled={busy || !rulesEligible} title="区分のルールは支払いだけに適用できます" onClick={() => { void performBulk("applyTransactionRules"); }}>{bulkAction === "applyTransactionRules" ? "適用中…" : "区分のルールの適用"}</button>
-        <button type="button" disabled={busy || filteredColumns.length === 0} onClick={() => setColumnFilters({})}>絞り込みをすべて解除</button>
+        <div className={styles.resetActions}>
+          <button type="button" disabled={busy || filteredColumns.length === 0} onClick={() => setColumnFilters({})}>絞り込み解除</button>
+          <button type="button" disabled={busy || sort === null} onClick={() => setSort(null)}>ソート解除</button>
+        </div>
         <button type="button" className={styles.bulkDelete} disabled={busy || checkedIds.length === 0} onClick={() => { void performBulk("deleteTransactions"); }}>{bulkAction === "deleteTransactions" ? "削除中…" : "削除"}</button>
       </div>
       {bulkError && <p role="alert" className={styles.bulkError}>{bulkError}</p>}

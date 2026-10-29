@@ -133,12 +133,22 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
         assert.equal(await page.getByRole("button", { name: /で絞り込み$/ }).count(), 11);
         assert.equal(await page.getByRole("button", { name: /で(昇順|降順)に並べ替え$/ }).count(), 0, "カラム名の操作をポップアップにまとめる");
         await assertSort(page);
+        const filterReset = page.getByRole("button", { name: "絞り込み解除", exact: true });
+        const sortReset = page.getByRole("button", { name: "ソート解除", exact: true });
+        assert.equal(await filterReset.isDisabled(), true, "条件がないときは絞り込み解除できない");
+        assert.equal(await sortReset.isDisabled(), true, "未指定のソートは解除できない");
+        assert.equal(await page.getByRole("button", { name: "絞り込みをすべて解除", exact: true }).count(), 0);
         if (width <= 768) {
           const headers = page.locator('table[aria-label="取引明細"] thead');
           for (const header of await headers.locator("tr, th:has(button)").all()) {
             const box = await header.boundingBox();
             assert.ok(box && Math.abs(box.height - 44) <= 1, "スマホのカラムヘッダは従来の44pxの行高に収まる");
           }
+          const filterBox = await filterReset.boundingBox(), sortBox = await sortReset.boundingBox();
+          assert.ok(filterBox && sortBox && Math.abs(filterBox.y - sortBox.y) <= 1 && sortBox.x >= filterBox.x + filterBox.width,
+            "絞り込み解除とソート解除はスマホでも左右に隣接する");
+          assert.ok(filterBox && sortBox && filterBox.x >= 0 && sortBox.x + sortBox.width <= width + 1,
+            "2つの解除ボタンはスマホの画面内に収まる");
         }
         const small = page.locator('[data-transaction-id="small"]');
         if (width <= 768) await small.getByRole("button", { name: "店2の詳細を開く", exact: true }).click();
@@ -198,6 +208,8 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
         assert.equal(await small.getByRole("checkbox", { name: "店2の明細を選択", exact: true }).isChecked(), true);
         if (width <= 768) assert.equal(await small.getAttribute("data-expanded"), "true", "ソートで展開状態を失わない");
         await assertTotals(page, ["+￥3,000", "−￥1,500", "+￥1,500"]);
+        assert.equal(await sortReset.isEnabled(), true, "ソート指定があれば解除できる");
+        assert.equal(await filterReset.isDisabled(), true, "ソート指定だけでは絞り込み解除を有効にしない");
         assert.equal(writes.length, 0, "並べ替えは業務データを更新しない");
 
         await chooseFilter(page, "種別", /^支払い/);
@@ -205,6 +217,38 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
         await assertSort(page, "金額（円）", "descending");
         assert.deepEqual(await rowIds(page), ["small", "settled"], "別列のフィルタ変更でソートを解除しない");
         await assertTotals(page, ["￥0", "−￥1,000", "−￥1,000"]);
+        assert.equal(await filterReset.isEnabled(), true);
+        assert.equal(await sortReset.isEnabled(), true);
+        let releaseRefresh!: () => void;
+        const refreshResponse = new Promise<void>(resolve => { releaseRefresh = resolve; });
+        await page.route("**/api/test-transactions", async route => {
+          await refreshResponse;
+          await route.fulfill({ json: [...records.values()] });
+        }, { times: 1 });
+        const refreshRequested = page.waitForRequest(request => request.method() === "GET" && new URL(request.url()).pathname === "/api/test-transactions");
+        await page.getByRole("button", { name: "更新", exact: true }).click();
+        await refreshRequested;
+        try {
+          assert.equal(await filterReset.isDisabled(), true, "再取得中は絞り込み解除できない");
+          assert.equal(await sortReset.isDisabled(), true, "再取得中はソート解除できない");
+        } finally { releaseRefresh(); }
+        await page.locator('section[aria-busy="false"]').waitFor();
+        await chooseSort(page, "金額（円）", "asc");
+        assert.deepEqual(await rowIds(page), ["settled", "small"]);
+        await sortReset.click();
+        await assertSort(page);
+        assert.deepEqual(await rowIds(page), ["small", "settled"], "ソート解除で絞り込み中の明細を取得時の日時降順へ戻す");
+        assert.equal(await page.getByRole("button", { name: /^(種別|方法)の絞り込みを解除$/ }).count(), 2, "ソート解除で列フィルタを消さない");
+        assert.equal(await page.getByRole("group", { name: "フィルタ結果の収支", exact: true }).getByText("対象 2件", { exact: true }).count(), 1);
+        await assertTotals(page, ["￥0", "−￥1,000", "−￥1,000"]);
+        assert.equal(await sortReset.isDisabled(), true);
+        assert.equal(await filterReset.isEnabled(), true);
+        assert.equal(await small.getByRole("checkbox", { name: "店2の明細を選択", exact: true }).isChecked(), true);
+        if (width <= 768) assert.equal(await small.getAttribute("data-expanded"), "true");
+        await amountColumn.click();
+        assert.equal(await noSort.isChecked(), true, "ソート解除後のポップアップはソートなしを示す");
+        await amountDialog.getByRole("button", { name: "フィルターを閉じる", exact: true }).click();
+        await chooseSort(page, "金額（円）", "desc");
         const amount = small.getByRole("spinbutton", { name: "金額（円）", exact: true });
         await amount.fill("999");
         await assertTotals(page, ["￥0", "−￥1,000", "−￥1,000"]);
@@ -219,10 +263,27 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
         assert.equal(await small.getByRole("checkbox", { name: "店2の明細を選択", exact: true }).isChecked(), true);
         await chooseSort(page, "取引先", "asc");
         assert.equal(await amount.inputValue(), "999", "並べ替えても保存失敗の下書きを維持する");
+        const errorBeforeReset = await feedback.getByRole("alert").textContent();
+        await sortReset.click();
+        await assertSort(page);
+        assert.deepEqual(await rowIds(page), ["small", "settled"]);
+        assert.equal(await amount.inputValue(), "999", "ソート解除でも保存失敗の下書きを維持する");
+        assert.equal(await feedback.getByRole("alert").textContent(), errorBeforeReset, "ソート解除でも保存エラーを保持する");
+        assert.equal(await small.getByRole("checkbox", { name: "店2の明細を選択", exact: true }).isChecked(), true);
+        if (width <= 768) assert.equal(await small.getAttribute("data-expanded"), "true", "ソート解除でも明細の展開を維持する");
+        assert.equal(await page.getByRole("group", { name: "フィルタ結果の収支", exact: true }).getByText("対象 1件", { exact: true }).count(), 1);
+        await assertTotals(page, ["￥0", "−￥700", "−￥700"]);
+        await chooseSort(page, "取引先", "asc");
 
-        await page.getByRole("button", { name: "絞り込みをすべて解除", exact: true }).click();
+        await filterReset.click();
         await assertSort(page, "取引先", "ascending");
         await assertTotals(page, ["+￥3,000", "−￥1,500", "+￥1,500"]);
+        assert.equal(await filterReset.isDisabled(), true);
+        assert.equal(await sortReset.isEnabled(), true, "絞り込み解除ではソートを解除しない");
+        assert.equal(await amount.inputValue(), "999");
+        assert.equal(await feedback.getByRole("alert").textContent(), errorBeforeReset);
+        assert.equal(await small.getByRole("checkbox", { name: "店2の明細を選択", exact: true }).isChecked(), true);
+        if (width <= 768) assert.equal(await small.getAttribute("data-expanded"), "true");
         fail = false;
         await feedback.getByRole("button", { name: "再試行", exact: true }).click();
         await assertTotals(page, ["+￥3,000", "−￥2,199", "+￥801"]);
@@ -267,7 +328,8 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
         await assertTotals(page, ["+￥3,000", "￥0", "+￥3,000"]);
         await chooseSort(page, "取引先", "none");
         await assertSort(page);
-        await page.getByRole("button", { name: "絞り込みをすべて解除", exact: true }).click();
+        assert.equal(await sortReset.isDisabled(), true, "ポップアップのソートなしでも解除ボタンを無効にする");
+        await filterReset.click();
         assert.deepEqual(await rowIds(page), ["income", "small", "settled", "own", "partner"], "ソート解除で取得時の日時降順へ戻る");
         await assertTotals(page, ["+￥3,000", "−￥1,300", "+￥1,700"]);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "合計と操作を画面幅に収める");
