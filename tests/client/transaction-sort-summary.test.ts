@@ -45,7 +45,8 @@ async function chooseFilter(page: Page, name: string, value?: RegExp) {
 async function chooseSort(page: Page, name: string, direction: "none" | "asc" | "desc") {
   await page.getByRole("button", { name: name + "で絞り込み", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: name + "で絞り込み", exact: true });
-  await dialog.getByRole("combobox", { name: "ソート順", exact: true }).selectOption(direction);
+  const label = { none: "ソートなし", asc: "昇順", desc: "降順" }[direction];
+  await dialog.getByRole("group", { name: "ソート順", exact: true }).getByRole("radio", { name: label, exact: true }).check();
   await dialog.getByRole("button", { name: "適用", exact: true }).click();
 }
 
@@ -132,6 +133,13 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
         assert.equal(await page.getByRole("button", { name: /で絞り込み$/ }).count(), 11);
         assert.equal(await page.getByRole("button", { name: /で(昇順|降順)に並べ替え$/ }).count(), 0, "カラム名の操作をポップアップにまとめる");
         await assertSort(page);
+        if (width <= 768) {
+          const headers = page.locator('table[aria-label="取引明細"] thead');
+          for (const header of await headers.locator("tr, th:has(button)").all()) {
+            const box = await header.boundingBox();
+            assert.ok(box && Math.abs(box.height - 44) <= 1, "スマホのカラムヘッダは従来の44pxの行高に収まる");
+          }
+        }
         const small = page.locator('[data-transaction-id="small"]');
         if (width <= 768) await small.getByRole("button", { name: "店2の詳細を開く", exact: true }).click();
         await small.getByRole("checkbox", { name: "店2の明細を選択", exact: true }).check();
@@ -140,33 +148,50 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
         await amountColumn.focus();
         await page.keyboard.press("Enter");
         const amountDialog = page.getByRole("dialog", { name: "金額（円）で絞り込み", exact: true });
-        const sortInput = amountDialog.getByRole("combobox", { name: "ソート順", exact: true });
-        assert.equal(await sortInput.inputValue(), "none");
-        assert.deepEqual(await sortInput.locator("option").allTextContents(), ["ソートなし", "昇順", "降順"]);
+        const sortGroup = amountDialog.getByRole("group", { name: "ソート順", exact: true });
+        const noSort = sortGroup.getByRole("radio", { name: "ソートなし", exact: true });
+        const ascending = sortGroup.getByRole("radio", { name: "昇順", exact: true });
+        const descending = sortGroup.getByRole("radio", { name: "降順", exact: true });
+        assert.equal(await sortGroup.getByRole("radio").count(), 3);
+        assert.equal(await amountDialog.getByRole("combobox", { name: "ソート順", exact: true }).count(), 0);
+        assert.equal(await noSort.isChecked(), true);
+        assert.equal(await sortGroup.locator("input:checked").count(), 1, "ソート順は1つだけ選べる");
+        const dialogBox = await amountDialog.boundingBox(), groupBox = await sortGroup.boundingBox();
+        assert.ok(dialogBox && groupBox && groupBox.x >= dialogBox.x && groupBox.x + groupBox.width <= dialogBox.x + dialogBox.width + 1,
+          "ソート順の選択肢は狭いポップアップでも枠内に収まる");
+        for (const choice of [noSort, ascending, descending]) assert.equal(await choice.isVisible(), true, "3つのソート順を常に表示する");
         if (process.env.CAKE_LAYOUT_SCREENSHOTS) {
           await page.screenshot({ path: `.cake/transaction-sort-summary-popup-${width}.png`, fullPage: true });
         }
-        await sortInput.selectOption("asc");
+        await ascending.focus();
+        await page.keyboard.press("Space");
+        assert.equal(await ascending.isChecked(), true, "Spaceでフォーカスしたソート順を選べる");
+        await page.keyboard.press("ArrowRight");
+        assert.equal(await descending.isChecked(), true, "矢印キーで次のソート順を選べる");
+        await page.keyboard.press("ArrowLeft");
+        assert.equal(await ascending.isChecked(), true);
+        assert.equal(await sortGroup.locator("input:checked").count(), 1);
         await amountDialog.getByRole("checkbox", { name: /^\+￥2,000/ }).uncheck();
         assert.deepEqual(await rowIds(page), ["income", "small", "settled", "own", "partner"], "適用前のソート・フィルタは一覧へ反映しない");
         await assertSort(page);
         await assertTotals(page, ["+￥3,000", "−￥1,500", "+￥1,500"]);
         await page.keyboard.press("Escape");
         await amountColumn.click();
-        assert.equal(await sortInput.inputValue(), "none", "Escapeで未適用のソートを破棄する");
+        assert.equal(await noSort.isChecked(), true, "Escapeで未適用のソートを破棄する");
         assert.equal(await amountDialog.getByRole("checkbox", { name: /^\+￥2,000/ }).isChecked(), true, "Escapeで未適用のフィルタを破棄する");
-        await sortInput.selectOption("asc");
+        await sortGroup.getByText("昇順", { exact: true }).click();
+        assert.equal(await ascending.isChecked(), true, "ラベルのクリックでもソート順を選べる");
         await amountDialog.getByRole("button", { name: "適用", exact: true }).click();
         assert.deepEqual(await rowIds(page), ["settled", "own", "small", "partner", "income"], "金額は支払いを負、収入を正として並べる");
         await assertSort(page, "金額（円）", "ascending");
         await amountColumn.click();
-        assert.equal(await sortInput.inputValue(), "asc");
-        await sortInput.selectOption("desc");
+        assert.equal(await ascending.isChecked(), true);
+        await descending.check();
         await assertSort(page, "金額（円）", "ascending");
         await amountDialog.getByRole("button", { name: "フィルターを閉じる", exact: true }).click();
         await amountColumn.click();
-        assert.equal(await sortInput.inputValue(), "asc", "閉じる操作でも未適用のソートを破棄する");
-        await sortInput.selectOption("desc");
+        assert.equal(await ascending.isChecked(), true, "閉じる操作でも未適用のソートを破棄する");
+        await descending.check();
         await amountDialog.getByRole("button", { name: "適用", exact: true }).click();
         assert.deepEqual(await rowIds(page), ["income", "partner", "small", "own", "settled"]);
         await assertSort(page, "金額（円）", "descending");
@@ -236,7 +261,7 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
         assert.equal(await page.getByText("条件に一致する明細がありません。", { exact: true }).count(), 1);
         await page.getByRole("button", { name: "方法で絞り込み", exact: true }).click();
         const methodDialog = page.getByRole("dialog", { name: "方法で絞り込み", exact: true });
-        await methodDialog.getByRole("combobox", { name: "ソート順", exact: true }).selectOption("desc");
+        await methodDialog.getByRole("group", { name: "ソート順", exact: true }).getByRole("radio", { name: "降順", exact: true }).check();
         await methodDialog.getByRole("button", { name: "この列の絞り込みを解除", exact: true }).click();
         await assertSort(page, "取引先", "ascending");
         await assertTotals(page, ["+￥3,000", "￥0", "+￥3,000"]);
@@ -330,7 +355,7 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
             assert.equal(await dialog.getByRole("checkbox", { name: /^−￥999/ }).isChecked(), true, "全選択の未操作状態は新しい候補にも追従する");
           }
           assert.equal(await dialog.getByRole("checkbox", { name: "候補の値をすべて選択", exact: true }).isChecked(), true);
-          await dialog.getByRole("combobox", { name: "ソート順", exact: true }).selectOption("asc");
+          await dialog.getByRole("group", { name: "ソート順", exact: true }).getByRole("radio", { name: "昇順", exact: true }).check();
           await dialog.getByRole("button", { name: "適用", exact: true }).click();
           await assertSort(page, "金額（円）", "ascending");
           assert.equal(await page.getByRole("button", { name: "金額（円）の絞り込みを解除", exact: true }).count(), filtered ? 1 : 0,

@@ -20,6 +20,7 @@ export function TransactionFilterDialog({ column, options, selected, sortDirecti
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const sortName = useId();
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState(sortDirection);
   // A save can replace the options while open; sorting alone must preserve the live filter.
@@ -40,9 +41,11 @@ export function TransactionFilterDialog({ column, options, selected, sortDirecti
     <label className={styles.filterColumn}>列<select value={column} onChange={event => onColumnChange(event.target.value as TransactionColumn)}>
       {transactionColumns.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
     </select></label>
-    <label className={styles.filterColumn}>ソート順<select value={direction} onChange={event => setDirection(event.target.value as SortDirection)}>
-      <option value="none">ソートなし</option><option value="asc">昇順</option><option value="desc">降順</option>
-    </select></label>
+    <fieldset className={styles.sortOptions}><legend>ソート順</legend>
+      <label><input type="radio" name={sortName} value="none" checked={direction === "none"} onChange={() => setDirection("none")} />ソートなし</label>
+      <label><input type="radio" name={sortName} value="asc" checked={direction === "asc"} onChange={() => setDirection("asc")} />昇順</label>
+      <label><input type="radio" name={sortName} value="desc" checked={direction === "desc"} onChange={() => setDirection("desc")} />降順</label>
+    </fieldset>
     <input className={styles.filterSearch} aria-label="候補の値を検索" placeholder="候補の値を検索" value={query} onChange={event => setQuery(event.target.value)} />
     <label className={styles.filterChoices}>
       <SelectionCheckbox label={query ? "検索結果の値をすべて選択" : "候補の値をすべて選択"} checked={allChecked}

@@ -11,17 +11,17 @@
   "recordDir": "aidlc/spaces/default/intents/261029-transaction-sort-summary",
   "phase": "Construction",
   "status": "frozen",
-  "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117",
+  "planHash": "381f9d4422a600096522342d1afbd7bc3bafb1fb3347134b378df806ed1e05ed",
   "approval": {
     "actor": "このチャットの利用者",
-    "reply": "お願い\n",
-    "recordedAt": "2026-10-29T00:44:00.559Z",
-    "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117",
-    "planFile": "plans/72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117.md"
+    "reply": "お願いします\n\n",
+    "recordedAt": "2026-10-29T02:22:53.940Z",
+    "planHash": "381f9d4422a600096522342d1afbd7bc3bafb1fb3347134b378df806ed1e05ed",
+    "planFile": "plans/381f9d4422a600096522342d1afbd7bc3bafb1fb3347134b378df806ed1e05ed.md"
   },
   "frozen": true,
   "createdAt": "2026-10-28T15:05:55.520Z",
-  "updatedAt": "2026-10-29T01:01:55.991Z",
+  "updatedAt": "2026-10-29T02:24:54.835Z",
   "events": [
     {
       "action": "CREATED",
@@ -160,6 +160,36 @@
       "recordedAt": "2026-10-29T01:01:55.991Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
+    },
+    {
+      "action": "PLAN",
+      "recordedAt": "2026-10-29T02:22:49.905Z",
+      "note": "計画を更新した。前の承認は新しい計画を許可しないため再承認が必要。",
+      "planHash": "381f9d4422a600096522342d1afbd7bc3bafb1fb3347134b378df806ed1e05ed"
+    },
+    {
+      "action": "APPROVE",
+      "recordedAt": "2026-10-29T02:22:53.940Z",
+      "note": "承認者：このチャットの利用者\n承認の記録日時：2026-10-29T02:22:53.940Z\n承認対象本文：[plans/381f9d4422a600096522342d1afbd7bc3bafb1fb3347134b378df806ed1e05ed.md](../plans/381f9d4422a600096522342d1afbd7bc3bafb1fb3347134b378df806ed1e05ed.md)\n利用者の実際の回答：\nお願いします",
+      "planHash": "381f9d4422a600096522342d1afbd7bc3bafb1fb3347134b378df806ed1e05ed"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-29T02:22:54.657Z",
+      "note": "# 追加Issue本文の承認記録\n\n- Issue URL: https://github.com/tyask/Cake/issues/172\n- 承認者: このチャットの利用者\n- 実際のIssue承認発言: お願い\n- 記録日時: 2026-10-29T02:22:37Z\n- 提示順序: スマホのヘッダ高さとラジオボタン化の追加計画をチャットへ提示 → 利用者が「お願いします」と計画承認 → Issue #172を更新・再取得して保存済み本文全文とURLを提示 → 利用者が「お願い」とIssue本文を承認。\n- PR #173: 023095c80c34a25b5e3154cbf3fd95335ab80839 のopen/Readyを照合後、追加修正のためdraftへ戻し、draft=trueを再取得確認済み。\n- 対象のplan.mdにはチャットへ提示した追加計画本文をそのまま保存する。先行要件は同じIssueと過去計画に保持し、今回の追加調整でも維持する。\n\n## 承認対象の保存済みIssue本文\n\n## 目的・背景\n\n取引明細をカラムで並べ替え、絞り込んだ明細の収入・支出・収支を上部で小さく確認できるようにする。\nカラム名を押す従来の操作にまとめ、ポップアップでフィルタ条件とソート順を設定する。\n独立したフィルタボタンは廃止する。\n\n追加要望として、スマートフォンで広がったカラムヘッダの高さを従来へ戻す。\nソート順の選択は、操作回数を減らせるラジオボタンに変更する。\n\n## 対象範囲・対象外\n\n- 対象は取引明細の全11列と、フィルタ結果の合計表示。既存のポップアップと共通ソート処理を使う。\n- スマートフォンのカラムヘッダは、今回追加した最小高さ44pxと上下余白を取り除き、従来の高さへ戻す。\n- ソート順は「ソートなし・昇順・降順」の3つのラジオボタンで選択する。\n  「適用」で確定し、閉じる／Escapeでは未適用の選択を取り消す。\n- ソートは単一列。日時・金額・配分割合は数値、その他は表示名の日本語自然順で比較する。\n  支出は負、収入は正として比較し、同値の元順と元配列の不変を保つ。\n- 合計は現在の月／未精算の表示範囲と列フィルタに一致する、配分前の保存済み明細全額を対象とする。\n  共有・個人・清算済みも範囲内なら含め、保存成功・追加・削除・更新に追従する。\n- 対象外はAPI・DBの変更、他画面へのソート追加、ソート状態の永続保存。\n  画面内の更新では指定したソートを保持し、再表示時は未指定へ戻す。\n\n設計・実装・検証：\n\n1. 更新済みIssue本文の承認後、同じIntent・branch・PRで追加計画と両方の承認を記録する。\n   PRをdraftへ戻して開発を再開する。\n2. ヘッダのCSSと既存ポップアップを調整し、設計書・操作テストを更新する。\n   既存画面の小さなUI調整として進め、独立した試作工程は省く。\n3. スマートフォン320／390pxとPCで、ヘッダの高さ・表示・クリック・キーボード操作を確認する。\n   ラジオの選択、適用・取消、フィルタ併用、矢印・合計・入力保持も確認する。\n4. 新しいコミットで自己レビュー・別Agentレビューと全体チェックを行う。\n   lint・型・文書・全自動テスト・build・Cloud実アプリQA、CI・正式Preview検証が完了したら再びReadyにする。\n5. 利用者によるmerge後の稼働と専用資源cleanupは既存Actionsで確認する。\n\n## 受入条件\n\n- [x] AC-01: 独立したフィルタボタンを廃止し、カラム名を押すとポップアップを開く。\n- [ ] AC-02: ポップアップでラジオボタンから「ソートなし・昇順・降順」を選び、フィルタ条件とともに「適用」で反映する。\n  ソート中の列だけ名前の横に小さな↑／↓を表示する。\n  初期状態・解除後は矢印を非表示にし、取得時の日時降順へ戻す。\n- [x] AC-03: 上部の小さな収入・支出・収支合計は、フィルタ結果に連動させる。\n- [x] AC-04: 合計は条件に一致する保存済み明細の全額を使い、条件外の編集中行や未保存値を除外する。\n  0件は0円にする。\n- [ ] AC-05: PC・スマートフォンで操作でき、選択・入力・保存エラーを保持する。\n  別の列のフィルタ変更でも指定済みソートを保持する。\n- [ ] AC-06: スマートフォンのカラムヘッダを従来の高さへ戻し、320／390pxで表示とカラム名からのポップアップ操作を確認する。\n- [ ] AC-07: ラジオボタンでは3つのソート順から1つを選べる。\n  「適用」前は一覧を変更せず、閉じる／Escapeで未適用の選択を取り消す。\n  PC・スマートフォンの表示とキーボード操作を確認する。\n\n## 関連記録\n\n- 追加計画: このチャットに提示した「スマホのヘッダを従来の高さへ戻し、ソート順をラジオボタンに変更する」計画。提示後の承認発言は「お願いします」。\n- Intent: [261029-transaction-sort-summary](https://github.com/tyask/Cake/tree/023095c80c34a25b5e3154cbf3fd95335ab80839/aidlc/spaces/default/intents/261029-transaction-sort-summary)。\n  先行計画・先行Issue本文の承認は記録済み。追加計画と今回のIssue本文の承認は、Issue本文承認後に同じIntentへ記録する。\n- PR: [#173](https://github.com/tyask/Cake/pull/173)（現在Ready。今回のIssue本文承認後にdraftへ戻して追加修正する）。\n- [先行実装の別Agentレビューと指摘への対応](https://github.com/tyask/Cake/pull/173#issuecomment-6473209530)\n- [基本設計](https://github.com/tyask/Cake/blob/main/docs/design.html)・[詳細設計](https://github.com/tyask/Cake/blob/main/docs/detail-design.html)\n\n## 進捗\n\n- 状況: 追加計画は承認済み。今回の更新済みIssue本文の承認待ち。\n- 完了: 先行実装のソート・合計表示・カラム名からのポップアップ操作。\n  SHA `023095c80c34a25b5e3154cbf3fd95335ab80839` で自己／別Agentレビュー、全自動テスト1,342件、lint・型・文書・build・Cloud実アプリQAが成功。\n- 完了: 先行SHAの[push CI](https://github.com/tyask/Cake/actions/runs/40798818750)・[PR CI](https://github.com/tyask/Cake/actions/runs/40798825886)・[正式ブラウザQA](https://github.com/tyask/Cake/actions/runs/40799353731)・[Ready直前status](https://github.com/tyask/Cake/actions/runs/40803733504)が成功。\n  この結果を追加修正後のSHAの検証へ流用しない。\n- 完了: 追加要望の調査と計画承認。スマホのヘッダに追加された最小高さ44pxと上下余白、ソート順のドロップダウンを確認した。\n- 未着手: Issue本文承認後のIntent更新、ヘッダ・ラジオボタンの実装、設計書・操作テストの更新、新SHAでのレビュー・検証・再Ready化。\n- 次の作業: 保存済み本文をチャットに提示し、Issue本文承認後に実装へ進む。\n- 認証: 先行作業中のCLI HTTP 401は設定変更なしの再試行で復旧した。原因は未確定。\n- 資源: 先行Cloud QAのサーバー・DB・browser・context・テスト明細はすべて0。\n  PR用Preview・専用DBは保持している。\n- 未実施: merge・本番操作・merge後確認。merge後の稼働・cleanup確認が揃うまでIssueをopenで維持する。\n\n",
+      "planHash": "381f9d4422a600096522342d1afbd7bc3bafb1fb3347134b378df806ed1e05ed"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-29T02:24:54.174Z",
+      "note": "- 完了: 計画と保存済みIssue本文それぞれの承認を確認し、既存PR #173をdraftへ戻した。追加計画・計画承認「お願いします」・Issue承認「お願い」と対象本文を同じIntentへ記録した。\n- 完了: スマートフォンのカラム名ボタンから追加のmin-height 44pxを取り除き、上下paddingを従来の0に戻した。PCの余白・カラム名からの操作・矢印表示を維持した。\n- 完了: ソート順をfieldset/legend「ソート順」・useIdで同じnameにしたnative radio 3択へ変更した。ラベルクリック・Space/左右矢印キー、適用/閉じる/Escapeと既存の未操作filter sentinelを維持した。\n- 完了: 基本/詳細設計書と既存の専用操作テストを更新。追加ライブラリ、API/DB、他画面の変更なし。\n- 完了: 専用テスト10件が成功（失敗0・skip0、32.52秒）。PC1920/1000、mobile390/320で3択常時表示/単一選択/キーボード/適用前保持/取消復元/枠内収容、mobileヘッダ実寸44px±1、既存の非同期保存4回帰を確認。\n- 完了: 親Agentがmobile390の一覧、mobile320/PC1920のポップアップ画像を確認し、ヘッダとradioの表示を自己レビュー。対象TSX lintと文書参照14ファイルの確認も成功。\n- 環境診断: 専用テストの初回はsandboxでloopback listen EPERMによりケース開始前に停止。ログを退避し、既存環境のnetwork許可付き同一コマンドで成功した。製品/テストソースの回避変更やproxy設定変更はしていない。\n- 判断: 小さな既存UI修正として試作工程は省略。状態所有は既存direction draftに保ち、適用時だけ親へ渡す。ソートと集計規則/保存APIの意味を変えない。\n- 次: 案件記録をfreeze・commitし、独立別Agentレビューと新しい最終SHAの全体検証・CI・正式Preview検証を行う。旧SHA023095cの成功証拠は別保存し、流用しない。完了まではdraft。\n- 未実施: merge・本番操作・merge後確認。PR用Preview/専用DBを保持し、Issueはmerge後の確認が揃うまでopen。\n\n",
+      "planHash": "381f9d4422a600096522342d1afbd7bc3bafb1fb3347134b378df806ed1e05ed"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-29T02:24:54.835Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "381f9d4422a600096522342d1afbd7bc3bafb1fb3347134b378df806ed1e05ed"
     }
   ]
 }
