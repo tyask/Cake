@@ -66,7 +66,7 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing, vi
   const modeName = useId();
   const [columnFilters, setColumnFilters] = useTransactionFilters(userId, selected.workspace.id);
   const [filterColumn, setFilterColumn] = useState<TransactionColumn | null>(null);
-  const [sort, setSort] = useState<TransactionSort>({ column: "occurredAt", direction: "desc" });
+  const [sort, setSort] = useState<TransactionSort | null>(null);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => new Set());
   const [memoPinnedIds, setMemoPinnedIds] = useState<Set<string>>(() => new Set());
   const [categoryPinnedIds, setCategoryPinnedIds] = useState<Set<string>>(() => new Set());
@@ -122,7 +122,7 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing, vi
       item => item.expenseClass === "SHARED" || item.actorUserId === userId),
     [selected.transactions, matches, pinnedIds, metadataPinnedIds, selectedIds, userId],
   );
-  const sortedVisible = useMemo(() => sortTransactions(visible, sort, selected.members, categoryChoices.byId),
+  const sortedVisible = useMemo(() => sort ? sortTransactions(visible, sort, selected.members, categoryChoices.byId) : visible,
     [visible, sort, selected.members, categoryChoices.byId]);
   const totals = useMemo(() => cashflowSummary(matching), [matching]);
   const busy = bulkAction !== null || preparingRefresh || refreshing || view?.loading === true;
@@ -308,22 +308,14 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing, vi
       {bulkNotice && <p role="status" className={styles.bulkNotice}>{bulkNotice}</p>}
       <p className={styles.note}>相手の個人明細は閲覧のみです。区分のルールは支払いのみが対象です。清算済みの明細もカテゴリとメモを編集できます。カテゴリは選択時、メモは入力欄を離れるかCtrl+Enterで保存します。絞り込み後も選択を保持します。全選択チェックを外すと非表示の選択も解除します。編集中の明細は編集を終えるまで表示します。</p>
       <TransactionTable wrap columns={tableColumns} label="取引明細" header={<tr><th className={styles.selectionCell}><SelectionCheckbox label={selectionChecked ? "選択した明細をすべて解除" : "表示中の未清算明細をすべて選択"} mobileLabel={selectionChecked ? "全解除" : "全選択"} checked={selectionChecked} partial={checkedIds.length > 0 && !selectionChecked} disabled={busy || (visibleEditable.length === 0 && checkedIds.length === 0)} onChange={toggleSelection} /></th>{transactionColumns.map(column => {
-        const active = sort.column === column.id;
-        const nextDirection = active && sort.direction === "asc" ? "desc" : "asc";
-        return <th key={column.id} aria-sort={active ? sort.direction === "asc" ? "ascending" : "descending" : "none"}>
-          <div className={styles.columnControls}>
-            <button type="button" className={styles.columnHeader} data-active={active} disabled={busy}
-              aria-label={`${column.label}で${nextDirection === "asc" ? "昇順" : "降順"}に並べ替え`}
-              onClick={() => setSort({ column: column.id, direction: nextDirection })}>
-              <span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span>
-              <span aria-hidden="true">{active ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span>
-            </button>
-            <button type="button" className={styles.columnFilter} data-active={columnFilters[column.id] !== undefined} disabled={busy}
-              aria-label={column.label + "で絞り込み"} title={column.label + "で絞り込み"} aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}>
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M2 3h12L9.5 8v4l-3 1V8L2 3Z" /></svg>
-              {columnFilters[column.id] !== undefined && <span className={styles.filterDot} aria-hidden="true">●</span>}
-            </button>
-          </div>
+        const direction = sort?.column === column.id ? sort.direction : null;
+        return <th key={column.id} aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"}>
+          <button type="button" className={styles.columnHeader} data-active={direction !== null || columnFilters[column.id] !== undefined} disabled={busy}
+            aria-label={column.label + "で絞り込み"} title={column.label + "のソート・絞り込み"}
+            aria-haspopup="dialog" onClick={() => setFilterColumn(column.id)}>
+            <span>{column.id === "splitWeights" ? transactionSplitLabel(selected.members) : column.label}</span>
+            {direction !== null && <span className={styles.sortIndicator} aria-hidden="true">{direction === "asc" ? "↑" : "↓"}</span>}
+          </button>
         </th>;
       })}<th className={styles.updateStatusCell} aria-label="更新状態" /></tr>}>
         {sortedVisible.map((item) => <EditableTransaction key={item.id} item={item} currentUserId={userId} members={selected.members} categoryChoices={categoryChoices} categoryDisplay={categoryDisplay} pinnedOutsideFilter={outsideFilterIds.has(item.id)} checked={selectedIds.has(item.id)} busy={busy} applyingRules={bulkAction === "applyTransactionRules" && selectedIds.has(item.id)} onSelect={toggle} onDelete={() => { void performBulk("deleteTransactions", [item.id]); }} register={register} onPin={onPin} onSave={save} onSaveMemo={saveMemo} onMemoPin={onMemoPin} onSaveCategory={saveCategory} onCategoryPin={onCategoryPin} />)}
@@ -332,8 +324,16 @@ function TransactionList({ selected, userId, add, run, onRefresh, refreshing, vi
     </section>
     {filterColumn && <TransactionFilterDialog key={filterColumn} column={filterColumn}
       options={transactionFilterOptions(selected.transactions, filterColumn, selected.members, visible, categoryChoices.byId)} selected={columnFilters[filterColumn]}
+      sortDirection={sort?.column === filterColumn ? sort.direction : "none"}
       onColumnChange={setFilterColumn} onClose={() => setFilterColumn(null)}
-      onApply={values => { setColumnFilter(filterColumn, values); setFilterColumn(null); }} />}
+      onClear={() => { setColumnFilter(filterColumn, undefined); setFilterColumn(null); }}
+      onApply={(values, direction) => {
+        setColumnFilter(filterColumn, values);
+        setSort(current => direction === "none"
+          ? current?.column === filterColumn ? null : current
+          : { column: filterColumn, direction });
+        setFilterColumn(null);
+      }} />}
   </>;
 }
 

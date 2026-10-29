@@ -22,9 +22,9 @@ const initial: WorkspaceData = {
     { id: "food", name: "食費", parentId: null, revision: 1, colorHex: "#f97316", sortOrder: 0, archivedAt: null },
     { id: "income", name: "収入", parentId: null, revision: 1, colorHex: "#3b82f6", sortOrder: 1, archivedAt: null },
   ], rules: [], settlement: null, settlementHistory: [], transactions: [
-    transaction("small", { merchant: "店2" }),
     transaction("income", { merchant: "店10", type: "RECEIPT", amountYen: 2000, method: "銀行", categoryId: "income",
       occurredAt: "2026-10-20T00:00:00.002Z", actorUserId: "b", actorName: "B" }),
+    transaction("small", { merchant: "店2" }),
     transaction("settled", { merchant: "清算済み", amountYen: 700, occurredAt: "2026-10-19T00:00:00.000Z", settledAt: "2026-10-20T00:00:00.000Z" }),
     transaction("own", { merchant: "個人費", amountYen: 500, method: "カード", expenseClass: "PERSONAL", splitWeights: { a: 1, b: 0 },
       occurredAt: "2026-10-18T00:00:00.000Z" }),
@@ -42,8 +42,29 @@ async function chooseFilter(page: Page, name: string, value?: RegExp) {
   await dialog.getByRole("button", { name: "適用", exact: true }).click();
 }
 
+async function chooseSort(page: Page, name: string, direction: "none" | "asc" | "desc") {
+  await page.getByRole("button", { name: name + "で絞り込み", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: name + "で絞り込み", exact: true });
+  await dialog.getByRole("combobox", { name: "ソート順", exact: true }).selectOption(direction);
+  await dialog.getByRole("button", { name: "適用", exact: true }).click();
+}
+
+async function assertSort(page: Page, name?: string, direction?: "ascending" | "descending") {
+  const headers = page.locator('table[aria-label="取引明細"] thead');
+  const arrows = headers.locator("button span").filter({ hasText: /^[↑↓]$/ });
+  assert.equal(await arrows.count(), name ? 1 : 0, "ソート未指定の列には矢印のDOMがない");
+  assert.equal(await headers.locator('th[aria-sort="ascending"], th[aria-sort="descending"]').count(), name ? 1 : 0);
+  if (name) {
+    const button = headers.getByRole("button", { name: name + "で絞り込み", exact: true, includeHidden: true });
+    assert.equal(await button.evaluate(element => element.closest("th")?.getAttribute("aria-sort")), direction);
+    assert.equal(await arrows.textContent(), direction === "ascending" ? "↑" : "↓");
+  } else {
+    assert.equal(await headers.locator('th[aria-sort="none"]').count(), 11);
+  }
+}
+
 async function assertTotals(page: Page, expected: string[]) {
-  const summary = page.getByRole("group", { name: "フィルタ結果の収支", exact: true });
+  const summary = page.locator('[role="group"][aria-label="フィルタ結果の収支"]');
   await page.waitForFunction(values => {
     const summary = document.querySelector('[role="group"][aria-label="フィルタ結果の収支"]');
     return JSON.stringify(Array.from(summary?.querySelectorAll("dd") ?? []).map(cell => cell.textContent)) === JSON.stringify(values);
@@ -108,17 +129,47 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
           await page.screenshot({ path: `.cake/transaction-sort-summary-${width}.png`, fullPage: true });
         }
         assert.deepEqual(await rowIds(page), ["income", "small", "settled", "own", "partner"], "初期順はミリ秒までの日時降順で月外を除く");
-        assert.equal(await page.getByRole("button", { name: /で(昇順|降順)に並べ替え$/ }).count(), 11);
-        assert.equal(await page.locator('th[aria-sort="descending"]').textContent().then(value => value?.includes("取引日時")), true);
+        assert.equal(await page.getByRole("button", { name: /で絞り込み$/ }).count(), 11);
+        assert.equal(await page.getByRole("button", { name: /で(昇順|降順)に並べ替え$/ }).count(), 0, "カラム名の操作をポップアップにまとめる");
+        await assertSort(page);
         const small = page.locator('[data-transaction-id="small"]');
         if (width <= 768) await small.getByRole("button", { name: "店2の詳細を開く", exact: true }).click();
         await small.getByRole("checkbox", { name: "店2の明細を選択", exact: true }).check();
-        await page.getByRole("button", { name: "金額（円）で昇順に並べ替え", exact: true }).click();
-        assert.deepEqual(await rowIds(page), ["settled", "own", "small", "partner", "income"], "金額は支払いを負、収入を正として並べる");
-        const amountSort = page.getByRole("button", { name: "金額（円）で降順に並べ替え", exact: true });
-        await amountSort.focus();
+
+        const amountColumn = page.getByRole("button", { name: "金額（円）で絞り込み", exact: true });
+        await amountColumn.focus();
         await page.keyboard.press("Enter");
+        const amountDialog = page.getByRole("dialog", { name: "金額（円）で絞り込み", exact: true });
+        const sortInput = amountDialog.getByRole("combobox", { name: "ソート順", exact: true });
+        assert.equal(await sortInput.inputValue(), "none");
+        assert.deepEqual(await sortInput.locator("option").allTextContents(), ["ソートなし", "昇順", "降順"]);
+        if (process.env.CAKE_LAYOUT_SCREENSHOTS) {
+          await page.screenshot({ path: `.cake/transaction-sort-summary-popup-${width}.png`, fullPage: true });
+        }
+        await sortInput.selectOption("asc");
+        await amountDialog.getByRole("checkbox", { name: /^\+￥2,000/ }).uncheck();
+        assert.deepEqual(await rowIds(page), ["income", "small", "settled", "own", "partner"], "適用前のソート・フィルタは一覧へ反映しない");
+        await assertSort(page);
+        await assertTotals(page, ["+￥3,000", "−￥1,500", "+￥1,500"]);
+        await page.keyboard.press("Escape");
+        await amountColumn.click();
+        assert.equal(await sortInput.inputValue(), "none", "Escapeで未適用のソートを破棄する");
+        assert.equal(await amountDialog.getByRole("checkbox", { name: /^\+￥2,000/ }).isChecked(), true, "Escapeで未適用のフィルタを破棄する");
+        await sortInput.selectOption("asc");
+        await amountDialog.getByRole("button", { name: "適用", exact: true }).click();
+        assert.deepEqual(await rowIds(page), ["settled", "own", "small", "partner", "income"], "金額は支払いを負、収入を正として並べる");
+        await assertSort(page, "金額（円）", "ascending");
+        await amountColumn.click();
+        assert.equal(await sortInput.inputValue(), "asc");
+        await sortInput.selectOption("desc");
+        await assertSort(page, "金額（円）", "ascending");
+        await amountDialog.getByRole("button", { name: "フィルターを閉じる", exact: true }).click();
+        await amountColumn.click();
+        assert.equal(await sortInput.inputValue(), "asc", "閉じる操作でも未適用のソートを破棄する");
+        await sortInput.selectOption("desc");
+        await amountDialog.getByRole("button", { name: "適用", exact: true }).click();
         assert.deepEqual(await rowIds(page), ["income", "partner", "small", "own", "settled"]);
+        await assertSort(page, "金額（円）", "descending");
         assert.equal(await small.getByRole("checkbox", { name: "店2の明細を選択", exact: true }).isChecked(), true);
         if (width <= 768) assert.equal(await small.getAttribute("data-expanded"), "true", "ソートで展開状態を失わない");
         await assertTotals(page, ["+￥3,000", "−￥1,500", "+￥1,500"]);
@@ -126,11 +177,13 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
 
         await chooseFilter(page, "種別", /^支払い/);
         await chooseFilter(page, "方法", /^現金/);
+        await assertSort(page, "金額（円）", "descending");
+        assert.deepEqual(await rowIds(page), ["small", "settled"], "別列のフィルタ変更でソートを解除しない");
         await assertTotals(page, ["￥0", "−￥1,000", "−￥1,000"]);
         const amount = small.getByRole("spinbutton", { name: "金額（円）", exact: true });
         await amount.fill("999");
         await assertTotals(page, ["￥0", "−￥1,000", "−￥1,000"]);
-        await page.getByRole("button", { name: "金額（円）で昇順に並べ替え", exact: true }).click();
+        await chooseSort(page, "金額（円）", "asc");
         const feedback = page.locator('[data-feedback-for="small"]');
         await feedback.getByRole("alert").waitFor();
         await chooseFilter(page, "取引先", /^清算済み/);
@@ -139,10 +192,11 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
         assert.equal(await amount.inputValue(), "999");
         assert.match(await feedback.textContent() ?? "", /編集中のため表示/);
         assert.equal(await small.getByRole("checkbox", { name: "店2の明細を選択", exact: true }).isChecked(), true);
-        await page.getByRole("button", { name: "取引先で昇順に並べ替え", exact: true }).click();
+        await chooseSort(page, "取引先", "asc");
         assert.equal(await amount.inputValue(), "999", "並べ替えても保存失敗の下書きを維持する");
 
         await page.getByRole("button", { name: "絞り込みをすべて解除", exact: true }).click();
+        await assertSort(page, "取引先", "ascending");
         await assertTotals(page, ["+￥3,000", "−￥1,500", "+￥1,500"]);
         fail = false;
         await feedback.getByRole("button", { name: "再試行", exact: true }).click();
@@ -167,8 +221,7 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
         records.set("small", { ...records.get("small")!, amountYen: 100 });
         await page.getByRole("button", { name: "更新", exact: true }).click();
         await assertTotals(page, ["+￥3,000", "−￥1,300", "+￥1,700"]);
-        assert.equal(await page.locator('th[aria-sort="ascending"]').textContent().then(value => value?.includes("取引先")), true,
-          "再取得しても選択したソートを維持する");
+        await assertSort(page, "取引先", "ascending");
         await page.getByRole("radio", { name: "未精算明細", exact: true }).click();
         await assertTotals(page, ["+￥2,000", "−￥1,000", "+￥1,000"]);
         assert.equal(await page.locator('[data-transaction-id="past"]').count(), 1);
@@ -181,6 +234,17 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
         await assertTotals(page, ["￥0", "￥0", "￥0"]);
         assert.deepEqual(await rowIds(page), []);
         assert.equal(await page.getByText("条件に一致する明細がありません。", { exact: true }).count(), 1);
+        await page.getByRole("button", { name: "方法で絞り込み", exact: true }).click();
+        const methodDialog = page.getByRole("dialog", { name: "方法で絞り込み", exact: true });
+        await methodDialog.getByRole("combobox", { name: "ソート順", exact: true }).selectOption("desc");
+        await methodDialog.getByRole("button", { name: "この列の絞り込みを解除", exact: true }).click();
+        await assertSort(page, "取引先", "ascending");
+        await assertTotals(page, ["+￥3,000", "￥0", "+￥3,000"]);
+        await chooseSort(page, "取引先", "none");
+        await assertSort(page);
+        await page.getByRole("button", { name: "絞り込みをすべて解除", exact: true }).click();
+        assert.deepEqual(await rowIds(page), ["income", "small", "settled", "own", "partner"], "ソート解除で取得時の日時降順へ戻る");
+        await assertTotals(page, ["+￥3,000", "−￥1,300", "+￥1,700"]);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "合計と操作を画面幅に収める");
         assert.deepEqual(errors, []);
       } finally { await context.close(); }
@@ -200,9 +264,10 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
           assert.ok(box && box.x >= 0 && box.x + box.width <= 321);
         }
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-        await page.getByRole("button", { name: "金額（円）で昇順に並べ替え", exact: true }).click();
+        await chooseSort(page, "金額（円）", "asc");
         await page.reload();
-        assert.equal(await page.locator('th[aria-sort="descending"]').textContent().then(value => value?.includes("取引日時")), true);
+        await assertTotals(page, ["+￥2,147,483,647", "−￥4,294,967,294", "−￥2,147,483,647"]);
+        await assertSort(page);
       } finally { await context.close(); }
     });
   } finally {

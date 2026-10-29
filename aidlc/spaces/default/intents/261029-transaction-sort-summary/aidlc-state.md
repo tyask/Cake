@@ -5,12 +5,12 @@ Cake運用層の進捗表示。公式AI-DLCエンジンのstate/receiptではな
 
 - 関連Issue：https://github.com/tyask/Cake/issues/172
 - Intent：`aidlc/spaces/default/intents/261029-transaction-sort-summary`
-- 承認済み計画SHA-256：`520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa`
+- 承認済み計画SHA-256：`72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117`
 - Primary branch：`codex/transaction-sort-summary`
 - Branches：`codex/transaction-sort-summary`
 - Phase：Construction
 - Status：frozen
-- 記録更新日時：2026-10-28T15:39:53.589Z
+- 記録更新日時：2026-10-29T00:50:04.464Z
 - 計画承認：記録あり（対象計画のhash一致はCLIで検査）
 - 記録凍結：済み。以後の検証・Ready・Operation結果はIssue/PR/Actionsに保存する。
 

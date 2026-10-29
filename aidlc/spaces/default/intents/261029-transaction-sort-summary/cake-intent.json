@@ -11,17 +11,17 @@
   "recordDir": "aidlc/spaces/default/intents/261029-transaction-sort-summary",
   "phase": "Construction",
   "status": "frozen",
-  "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa",
+  "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117",
   "approval": {
     "actor": "このチャットの利用者",
-    "reply": "ok\n",
-    "recordedAt": "2026-10-28T15:05:56.822Z",
-    "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa",
-    "planFile": "plans/520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa.md"
+    "reply": "お願い\n",
+    "recordedAt": "2026-10-29T00:44:00.559Z",
+    "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117",
+    "planFile": "plans/72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117.md"
   },
   "frozen": true,
   "createdAt": "2026-10-28T15:05:55.520Z",
-  "updatedAt": "2026-10-28T15:39:53.589Z",
+  "updatedAt": "2026-10-29T00:50:04.464Z",
   "events": [
     {
       "action": "CREATED",
@@ -88,6 +88,42 @@
       "recordedAt": "2026-10-28T15:39:53.589Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-29T00:43:59.771Z",
+      "note": "カラム名で開くポップアップでソート順とフィルタを選択する変更計画、および更新済みIssue本文の承認を確認した。新しい計画と各承認対象・実際の承認発言を別々に記録して開発を再開する。\n",
+      "planHash": "520257f651365e02f4dfc464f519e47263794f2058b697f7e8e9dc944c04fcfa"
+    },
+    {
+      "action": "PLAN",
+      "recordedAt": "2026-10-29T00:44:00.157Z",
+      "note": "計画を更新した。前の承認は新しい計画を許可しないため再承認が必要。",
+      "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
+    },
+    {
+      "action": "APPROVE",
+      "recordedAt": "2026-10-29T00:44:00.559Z",
+      "note": "承認者：このチャットの利用者\n承認の記録日時：2026-10-29T00:44:00.559Z\n承認対象本文：[plans/72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117.md](../plans/72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117.md)\n利用者の実際の回答：\nお願い",
+      "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-29T00:44:00.956Z",
+      "note": "# 更新済みIssue本文の承認記録\n\n- Issue URL: https://github.com/tyask/Cake/issues/172\n- 承認者: このチャットの利用者\n- 実際の承認発言: お願い\n- 記録日時: 2026-10-29T00:43:59.068732+00:00\n- 提示順序: 変更計画を提示 → 利用者が「お願い」と計画承認 → Issue本文を更新・再取得し全文とURLを提示 → 利用者が「お願い」とIssue本文を承認。\n\n## 承認対象本文\n\n## 目的・背景\n\n取引明細をカラムで並べ替え、絞り込んだ明細の収入・支出・収支を上部で小さく確認できるようにする。\nカラム名を押す従来の操作にまとめ、ポップアップでフィルタ条件とソート順を設定する。\n独立したフィルタボタンは廃止する。\n\n## 対象範囲・対象外\n\n- 対象は取引明細の全11列と、フィルタ結果の合計表示。既存のポップアップと共通ソート処理を使う。\n- ソートは単一列。日時・金額・配分割合は数値、その他は表示名の日本語自然順で比較する。\n  支出は負、収入は正として比較し、同値の元順と元配列の不変を保つ。\n- 合計は現在の月／未精算の表示範囲と列フィルタに一致する、配分前の保存済み明細全額を対象とする。\n  共有・個人・清算済みも範囲内なら含め、保存成功・追加・削除・更新に追従する。\n- 対象外はAPI・DBの変更、他画面へのソート追加、ソート状態の永続保存。\n  画面内の更新では指定したソートを保持し、再表示時は未指定へ戻す。\n\n設計・実装・検証：\n\n1. 更新済みIssue本文の承認後、同じIntent・branch・PRで計画と両方の承認を記録し、開発を再開する。\n2. カラム名とポップアップの操作、矢印表示、設計書・操作テストを更新する。\n   既存画面の拡張として進め、独立した試作工程は省く。\n3. PC・狭いPC・スマートフォンで、ポップアップによる昇順・降順・解除、フィルタ併用、矢印の表示、合計と入力保持を検証する。\n4. 新しいコミットで自己レビュー・別Agentレビュー、lint・型・全自動テスト・build、CI・正式Preview検証を行い、完了まではdraftを維持する。\n5. 利用者によるmerge後の稼働と専用資源cleanupは既存Actionsで確認する。\n\n## 受入条件\n\n- [ ] AC-01: 独立したフィルタボタンを廃止し、カラム名を押すとポップアップを開く。\n- [ ] AC-02: ポップアップで「ソートなし・昇順・降順」とフィルタ条件を選び、「適用」で反映する。\n  ソート中の列だけ名前の横に小さな↑／↓を表示する。\n  初期状態・解除後は矢印を非表示にし、取得時の日時降順へ戻す。\n- [ ] AC-03: 上部の小さな収入・支出・収支合計は、フィルタ結果に連動させる。\n- [ ] AC-04: 合計は条件に一致する保存済み明細の全額を使い、条件外の編集中行や未保存値を除外する。\n  0件は0円にする。\n- [ ] AC-05: PC・スマートフォンで操作でき、選択・入力・保存エラーを保持する。\n  別の列のフィルタ変更でも指定済みソートを保持する。\n\n## 関連記録\n\n- 変更計画: このチャットに提示した上記操作への変更計画。利用者の承認発言は「お願い」。\n- Intent: [261029-transaction-sort-summary](https://github.com/tyask/Cake/tree/codex/transaction-sort-summary/aidlc/spaces/default/intents/261029-transaction-sort-summary)。更新済みIssue本文の承認後に計画を更新する。\n- PR: [#173](https://github.com/tyask/Cake/pull/173)（draft）。\n- [既存実装の別Agentレビュー](https://github.com/tyask/Cake/pull/173#issuecomment-6473209530)\n- [基本設計](https://github.com/tyask/Cake/blob/main/docs/design.html)・[詳細設計](https://github.com/tyask/Cake/blob/main/docs/detail-design.html)\n\n## 進捗\n\n- 状況: 実行中。変更計画の承認は完了し、更新済みIssue本文の承認待ち。\n- 完了: 既存実装の調査、列ソートと合計の実装、レビュー、変更計画の提示・承認。\n- 未着手: 新しいカラム操作・ポップアップ・矢印表示の実装、変更後コミットのレビュー・全体検証・CI・正式Preview、Ready。\n- 検証記録: 旧SHA `9a2aa7a2b0316d9f44eff1d1a5c3174e732d71a0` の全自動テスト1,338件・build・Cloud実アプリQA・正式Preview QAは成功済み。\n  その後のローカルSHA `58aa6099afbc68db3a422db34cfd4f74e42067ee` の全体検証では既存ブラウザテストがタイムアウトしたため、完了扱いにしていない。\n  旧SHAの結果は新しい変更の検証済み証拠へ流用しない。\n- 次の作業: 保存済み本文とURLを提示してIssue本文の承認を得た後、同じ案件で開発を再開する。\n- merge・本番操作は未実施。PR用Preview・専用DBは保持し、merge後の確認が揃うまでIssueをopenで維持する。\n",
+      "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-29T00:50:04.099Z",
+      "note": "- 完了: カラム名で既存ポップアップを開く操作へ統一し、独立したフィルタボタン・枠・アイコン用CSSを削除した。\n- 完了: ポップアップにソートなし/昇順/降順を追加し、「適用」でフィルタ条件とソートを確定する。閉じる/Escapeは未適用値を破棄する。\n- 完了: ソート未指定をnullで表し、指定中の列だけ小さな↑/↓を描画する。初期・解除後は矢印を描画せず、取得時の日時降順を使う。別列のフィルタ変更・絞り込み解除ではソートを維持する。\n- 維持: 共通の非破壊安定ソート、保存済みの条件一致行だけのBigInt集計、月/未精算範囲、選択/下書き/保存エラー/mobile展開の保持。API/DB/永続保存の変更なし。\n- 完了: 専用ブラウザ6件、既存レイアウト/収支22件の回帰が成功。PC・狭いPC・mobileの初期画面とポップアップ画像を確認した。\n- 判断: 過去の全体検証で既存の月表示・Dashboard fixtureが読込/初回controller公開待ちで別々にタイムアウトした。アプリ検証条件へ入る前の失敗であり、タイムアウト上限は延長せず、commit後にJS状態を明示的・非rAFのpollingで待つようにした。初期化失敗時もcontextを必ずcloseし、限定した診断を残す。業務assert・ケース数は維持し、対象54件が並列度2で成功した。\n- 判断: 監査Markdownの空引用行にある末尾空白はtask:intentのquote生成に由来する。機械記録は手編集せず既存の正本・生成処理を維持し、それ以外の差分に末尾空白がないことを確認した。\n- 完了: 自己レビューとcheck:fast（Node・lint・型・依存境界14件・文書参照14ファイル）が成功した。記録をfreezeしてcommit後、新しい完全SHAを別Agentへ渡して差分と全体の要件整合を再レビューする。\n- 未着手: 新HEADの全体検証・build・Cloud実アプリQA、PR更新・CI/正式Preview検証、Ready。過去SHAの証拠は流用しない。\n",
+      "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-29T00:50:04.464Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
     }
   ]
 }

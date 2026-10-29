@@ -2,20 +2,26 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { transactionColumns, type FilterOption, type TransactionColumn } from "@/lib/shared/transaction-filters";
+import type { TransactionSort } from "@/lib/shared/transaction-sort";
 import styles from "./transactions-panel.module.css";
 import { SelectionCheckbox } from "./selection-checkbox";
 
-export function TransactionFilterDialog({ column, options, selected, onColumnChange, onApply, onClose }: {
+type SortDirection = TransactionSort["direction"] | "none";
+
+export function TransactionFilterDialog({ column, options, selected, sortDirection, onColumnChange, onApply, onClear, onClose }: {
   column: TransactionColumn;
   options: FilterOption[];
   selected?: string[];
+  sortDirection: SortDirection;
   onColumnChange: (column: TransactionColumn) => void;
-  onApply: (values: string[] | undefined) => void;
+  onApply: (values: string[] | undefined, direction: SortDirection) => void;
+  onClear: () => void;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const [query, setQuery] = useState("");
+  const [direction, setDirection] = useState(sortDirection);
   const [checked, setChecked] = useState(() => new Set(selected ?? options.map(option => option.value)));
   const matching = options.filter(option => option.label.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const checkedCount = matching.filter(option => checked.has(option.value)).length;
@@ -31,6 +37,9 @@ export function TransactionFilterDialog({ column, options, selected, onColumnCha
     <div className={styles.filterTitle}><h2 id={titleId}>{label}で絞り込み</h2><button type="button" aria-label="フィルターを閉じる" onClick={onClose}>×</button></div>
     <label className={styles.filterColumn}>列<select value={column} onChange={event => onColumnChange(event.target.value as TransactionColumn)}>
       {transactionColumns.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+    </select></label>
+    <label className={styles.filterColumn}>ソート順<select value={direction} onChange={event => setDirection(event.target.value as SortDirection)}>
+      <option value="none">ソートなし</option><option value="asc">昇順</option><option value="desc">降順</option>
     </select></label>
     <input className={styles.filterSearch} aria-label="候補の値を検索" placeholder="候補の値を検索" value={query} onChange={event => setQuery(event.target.value)} />
     <label className={styles.filterChoices}>
@@ -58,8 +67,8 @@ export function TransactionFilterDialog({ column, options, selected, onColumnCha
       {matching.length === 0 && <p>候補がありません。</p>}
     </div>
     <div className={styles.filterActions}>
-      <button type="button" onClick={() => onApply(undefined)}>この列の絞り込みを解除</button>
-      <button type="button" className="primary" onClick={() => onApply(options.every(option => checked.has(option.value)) ? undefined : [...checked])}>適用</button>
+      <button type="button" onClick={onClear}>この列の絞り込みを解除</button>
+      <button type="button" className="primary" onClick={() => onApply(options.every(option => checked.has(option.value)) ? undefined : [...checked], direction)}>適用</button>
     </div>
   </dialog>;
 }
