@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { transactionListView } from "../../lib/shared/transaction-list";
+import { cashflowSummary } from "../../lib/shared/home-summary";
 import type { TransactionRecord } from "../../lib/shared/types";
 
 const item = (id: string, settledAt: string | null = null): TransactionRecord => ({
@@ -16,6 +17,7 @@ test("編集・保存失敗とメモ編集中の条件外行を保持し、判�
   const view = transactionListView(items, record => { evaluated.push(record.id); return record.id === "match"; },
     new Set(["draft", "error", "removed"]), new Set(["memo"]), new Set(["match", "hidden", "memo", "removed"]));
   assert.deepEqual(evaluated, items.map(record => record.id));
+  assert.deepEqual(view.matching.map(record => record.id), ["match"]);
   assert.deepEqual(view.visible.map(record => record.id), ["match", "draft", "error", "memo"]);
   assert.deepEqual([...view.outsideFilterIds], ["draft", "error", "memo"]);
   assert.deepEqual(view.visibleEditable.map(record => record.id), ["match", "draft", "error"]);
@@ -29,6 +31,7 @@ test("表示0件でも非表示選択の全解除を有効にし、外部削除�
   const items = [item("hidden"), item("settled", "2026-10-07T00:00:00Z")];
   const view = transactionListView(items, () => false, empty, empty, selected);
   assert.equal(view.visible.length, 0);
+  assert.deepEqual(view.matching, []);
   assert.deepEqual(view.checkedIds, ["hidden"]);
   assert.equal(view.hiddenCheckedCount, 1);
   assert.equal(view.selectionChecked, true);
@@ -68,7 +71,30 @@ test("相手の個人明細は表示しても全選択・選択済み件数・�
   const view = transactionListView(items, () => true, empty, empty, new Set(["shared", "own", "partner"]),
     record => record.expenseClass === "SHARED" || record.actorUserId === "a");
   assert.deepEqual(view.visible.map(record => record.id), ["shared", "own", "partner", "settled"]);
+  assert.deepEqual(view.matching.map(record => record.id), ["shared", "own", "partner", "settled"]);
   assert.deepEqual(view.visibleEditable.map(record => record.id), ["shared", "own"]);
   assert.deepEqual(view.checkedIds, ["shared", "own"]);
   assert.equal(view.selectionChecked, true);
+});
+
+test("合計用の一致行は確定済みの共有・個人・清算済みを含め、条件外の保持行と非表示選択を除く", () => {
+  const receipt = { ...item("receipt", "2026-10-07T00:00:00Z"), type: "RECEIPT" as const, amountYen: 1000 };
+  const personal = { ...item("personal"), expenseClass: "PERSONAL" as const, actorUserId: "b", amountYen: 200 };
+  const payment = { ...item("payment"), amountYen: 300 };
+  const items = [receipt, personal, payment, item("draft"), item("memo"), item("hidden")];
+  const matches = (record: TransactionRecord) => ["receipt", "personal", "payment"].includes(record.id);
+  const view = transactionListView(items, matches, new Set(["draft"]), new Set(["memo"]), new Set(["hidden"]),
+    record => record.expenseClass === "SHARED" || record.actorUserId === "a");
+  assert.deepEqual(view.matching, [receipt, personal, payment]);
+  assert.deepEqual(cashflowSummary(view.matching), { paymentTotal: BigInt(500), receiptTotal: BigInt(1000), balanceYen: BigInt(500) });
+  assert.deepEqual(view.visible.map(record => record.id), ["receipt", "personal", "payment", "draft", "memo"]);
+
+  const changed = transactionListView(items.map(record => record.id === "receipt" ? { ...record, amountYen: 2000 } : record),
+    matches, empty, empty, empty);
+  assert.equal(cashflowSummary(changed.matching).receiptTotal, BigInt(2000), "保存成功後の確定値を使う");
+  const noMatches = transactionListView(items, () => false, new Set(["draft"]), new Set(["memo"]), empty);
+  assert.equal(noMatches.visible.length, 2, "編集中の行は条件外でも表示を保持する");
+  assert.deepEqual(cashflowSummary(noMatches.matching), { paymentTotal: BigInt(0), receiptTotal: BigInt(0), balanceYen: BigInt(0) });
+  assert.deepEqual(cashflowSummary(transactionListView([], () => true, empty, empty, empty).matching),
+    { paymentTotal: BigInt(0), receiptTotal: BigInt(0), balanceYen: BigInt(0) });
 });

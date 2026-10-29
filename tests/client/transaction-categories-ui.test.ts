@@ -191,7 +191,7 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         const allIds = ["first", "settled", "category-food", "category-fresh", "category-leaf"];
         await visible(allIds);
         const dialog = await openFilter("カテゴリ");
-        assert.equal(await dialog.getByRole("combobox").inputValue(), "category");
+        assert.equal(await dialog.getByRole("combobox", { name: "列", exact: true }).inputValue(), "category");
         for (const label of ["未分類", "以前のカテゴリ（使用停止）", "食費", "食費 › 生鮮食品", "食費 › 生鮮食品 › 野菜"]) {
           await dialog.getByText(label, { exact: true }).waitFor();
         }
@@ -223,7 +223,7 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         await choose("カテゴリ", []);
         await visible([]);
         await page.getByText("条件に一致する明細がありません。", { exact: true }).waitFor();
-        await page.getByRole("button", { name: "絞り込みをすべて解除", exact: true }).click();
+        await page.getByRole("button", { name: "絞り込み解除", exact: true }).click();
         await visible(allIds);
         assert.equal(await page.evaluate(() => localStorage.getItem("cake:transaction-filters:v1:a:workspace")), null);
         assert.equal(writes.length, 0, "絞り込み・表示範囲切替・再読み込み・解除だけでは業務更新しない");

@@ -1,4 +1,10 @@
 .panel { overflow: hidden; }
+.filterSummary { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem; padding: .65rem 1rem; border-bottom: 1px solid var(--line); font-size: .72rem; }
+.summaryCount { color: var(--muted); font-size: .65rem; }
+.filterSummary dl { display: flex; flex-wrap: wrap; min-width: 0; gap: .4rem 1.2rem; margin: 0; }
+.filterSummary dl > div { display: flex; flex-wrap: wrap; align-items: baseline; min-width: 0; gap: .25rem .45rem; }
+.filterSummary dt { color: var(--muted); }
+.filterSummary dd { min-width: 0; margin: 0; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .viewToolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.5rem; margin-bottom: .85rem; }
 .viewModes { display: flex; flex-wrap: wrap; gap: .3rem 1rem; min-width: 0; margin: 0; padding: 0; border: 0; }
 .viewModes label { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; color: var(--ink); font-size: .82rem; cursor: pointer; }
@@ -16,15 +22,22 @@
 .table .mobileSummary { display: none; }
 .activeFilters { display: flex; flex-wrap: wrap; gap: .4rem; padding: .7rem 1rem; border-bottom: 1px solid var(--line); }
 .activeFilters button { max-width: 100%; padding: .3rem .55rem; border: 1px solid var(--line-strong); border-radius: 1rem; color: var(--accent); background: var(--accent-soft); font: inherit; font-size: .68rem; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
-.columnHeader { display: flex; align-items: center; justify-content: space-between; gap: .3rem; width: 100%; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.columnHeader { display: flex; align-items: center; gap: .25rem; width: 100%; min-width: 0; padding: .15rem 0; border: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.sortIndicator { flex-shrink: 0; font-size: .6rem; line-height: 1; }
 .columnHeader[data-active="true"] { color: var(--accent-dark); }
+.columnHeader:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.columnHeader:disabled { cursor: wait; }
 .filterDialog { width: min(26rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); margin: auto; padding: 1.2rem; border: 1px solid var(--line-strong); border-radius: 1rem; color: var(--ink); background: var(--paper); box-shadow: 0 1rem 4rem #402b1926; overflow-y: auto; }
 .filterDialog::backdrop { background: #30241655; }
 .filterTitle { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: 1rem; }
 .filterTitle h2 { margin: 0; font-size: 1rem; }
 .filterTitle button { padding: .25rem .5rem; border: 0; color: var(--muted); background: transparent; font: inherit; font-size: 1.3rem; cursor: pointer; }
-.filterColumn { display: flex; align-items: center; gap: .7rem; margin-bottom: .7rem; color: var(--muted); font-size: .75rem; }
+.filterColumn { display: flex; align-items: center; gap: .7rem; margin-bottom: .7rem; color: var(--muted); font-size: .75rem; white-space: nowrap; }
 .filterColumn select, .filterSearch { width: 100%; min-width: 0; padding: .55rem .7rem; border: 1px solid var(--line-strong); border-radius: .5rem; color: var(--ink); background: var(--paper); font: inherit; font-size: .8rem; }
+.sortOptions { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .8rem; min-width: 0; margin: 0 0 .7rem; padding: 0; border: 0; }
+.sortOptions legend { margin-bottom: .3rem; padding: 0; color: var(--muted); font-size: .75rem; }
+.sortOptions label { display: inline-flex; align-items: center; gap: .4rem; min-height: 2rem; color: var(--ink); font-size: .8rem; cursor: pointer; }
+.sortOptions input { flex-shrink: 0; width: 1rem; height: 1rem; margin: 0; accent-color: var(--brand); }
 .filterChoices { display: flex; align-items: center; gap: .6rem; margin: .8rem 0; color: var(--accent); font-size: .75rem; cursor: pointer; }
 .filterChoices input.checkbox { flex-shrink: 0; width: 1rem; height: 1rem; margin: 0; padding: 0; accent-color: var(--brand); cursor: pointer; }
 .filterCountNote { margin: 0 0 .5rem; color: var(--muted); font-size: .65rem; line-height: 1.5; }
@@ -38,7 +51,8 @@
 .filterActions > button:first-child { padding: .4rem 0; border: 0; color: var(--muted); background: transparent; font: inherit; font-size: .7rem; cursor: pointer; }
 .bulkBar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .7rem 1rem; border-bottom: 1px solid var(--line); background: var(--accent-soft); font-size: .7rem; }
 .bulkBar > span { margin-right: auto; color: var(--accent); font-weight: 800; }
-.bulkBar > button { min-height: 2rem; padding: .35rem .55rem; border: 1px solid var(--line-strong); border-radius: .5rem; color: var(--accent); background: var(--paper); cursor: pointer; font-size: .67rem; }
+.bulkBar > button, .resetActions > button { min-height: 2rem; padding: .35rem .55rem; border: 1px solid var(--line-strong); border-radius: .5rem; color: var(--accent); background: var(--paper); cursor: pointer; font-size: .67rem; }
+.resetActions { display: flex; flex-shrink: 0; align-items: center; gap: .5rem; }
 .bulkBar > .bulkDelete { color: var(--red); }
 .categoryDisplay { display: flex; align-items: center; gap: .4rem; color: var(--muted); font-size: .67rem; }
 .categoryDisplay select { min-height: 2rem; padding: .3rem .4rem; border: 1px solid var(--line-strong); border-radius: .45rem; color: var(--ink); background: var(--paper); font: inherit; }
@@ -107,7 +121,6 @@
     .wrappingTable thead tr { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; padding: .55rem; background: var(--surface-muted); }
     .wrappingTable th { min-width: 0; max-width: 100%; padding: .35rem .45rem; overflow-wrap: anywhere; }
     .wrappingTable .columnHeader { min-width: 0; }
-    .wrappingTable .columnHeader > span:last-child { flex-shrink: 0; }
     .wrappingTable thead .updateStatusCell { display: none; }
     .wrappingTable .selectAllLabel { gap: .4rem; }
     .wrappingTable .selectAllLabel > span { display: inline; }
@@ -129,9 +142,12 @@
 }
 
 @media (max-width: 48rem) {
+  .filterSummary { padding: .65rem .85rem; gap: .3rem .75rem; }
+  .filterSummary dl { gap: .3rem .85rem; }
+  .columnHeader { padding: 0; }
   .bulkBar { padding: .85rem; }
   .bulkBar > span { flex-basis: 100%; }
-  .bulkBar > button { min-height: 2.3rem; font-size: .72rem; }
+  .bulkBar > button, .resetActions > button { min-height: 2.3rem; font-size: .72rem; }
   .note, .bulkError, .bulkNotice { margin-left: .85rem; margin-right: .85rem; }
   .tableWrap { overflow: visible; padding: .45rem; }
   .table { display: block; width: 100%; min-width: 0; }

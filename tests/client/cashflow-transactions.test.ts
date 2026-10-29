@@ -232,10 +232,10 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
 
         await chooseFilter(page, "金額（円）", /^−￥10,000/);
         assert.deepEqual(await transactions.locator("tr[data-transaction-id]").evaluateAll(rows => rows.map(row => row.getAttribute("data-transaction-id"))), ["payment"], "同額の収入を支払いの金額フィルタに含めない");
-        await transactions.getByRole("button", { name: "絞り込みをすべて解除", exact: true }).click();
+        await transactions.getByRole("button", { name: "絞り込み解除", exact: true }).click();
         await chooseFilter(page, "種別", /^収入/);
         assert.deepEqual(await transactions.locator("tr[data-transaction-id]").evaluateAll(rows => rows.map(row => row.getAttribute("data-transaction-id"))), ["receipt", "settled-receipt", "same-amount-receipt"]);
-        await transactions.getByRole("button", { name: "絞り込みをすべて解除", exact: true }).click();
+        await transactions.getByRole("button", { name: "絞り込み解除", exact: true }).click();
         if (width < 768) await payment.getByRole("button", { name: "paymentの詳細を開く", exact: true }).click();
         const type = payment.getByLabel("種別", { exact: true });
         await type.selectOption("RECEIPT");

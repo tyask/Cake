@@ -2,21 +2,30 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { transactionColumns, type FilterOption, type TransactionColumn } from "@/lib/shared/transaction-filters";
+import type { TransactionSort } from "@/lib/shared/transaction-sort";
 import styles from "./transactions-panel.module.css";
 import { SelectionCheckbox } from "./selection-checkbox";
 
-export function TransactionFilterDialog({ column, options, selected, onColumnChange, onApply, onClose }: {
+type SortDirection = TransactionSort["direction"] | "none";
+
+export function TransactionFilterDialog({ column, options, selected, sortDirection, onColumnChange, onApply, onClear, onClose }: {
   column: TransactionColumn;
   options: FilterOption[];
   selected?: string[];
+  sortDirection: SortDirection;
   onColumnChange: (column: TransactionColumn) => void;
-  onApply: (values: string[] | undefined) => void;
+  onApply: (values: string[] | undefined, direction: SortDirection) => void;
+  onClear: () => void;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const sortName = useId();
   const [query, setQuery] = useState("");
-  const [checked, setChecked] = useState(() => new Set(selected ?? options.map(option => option.value)));
+  const [direction, setDirection] = useState(sortDirection);
+  // A save can replace the options while open; sorting alone must preserve the live filter.
+  const [changedSelection, setChangedSelection] = useState<Set<string>>();
+  const checked = changedSelection ?? new Set(selected ?? options.map(option => option.value));
   const matching = options.filter(option => option.label.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const checkedCount = matching.filter(option => checked.has(option.value)).length;
   const allChecked = matching.length > 0 && checkedCount === matching.length;
@@ -32,12 +41,17 @@ export function TransactionFilterDialog({ column, options, selected, onColumnCha
     <label className={styles.filterColumn}>列<select value={column} onChange={event => onColumnChange(event.target.value as TransactionColumn)}>
       {transactionColumns.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
     </select></label>
+    <fieldset className={styles.sortOptions}><legend>ソート順</legend>
+      <label><input type="radio" name={sortName} value="none" checked={direction === "none"} onChange={() => setDirection("none")} />ソートなし</label>
+      <label><input type="radio" name={sortName} value="asc" checked={direction === "asc"} onChange={() => setDirection("asc")} />昇順</label>
+      <label><input type="radio" name={sortName} value="desc" checked={direction === "desc"} onChange={() => setDirection("desc")} />降順</label>
+    </fieldset>
     <input className={styles.filterSearch} aria-label="候補の値を検索" placeholder="候補の値を検索" value={query} onChange={event => setQuery(event.target.value)} />
     <label className={styles.filterChoices}>
       <SelectionCheckbox label={query ? "検索結果の値をすべて選択" : "候補の値をすべて選択"} checked={allChecked}
         partial={checkedCount > 0 && !allChecked} disabled={matching.length === 0}
-        onChange={() => setChecked(current => {
-          const next = new Set(current);
+        onChange={() => setChangedSelection(current => {
+          const next = new Set(current ?? checked);
           for (const option of matching) {
             if (allChecked) next.delete(option.value); else next.add(option.value);
           }
@@ -52,14 +66,15 @@ export function TransactionFilterDialog({ column, options, selected, onColumnCha
         <input type="checkbox" checked={checked.has(option.value)} onChange={event => {
           const next = new Set(checked);
           if (event.target.checked) next.add(option.value); else next.delete(option.value);
-          setChecked(next);
+          setChangedSelection(next);
         }} /><span>{option.label || "（空白）"}</span><small>{option.count}件</small>
       </label>)}
       {matching.length === 0 && <p>候補がありません。</p>}
     </div>
     <div className={styles.filterActions}>
-      <button type="button" onClick={() => onApply(undefined)}>この列の絞り込みを解除</button>
-      <button type="button" className="primary" onClick={() => onApply(options.every(option => checked.has(option.value)) ? undefined : [...checked])}>適用</button>
+      <button type="button" onClick={onClear}>この列の絞り込みを解除</button>
+      <button type="button" className="primary" onClick={() => onApply(changedSelection === undefined ? selected
+        : options.every(option => checked.has(option.value)) ? undefined : [...checked], direction)}>適用</button>
     </div>
   </dialog>;
 }

@@ -50,51 +50,68 @@ test("Dashboard hookの取得・保存・切替・通知を実React/Chromiumで�
     });
   }
   async function fixture(initialTab: DashboardTab, initial: BootstrapMetadata) {
-    const context = await browser.newContext({ serviceWorkers: "block" }), page = await context.newPage();
-    await page.clock.setFixedTime(new Date("2026-10-28T03:00:00Z"));
-    const requests: Route[] = [], transactionRequests: Route[] = [], errors: string[] = [];
-    const transactionData = new Map<string, TransactionRecord[]>();
-    if (isWorkspaceData(initial.selected)) transactionData.set(initial.selected.workspace.id, initial.selected.transactions);
-    let manualTransactions = false;
-    page.setDefaultTimeout(5000);
-    page.on("pageerror", error => errors.push(error.message));
-    await page.route("**/*", async route => {
-      const url = new URL(route.request().url());
-      if (url.origin !== origin) { errors.push("unexpected origin"); await route.abort(); return; }
-      if (url.pathname === "/api/app") requests.push(route);
-      else if (url.pathname === "/api/transactions") {
-        if (manualTransactions) { transactionRequests.push(route); return; }
-        const workspaceId = url.searchParams.get("workspaceId")!;
-        const mode = url.searchParams.get("mode") === "unsettled" ? "unsettled" : "month";
-        const month = url.searchParams.get("month") ?? "2026-10";
-        const source = transactionData.get(workspaceId) ?? data(workspaceId).selected!.transactions;
-        await route.fulfill({ json: { workspaceId, mode, month: mode === "month" ? month : null,
-          transactions: source.filter(item => transactionMatchesView(item, { mode, month })) } });
-      } else await route.continue();
-    });
-    await page.addInitScript(({ initial, initialTab }) => { window.initialData = initial; window.initialTab = initialTab; }, { initial, initialTab });
-    await page.goto(origin);
-    await page.waitForFunction(() => !!window.controller);
-    async function take(method = "GET") {
-      for (let i = 0; !requests.some(r => r.request().method() === method) && i < 200; i++) await new Promise(done => setTimeout(done, 5));
-      const index = requests.findIndex(r => r.request().method() === method);
-      assert.notEqual(index, -1, `missing ${method} request`);
-      return requests.splice(index, 1)[0];
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    const startup = { domContentLoaded: false, load: false };
+    const failedResources: { path: string; kind: string; error: string }[] = [];
+    const errors: string[] = [];
+    try {
+      const page = await context.newPage();
+      await page.clock.setFixedTime(new Date("2026-10-28T03:00:00Z"));
+      const requests: Route[] = [], transactionRequests: Route[] = [];
+      const transactionData = new Map<string, TransactionRecord[]>();
+      if (isWorkspaceData(initial.selected)) transactionData.set(initial.selected.workspace.id, initial.selected.transactions);
+      let manualTransactions = false;
+      page.setDefaultTimeout(5000);
+      page.on("pageerror", error => errors.push(error.message));
+      page.on("domcontentloaded", () => { startup.domContentLoaded = true; });
+      page.on("load", () => { startup.load = true; });
+      page.on("requestfailed", request => {
+        if (failedResources.length < 3) failedResources.push({ path: new URL(request.url()).pathname,
+          kind: request.resourceType(), error: request.failure()?.errorText ?? "unknown" });
+      });
+      await page.route("**/*", async route => {
+        const url = new URL(route.request().url());
+        if (url.origin !== origin) { errors.push("unexpected origin"); await route.abort(); return; }
+        if (url.pathname === "/api/app") requests.push(route);
+        else if (url.pathname === "/api/transactions") {
+          if (manualTransactions) { transactionRequests.push(route); return; }
+          const workspaceId = url.searchParams.get("workspaceId")!;
+          const mode = url.searchParams.get("mode") === "unsettled" ? "unsettled" : "month";
+          const month = url.searchParams.get("month") ?? "2026-10";
+          const source = transactionData.get(workspaceId) ?? data(workspaceId).selected!.transactions;
+          await route.fulfill({ json: { workspaceId, mode, month: mode === "month" ? month : null,
+            transactions: source.filter(item => transactionMatchesView(item, { mode, month })) } });
+        } else await route.continue();
+      });
+      await page.addInitScript(({ initial, initialTab }) => { window.initialData = initial; window.initialTab = initialTab; }, { initial, initialTab });
+      await page.goto(origin, { waitUntil: "commit" });
+      await page.waitForFunction(() => !!window.controller, undefined, { polling: 100 });
+      async function take(method = "GET") {
+        for (let i = 0; !requests.some(r => r.request().method() === method) && i < 200; i++) await new Promise(done => setTimeout(done, 5));
+        const index = requests.findIndex(r => r.request().method() === method);
+        assert.notEqual(index, -1, `missing ${method} request`);
+        return requests.splice(index, 1)[0];
+      }
+      const reply = (route: Route, json: unknown, status = 200) => route.fulfill({ status, json });
+      async function takeTransactions() {
+        for (let i = 0; transactionRequests.length === 0 && i < 200; i++) await new Promise(done => setTimeout(done, 5));
+        assert.ok(transactionRequests.length > 0, "missing scoped transaction request");
+        return transactionRequests.shift()!;
+      }
+      async function replyTransactions(route: Route, transactions: TransactionRecord[]) {
+        const query = new URL(route.request().url()).searchParams;
+        const mode = query.get("mode")!;
+        await route.fulfill({ json: { workspaceId: query.get("workspaceId"), mode, month: mode === "month" ? query.get("month") : null, transactions } });
+      }
+      const holdTransactions = () => { manualTransactions = true; };
+      const setTransactions = (workspaceId: string, transactions: TransactionRecord[]) => { transactionData.set(workspaceId, transactions); };
+      return { context, page, requests, transactionRequests, errors, take, reply, takeTransactions, replyTransactions, holdTransactions, setTransactions };
+    } catch (error) {
+      const diagnostics = JSON.stringify({ startup, pageErrors: errors.slice(0, 3).map(message => message.slice(0, 200)), failedResources });
+      await context.close();
+      if (error instanceof Error) error.message += `\nFixture startup: ${diagnostics}`;
+      throw error;
     }
-    const reply = (route: Route, json: unknown, status = 200) => route.fulfill({ status, json });
-    async function takeTransactions() {
-      for (let i = 0; transactionRequests.length === 0 && i < 200; i++) await new Promise(done => setTimeout(done, 5));
-      assert.ok(transactionRequests.length > 0, "missing scoped transaction request");
-      return transactionRequests.shift()!;
-    }
-    async function replyTransactions(route: Route, transactions: TransactionRecord[]) {
-      const query = new URL(route.request().url()).searchParams;
-      const mode = query.get("mode")!;
-      await route.fulfill({ json: { workspaceId: query.get("workspaceId"), mode, month: mode === "month" ? query.get("month") : null, transactions } });
-    }
-    const holdTransactions = () => { manualTransactions = true; };
-    const setTransactions = (workspaceId: string, transactions: TransactionRecord[]) => { transactionData.set(workspaceId, transactions); };
-    return { context, page, requests, transactionRequests, errors, take, reply, takeTransactions, replyTransactions, holdTransactions, setTransactions };
   }
   try {
     await scenario("ホームの未取得明細を0件と偽装せず、明細保存後もサマリーの世代だけを更新する", async f => {

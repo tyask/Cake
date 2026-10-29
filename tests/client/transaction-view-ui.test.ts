@@ -28,9 +28,9 @@ const personal = transaction("個人の支払い", "2026-10-20T00:00:00.000Z", {
 
 async function waitForSelection(page: Page, mode: string, month = "2026-10") {
   await page.waitForFunction(({ mode, month }) => {
-    const view = window.viewUiController.transactionView;
-    return view.selection.mode === mode && view.selection.month === month && !view.loading;
-  }, { mode, month });
+    const view = window.viewUiController?.transactionView;
+    return view?.selection.mode === mode && view.selection.month === month && !view.loading;
+  }, { mode, month }, { polling: 100 });
 }
 
 test("取引明細の月・未精算切替を実UIとcontrollerで確認する", async t => {
@@ -49,55 +49,73 @@ test("取引明細の月・未精算切替を実UIとcontrollerで確認する",
 
   async function fixture(width = 1280) {
     const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ja-JP", timezoneId: "Asia/Tokyo", serviceWorkers: "block" });
-    const page = await context.newPage();
-    page.setDefaultTimeout(7000);
-    await page.clock.setFixedTime(new Date("2026-10-28T03:00:00.000Z"));
-    const queries: string[] = [], posts: Route[] = [], errors: string[] = [];
-    const records = new Map([october, september, november, income, settled, personal].map(item => [item.id, { ...item }]));
-    let holdSaves = false;
-    let savedRequest: (() => void) | undefined;
-    page.on("pageerror", error => errors.push(error.message));
-    await page.addInitScript(data => { window.viewUiInitial = data; }, initial);
-    await page.route("**/api/**", async route => {
-      const request = route.request(), url = new URL(request.url());
-      if (request.method() === "POST") {
-        if (holdSaves) { posts.push(route); savedRequest?.(); return; }
-        const payload = request.postDataJSON();
-        const saved = { ...records.get(payload.transactionId)!, ...payload };
-        records.set(saved.id, saved);
-        await route.fulfill({ json: { transaction: saved } });
-        return;
-      }
-      if (url.pathname === "/api/app") { await route.fulfill({ json: initial }); return; }
-      if (url.pathname === "/api/transactions") {
-        queries.push(url.search);
-        const mode = url.searchParams.get("mode"), month = url.searchParams.get("month");
-        const ids = mode === "unsettled" ? [october.id, september.id, november.id, income.id]
-          : month === "2026-09" ? [september.id] : month === "2026-11" ? [november.id]
-            : month === "2026-10" ? [october.id, income.id, settled.id, personal.id] : [];
-        await route.fulfill({ json: { workspaceId: workspace.id, mode, month: mode === "month" ? month : null,
-          transactions: ids.map(id => records.get(id)) } });
-        return;
-      }
-      errors.push(`unexpected API: ${url.pathname}`);
-      await route.abort();
-    });
-    await page.goto(origin);
-    await waitForSelection(page, "month");
-    await page.locator(`[data-transaction-id="${october.id}"]`).waitFor();
-    const close = async () => { assert.deepEqual(errors, []); await context.close(); };
-    return { page, context, queries, posts, close, holdSaves: () => { holdSaves = true; },
-      releaseSave: async (status = 200) => {
-        await page.waitForFunction(() => window.viewUiController.refreshing || document.querySelector('button[aria-busy="true"]') !== null);
-        if (posts.length === 0) await new Promise<void>(done => { savedRequest = done; });
-        savedRequest = undefined;
-        assert.ok(posts.length > 0, "保存要求が開始されている");
-        const route = posts.shift()!;
-        const payload = route.request().postDataJSON();
-        const saved = { ...records.get(payload.transactionId)!, ...payload };
-        if (status === 200) records.set(saved.id, saved);
-        await route.fulfill({ status, json: status === 200 ? { transaction: saved } : { error: "保存の確認用エラー" } });
-      } };
+    const startup = { domContentLoaded: false, load: false };
+    const failedResources: { path: string; kind: string; error: string }[] = [];
+    const errors: string[] = [];
+    try {
+      const page = await context.newPage();
+      page.setDefaultTimeout(7000);
+      await page.clock.setFixedTime(new Date("2026-10-28T03:00:00.000Z"));
+      const queries: string[] = [], posts: Route[] = [];
+      const records = new Map([october, september, november, income, settled, personal].map(item => [item.id, { ...item }]));
+      let holdSaves = false;
+      let savedRequest: (() => void) | undefined;
+      page.on("pageerror", error => errors.push(error.message));
+      page.on("domcontentloaded", () => { startup.domContentLoaded = true; });
+      page.on("load", () => { startup.load = true; });
+      page.on("requestfailed", request => {
+        if (failedResources.length < 3) failedResources.push({ path: new URL(request.url()).pathname,
+          kind: request.resourceType(), error: request.failure()?.errorText ?? "unknown" });
+      });
+      await page.addInitScript(data => { window.viewUiInitial = data; }, initial);
+      await page.route("**/api/**", async route => {
+        const request = route.request(), url = new URL(request.url());
+        if (request.method() === "POST") {
+          if (holdSaves) { posts.push(route); savedRequest?.(); return; }
+          const payload = request.postDataJSON();
+          const saved = { ...records.get(payload.transactionId)!, ...payload };
+          records.set(saved.id, saved);
+          await route.fulfill({ json: { transaction: saved } });
+          return;
+        }
+        if (url.pathname === "/api/app") { await route.fulfill({ json: initial }); return; }
+        if (url.pathname === "/api/transactions") {
+          queries.push(url.search);
+          const mode = url.searchParams.get("mode"), month = url.searchParams.get("month");
+          const ids = mode === "unsettled" ? [october.id, september.id, november.id, income.id]
+            : month === "2026-09" ? [september.id] : month === "2026-11" ? [november.id]
+              : month === "2026-10" ? [october.id, income.id, settled.id, personal.id] : [];
+          await route.fulfill({ json: { workspaceId: workspace.id, mode, month: mode === "month" ? month : null,
+            transactions: ids.map(id => records.get(id)) } });
+          return;
+        }
+        errors.push(`unexpected API: ${url.pathname}`);
+        await route.abort();
+      });
+      await page.goto(origin, { waitUntil: "commit" });
+      await waitForSelection(page, "month");
+      await page.locator(`[data-transaction-id="${october.id}"]`).waitFor();
+      const close = async () => {
+        try { assert.deepEqual(errors, []); } finally { await context.close(); }
+      };
+      return { page, context, queries, posts, close, holdSaves: () => { holdSaves = true; },
+        releaseSave: async (status = 200) => {
+          await page.waitForFunction(() => window.viewUiController.refreshing || document.querySelector('button[aria-busy="true"]') !== null);
+          if (posts.length === 0) await new Promise<void>(done => { savedRequest = done; });
+          savedRequest = undefined;
+          assert.ok(posts.length > 0, "保存要求が開始されている");
+          const route = posts.shift()!;
+          const payload = route.request().postDataJSON();
+          const saved = { ...records.get(payload.transactionId)!, ...payload };
+          if (status === 200) records.set(saved.id, saved);
+          await route.fulfill({ status, json: status === 200 ? { transaction: saved } : { error: "保存の確認用エラー" } });
+        } };
+    } catch (error) {
+      const diagnostics = JSON.stringify({ startup, pageErrors: errors.slice(0, 3).map(message => message.slice(0, 200)), failedResources });
+      await context.close();
+      if (error instanceof Error) error.message += `\nFixture startup: ${diagnostics}`;
+      throw error;
+    }
   }
 
   try {
@@ -126,14 +144,14 @@ test("取引明細の月・未精算切替を実UIとcontrollerで確認する",
         assert.equal(await f.page.locator(`[data-transaction-id="${september.id}"]`).count(), 1, "月外の未清算も表示する");
         assert.equal(await f.page.locator(`[data-transaction-id="${personal.id}"]`).count(), 0);
         assert.equal(await f.page.locator(`[data-transaction-id="${settled.id}"]`).count(), 0);
-        await f.page.reload();
+        await f.page.reload({ waitUntil: "commit" });
         await waitForSelection(f.page, "unsettled");
         assert.equal(await f.page.getByRole("radio", { name: "未精算明細", exact: true }).isChecked(), true, "モードを再読込後も復元する");
         await f.page.getByRole("radio", { name: "月単位明細", exact: true }).click();
         await waitForSelection(f.page, "month");
         await f.page.getByLabel("取引明細の対象年月", { exact: true }).fill("2026-11");
         await waitForSelection(f.page, "month", "2026-11");
-        await f.page.reload();
+        await f.page.reload({ waitUntil: "commit" });
         await waitForSelection(f.page, "month", "2026-11");
         await f.page.getByRole("button", { name: "今月", exact: true }).click();
         await waitForSelection(f.page, "month");
