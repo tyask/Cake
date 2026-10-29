@@ -22,7 +22,9 @@ export function TransactionFilterDialog({ column, options, selected, sortDirecti
   const titleId = useId();
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState(sortDirection);
-  const [checked, setChecked] = useState(() => new Set(selected ?? options.map(option => option.value)));
+  // A save can replace the options while open; sorting alone must preserve the live filter.
+  const [changedSelection, setChangedSelection] = useState<Set<string>>();
+  const checked = changedSelection ?? new Set(selected ?? options.map(option => option.value));
   const matching = options.filter(option => option.label.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const checkedCount = matching.filter(option => checked.has(option.value)).length;
   const allChecked = matching.length > 0 && checkedCount === matching.length;
@@ -45,8 +47,8 @@ export function TransactionFilterDialog({ column, options, selected, sortDirecti
     <label className={styles.filterChoices}>
       <SelectionCheckbox label={query ? "検索結果の値をすべて選択" : "候補の値をすべて選択"} checked={allChecked}
         partial={checkedCount > 0 && !allChecked} disabled={matching.length === 0}
-        onChange={() => setChecked(current => {
-          const next = new Set(current);
+        onChange={() => setChangedSelection(current => {
+          const next = new Set(current ?? checked);
           for (const option of matching) {
             if (allChecked) next.delete(option.value); else next.add(option.value);
           }
@@ -61,14 +63,15 @@ export function TransactionFilterDialog({ column, options, selected, sortDirecti
         <input type="checkbox" checked={checked.has(option.value)} onChange={event => {
           const next = new Set(checked);
           if (event.target.checked) next.add(option.value); else next.delete(option.value);
-          setChecked(next);
+          setChangedSelection(next);
         }} /><span>{option.label || "（空白）"}</span><small>{option.count}件</small>
       </label>)}
       {matching.length === 0 && <p>候補がありません。</p>}
     </div>
     <div className={styles.filterActions}>
       <button type="button" onClick={onClear}>この列の絞り込みを解除</button>
-      <button type="button" className="primary" onClick={() => onApply(options.every(option => checked.has(option.value)) ? undefined : [...checked], direction)}>適用</button>
+      <button type="button" className="primary" onClick={() => onApply(changedSelection === undefined ? selected
+        : options.every(option => checked.has(option.value)) ? undefined : [...checked], direction)}>適用</button>
     </div>
   </dialog>;
 }

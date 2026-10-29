@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-10-28T15:05:55.520Z",
-  "updatedAt": "2026-10-29T00:50:04.464Z",
+  "updatedAt": "2026-10-29T00:55:12.830Z",
   "events": [
     {
       "action": "CREATED",
@@ -122,6 +122,24 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-10-29T00:50:04.464Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-10-29T00:52:15.810Z",
+      "note": "別AgentレビューのP2指摘を採用する。金額変更の保存応答を保留して金額ポップアップを開き、保存成功後にソートだけ適用すると、マウント時の古いcheckedから意図しない金額フィルタが作成され、保存後の行と合計が除外された。\n未操作のフィルタは現在のselectedをそのまま維持し、フィルタ未指定の全選択は新optionsへ追従させる。チェックを変更した場合だけフィルタ下書きを確定する。フィルタ未指定/既存フィルタの両方で保存応答を遅らせる回帰を追加する。\n承認済みの操作・ACの変更ではなく、ソートのみの操作がフィルタ条件を意図せず変更しないよう修正する。修正後に再freeze・commitし、新HEADを再レビューする。\n",
+      "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-10-29T00:55:12.489Z",
+      "note": "- 完了: 別AgentレビューのP2を採用し、未操作フィルタをundefinedの下書き状態で区別するよう修正した。未操作のチェック表示は現在selectedまたは最新optionsから導き、ソートだけの適用はselectedをそのまま返す。\n- 完了: PC1280/mobile390の各環境で、300→999の保存成功後に全選択が新候補へ追従してソートだけではフィルタを作らないこと、既存subsetをソートだけで全解除しないことを確認した。専用ブラウザテスト全10件が成功した。\n- 完了: 詳細設計の状態所有とテスト表へ、保存応答と未操作フィルタの契約を反映した。\n- 維持: フィルタ候補のチェックを変更した場合だけその下書きを適用し、閉じる/Escapeとフィルタ解除時のソート保持を維持する。計画・ACの変更なし。\n- 次: 再freeze・commit後、新HEADを再レビューし、最終SHAで全体検証・build・CloudQA・CI/正式Previewを確認する。\n",
+      "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-10-29T00:55:12.830Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "72830fad6e0cb22b466d1dcc50c1d5278d9e7338a105ee1e69a79c66d01af117"
     }

@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdir } from "node:fs/promises";
 import { build } from "esbuild";
-import { chromium, type Page } from "playwright";
+import { chromium, type Page, type Route } from "playwright";
 import type { TransactionRecord, WorkspaceData } from "../../lib/shared/types";
 
 function transaction(id: string, extra: Partial<TransactionRecord>): TransactionRecord {
@@ -270,6 +270,83 @@ test("取引明細のソートと絞り込み結果の合計はPC/mobileで確�
         await assertSort(page);
       } finally { await context.close(); }
     });
+    for (const width of [1280, 390]) for (const filtered of [false, true]) {
+      await t.test(`${width}px・保存応答で候補が変わってもソートだけの適用で${filtered ? "既存の金額条件を解除しない" : "金額条件を追加しない"}`, async () => {
+        const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ja-JP", timezoneId: "Asia/Tokyo" });
+        const page = await context.newPage();
+        page.setDefaultTimeout(7000);
+        const transactions = initial.transactions.filter(row => row.id === "small" || row.id === "settled");
+        if (filtered) transactions.push(transaction("extra", { merchant: "別の金額", amountYen: 500, occurredAt: "2026-10-18T00:00:00.000Z" }));
+        await page.addInitScript(data => { window.sortSummaryInitial = data; }, { ...initial, transactions });
+        const records = new Map(transactions.map(row => [row.id, row]));
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        let observeSave!: (route: Route) => void;
+        const pendingSave = new Promise<Route>(resolve => { observeSave = resolve; });
+        await page.route("**/api/**", async route => {
+          if (route.request().method() === "GET") {
+            await route.fulfill({ json: [...records.values()] });
+          } else {
+            observeSave(route);
+          }
+        });
+        try {
+          await page.goto(origin);
+          await assertTotals(page, ["￥0", filtered ? "−￥1,500" : "−￥1,000", filtered ? "−￥1,500" : "−￥1,000"]);
+          const edited = page.locator(`[data-transaction-id="${filtered ? "extra" : "small"}"]`);
+          if (width <= 768) await edited.getByRole("button", { name: filtered ? "別の金額の詳細を開く" : "店2の詳細を開く", exact: true }).click();
+          await edited.getByRole("spinbutton", { name: "金額（円）", exact: true }).fill(filtered ? "700" : "999");
+          const requested = page.waitForRequest(request => request.method() === "POST" && new URL(request.url()).pathname === "/api/app");
+          const amountColumn = page.getByRole("button", { name: "金額（円）で絞り込み", exact: true });
+          await amountColumn.click();
+          await requested;
+          const route = await pendingSave;
+          const dialog = page.getByRole("dialog", { name: "金額（円）で絞り込み", exact: true });
+          await dialog.getByRole("checkbox", { name: /^−￥300/ }).waitFor();
+
+          if (filtered) {
+            // 500円の保存待ち中に300/700円の条件を確定し、元の条件を持つポップアップを開き直す。
+            await dialog.getByRole("checkbox", { name: "候補の値をすべて選択", exact: true }).uncheck();
+            await dialog.getByRole("checkbox", { name: /^−￥300/ }).check();
+            await dialog.getByRole("checkbox", { name: /^−￥700/ }).check();
+            await dialog.getByRole("button", { name: "適用", exact: true }).click();
+            await assertTotals(page, ["￥0", "−￥1,000", "−￥1,000"]);
+            await amountColumn.click();
+            assert.equal(await dialog.getByRole("checkbox", { name: /^−￥500/ }).isChecked(), false);
+          } else {
+            assert.equal(await dialog.getByRole("checkbox", { name: /^−￥300/ }).isChecked(), true);
+          }
+
+          // ポップアップのマウントを確認した後で、自動保存の成功応答を返す。
+          const payload = route.request().postDataJSON();
+          const saved = { ...records.get(payload.transactionId)!, ...payload };
+          records.set(saved.id, saved);
+          await route.fulfill({ json: { transaction: saved } });
+          if (filtered) {
+            await dialog.getByRole("checkbox", { name: /^−￥500/ }).waitFor({ state: "detached" });
+            await assertTotals(page, ["￥0", "−￥1,700", "−￥1,700"]);
+          } else {
+            await dialog.getByRole("checkbox", { name: /^−￥999/ }).waitFor();
+            assert.equal(await dialog.getByRole("checkbox", { name: /^−￥999/ }).isChecked(), true, "全選択の未操作状態は新しい候補にも追従する");
+          }
+          assert.equal(await dialog.getByRole("checkbox", { name: "候補の値をすべて選択", exact: true }).isChecked(), true);
+          await dialog.getByRole("combobox", { name: "ソート順", exact: true }).selectOption("asc");
+          await dialog.getByRole("button", { name: "適用", exact: true }).click();
+          await assertSort(page, "金額（円）", "ascending");
+          assert.equal(await page.getByRole("button", { name: "金額（円）の絞り込みを解除", exact: true }).count(), filtered ? 1 : 0,
+            "ソート順だけの適用は元の金額条件の有無を変更しない");
+          await assertTotals(page, ["￥0", filtered ? "−￥1,700" : "−￥1,699", filtered ? "−￥1,700" : "−￥1,699"]);
+          assert.equal((await rowIds(page)).length, filtered ? 3 : 2);
+          if (filtered) {
+            records.set("later", transaction("later", { merchant: "後から届いた500円", amountYen: 500 }));
+            await page.getByRole("button", { name: "更新", exact: true }).click();
+            await assertTotals(page, ["￥0", "−￥1,700", "−￥1,700"]);
+            assert.equal(await page.locator('[data-transaction-id="later"]').count(), 0, "全候補が選択済みに見えても保存済みのsubsetを維持する");
+          }
+          assert.deepEqual(errors, []);
+        } finally { await context.close(); }
+      });
+    }
   } finally {
     await browser.close();
     await new Promise<void>(done => server.close(() => done()));
