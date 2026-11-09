@@ -47,7 +47,9 @@ async function swipeMonth(page: Page, target: Locator, dx: number, dy = 0, cance
 }
 
 async function assertMonthLabel(navigation: Locator, month: string) {
+  await navigation.locator('input[type="month"]').blur();
   const value = navigation.locator(".month-input-value");
+  await value.waitFor({ state: "visible" });
   assert.equal(await value.textContent(), `${Number(month.slice(0, 4))}年${Number(month.slice(5))}月`);
   const fits = await value.evaluate(element => {
     const range = document.createRange(); range.selectNodeContents(element);

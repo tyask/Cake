@@ -14,7 +14,9 @@ async function assertMoney(locator: Locator, text: string, color: string) {
 }
 
 async function assertMonthLabel(navigation: Locator, month: string) {
+  await navigation.locator('input[type="month"]').blur();
   const value = navigation.locator(".month-input-value");
+  await value.waitFor({ state: "visible" });
   assert.equal(await value.textContent(), `${Number(month.slice(0, 4))}年${Number(month.slice(5))}月`);
   const fits = await value.evaluate(element => {
     const range = document.createRange(); range.selectNodeContents(element);
@@ -78,7 +80,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(resolve => server.close(() => resolve())); throw error; });
   try {
-    for (const width of [1440, 390, 320]) await t.test(`${width}px`, async () => {
+    for (const width of [1440, 800, 769, 390, 320]) await t.test(`${width}px`, async () => {
       const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ja-JP", hasTouch: width < 768 });
       const page = await context.newPage(), errors: string[] = [], writes: Record<string, unknown>[] = [];
       page.setDefaultTimeout(6000);
@@ -137,6 +139,15 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         }
         await page.goto(origin);
         const home = page.locator("#home"), transactions = page.locator("#transactions");
+        if (width === 769 || width === 800) await home.evaluate(element => {
+          // Reproduce the app's content width after the desktop sidebar and padding.
+          const layout = document.createElement("div"); layout.className = "app-main";
+          document.body.append(layout);
+          const style = getComputedStyle(layout);
+          const contentWidth = layout.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+          layout.remove();
+          (element as HTMLElement).style.maxWidth = `${contentWidth}px`;
+        });
         const payment = transactions.locator('[data-transaction-id="payment"]');
         const receipt = transactions.locator('[data-transaction-id="receipt"]');
         const settled = transactions.locator('[data-transaction-id="settled-receipt"]');

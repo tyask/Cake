@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-11-09T12:23:22.093Z",
-  "updatedAt": "2026-11-09T17:36:25.848Z",
+  "updatedAt": "2026-11-09T17:46:57.408Z",
   "events": [
     {
       "action": "CREATED",
@@ -104,6 +104,24 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-11-09T17:36:25.848Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "d1a53008885036c5b128c84e961f59a87d3a4579365f505516fa69ffddb1c3a5"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-11-09T17:41:15.588Z",
+      "note": "# 別Agentレビュー指摘への対応\n\n- 対象SHA：10f728010e1c0ce3bac4e706665817d47efd919a。\n- 指摘2件：769/800pxのホーム2列カードで年月の可視幅が不足する。透明なnative入力ではlocaleによるsegment順と日本語表示順が一致せず、編集中の場所も見えない。\n- 対応：ホームのカード列に必要幅を確保し境界幅を回帰テストする。MonthInputはfocus中に標準入力を表示し、blur時に短い日本語年月へ戻す。実クリックとArrowUpによる月・年編集を検証する。\n- 承認済み範囲の不具合修正として同じ計画・Issue・Intent・PRを維持する。前SHAのレビュー2件未修正としてPRに履歴を残し、新しいcommitで再レビュー・全検証を行う。\n",
+      "planHash": "d1a53008885036c5b128c84e961f59a87d3a4579365f505516fa69ffddb1c3a5"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-11-09T17:46:56.834Z",
+      "note": "# 別Agentレビュー2件の対応確定\n\n- 前レビューSHA：10f728010e1c0ce3bac4e706665817d47efd919a。指摘2件、対応2件、不採用0件、未解決0件として再レビューへ進む。\n- P2-1：ホームの2列固定を、カードごとの最小必要幅19remを持つauto-fitへ変更した。親幅に応じて1列となり、769/800pxのPCレイアウトでも年月を切らない。kpi-gridの利用箇所はホームのみである。\n- P2-2：MonthInputは非編集時に短い日本語年月、focus中は標準入力を表示する。segment/caretの実際の編集位置を見せ、blur時に確定した日本語年月へ戻す。44pxの枠・周囲の配置は変えない。非対応text入力は常時表示を維持する。\n- 回帰検証：実app-mainのcontent幅を再現した769/800pxを含む集計・収支テスト61/61件成功（93.548秒）。MonthInputはChromium/WebKit × 390/320/1440pxの9/9件成功・skip0（9.45秒）。英語localeで初回クリック、月・年のArrowUp、年の直接入力、blur後の表示を検証した。\n- 自己レビュー：選択中の年がnative表示で見える画像を確認した。狭い枠ではnativeが編集segmentへ横スクロールする標準動作を維持する。非編集時の年月全文表示と、編集中の選択位置表示を区別し、業務状態・検証規則は変更しない。\n- 作業中fixture QA：Chromium/WebKit × 元の両画面1440/390/320pxに、ホームの実app-main 769/800pxと英語locale PC両画面を加えた20/20条件が成功。44px・8px・同じ行、文字全文、focus/blurを確認した。実行中の実装ファイルhash一致を確認し、dirty worktreeの補助証拠として最終SHAの結果とは区別する。\n- 対象lint・型チェック・文書検査14ファイル成功。基本・詳細設計はfocus/blurとカードの必要幅、追加テストへ更新した。\n- 未完了：新commitの別Agent再レビュー、現在SHAでの所定全チェック・実Cake QA・CI・正式Preview QA・Ready。実iPhone/UIKitとOS picker内部は未確認。\n",
+      "planHash": "d1a53008885036c5b128c84e961f59a87d3a4579365f505516fa69ffddb1c3a5"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-11-09T17:46:57.408Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "d1a53008885036c5b128c84e961f59a87d3a4579365f505516fa69ffddb1c3a5"
     }

@@ -1,19 +1,27 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { build } from "esbuild";
 import { chromium, webkit, type Locator } from "playwright";
 
-async function assertMonth(input: Locator, month: string, label: string, nativeMonth: boolean) {
+async function assertValue(input: Locator, month: string) {
   const page = input.page();
   await page.waitForFunction(expected => document.querySelector("output")?.textContent === expected, month);
   assert.equal(await input.inputValue(), month, "入力値とReactの選択月を同期する");
+}
+
+async function assertMonth(input: Locator, month: string, label: string, nativeMonth: boolean) {
+  await assertValue(input, month);
   if (!nativeMonth) return;
+  await input.blur();
+  const page = input.page();
   const visible = page.locator(".month-input-value");
   assert.equal(await visible.textContent(), label);
+  assert.equal(await visible.evaluate(element => getComputedStyle(element).visibility), "visible", "blur後は確定した日本語の年月を表示する");
+  assert.equal(await input.evaluate(element => getComputedStyle(element).opacity), "0");
   const layout = await visible.evaluate(element => {
     const range = document.createRange();
     range.selectNodeContents(element);
@@ -29,6 +37,17 @@ async function assertMonth(input: Locator, month: string, label: string, nativeM
   assert.equal(layout.width, 98);
   assert.equal(layout.fits, true, "98pxの枠でも日本語の年月全体を表示する");
   assert.equal(layout.weight, "400", "親ラベルの太字を年月へ継承しない");
+}
+
+async function assertEditing(input: Locator) {
+  const page = input.page(), frame = page.locator(".month-input");
+  assert.equal(await input.evaluate(element => element === document.activeElement), true);
+  assert.equal(await input.evaluate(element => getComputedStyle(element).opacity), "1", "focus中は編集するnative segmentを見せる");
+  assert.equal(await page.locator(".month-input-value").evaluate(element => getComputedStyle(element).visibility), "hidden", "編集中に日本語表示とnative表示を重ねない");
+  const bounds = (await frame.boundingBox())!;
+  assert.equal(bounds.width, 98);
+  assert.equal(bounds.height, 44, "focus中も枠の高さを変えない");
+  assert.deepEqual(await input.boundingBox(), bounds, "focus中も入力は可視枠全体を覆う");
 }
 
 test("年月入力はChromiumとWebKitで44pxの枠・操作・値同期を保つ", async t => {
@@ -63,10 +82,10 @@ test("年月入力はChromiumとWebKitで44pxの枠・操作・値同期を保�
         // 起動失敗は実行環境の不備として失敗させ、skipへ置き換えない。
         const browser = await engine.launch({ headless: true, ...(override ? { executablePath: override } : {}) });
         try {
-          for (const width of engine === webkit ? [390, 320, 1440] : [390, 320]) await t.test(`${width}px`, async () => {
+          for (const width of [390, 320, 1440]) await t.test(`${width}px`, async () => {
             const mobile = width < 768;
             const context = await browser.newContext({ viewport: { width, height: 844 }, isMobile: mobile, hasTouch: mobile,
-              reducedMotion: "reduce", serviceWorkers: "block" });
+              locale: "en-US", reducedMotion: "reduce", serviceWorkers: "block" });
             const page = await context.newPage(), errors: string[] = [];
             page.setDefaultTimeout(10000);
             page.on("pageerror", error => errors.push(error.message));
@@ -84,7 +103,7 @@ test("年月入力はChromiumとWebKitで44pxの枠・操作・値同期を保�
               });
               const nativeMonth = await input.evaluate(element => (element as HTMLInputElement).type === "month");
               // LinuxのWebKitはUIKit実機ではない。mobileのmonth操作面とdesktopのtext fallbackを区別する。
-              assert.equal(nativeMonth, mobile, "mobileはnative month、desktop WebKitは通常のtext入力を使う");
+              assert.equal(nativeMonth, engine === chromium || mobile, "Chromiumとmobile WebKitはnative month、desktop WebKitは通常のtext入力を使う");
               await page.waitForFunction(expected => document.querySelector(".month-input")?.getAttribute("data-native-month") === String(expected), nativeMonth);
               assert.equal(await input.getAttribute("min"), "0001-06");
               assert.equal(await input.getAttribute("max"), "2026-11");
@@ -95,13 +114,34 @@ test("年月入力はChromiumとWebKitで44pxの枠・操作・値同期を保�
               assert.equal(await page.locator(".month-input-value").evaluate(element => getComputedStyle(element).visibility), nativeMonth ? "visible" : "hidden");
               await assertMonth(input, "2026-11", "2026年11月", nativeMonth);
 
+              if (engine === chromium && !mobile) {
+                await input.fill("2025-09");
+                await assertMonth(input, "2025-09", "2025年9月", true);
+                // en-USの編集順は月→年。日本語の年があった場所でも、focus後には実際の編集segmentを見せる。
+                await input.click({ position: { x: 15, y: 22 } });
+                await assertEditing(input);
+                await input.press("ArrowUp");
+                await assertValue(input, "2025-10");
+                await input.press("ArrowRight");
+                await input.press("ArrowUp");
+                await assertValue(input, "2026-10");
+                await mkdir(".cake/output/playwright", { recursive: true });
+                await frame.screenshot({ path: ".cake/output/playwright/month-input-focus-en-us-98px.png", animations: "disabled" });
+                await input.pressSequentially("2024");
+                await assertValue(input, "2024-10");
+                await assertEditing(input);
+                await assertMonth(input, "2024-10", "2024年10月", true);
+                await page.getByRole("button", { name: "今月", exact: true }).click();
+                await assertMonth(input, "2026-11", "2026年11月", true);
+              }
+
               await page.getByTestId("month-label").click();
               assert.equal(await input.evaluate(element => element === document.activeElement), true, "ラベル操作で入力をfocusする");
               await input.click();
               assert.equal(await input.evaluate(element => element === document.activeElement), true, "可視枠の上からnative入力を操作できる");
               await page.getByRole("button", { name: "入力の前", exact: true }).focus();
               await page.keyboard.press("Tab");
-              assert.equal(await input.evaluate(element => element === document.activeElement), true, "透明な操作面へキーボードでも移動できる");
+              await assertEditing(input);
               assert.equal(await frame.evaluate(element => {
                 const style = getComputedStyle(element);
                 return style.outlineStyle !== "none" && parseFloat(style.outlineWidth) >= 2;
