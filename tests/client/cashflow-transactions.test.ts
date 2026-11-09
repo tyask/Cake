@@ -13,6 +13,18 @@ async function assertMoney(locator: Locator, text: string, color: string) {
   assert.equal(await locator.evaluate(element => getComputedStyle(element).color), color);
 }
 
+async function assertMonthLabel(navigation: Locator, month: string) {
+  const value = navigation.locator(".month-input-value");
+  assert.equal(await value.textContent(), `${Number(month.slice(0, 4))}年${Number(month.slice(5))}月`);
+  const fits = await value.evaluate(element => {
+    const range = document.createRange(); range.selectNodeContents(element);
+    const text = range.getBoundingClientRect(), frame = element.getBoundingClientRect();
+    return element.scrollWidth <= element.clientWidth && text.left >= frame.left && text.right <= frame.right
+      && text.top >= frame.top && text.bottom <= frame.bottom;
+  });
+  assert.equal(fits, true, "ホームの日本語年月を省略・切り取りせず枠内に表示する");
+}
+
 async function waitHome(page: Page) {
   await page.waitForFunction(() => document.querySelector("#home .home-month-summary")?.getAttribute("aria-busy") === "false");
 }
@@ -160,14 +172,16 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         });
         const navigation = home.getByRole("group", { name: "収支の対象月", exact: true });
         const inputBox = (await monthInput.boundingBox())!;
-        const previousBox = (await previousMonth.boundingBox())!, nextBox = (await nextMonth.boundingBox())!;
-        for (const box of [inputBox, previousBox, nextBox]) {
-          assert.ok(Math.abs(box.height - 44) < .5, "実フォント使用時もホームの年月入力と矢印の高さを44pxに揃える");
+        const previousBox = (await previousMonth.boundingBox())!, nextBox = (await nextMonth.boundingBox())!, resetBox = (await resetMonth.boundingBox())!;
+        for (const box of [inputBox, previousBox, nextBox, resetBox]) {
+          assert.ok(Math.abs(box.height - 44) < .5, "実フォント使用時もホームの年月入力と月ボタンの高さを44pxに揃える");
           assert.ok(Math.abs(box.y - inputBox.y) < .5 && Math.abs(box.y + box.height - inputBox.y - inputBox.height) < .5,
             "ホームの年月入力と左右矢印の上下端を揃える");
         }
+        for (const box of [previousBox, nextBox, resetBox]) assert.ok(Math.abs(box.width - 44) < .5, "ホームの月ボタンの幅を44pxに揃える");
         assert.ok(Math.abs(inputBox.x - previousBox.x - previousBox.width - 8) < .5, "前月ボタンと年月入力の間隔は8px");
         assert.ok(Math.abs(nextBox.x - inputBox.x - inputBox.width - 8) < .5, "年月入力と翌月ボタンの間隔は8px");
+        assert.ok(Math.abs(resetBox.x - nextBox.x - nextBox.width - 8) < .5, "ホームの今月ボタンは翌月ボタンの右8pxに同じ行で表示する");
         assert.equal(await home.getByText("左右にスワイプして月を切り替えられます。", { exact: true }).count(), 0);
         if (width < 768) {
           const bounds = (await navigation.boundingBox())!;
@@ -176,7 +190,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
             return { left: parent.getBoundingClientRect().x + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
               width: parent.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) };
           });
-          assert.ok(Math.abs(bounds.width - Math.min(248, container.width)) < .5, "スマートフォンのホーム月操作欄を最大248pxに収める");
+          assert.ok(Math.abs(bounds.width - Math.min(304, container.width)) < .5, "スマートフォンのホーム月操作欄を最大304pxに収める");
           assert.ok(Math.abs(bounds.x - container.left) < .5, "ホームの月操作欄は左寄せにする");
         }
         const settlementBefore = await home.locator(".settlement-hero").textContent();
@@ -187,6 +201,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           assert.equal(await monthInput.inputValue(), value);
           await waitHome(page);
           assert.equal(await monthlyTable.locator("caption").textContent(), caption);
+          await assertMonthLabel(navigation, value);
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true,
             "年月操作欄と収支表を画面幅に収める");
         }
@@ -223,6 +238,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         assert.equal(await previousMonth.isDisabled(), true, "最小年月から前へ進めない");
         await monthInput.fill("9999-12");
         assert.equal(await nextMonth.isDisabled(), true, "最大年月から次へ進めない");
+        await assertMonthLabel(navigation, "9999-12");
         await resetMonth.click();
         await assertMonth("2026-10", "2026年10月の収支");
         if (width < 768) {

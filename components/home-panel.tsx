@@ -7,6 +7,7 @@ import { addMonths } from "@/lib/shared/recurring-payment-calendar";
 import type { RunAppAction } from "@/lib/shared/schemas/app-input";
 import type { DashboardTab as Tab, WorkspaceMetadata } from "@/lib/shared/types";
 import { useHomeData } from "./use-home-data";
+import { MonthInput } from "./month-input";
 
 export function HomePanel({ selected, pending, setTab, add, run, refreshAction, refreshing, revision = 0, suspended = false, registerRefresh }: {
   selected: WorkspaceMetadata; userId: string; pending: number; setTab: (tab: Tab) => void; add: () => void;
@@ -71,7 +72,7 @@ export function HomePanel({ selected, pending, setTab, add, run, refreshAction, 
       <article className="kpi home-month-summary" aria-busy={loading || suspended} onTouchStart={touchStart} onTouchMove={touchMove} onTouchEnd={touchEnd} onTouchCancel={() => { swipe.current = null; }}>
         <div className="home-month-navigation" role="group" aria-label="収支の対象月">
           <button type="button" className="secondary" aria-label="前の月" disabled={selectedMonth === "0001-01"} onClick={() => changeMonth(-1)}>‹</button>
-          <label className="home-month-field">対象年月<input type="month" aria-label="収支の対象年月" min="0001-01" max="9999-12" required value={selectedMonth} onChange={event => {
+          <label className="home-month-field">対象年月<MonthInput aria-label="収支の対象年月" min="0001-01" max="9999-12" required value={selectedMonth} onChange={event => {
             if (isHomeMonth(event.target.value)) setSelectedMonth(event.target.value);
           }} /></label>
           <button type="button" className="secondary" aria-label="次の月" disabled={selectedMonth === "9999-12"} onClick={() => changeMonth(1)}>›</button>

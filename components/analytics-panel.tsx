@@ -8,6 +8,7 @@ import { addMonths } from "@/lib/shared/recurring-payment-calendar";
 import type { ExpenseClass } from "@/lib/shared/types";
 import { PageHeading } from "./dashboard-ui";
 import { AnalyticsCategoryFilter } from "./analytics-category-filter";
+import { MonthInput } from "./month-input";
 import { AnalyticsTransactionsDialog } from "./analytics-transactions-dialog";
 import { useAnalytics } from "./use-analytics";
 import { useAnalyticsFilters } from "./use-analytics-filters";
@@ -120,7 +121,7 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
         {periodMode === "month" && <div className={styles.monthNavigation} role="group" aria-label="集計の対象月"
           onTouchStart={touchStart} onTouchMove={touchMove} onTouchEnd={touchEnd} onTouchCancel={() => { swipe.current = null; }}>
           <button type="button" className="secondary" aria-label="前の月" disabled={navigationMonth <= minimumMonth} onClick={() => changeMonth(-1)}>‹</button>
-          <label className={styles.field}>集計する月<input type="month" min={minimumMonth} max={currentMonth} required value={draftMonth}
+          <label className={styles.field}>集計する月<MonthInput aria-label="集計する月" min={minimumMonth} max={currentMonth} required value={draftMonth}
             onChange={event => selectMonth(event.target.value)} /></label>
           <button type="button" className="secondary" aria-label="次の月" disabled={navigationMonth >= currentMonth} onClick={() => changeMonth(1)}>›</button>
           <button type="button" className={`secondary ${styles.currentMonth}`} aria-label="今月に戻る" disabled={draftMonth === currentMonth}
