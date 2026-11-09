@@ -125,7 +125,6 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
           <button type="button" className="secondary" aria-label="次の月" disabled={navigationMonth >= currentMonth} onClick={() => changeMonth(1)}>›</button>
           <button type="button" className={`secondary ${styles.currentMonth}`} aria-label="今月に戻る" disabled={draftMonth === currentMonth}
             onClick={() => selectMonth(analyticsToday().slice(0, 7))}>今月</button>
-          <p className={styles.monthHint}>左右にスワイプして月を切り替えられます。</p>
         </div>}
       </div>
       <label className={styles.field}>カテゴリの細かさ<select aria-label="カテゴリの細かさ" value={depth} onChange={event => {

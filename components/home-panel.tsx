@@ -88,7 +88,6 @@ export function HomePanel({ selected, pending, setTab, add, run, refreshAction, 
         </table>
         {loading && <p className="section-note" role="status">収支を読み込んでいます。</p>}
         <p className="section-note">各ユーザーの個人収支と、共有の収支を配分した金額です。清算済み・対象月の未来日付を含みます。</p>
-        <p className="section-note home-month-hint">左右にスワイプして月を切り替えられます。</p>
       </article>
       <section className="settlement-hero">
         <span>次の清算</span>

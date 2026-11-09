@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { build } from "esbuild";
 import { chromium, type Locator, type Page, type Route } from "playwright";
 import { resolveAnalyticsPeriods, type AnalyticsDataset, type AnalyticsQuery } from "../../lib/shared/analytics";
@@ -14,11 +14,13 @@ const workspaceId = "11111111-1111-4111-8111-111111111111";
 const otherWorkspaceId = "22222222-2222-4222-8222-222222222222";
 const now = new Date("2026-10-23T02:00:00Z");
 
-async function swipeMonth(page: Page, target: Locator, dx: number, dy = 0, cancel = false, multiple = false) {
+async function swipeMonth(page: Page, target: Locator, dx: number, dy = 0, cancel = false, multiple = false, startRow?: Locator) {
   await target.scrollIntoViewIfNeeded();
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   const box = (await target.boundingBox())!;
-  const x = box.x + box.width * (dx > 0 ? .25 : .75), y = box.y + box.height / 2;
+  const row = startRow ? (await startRow.boundingBox())! : box;
+  const horizontalPosition = startRow ? (dx > 0 ? .15 : .55) : (dx > 0 ? .25 : .75);
+  const x = box.x + box.width * horizontalPosition, y = row.y + row.height / 2;
   const session = await page.context().newCDPSession(page);
   const points = (offsetX: number, offsetY: number) => [
     { x: x + offsetX, y: y + offsetY, id: 0 },
@@ -93,11 +95,18 @@ function detailTransactions(): TransactionRecord[] {
 test("集計は保存条件を復元し、ユーザー・共有費・個人費・収入をローカルで切り替え、期間と取得世代だけをAPIへ送る", async t => {
   const bundle = await build({ entryPoints: ["tests/client/fixtures/analytics.tsx"], bundle: true, write: false,
     outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
+  const fonts = new Map<string, Buffer>(await Promise.all([400, 800].map(async weight => [
+    `/fonts/cake-${weight}.woff2`, await readFile(new URL(`../../public/fonts/m-plus-rounded-1c/m-plus-rounded-1c-${weight}.woff2`, import.meta.url)),
+  ] as const)));
+  const fontCss = [400, 800].map(weight => `@font-face{font-family:"Cake fixture";src:url("/fonts/cake-${weight}.woff2") format("woff2");font-weight:${weight};font-style:normal;font-display:block;}`).join("")
+    + ':root{--font-cake:"Cake fixture";}';
   const server = createServer((req, res) => {
+    const font = fonts.get(req.url ?? "");
+    if (font) { res.setHeader("Content-Type", "font/woff2"); res.end(font); return; }
     const extension = req.url === "/bundle.css" ? "css" : "js";
     const output = bundle.outputFiles.find(file => file.path.endsWith(`/bundle.${extension}`));
     res.setHeader("Content-Type", req.url === "/bundle.js" ? "application/javascript" : req.url === "/bundle.css" ? "text/css" : "text/html");
-    res.end(req.url?.startsWith("/bundle.") ? output!.text : '<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>');
+    res.end(req.url?.startsWith("/bundle.") ? output!.text : `<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/bundle.css"><style>${fontCss}</style></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>`);
   });
   await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -136,6 +145,10 @@ test("集計は保存条件を復元し、ユーザー・共有費・個人費�
     }, { workspaceId, active: initialActive, currentUserId, stored, storageKeys, storageUnavailable });
     await page.goto(origin);
     await page.waitForFunction(() => !!window.updateAnalytics);
+    await page.evaluate(async () => {
+      await Promise.all([document.fonts.load('400 16px "Cake fixture"'), document.fonts.load('800 24px "Cake fixture"')]);
+      await document.fonts.ready;
+    });
     async function take() {
       for (let index = 0; !requests.length && index < 200; index++) await new Promise(done => setTimeout(done, 5));
       assert.ok(requests.length, "集計APIの呼び出しを待つ");
@@ -205,7 +218,32 @@ test("集計は保存条件を復元し、ユーザー・共有費・個人費�
         assert.equal(await reset.isDisabled(), true);
         assert.equal(await f.page.getByRole("alert").count(), 0, "月ボタンから不正入力を復帰できる");
         assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+        await f.page.evaluate(() => document.fonts.ready);
         const bounds = (await navigation.boundingBox())!;
+        const inputBox = (await input.boundingBox())!;
+        const previousBox = (await previous.boundingBox())!, nextBox = (await next.boundingBox())!;
+        for (const box of [inputBox, previousBox, nextBox]) {
+          assert.ok(Math.abs(box.height - 44) < .5, "実フォント使用時も年月入力と矢印の高さを44pxに揃える");
+          assert.ok(Math.abs(box.y - inputBox.y) < .5 && Math.abs(box.y + box.height - inputBox.y - inputBox.height) < .5,
+            "年月入力と左右矢印の上下端を揃える");
+        }
+        assert.ok(Math.abs(inputBox.x - previousBox.x - previousBox.width - 8) < .5, "前月ボタンと年月入力の間隔は8px");
+        assert.ok(Math.abs(nextBox.x - inputBox.x - inputBox.width - 8) < .5, "年月入力と翌月ボタンの間隔は8px");
+        assert.equal(await f.page.getByText("左右にスワイプして月を切り替えられます。", { exact: true }).count(), 0);
+        if (width <= 768) {
+          const container = await navigation.evaluate(element => {
+            const parent = element.parentElement!, style = getComputedStyle(parent);
+            return { left: parent.getBoundingClientRect().x + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+              width: parent.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) };
+          });
+          assert.ok(Math.abs(bounds.width - Math.min(248, container.width)) < .5, "スマートフォンの月操作欄を最大248pxの幅に収める");
+          assert.ok(Math.abs(bounds.x - container.left) < .5, "月操作欄は左寄せにする");
+        } else {
+          const periodBox = (await f.page.getByLabel("集計する期間", { exact: true }).boundingBox())!;
+          assert.ok(Math.abs(periodBox.height - 44) < .5 && Math.abs(periodBox.y - inputBox.y) < .5
+            && Math.abs(periodBox.y + periodBox.height - inputBox.y - inputBox.height) < .5,
+          "PCでは期間選択と年月入力の高さ・上下位置を揃える");
+        }
         for (const button of await navigation.getByRole("button").all()) {
           const box = (await button.boundingBox())!;
           assert.ok(box.width >= 44 && box.height >= 44, "月ボタンの操作領域を確保する");
@@ -233,21 +271,22 @@ test("集計は保存条件を復元し、ユーザー・共有費・個人費�
         await f.reply(await f.take()); await f.total("−￥80");
         const navigation = f.page.getByRole("group", { name: "集計の対象月", exact: true });
         const input = navigation.getByLabel("集計する月", { exact: true });
-        const hint = navigation.locator("p").first();
-        await swipeMonth(f.page, hint, 80);
+        const reset = navigation.getByRole("button", { name: "今月に戻る", exact: true });
+        const swipeControls = (dx: number, dy = 0, cancel = false, multiple = false) => swipeMonth(f.page, navigation, dx, dy, cancel, multiple, reset);
+        await swipeControls(80);
         const previous = await f.take();
         assert.deepEqual(queryFromRoute(previous), { workspaceId, period: "month", month: "2026-09" });
         await f.reply(previous); await f.total("−￥80");
-        await swipeMonth(f.page, hint, -80);
+        await swipeControls(-80);
         const current = await f.take();
         assert.deepEqual(queryFromRoute(current), { workspaceId, period: "month", month: "2026-10" });
         await f.reply(current); await f.total("−￥80");
         const count = f.urls.length;
-        await swipeMonth(f.page, hint, -80);
-        await swipeMonth(f.page, hint, 25);
-        await swipeMonth(f.page, hint, 60, -120);
-        await swipeMonth(f.page, hint, 80, 0, true);
-        await swipeMonth(f.page, hint, 80, 0, false, true);
+        await swipeControls(-80);
+        await swipeControls(25);
+        await swipeControls(60, -120);
+        await swipeControls(80, 0, true);
+        await swipeControls(80, 0, false, true);
         await swipeMonth(f.page, input, 80, 0, true);
         await swipeMonth(f.page, f.page.getByRole("heading", { name: "月ごとの収入・支出・収支", exact: true }), 80);
         await f.stable();

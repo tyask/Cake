@@ -5,12 +5,12 @@ Cake運用層の進捗表示。公式AI-DLCエンジンのstate/receiptではな
 
 - 関連Issue：https://github.com/tyask/Cake/issues/174
 - Intent：`aidlc/spaces/default/intents/261109-analytics-month-navigation`
-- 承認済み計画SHA-256：`12ad84b6f1aa89834ebb452c19df029dff1197d7ee29ad3ef0c7a29b9876dec0`
+- 承認済み計画SHA-256：`d1a53008885036c5b128c84e961f59a87d3a4579365f505516fa69ffddb1c3a5`
 - Primary branch：`codex/analytics-month-navigation`
 - Branches：`codex/analytics-month-navigation`
 - Phase：Construction
 - Status：frozen
-- 記録更新日時：2026-11-09T12:29:19.808Z
+- 記録更新日時：2026-11-09T16:06:32.427Z
 - 計画承認：記録あり（対象計画のhash一致はCLIで検査）
 - 記録凍結：済み。以後の検証・Ready・Operation結果はIssue/PR/Actionsに保存する。
 

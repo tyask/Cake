@@ -4,11 +4,11 @@
 .conditions { position: static; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1.1rem 1.5rem; padding: 1.1rem 1.25rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--paper); }
 .periodGroup { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .65rem; }
 .monthNavigation { display: grid; grid-template-columns: 2.75rem minmax(9rem,1fr) 2.75rem auto; align-items: end; gap: .5rem; min-width: 0; touch-action: pan-y pinch-zoom; }
-.monthNavigation > button { min-width: 2.75rem; min-height: 2.75rem; padding: .4rem; font-size: 1.5rem; }
+.monthNavigation > button { display: grid; place-items: center; min-width: 2.75rem; height: 2.75rem; min-height: 2.75rem; padding: .4rem; font-size: 1.5rem; line-height: 1; }
 .monthNavigation > .currentMonth { padding: .4rem .85rem; font-size: .75rem; }
-.monthHint { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: .62rem; line-height: 1.8; }
 .field { display: flex; flex-direction: column; gap: .45rem; min-width: 0; color: var(--muted); font-size: .67rem; }
 .field input,.field select { min-height: 2.75rem; max-width: 100%; min-width: 0; padding: .5rem .65rem; border: 1px solid var(--line-strong); border-radius: .45rem; color: var(--ink); background: #fff; font-size: .75rem; }
+.periodGroup .field input,.periodGroup .field select { height: 2.75rem; }
 .checkGroup { min-width: 0; max-width: 100%; margin: 0; padding: 0; border: 0; }
 .checkGroup legend { padding: 0; margin-bottom: .35rem; color: var(--muted); font-size: .67rem; }
 .checks { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1rem; min-height: 2.75rem; }
@@ -106,7 +106,7 @@
 @media (max-width: 48rem) {
   .conditions { position: static; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: 1rem .7rem; padding: .9rem; }
   .periodGroup { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr); gap: .7rem; }
-  .monthNavigation { grid-template-columns: 2.75rem minmax(0,1fr) 2.75rem; }
+  .monthNavigation { width: min(100%,15.5rem); grid-template-columns: 2.75rem minmax(0,1fr) 2.75rem; }
   .monthNavigation > .currentMonth { grid-column: 1 / -1; justify-self: end; }
   .conditions > .field { grid-column: 1 / -1; }
   .field input,.field select { width: 100%; }

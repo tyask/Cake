@@ -100,11 +100,10 @@ code { padding: .12rem .35rem; border-radius: .3rem; background: var(--surface-m
 .home-month-summary { min-width: 0; touch-action: pan-y pinch-zoom; }
 .home-summary-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: .9rem; }
 .home-month-navigation { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: end; gap: .5rem; margin-bottom: 1rem; }
-.home-month-navigation > button { min-width: 44px; min-height: 44px; padding: .4rem; font-size: 1.5rem; }
+.home-month-navigation > button { display: grid; place-items: center; min-width: 44px; height: 44px; min-height: 44px; padding: .4rem; font-size: 1.5rem; line-height: 1; }
 .home-month-field { min-width: 0; color: var(--muted); font-size: .75rem; }
-.home-month-field input { display: block; width: 0; min-width: 100%; max-width: 100%; min-height: 44px; margin-top: .25rem; padding: .45rem; border: 1px solid var(--line-strong); border-radius: .65rem; color: var(--ink); background: var(--paper); font-size: .9rem; }
+.home-month-field input { display: block; width: 0; min-width: 100%; max-width: 100%; height: 44px; min-height: 44px; margin-top: .25rem; padding: .45rem; border: 1px solid var(--line-strong); border-radius: .65rem; color: var(--ink); background: var(--paper); font-size: .9rem; }
 .home-month-navigation > .home-month-reset { grid-column: 1 / -1; justify-self: end; padding: .4rem .85rem; font-size: .8rem; }
-.home-month-hint { margin-bottom: 0; }
 .home-summary-table caption { margin-bottom: .65rem; text-align: left; font-size: 1rem; font-weight: 700; }
 .home-summary-table th, .home-summary-table td { padding: .8rem .2rem; border-bottom: 1px solid var(--line); }
 .home-summary-table th { overflow-wrap: anywhere; color: var(--muted); text-align: left; font-size: .8rem; font-weight: 500; }
@@ -215,6 +214,7 @@ code { padding: .12rem .35rem; border-radius: .3rem; background: var(--surface-m
 }
 @media (max-width: 48rem) {
   body { background: var(--canvas); }
+  .home-month-navigation { width: min(100%,15.5rem); }
   .user-registration-form fieldset { grid-template-columns: 1fr; }
   .import-inputs { grid-template-columns: minmax(0, 1fr); }
   .import-paste { padding: 1rem; }

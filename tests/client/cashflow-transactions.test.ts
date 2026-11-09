@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { readFile } from "node:fs/promises";
 import { build } from "esbuild";
 import { chromium, type Locator, type Page } from "playwright";
 
@@ -48,10 +49,17 @@ async function swipeMonth(page: Page, target: Locator, dx: number, dy = 0, cance
 test("収支・清算・明細の符号と色、種別編集と絞り込みをPC/mobileで検証する", async t => {
   const bundle = await build({ entryPoints: ["tests/client/fixtures/cashflow-transactions.tsx"], bundle: true, write: false,
     outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
+  const fonts = new Map<string, Buffer>(await Promise.all([400, 800].map(async weight => [
+    `/fonts/cake-${weight}.woff2`, await readFile(new URL(`../../public/fonts/m-plus-rounded-1c/m-plus-rounded-1c-${weight}.woff2`, import.meta.url)),
+  ] as const)));
+  const fontCss = [400, 800].map(weight => `@font-face{font-family:"Cake fixture";src:url("/fonts/cake-${weight}.woff2") format("woff2");font-weight:${weight};font-style:normal;font-display:block;}`).join("")
+    + ':root{--font-cake:"Cake fixture";}';
   const server = createServer((req, res) => {
+    const font = fonts.get(req.url ?? "");
+    if (font) { res.setHeader("Content-Type", "font/woff2"); res.end(font); return; }
     const asset = bundle.outputFiles.find(file => file.path.endsWith(req.url === "/bundle.css" ? "/bundle.css" : "/bundle.js"));
     res.setHeader("Content-Type", req.url === "/bundle.js" ? "application/javascript" : req.url === "/bundle.css" ? "text/css" : "text/html");
-    res.end(req.url?.startsWith("/bundle.") ? asset!.text : '<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>');
+    res.end(req.url?.startsWith("/bundle.") ? asset!.text : `<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/bundle.css"><style>${fontCss}</style></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>`);
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -146,6 +154,31 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         const previousMonth = home.getByRole("button", { name: "前の月", exact: true });
         const nextMonth = home.getByRole("button", { name: "次の月", exact: true });
         const resetMonth = home.getByRole("button", { name: "今月に戻る", exact: true });
+        await page.evaluate(async () => {
+          await Promise.all([document.fonts.load('400 16px "Cake fixture"'), document.fonts.load('800 24px "Cake fixture"')]);
+          await document.fonts.ready;
+        });
+        const navigation = home.getByRole("group", { name: "収支の対象月", exact: true });
+        const inputBox = (await monthInput.boundingBox())!;
+        const previousBox = (await previousMonth.boundingBox())!, nextBox = (await nextMonth.boundingBox())!;
+        for (const box of [inputBox, previousBox, nextBox]) {
+          assert.ok(Math.abs(box.height - 44) < .5, "実フォント使用時もホームの年月入力と矢印の高さを44pxに揃える");
+          assert.ok(Math.abs(box.y - inputBox.y) < .5 && Math.abs(box.y + box.height - inputBox.y - inputBox.height) < .5,
+            "ホームの年月入力と左右矢印の上下端を揃える");
+        }
+        assert.ok(Math.abs(inputBox.x - previousBox.x - previousBox.width - 8) < .5, "前月ボタンと年月入力の間隔は8px");
+        assert.ok(Math.abs(nextBox.x - inputBox.x - inputBox.width - 8) < .5, "年月入力と翌月ボタンの間隔は8px");
+        assert.equal(await home.getByText("左右にスワイプして月を切り替えられます。", { exact: true }).count(), 0);
+        if (width < 768) {
+          const bounds = (await navigation.boundingBox())!;
+          const container = await navigation.evaluate(element => {
+            const parent = element.parentElement!, style = getComputedStyle(parent);
+            return { left: parent.getBoundingClientRect().x + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+              width: parent.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) };
+          });
+          assert.ok(Math.abs(bounds.width - Math.min(248, container.width)) < .5, "スマートフォンのホーム月操作欄を最大248pxに収める");
+          assert.ok(Math.abs(bounds.x - container.left) < .5, "ホームの月操作欄は左寄せにする");
+        }
         const settlementBefore = await home.locator(".settlement-hero").textContent();
         const allocationBefore = await allocation.textContent();
         const historyBefore = await home.locator(".history").textContent();
