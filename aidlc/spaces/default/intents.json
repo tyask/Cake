@@ -90,6 +90,15 @@
         "codex/transaction-sort-summary"
       ],
       "recordDir": "aidlc/spaces/default/intents/261029-transaction-sort-summary"
+    },
+    {
+      "id": "261109-analytics-month-navigation",
+      "issue": 174,
+      "branch": "codex/analytics-month-navigation",
+      "branches": [
+        "codex/analytics-month-navigation"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261109-analytics-month-navigation"
     }
   ]
 }
