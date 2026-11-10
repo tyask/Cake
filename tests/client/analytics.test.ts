@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { build } from "esbuild";
-import { chromium, type Route } from "playwright";
+import { chromium, type Locator, type Page, type Route } from "playwright";
 import { resolveAnalyticsPeriods, type AnalyticsDataset, type AnalyticsQuery } from "../../lib/shared/analytics";
 import { formatCashflow, formatYen } from "../../lib/shared/display-formatters";
 import type { TransactionRecord } from "../../lib/shared/types";
@@ -13,6 +13,53 @@ import { analyticsFiltersStorageKey } from "../../lib/client/analytics-filter-st
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const otherWorkspaceId = "22222222-2222-4222-8222-222222222222";
 const now = new Date("2026-10-23T02:00:00Z");
+
+async function swipeMonth(page: Page, target: Locator, dx: number, dy = 0, cancel = false, multiple = false, startAbove?: Locator) {
+  await target.scrollIntoViewIfNeeded();
+  if (startAbove) await target.evaluate(element => element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const box = (await target.boundingBox())!;
+  const anchor = startAbove ? (await startAbove.boundingBox())! : box;
+  const x = startAbove ? anchor.x + anchor.width / 2 : box.x + box.width * (dx > 0 ? .25 : .75);
+  const y = startAbove ? (box.y + anchor.y) / 2 : box.y + box.height / 2;
+  const session = await page.context().newCDPSession(page);
+  const points = (offsetX: number, offsetY: number) => [
+    { x: x + offsetX, y: y + offsetY, id: 0 },
+    ...(multiple ? [{ x: x + offsetX + 12, y: y + offsetY + (startAbove ? 0 : 12), id: 1 }] : []),
+  ];
+  try {
+    if (startAbove) {
+      const hits = await target.evaluate((element, points) => points.map(({ x, y }) => {
+        const hit = document.elementFromPoint(x, y);
+        return { x, y, valid: hit !== null && element.contains(hit) && !hit.closest("button, input, label, select, a"),
+          tag: hit?.tagName, className: hit?.className };
+      }), points(0, 0));
+      assert.equal(hits.every(hit => hit.valid), true, `ラベル行の空きからスワイプを開始し、入力やボタンを操作しない: ${JSON.stringify(hits)}`);
+    }
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: points(0, 0) });
+    for (let step = 1; step <= 6; step++) {
+      await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: points(dx * step / 6, dy * step / 6) });
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+    }
+    await session.send("Input.dispatchTouchEvent", { type: cancel ? "touchCancel" : "touchEnd", touchPoints: [] });
+  } finally { await session.detach(); }
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+}
+
+async function assertMonthLabel(navigation: Locator, month: string) {
+  await navigation.locator('input[type="month"]').blur();
+  const value = navigation.locator(".month-input-value");
+  await value.waitFor({ state: "visible" });
+  assert.equal(await value.textContent(), `${Number(month.slice(0, 4))}年${Number(month.slice(5))}月`);
+  const fits = await value.evaluate(element => {
+    const range = document.createRange(); range.selectNodeContents(element);
+    const text = range.getBoundingClientRect(), frame = element.getBoundingClientRect();
+    return element.scrollWidth <= element.clientWidth && text.left >= frame.left && text.right <= frame.right
+      && text.top >= frame.top && text.bottom <= frame.bottom;
+  });
+  assert.equal(fits, true, "日本語の年月を省略・切り取りせず枠内に表示する");
+}
+
 function dataset(query: AnalyticsQuery = { workspaceId, period: "month", month: "2026-10" }): AnalyticsDataset {
   const periods = resolveAnalyticsPeriods(query, now);
   const month = periods.current.to.slice(0, 7), previousMonth = periods.comparison.to.slice(0, 7);
@@ -71,11 +118,18 @@ function detailTransactions(): TransactionRecord[] {
 test("集計は保存条件を復元し、ユーザー・共有費・個人費・収入をローカルで切り替え、期間と取得世代だけをAPIへ送る", async t => {
   const bundle = await build({ entryPoints: ["tests/client/fixtures/analytics.tsx"], bundle: true, write: false,
     outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
+  const fonts = new Map<string, Buffer>(await Promise.all([400, 800].map(async weight => [
+    `/fonts/cake-${weight}.woff2`, await readFile(new URL(`../../public/fonts/m-plus-rounded-1c/m-plus-rounded-1c-${weight}.woff2`, import.meta.url)),
+  ] as const)));
+  const fontCss = [400, 800].map(weight => `@font-face{font-family:"Cake fixture";src:url("/fonts/cake-${weight}.woff2") format("woff2");font-weight:${weight};font-style:normal;font-display:block;}`).join("")
+    + ':root{--font-cake:"Cake fixture";}';
   const server = createServer((req, res) => {
+    const font = fonts.get(req.url ?? "");
+    if (font) { res.setHeader("Content-Type", "font/woff2"); res.end(font); return; }
     const extension = req.url === "/bundle.css" ? "css" : "js";
     const output = bundle.outputFiles.find(file => file.path.endsWith(`/bundle.${extension}`));
     res.setHeader("Content-Type", req.url === "/bundle.js" ? "application/javascript" : req.url === "/bundle.css" ? "text/css" : "text/html");
-    res.end(req.url?.startsWith("/bundle.") ? output!.text : '<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>');
+    res.end(req.url?.startsWith("/bundle.") ? output!.text : `<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/bundle.css"><style>${fontCss}</style></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>`);
   });
   await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -114,6 +168,10 @@ test("集計は保存条件を復元し、ユーザー・共有費・個人費�
     }, { workspaceId, active: initialActive, currentUserId, stored, storageKeys, storageUnavailable });
     await page.goto(origin);
     await page.waitForFunction(() => !!window.updateAnalytics);
+    await page.evaluate(async () => {
+      await Promise.all([document.fonts.load('400 16px "Cake fixture"'), document.fonts.load('800 24px "Cake fixture"')]);
+      await document.fonts.ready;
+    });
     async function take() {
       for (let index = 0; !requests.length && index < 200; index++) await new Promise(done => setTimeout(done, 5));
       assert.ok(requests.length, "集計APIの呼び出しを待つ");
@@ -148,6 +206,127 @@ test("集計は保存条件を復元し、ユーザー・共有費・個人費�
     return { context, page, requests, urls, errors, take, reply, total, stable, chartOrder, detailRequests, detailUrls, takeDetails, replyDetails };
   }
   try {
+    for (const width of [1440, 390, 320]) await t.test(`${width}px: 前後の月・年月入力・今月で集計を切り替え、境界と指定期間を維持する`, async () => {
+      const f = await fixture(width);
+      try {
+        await f.reply(await f.take()); await f.total("−￥80");
+        const navigation = f.page.getByRole("group", { name: "集計の対象月", exact: true });
+        const input = navigation.getByLabel("集計する月", { exact: true });
+        const previous = navigation.getByRole("button", { name: "前の月", exact: true });
+        const next = navigation.getByRole("button", { name: "次の月", exact: true });
+        const reset = navigation.getByRole("button", { name: "今月に戻る", exact: true });
+        async function expectMonth(month: string) {
+          const request = await f.take();
+          assert.deepEqual(queryFromRoute(request), { workspaceId, period: "month", month });
+          await f.reply(request); await f.total("−￥80");
+          assert.equal(await input.inputValue(), month);
+          await assertMonthLabel(navigation, month);
+        }
+        assert.equal(await input.inputValue(), "2026-10");
+        await assertMonthLabel(navigation, "2026-10");
+        assert.equal(await input.getAttribute("min"), "0001-06");
+        assert.equal(await input.getAttribute("max"), "2026-10");
+        assert.equal(await next.isDisabled(), true, "今月から未来月へ進めない");
+        assert.equal(await reset.isDisabled(), true);
+        await previous.focus(); await previous.press("Enter");
+        await expectMonth("2026-09");
+        await next.click(); await expectMonth("2026-10");
+        await input.fill("2026-01"); await expectMonth("2026-01");
+        await previous.click(); await expectMonth("2025-12");
+        await next.click(); await expectMonth("2026-01");
+        await input.fill("0001-06"); await expectMonth("0001-06");
+        assert.equal(await previous.isDisabled(), true, "6か月推移も西暦1年以降になる最古の月で停止する");
+        const beforeInvalid = f.urls.length;
+        await input.fill(""); await f.stable();
+        assert.equal(f.urls.length, beforeInvalid, "空の年月は適用・通信しない");
+        await next.click(); await expectMonth("0001-07");
+        await reset.click(); await expectMonth("2026-10");
+        assert.equal(await next.isDisabled(), true);
+        assert.equal(await reset.isDisabled(), true);
+        assert.equal(await f.page.getByRole("alert").count(), 0, "月ボタンから不正入力を復帰できる");
+        assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+        await f.page.evaluate(() => document.fonts.ready);
+        const bounds = (await navigation.boundingBox())!;
+        const inputBox = (await input.boundingBox())!;
+        const previousBox = (await previous.boundingBox())!, nextBox = (await next.boundingBox())!, resetBox = (await reset.boundingBox())!;
+        for (const box of [inputBox, previousBox, nextBox, resetBox]) {
+          assert.ok(Math.abs(box.height - 44) < .5, "実フォント使用時も年月入力と月ボタンの高さを44pxに揃える");
+          assert.ok(Math.abs(box.y - inputBox.y) < .5 && Math.abs(box.y + box.height - inputBox.y - inputBox.height) < .5,
+            "年月入力と左右矢印の上下端を揃える");
+        }
+        for (const box of [previousBox, nextBox, resetBox]) assert.ok(Math.abs(box.width - 44) < .5, "月ボタンの幅を44pxに揃える");
+        assert.ok(Math.abs(inputBox.x - previousBox.x - previousBox.width - 8) < .5, "前月ボタンと年月入力の間隔は8px");
+        assert.ok(Math.abs(nextBox.x - inputBox.x - inputBox.width - 8) < .5, "年月入力と翌月ボタンの間隔は8px");
+        assert.ok(Math.abs(resetBox.x - nextBox.x - nextBox.width - 8) < .5, "今月ボタンは翌月ボタンの右8pxに同じ行で表示する");
+        assert.equal(await f.page.getByText("左右にスワイプして月を切り替えられます。", { exact: true }).count(), 0);
+        if (width <= 768) {
+          const container = await navigation.evaluate(element => {
+            const parent = element.parentElement!, style = getComputedStyle(parent);
+            return { left: parent.getBoundingClientRect().x + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+              width: parent.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) };
+          });
+          assert.ok(Math.abs(bounds.width - Math.min(304, container.width)) < .5, "スマートフォンの4列の月操作欄を最大304pxの幅に収める");
+          assert.ok(Math.abs(bounds.x - container.left) < .5, "月操作欄は左寄せにする");
+        } else {
+          const periodBox = (await f.page.getByLabel("集計する期間", { exact: true }).boundingBox())!;
+          assert.ok(Math.abs(periodBox.height - 44) < .5 && Math.abs(periodBox.y - inputBox.y) < .5
+            && Math.abs(periodBox.y + periodBox.height - inputBox.y - inputBox.height) < .5,
+          "PCでは期間選択と年月入力の高さ・上下位置を揃える");
+        }
+        for (const button of await navigation.getByRole("button").all()) {
+          const box = (await button.boundingBox())!;
+          assert.ok(box.width >= 44 && box.height >= 44, "月ボタンの操作領域を確保する");
+          assert.ok(box.x >= bounds.x - 1 && box.x + box.width <= bounds.x + bounds.width + 1, "操作を月選択欄内に収める");
+        }
+        await mkdir(".cake/output/playwright", { recursive: true });
+        await navigation.screenshot({ path: `.cake/output/playwright/analytics-month-navigation-${width}.png`, animations: "disabled" });
+        await f.page.getByLabel("集計する期間", { exact: true }).selectOption("range");
+        assert.equal(await navigation.count(), 0, "指定期間では月ボタンを表示しない");
+        await f.page.getByLabel("開始日", { exact: true }).fill("2026-07-10");
+        await f.page.getByLabel("終了日", { exact: true }).fill("2026-07-20");
+        await f.stable();
+        assert.equal(f.urls.length, beforeInvalid + 2, "指定期間は適用まで通信しない");
+        await f.page.getByRole("button", { name: "この期間で表示", exact: true }).click();
+        const range = await f.take();
+        assert.deepEqual(queryFromRoute(range), { workspaceId, period: "range", from: "2026-07-10", to: "2026-07-20" });
+        await f.reply(range); await f.total("−￥80");
+        assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
+    for (const width of [390, 320]) await t.test(`${width}px: 月操作欄だけの左右スワイプで月を切り替え、縦操作と入力・グラフを妨げない`, async () => {
+      const f = await fixture(width);
+      try {
+        await f.reply(await f.take()); await f.total("−￥80");
+        const navigation = f.page.getByRole("group", { name: "集計の対象月", exact: true });
+        const input = navigation.getByLabel("集計する月", { exact: true });
+        const previousButton = navigation.getByRole("button", { name: "前の月", exact: true });
+        const reset = navigation.getByRole("button", { name: "今月に戻る", exact: true });
+        const swipeControls = (dx: number, dy = 0, cancel = false, multiple = false) => swipeMonth(f.page, navigation, dx, dy, cancel, multiple, dx > 0 ? previousButton : reset);
+        await swipeControls(80);
+        const previous = await f.take();
+        assert.deepEqual(queryFromRoute(previous), { workspaceId, period: "month", month: "2026-09" });
+        await f.reply(previous); await f.total("−￥80");
+        await swipeControls(-80);
+        const current = await f.take();
+        assert.deepEqual(queryFromRoute(current), { workspaceId, period: "month", month: "2026-10" });
+        await f.reply(current); await f.total("−￥80");
+        const count = f.urls.length;
+        await swipeControls(-80);
+        await swipeControls(25);
+        await swipeControls(60, -120);
+        await swipeControls(80, 0, true);
+        await swipeControls(80, 0, false, true);
+        await swipeMonth(f.page, input, 80, 0, true);
+        await swipeMonth(f.page, f.page.getByRole("heading", { name: "月ごとの収入・支出・収支", exact: true }), 80);
+        await f.stable();
+        assert.equal(f.urls.length, count, "未来月・短距離・縦移動・中断・複数指・入力・グラフから月を変えない");
+        assert.equal(await input.inputValue(), "2026-10");
+        assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+        assert.deepEqual(f.errors, []);
+      } finally { await f.context.close(); }
+    });
+
     await t.test("別タブの保存変更を復元し、表示条件・巨大な階層値は通信せず確定期間だけ再取得する", async () => {
       const f = await fixture(1440, true, "a", null);
       try {
@@ -226,7 +405,7 @@ test("集計は保存条件を復元し、ユーザー・共有費・個人費�
           await f.page.getByRole("group", { name: "集計に含めるカテゴリ", exact: true }).getByRole("checkbox", { name: "食費 › スーパー", exact: true }).check();
           await f.total("−￥40");
           assert.equal(f.urls.length, 1, "表示フィルタの保存で追加通信しない");
-          await f.page.getByLabel("集計する月", { exact: true }).fill("2026-09");
+          await f.page.getByRole("group", { name: "集計の対象月", exact: true }).getByRole("button", { name: "前の月", exact: true }).click();
           await f.reply(await f.take()); await f.total("−￥40");
           await f.page.reload();
           const restored = await f.take();
@@ -1126,9 +1305,12 @@ test("集計は保存条件を復元し、ユーザー・共有費・個人費�
       try {
         await f.stable(); assert.equal(f.urls.length, 0, "未訪問の画面は取得しない");
         await f.page.evaluate(() => window.updateAnalytics({ active: true })); await f.reply(await f.take()); await f.total("−￥80");
-        await f.page.getByLabel("集計する月", { exact: true }).fill("2026-09"); const older = await f.take();
+        const previous = f.page.getByRole("group", { name: "集計の対象月", exact: true }).getByRole("button", { name: "前の月", exact: true });
+        await previous.click(); const older = await f.take();
+        assert.deepEqual(queryFromRoute(older), { workspaceId, period: "month", month: "2026-09" });
         assert.equal(await f.page.getByTestId("analytics-total").count(), 0, "別期間の古いグラフを表示しない");
-        await f.page.getByLabel("集計する月", { exact: true }).fill("2026-08"); const newer = await f.take();
+        await previous.click(); const newer = await f.take();
+        assert.deepEqual(queryFromRoute(newer), { workspaceId, period: "month", month: "2026-08" });
         const latest = dataset(queryFromRoute(newer)); latest.buckets[0].burdenYen = "560";
         await f.reply(newer, latest); await f.total("−￥580");
         await f.reply(older); await f.stable(); await f.total("−￥580");

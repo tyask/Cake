@@ -7,6 +7,7 @@ import { addMonths } from "@/lib/shared/recurring-payment-calendar";
 import type { RunAppAction } from "@/lib/shared/schemas/app-input";
 import type { DashboardTab as Tab, WorkspaceMetadata } from "@/lib/shared/types";
 import { useHomeData } from "./use-home-data";
+import { MonthInput } from "./month-input";
 
 export function HomePanel({ selected, pending, setTab, add, run, refreshAction, refreshing, revision = 0, suspended = false, registerRefresh }: {
   selected: WorkspaceMetadata; userId: string; pending: number; setTab: (tab: Tab) => void; add: () => void;
@@ -71,7 +72,7 @@ export function HomePanel({ selected, pending, setTab, add, run, refreshAction, 
       <article className="kpi home-month-summary" aria-busy={loading || suspended} onTouchStart={touchStart} onTouchMove={touchMove} onTouchEnd={touchEnd} onTouchCancel={() => { swipe.current = null; }}>
         <div className="home-month-navigation" role="group" aria-label="収支の対象月">
           <button type="button" className="secondary" aria-label="前の月" disabled={selectedMonth === "0001-01"} onClick={() => changeMonth(-1)}>‹</button>
-          <label className="home-month-field">対象年月<input type="month" aria-label="収支の対象年月" min="0001-01" max="9999-12" required value={selectedMonth} onChange={event => {
+          <label className="home-month-field">対象年月<MonthInput aria-label="収支の対象年月" min="0001-01" max="9999-12" required value={selectedMonth} onChange={event => {
             if (isHomeMonth(event.target.value)) setSelectedMonth(event.target.value);
           }} /></label>
           <button type="button" className="secondary" aria-label="次の月" disabled={selectedMonth === "9999-12"} onClick={() => changeMonth(1)}>›</button>
@@ -88,7 +89,6 @@ export function HomePanel({ selected, pending, setTab, add, run, refreshAction, 
         </table>
         {loading && <p className="section-note" role="status">収支を読み込んでいます。</p>}
         <p className="section-note">各ユーザーの個人収支と、共有の収支を配分した金額です。清算済み・対象月の未来日付を含みます。</p>
-        <p className="section-note home-month-hint">左右にスワイプして月を切り替えられます。</p>
       </article>
       <section className="settlement-hero">
         <span>次の清算</span>

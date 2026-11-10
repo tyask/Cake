@@ -1,18 +1,21 @@
 "use client";
 
-import { lazy, Suspense, useMemo, useState } from "react";
-import { analyticsQuerySchema, analyticsToday, type AnalyticsDataset, type AnalyticsQuery, type AnalyticsRange, type AnalyticsRow, type AnalyticsView } from "@/lib/shared/analytics";
+import { lazy, Suspense, useMemo, useRef, useState, type TouchEvent } from "react";
+import { ANALYTICS_TREND_MONTHS, analyticsQuerySchema, analyticsToday, type AnalyticsDataset, type AnalyticsQuery, type AnalyticsRange, type AnalyticsRow, type AnalyticsView } from "@/lib/shared/analytics";
 import { ANALYTICS_UNCLASSIFIED_ID, buildAnalyticsView, prepareAnalyticsDataset } from "@/lib/shared/analytics-view";
 import { cashflowClass, formatCashflow, formatYen, formatJstDateTime } from "@/lib/shared/display-formatters";
+import { addMonths } from "@/lib/shared/recurring-payment-calendar";
 import type { ExpenseClass } from "@/lib/shared/types";
 import { PageHeading } from "./dashboard-ui";
 import { AnalyticsCategoryFilter } from "./analytics-category-filter";
+import { MonthInput } from "./month-input";
 import { AnalyticsTransactionsDialog } from "./analytics-transactions-dialog";
 import { useAnalytics } from "./use-analytics";
 import { useAnalyticsFilters } from "./use-analytics-filters";
 import styles from "./analytics-panel.module.css";
 
 const AnalyticsCharts = lazy(() => import("./analytics-charts"));
+const minimumMonth = `0001-${String(ANALYTICS_TREND_MONTHS).padStart(2, "0")}`;
 
 export function analyticsRangeLabel(range: AnalyticsRange) {
   return `${range.from.replaceAll("-", "/")} ～ ${range.to.replaceAll("-", "/")}`;
@@ -33,6 +36,9 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
   const [periodError, setPeriodError] = useState<string | null>(null);
   const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
   const [details, setDetails] = useState<{ row: AnalyticsRow; data: AnalyticsDataset; view: AnalyticsView } | null>(null);
+  const swipe = useRef<{ x: number; y: number; periodKey: string; axis: "horizontal" | "vertical" | null } | null>(null);
+  // Navigation always starts from a committed month, even while the input is incomplete.
+  const navigationMonth = query.period === "month" ? query.month : currentMonth;
   // Restore committed dates after hydration or another tab's update, keeping drafts local.
   if (previousPeriodKey !== periodKey) {
     setPreviousPeriodKey(periodKey);
@@ -70,6 +76,37 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
     setFilters(current => ({ ...current, period }));
   }
 
+  function selectMonth(month: string) {
+    setDraftMonth(month);
+    applyPeriod({ workspaceId, period: "month", month });
+  }
+
+  function changeMonth(offset: -1 | 1) {
+    if ((offset < 0 && navigationMonth <= minimumMonth) || (offset > 0 && navigationMonth >= currentMonth)) return;
+    selectMonth(addMonths(`${navigationMonth}-01`, offset).slice(0, 7));
+  }
+
+  function touchStart(event: TouchEvent<HTMLElement>) {
+    swipe.current = event.touches.length === 1 && !(event.target as Element).closest("button, input, label, select, a")
+      ? { x: event.touches[0].clientX, y: event.touches[0].clientY, periodKey, axis: null } : null;
+  }
+
+  function touchMove(event: TouchEvent<HTMLElement>) {
+    if (event.touches.length !== 1) { swipe.current = null; return; }
+    const start = swipe.current;
+    if (!start || start.axis) return;
+    const dx = Math.abs(event.touches[0].clientX - start.x), dy = Math.abs(event.touches[0].clientY - start.y);
+    if (Math.max(dx, dy) >= 10) start.axis = dx > dy * 1.5 ? "horizontal" : "vertical";
+  }
+
+  function touchEnd(event: TouchEvent<HTMLElement>) {
+    const start = swipe.current;
+    swipe.current = null;
+    if (!start || start.periodKey !== periodKey || start.axis !== "horizontal" || event.touches.length || event.changedTouches.length !== 1) return;
+    const dx = event.changedTouches[0].clientX - start.x, dy = event.changedTouches[0].clientY - start.y;
+    if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy) * 1.5) changeMonth(dx < 0 ? 1 : -1);
+  }
+
   return <div hidden={!active} className={styles.analytics}>
     <PageHeading eyebrow="ANALYTICS" title="収支の集計" description="ユーザーを選んで、収入・支出と使いみちを確認します。"
       action={<button type="button" className={`refresh-button ${styles.refresh}`} disabled={loading} onClick={() => { setDetails(null); refresh(); }}>↻ 更新</button>} />
@@ -81,10 +118,15 @@ export function AnalyticsPanel({ workspaceId, currentUserId, revision, active }:
           setPeriodError(null);
           if (mode === "month") applyPeriod({ workspaceId, period: "month", month: draftMonth });
         }}><option value="month">月を選択</option><option value="range">期間を指定</option></select></label>
-        {periodMode === "month" && <label className={styles.field}>集計する月<input type="month" max={currentMonth} value={draftMonth} onChange={event => {
-          setDraftMonth(event.target.value);
-          applyPeriod({ workspaceId, period: "month", month: event.target.value });
-        }} /></label>}
+        {periodMode === "month" && <div className={styles.monthNavigation} role="group" aria-label="集計の対象月"
+          onTouchStart={touchStart} onTouchMove={touchMove} onTouchEnd={touchEnd} onTouchCancel={() => { swipe.current = null; }}>
+          <button type="button" className="secondary" aria-label="前の月" disabled={navigationMonth <= minimumMonth} onClick={() => changeMonth(-1)}>‹</button>
+          <label className={styles.field}>集計する月<MonthInput aria-label="集計する月" min={minimumMonth} max={currentMonth} required value={draftMonth}
+            onChange={event => selectMonth(event.target.value)} /></label>
+          <button type="button" className="secondary" aria-label="次の月" disabled={navigationMonth >= currentMonth} onClick={() => changeMonth(1)}>›</button>
+          <button type="button" className={`secondary ${styles.currentMonth}`} aria-label="今月に戻る" disabled={draftMonth === currentMonth}
+            onClick={() => selectMonth(analyticsToday().slice(0, 7))}>今月</button>
+        </div>}
       </div>
       <label className={styles.field}>カテゴリの細かさ<select aria-label="カテゴリの細かさ" value={depth} onChange={event => {
         const nextDepth = event.target.value === "all" ? "all" : Number(event.target.value);

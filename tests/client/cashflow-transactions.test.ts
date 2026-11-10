@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { readFile } from "node:fs/promises";
 import { build } from "esbuild";
 import { chromium, type Locator, type Page } from "playwright";
 
@@ -10,6 +11,20 @@ const green = "rgb(47, 107, 72)", red = "rgb(173, 67, 59)", normal = "rgb(51, 42
 async function assertMoney(locator: Locator, text: string, color: string) {
   assert.equal(await locator.textContent(), text);
   assert.equal(await locator.evaluate(element => getComputedStyle(element).color), color);
+}
+
+async function assertMonthLabel(navigation: Locator, month: string) {
+  await navigation.locator('input[type="month"]').blur();
+  const value = navigation.locator(".month-input-value");
+  await value.waitFor({ state: "visible" });
+  assert.equal(await value.textContent(), `${Number(month.slice(0, 4))}年${Number(month.slice(5))}月`);
+  const fits = await value.evaluate(element => {
+    const range = document.createRange(); range.selectNodeContents(element);
+    const text = range.getBoundingClientRect(), frame = element.getBoundingClientRect();
+    return element.scrollWidth <= element.clientWidth && text.left >= frame.left && text.right <= frame.right
+      && text.top >= frame.top && text.bottom <= frame.bottom;
+  });
+  assert.equal(fits, true, "ホームの日本語年月を省略・切り取りせず枠内に表示する");
 }
 
 async function waitHome(page: Page) {
@@ -48,17 +63,24 @@ async function swipeMonth(page: Page, target: Locator, dx: number, dy = 0, cance
 test("収支・清算・明細の符号と色、種別編集と絞り込みをPC/mobileで検証する", async t => {
   const bundle = await build({ entryPoints: ["tests/client/fixtures/cashflow-transactions.tsx"], bundle: true, write: false,
     outfile: "bundle.js", platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
+  const fonts = new Map<string, Buffer>(await Promise.all([400, 800].map(async weight => [
+    `/fonts/cake-${weight}.woff2`, await readFile(new URL(`../../public/fonts/m-plus-rounded-1c/m-plus-rounded-1c-${weight}.woff2`, import.meta.url)),
+  ] as const)));
+  const fontCss = [400, 800].map(weight => `@font-face{font-family:"Cake fixture";src:url("/fonts/cake-${weight}.woff2") format("woff2");font-weight:${weight};font-style:normal;font-display:block;}`).join("")
+    + ':root{--font-cake:"Cake fixture";}';
   const server = createServer((req, res) => {
+    const font = fonts.get(req.url ?? "");
+    if (font) { res.setHeader("Content-Type", "font/woff2"); res.end(font); return; }
     const asset = bundle.outputFiles.find(file => file.path.endsWith(req.url === "/bundle.css" ? "/bundle.css" : "/bundle.js"));
     res.setHeader("Content-Type", req.url === "/bundle.js" ? "application/javascript" : req.url === "/bundle.css" ? "text/css" : "text/html");
-    res.end(req.url?.startsWith("/bundle.") ? asset!.text : '<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>');
+    res.end(req.url?.startsWith("/bundle.") ? asset!.text : `<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/bundle.css"><style>${fontCss}</style></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>`);
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const browser = await chromium.launch({ headless: true, ...(process.env.CAKE_BROWSER_EXECUTABLE ? { executablePath: process.env.CAKE_BROWSER_EXECUTABLE } : {}) })
     .catch(async error => { await new Promise<void>(resolve => server.close(() => resolve())); throw error; });
   try {
-    for (const width of [1440, 390, 320]) await t.test(`${width}px`, async () => {
+    for (const width of [1440, 800, 769, 390, 320]) await t.test(`${width}px`, async () => {
       const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ja-JP", hasTouch: width < 768 });
       const page = await context.newPage(), errors: string[] = [], writes: Record<string, unknown>[] = [];
       page.setDefaultTimeout(6000);
@@ -117,6 +139,15 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         }
         await page.goto(origin);
         const home = page.locator("#home"), transactions = page.locator("#transactions");
+        if (width === 769 || width === 800) await home.evaluate(element => {
+          // Reproduce the app's content width after the desktop sidebar and padding.
+          const layout = document.createElement("div"); layout.className = "app-main";
+          document.body.append(layout);
+          const style = getComputedStyle(layout);
+          const contentWidth = layout.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+          layout.remove();
+          (element as HTMLElement).style.maxWidth = `${contentWidth}px`;
+        });
         const payment = transactions.locator('[data-transaction-id="payment"]');
         const receipt = transactions.locator('[data-transaction-id="receipt"]');
         const settled = transactions.locator('[data-transaction-id="settled-receipt"]');
@@ -146,6 +177,33 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         const previousMonth = home.getByRole("button", { name: "前の月", exact: true });
         const nextMonth = home.getByRole("button", { name: "次の月", exact: true });
         const resetMonth = home.getByRole("button", { name: "今月に戻る", exact: true });
+        await page.evaluate(async () => {
+          await Promise.all([document.fonts.load('400 16px "Cake fixture"'), document.fonts.load('800 24px "Cake fixture"')]);
+          await document.fonts.ready;
+        });
+        const navigation = home.getByRole("group", { name: "収支の対象月", exact: true });
+        const inputBox = (await monthInput.boundingBox())!;
+        const previousBox = (await previousMonth.boundingBox())!, nextBox = (await nextMonth.boundingBox())!, resetBox = (await resetMonth.boundingBox())!;
+        for (const box of [inputBox, previousBox, nextBox, resetBox]) {
+          assert.ok(Math.abs(box.height - 44) < .5, "実フォント使用時もホームの年月入力と月ボタンの高さを44pxに揃える");
+          assert.ok(Math.abs(box.y - inputBox.y) < .5 && Math.abs(box.y + box.height - inputBox.y - inputBox.height) < .5,
+            "ホームの年月入力と左右矢印の上下端を揃える");
+        }
+        for (const box of [previousBox, nextBox, resetBox]) assert.ok(Math.abs(box.width - 44) < .5, "ホームの月ボタンの幅を44pxに揃える");
+        assert.ok(Math.abs(inputBox.x - previousBox.x - previousBox.width - 8) < .5, "前月ボタンと年月入力の間隔は8px");
+        assert.ok(Math.abs(nextBox.x - inputBox.x - inputBox.width - 8) < .5, "年月入力と翌月ボタンの間隔は8px");
+        assert.ok(Math.abs(resetBox.x - nextBox.x - nextBox.width - 8) < .5, "ホームの今月ボタンは翌月ボタンの右8pxに同じ行で表示する");
+        assert.equal(await home.getByText("左右にスワイプして月を切り替えられます。", { exact: true }).count(), 0);
+        if (width < 768) {
+          const bounds = (await navigation.boundingBox())!;
+          const container = await navigation.evaluate(element => {
+            const parent = element.parentElement!, style = getComputedStyle(parent);
+            return { left: parent.getBoundingClientRect().x + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+              width: parent.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) };
+          });
+          assert.ok(Math.abs(bounds.width - Math.min(304, container.width)) < .5, "スマートフォンのホーム月操作欄を最大304pxに収める");
+          assert.ok(Math.abs(bounds.x - container.left) < .5, "ホームの月操作欄は左寄せにする");
+        }
         const settlementBefore = await home.locator(".settlement-hero").textContent();
         const allocationBefore = await allocation.textContent();
         const historyBefore = await home.locator(".history").textContent();
@@ -154,6 +212,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
           assert.equal(await monthInput.inputValue(), value);
           await waitHome(page);
           assert.equal(await monthlyTable.locator("caption").textContent(), caption);
+          await assertMonthLabel(navigation, value);
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true,
             "年月操作欄と収支表を画面幅に収める");
         }
@@ -190,6 +249,7 @@ test("収支・清算・明細の符号と色、種別編集と絞り込みをPC
         assert.equal(await previousMonth.isDisabled(), true, "最小年月から前へ進めない");
         await monthInput.fill("9999-12");
         assert.equal(await nextMonth.isDisabled(), true, "最大年月から次へ進めない");
+        await assertMonthLabel(navigation, "9999-12");
         await resetMonth.click();
         await assertMonth("2026-10", "2026年10月の収支");
         if (width < 768) {
