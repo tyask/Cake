@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-11-17T14:27:01.701Z",
-  "updatedAt": "2026-11-17T14:35:01.797Z",
+  "updatedAt": "2026-11-17T14:51:57.970Z",
   "events": [
     {
       "action": "CREATED",
@@ -56,6 +56,24 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-11-17T14:35:01.797Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "58f648019a7bd699f531b03ac41021ab17baa0a4f502c5bcca898a398ae37ba1"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-11-17T14:50:14.291Z",
+      "note": "実Cakeのmobileスクリーンショットで、写真ボタンから実行した解析失敗の案内がフォーム下部に置かれ、初期スクロール位置では見えないことを確認した。\n写真解析の失敗はカメラボタンの近くに表示し、保存エラーは従来の保存操作付近に保持するよう修正する。\n承認済みAC-04の失敗後の再試行を分かりやすくする同じ範囲の修正であり、目的・対象範囲・受入条件・重要な実装方針は変更しない。\n修正後にfreeze/commit、別Agent再レビューと最終SHAの必要な検証を行う。旧SHAのCI/Preview/QA証拠は新SHAへ流用しない。\n",
+      "planHash": "58f648019a7bd699f531b03ac41021ab17baa0a4f502c5bcca898a398ae37ba1"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-11-17T14:51:57.742Z",
+      "note": "写真解析の失敗案内を専用stateへ分け、写真ボタンの近くに表示する修正を完了した。\n保存エラーは従来の保存操作付近に表示する。再解析を始めると前の写真エラーを消去し、手入力による保存を妨げない。\n390×844のブラウザで503エラーが表示領域内にあること、入力保持・手入力の登録・再試行後のエラー消去を関連テストで確認した。写真テスト7/7・対象eslint成功。\n変更はcomponents/new-transaction-modal.tsxとtests/client/photo-transaction.test.tsの範囲である。\n修正前SHA 08ae052e7cf347a9f5fe9ffe391dc5e878cb07d6のpush/PR CIは両方成功したが、新しいHEADの検証証拠には使わない。\nfreeze/commit後、差分と影響範囲を別Agentで再レビューし、最終SHAの所定検証とCI/Preview確認をやり直す。\n",
+      "planHash": "58f648019a7bd699f531b03ac41021ab17baa0a4f502c5bcca898a398ae37ba1"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-11-17T14:51:57.970Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "58f648019a7bd699f531b03ac41021ab17baa0a4f502c5bcca898a398ae37ba1"
     }

@@ -123,7 +123,7 @@ test("写真入力は確認前に保存せず、補完・再試行・家計切�
     });
 
     await t.test("失敗後の再試行と部分読取りで手動カテゴリ・割合・入力を保持する", async () => {
-      const context = await browser.newContext({ viewport: { width: 390, height: 1000 } });
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
       const page = await context.newPage();
       const errors: string[] = [];
       let nextResponse: unknown = { error: "写真を解析できませんでした。もう一度お試しください。" };
@@ -143,8 +143,15 @@ test("写真入力は確認前に保存せず、補完・再試行・家計切�
         await modal.getByLabel("カテゴリ", { exact: true }).selectOption(dailyCategory);
         await modal.getByLabel("Aの配分割合", { exact: true }).fill("40");
         const photo = await sourcePhoto(page, 600, 1000);
+        await modal.evaluate(element => { element.scrollTop = 0; });
         await file.setInputFiles(photo);
-        await modal.getByRole("alert").waitFor();
+        const photoError = modal.getByRole("alert");
+        await photoError.waitFor();
+        const errorBounds = await photoError.boundingBox();
+        assert.ok(errorBounds && errorBounds.y >= 0 && errorBounds.y + errorBounds.height <= 844,
+          "写真解析の失敗はカメラ操作付近の画面内に表示する");
+        assert.equal(await modal.getByRole("button", { name: "追加する", exact: true }).isEnabled(), true,
+          "写真解析に失敗しても手入力で登録できる");
         assert.equal(await modal.getByLabel("取引先", { exact: true }).inputValue(), "手入力店");
         assert.equal(await modal.getByLabel("金額（円）", { exact: true }).inputValue(), "987");
         assert.equal(await modal.getByLabel("メモ", { exact: true }).inputValue(), "手入力メモ");
@@ -152,6 +159,7 @@ test("写真入力は確認前に保存せず、補完・再試行・家計切�
         nextResponse = { ...extraction, time: null, amountYen: null, memo: null, categorySuggestionFailed: true };
         await file.setInputFiles(photo);
         await page.waitForFunction(() => (document.querySelector('input[type="datetime-local"]') as HTMLInputElement)?.value === "2026-11-16T10:25");
+        assert.equal(await modal.getByRole("alert").count(), 0, "再解析で前回の写真エラーを消す");
         assert.equal(await modal.getByLabel("取引先", { exact: true }).inputValue(), "ルール店");
         assert.equal(await modal.getByLabel("カテゴリ", { exact: true }).inputValue(), dailyCategory);
         assert.equal(await modal.getByLabel("Aの配分割合", { exact: true }).inputValue(), "40");

@@ -51,6 +51,7 @@ function NewTransactionForm({ selected, currentUserId, close, run }: NewTransact
   const [customized, setCustomized] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [photoMessage, setPhotoMessage] = useState<string | null>(null);
   const photoInput = useRef<HTMLInputElement>(null);
@@ -88,7 +89,7 @@ function NewTransactionForm({ selected, currentUserId, close, run }: NewTransact
     const id = ++requestId.current;
     photoRequest.current = controller;
     setAnalyzing(true);
-    setError(null);
+    setPhotoError(null);
     setPhotoMessage(null);
     try {
       const result = await analyzeTransactionPhoto(selected.workspace.id, file, controller.signal);
@@ -122,7 +123,7 @@ function NewTransactionForm({ selected, currentUserId, close, run }: NewTransact
       setPhotoMessage(messages.join(" "));
     } catch (failure) {
       if (controller.signal.aborted || requestId.current !== id) return;
-      setError(failure instanceof Error ? failure.message : "写真を解析できませんでした。もう一度お試しください。");
+      setPhotoError(failure instanceof Error ? failure.message : "写真を解析できませんでした。もう一度お試しください。");
     } finally {
       if (requestId.current === id) {
         photoRequest.current = null;
@@ -174,6 +175,7 @@ function NewTransactionForm({ selected, currentUserId, close, run }: NewTransact
           写真から入力
         </button>
         <p className={styles.photoHelp}>撮影した写真をOpenAIに送信して読み取ります。登録前に内容を確認できます。</p>
+        {photoError && <p className="form-error" role="alert">{photoError}</p>}
         <div role="status" aria-live="polite" aria-atomic="true">{(analyzing || photoMessage) && <p className={styles.photoStatus}>{analyzing ? "写真を解析しています…" : photoMessage}</p>}</div>
       </div>
       <div className="form-grid" aria-busy={analyzing}>
