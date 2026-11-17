@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-11-17T14:27:01.701Z",
-  "updatedAt": "2026-11-17T14:51:57.970Z",
+  "updatedAt": "2026-11-17T14:53:07.519Z",
   "events": [
     {
       "action": "CREATED",
@@ -74,6 +74,18 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-11-17T14:51:57.970Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "58f648019a7bd699f531b03ac41021ab17baa0a4f502c5bcca898a398ae37ba1"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-11-17T14:53:07.308Z",
+      "note": "別Agentの追加差分レビューで、実装の不具合0件、検証記録の表現に1件の指摘を受けたため、記録を訂正する。\n\n直前のPROGRESSの「手入力の登録を関連テストで確認」は不正確であった。\n今回の失敗後の検証で確認したのは「手入力の登録ボタンが有効」であり、失敗後の保存操作・保存payloadそのものを実測した成功ではない。\n追加テストの証拠は、390×844の表示領域内のエラー、下書き保持、登録ボタンが有効、再試行でのエラー消去である。\n通常の写真補完成功後の確認保存payloadは別の既存テストで確認しており、失敗後の保存操作の実測と区別する。\n\n過去のauditは操作履歴として維持し、この訂正を最新の正確な記録とする。\nアプリ・テストの変更はない。freeze/commit後の新SHAで記録差分を再確認し、最終検証を実行する。\n",
+      "planHash": "58f648019a7bd699f531b03ac41021ab17baa0a4f502c5bcca898a398ae37ba1"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-11-17T14:53:07.519Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "58f648019a7bd699f531b03ac41021ab17baa0a4f502c5bcca898a398ae37ba1"
     }
