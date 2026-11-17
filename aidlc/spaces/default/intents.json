@@ -99,6 +99,15 @@
         "codex/analytics-month-navigation"
       ],
       "recordDir": "aidlc/spaces/default/intents/261109-analytics-month-navigation"
+    },
+    {
+      "id": "261117-photo-transaction-input",
+      "issue": 176,
+      "branch": "codex/photo-transaction-input",
+      "branches": [
+        "codex/photo-transaction-input"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261117-photo-transaction-input"
     }
   ]
 }

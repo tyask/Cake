@@ -262,6 +262,7 @@
             </tbody>
           </table></div>
           <p>定期支払いは<code>lib/server/services/recurring-payments.ts</code>に業務処理とstoreの型、<code>lib/server/stores/recurring-payment-store.ts</code>に既定のSQL操作を置く。APIのcomposition rootがstoreをサービスへ注入し、HTTP handlerは処理を引数で受け取る。共有schema・DTO・予定日計算はsharedに置く。HTTPで扱う<code>UserAccessError</code>・<code>RecurringPaymentError</code>は、認証・handler・サービスをまたぐ副作用のない定義として<code>lib/server/errors.ts</code>に単一定義し、handlerから認証・DB実装への実行時依存を生まない。</p>
+          <p>写真入力は<code>lib/client/photo-transaction.ts</code>にブラウザの画像変換と専用POST、<code>lib/shared/photo-transaction.ts</code>に容量・形式・抽出schema・DTO、<code>lib/server/photo-transaction.ts</code>にOpenAIとの通信と応答検証を置く。専用handlerは認証・所属確認・抽出・カテゴリ候補を注入された関数として呼び、DBや資格情報取得へ直接依存しない。Route Handlerが既存の認証・所属・カテゴリstoreと接続を組み立てる。</p>
           <p><code>lib/</code>のモジュールはclient・server・sharedのいずれかに配置する。<code>npm test</code>の<code>tests/architecture/</code>が<code>lib/client/</code>と<code>"use client"</code>からの推移依存、shared・serverの依存方向、handler・servicesからstores・database全体への到達、アプリからscripts・testsへの参照とlibの配置を検査する。ブラウザで使う外部依存は検査側の許可一覧で管理し、Node組込み・サーバーSDK・未知の外部依存を拒否する。</p>
           <p>検査は相対path・<code>@/</code>のalias、拡張子省略・index、再export、文字列literalの<code>import()</code>・<code>require()</code>を追跡する。shared、client、handler、servicesの推移依存では、解決できないlocal参照や対象を静的に決められない動的参照を拒否する。<code>.d.ts</code>・<code>.d.mts</code>・<code>.d.cts</code>の型宣言ファイルと、<code>import type</code>・<code>export type</code>など明示された型だけの参照は実行時の依存から除き、通常のimport・再exportは型としてだけ使用していても実行時依存として扱う。</p>
           <div class="note"><code>lib/shared/paypay.ts</code>はブラウザでCSVを解析する。純粋関数の<code>lib/shared/settlement.ts</code>はRepositoryでの参照・清算処理に加え、ブラウザで保存済み明細の応答を反映するときにも呼び出す。</div>
@@ -374,6 +375,7 @@
               <tr><td>app/api/app/route.ts</td><td><code>GET</code>でscope別参照、<code>POST</code>でアクション別入力検証・所属確認・更新。</td></tr>
               <tr><td>app/api/admin/users/route.ts</td><td>管理者専用の利用者一覧・登録・利用停止。毎回DB権限を確認。</td></tr>
               <tr><td>app/api/transactions/route.ts</td><td>取引明細用GET。月単位または全期間の未清算共有明細の取得条件を検証・認可して専用storeへ渡す。</td></tr>
+              <tr><td>app/api/transactions/photo/route.ts</td><td>写真解析用POST。認証・workspace所属・画像を検証し、サーバー専用のOpenAI接続と既存カテゴリ候補storeを組み立てる。解析結果を返すだけで明細は保存しない。</td></tr>
               <tr><td>app/api/import/transactions/route.ts</td><td>取込ID・形式・workspaceを検証し、本人の所属範囲内で対象の取込明細とカテゴリを返す。</td></tr>
               <tr><td>app/api/import/history/route.ts</td><td>履歴用GETの認証・入力検証と選択workspaceの認可を配線し、形式ごと・取込者ごとの最近の履歴を返す。</td></tr>
               <tr><td>app/api/import/duplicates/route.ts</td><td>選択workspace内の外部IDを照合し、既存の金額・取引先・sourceを返す。</td></tr>
@@ -389,6 +391,7 @@
               <tr><td>components/use-dashboard-controller.ts / lib/client/dashboard-requests.ts</td><td>取得・更新・通知のhookと、workspace世代・tab世代・revision・要求IDによる応答採用条件の純粋関数。</td></tr>
               <tr><td>components/home-panel.tsx / import-panel.tsx / workspace-settings-panel.tsx</td><td>ホームの収支・清算・共有費配分・履歴、CSV選択/重複照合/カテゴリ補完/取込、workspace設定の表示と各画面の入力状態を担当する。</td></tr>
               <tr><td>components/workspace-modal.tsx / new-transaction-modal.tsx / dashboard-ui.tsx</td><td>workspace/新規明細のフォームと共通の見出し・空表示・Modalを分離する。フォームの保存時期と再マウント用keyを保持する。</td></tr>
+              <tr><td>lib/client/photo-transaction.ts<br />components/new-transaction-modal.module.css</td><td><code>prepareTransactionPhoto()</code>で画像を縮小・JPEGへ変換し、<code>analyzeTransactionPhoto()</code>で専用POSTと応答検証を行う。カメラ操作・状態表示のスタイルを分離し、未保存入力と応答の採用は追加モーダルが管理する。</td></tr>
               <tr><td>lib/client/app-client.ts</td><td><code>postAction()</code>でJSONのPOSTと非2xx応答の例外化を共用する。</td></tr>
               <tr><td>components/transactions-panel.tsx / transaction-table.tsx</td><td>月単位／未精算の選択、コンパクトな年月操作、表示範囲内の列フィルタ、明細一覧のインライン編集、行ごとの保存状態、一括選択・削除・ルール適用。<code>TransactionTable</code>は明細/取込の共通表枠とモバイル要約。</td></tr>
               <tr><td>components/transaction-filter-dialog.tsx / use-transaction-filters.ts</td><td>列候補の選択、列内OR・列間AND条件、ユーザー/workspace別のブラウザ保存。</td></tr>
@@ -417,6 +420,7 @@
               <tr><td>lib/shared/expense-splits.ts / split-allocations.ts / settlement.ts</td><td>参加者別保存割合・デフォルトルール、整数円への配分・円入力からの割合、正確な分数集計による清算。</td></tr>
               <tr><td>lib/shared/paypay.ts / paypay-id.ts / import-duplicates.ts<br />lib/server/stores/import-duplicates-store.ts / paypay-import.ts</td><td>CSV解析、JST外部ID生成・正規化、既存/CSV内重複・衝突の検出、所属確認と既存明細の最小照合情報の取得、DB Transactionでの登録。</td></tr>
               <tr><td>lib/shared/import-category-suggestions.ts<br />lib/server/handlers/import-category-suggestions-handler.ts<br />lib/server/stores/import-category-suggestions-store.ts</td><td>カテゴリ候補の共有schema・型・上限、認証と入力・所属の検証、正規化後の取引先に一致する最新30件からの集合集計。候補APIはDBを更新せず、ImportPanelが全応答成功後に未分類行へ反映する。</td></tr>
+              <tr><td>lib/shared/photo-transaction.ts<br />lib/server/photo-transaction.ts<br />lib/server/handlers/photo-transaction-handler.ts</td><td>写真形式・容量上限と抽出DTO、<code>extractPhotoTransaction()</code>によるOpenAI Responses APIの接続・構造化出力検証、<code>readBoundedPhotoBody()</code>による本文上限、<code>photoTransactionHandler()</code>による認証・所属・multipart検証・履歴候補の合成。外部解析エラーは<code>PhotoTransactionError</code>でHTTP応答へ変換する。</td></tr>
               <tr><td>components/import-history-panel.tsx<br />lib/shared/import-history.ts<br />lib/server/handlers/import-history-handler.ts<br />lib/server/stores/import-history-store.ts</td><td>取込履歴の共有形式・schema・DTO・一人5件の上限、専用GETの認証・入力検証・所属認可、本人の最新履歴取得、履歴一覧の取得状態・一行の表を担当する。BootstrapDataへ履歴を追加しない。</td></tr>
               <tr><td>components/import-transactions-dialog.tsx</td><td>選択batch・workspace・形式に対する明細の遅延取得・再試行・中止を管理し、取込の説明と取得状態を共通明細ダイアログへ渡す。</td></tr>
               <tr><td>components/transaction-list-dialog.tsx</td><td>明細・カテゴリと呼出元の取得状態、見出し・説明・再試行・閉じる操作を受け取る共通の参照用明細ダイアログ。取込の型・ID・専用APIや通信処理には依存しない。</td></tr>
@@ -442,6 +446,7 @@
               <tr><td><code>/api/auth/[...nextauth]</code></td><td>Auth.js Handler。OAuth / Credentials。</td><td>ログイン、コールバック、セッション、ログアウト。</td></tr>
               <tr><td><code>/api/app</code> GET</td><td>Node.js Route Handler。<code>workspaceId?</code>、<code>scope=full|metadata</code>（既定full）。</td><td>認証・利用可否を確認し、BootstrapDataまたはBootstrapMetadataを返す。</td></tr>
               <tr><td><code>/api/transactions</code> GET</td><td>Node.js。workspace UUIDと<code>mode=month&amp;month=YYYY-MM</code>または<code>mode=unsettled</code>。</td><td>有効利用者・現在の所属・queryを検証し、指定月の全明細または全期間の未清算共有明細を返す。月全体は日本時間の半開区間、収入・支出・個人・共有・清算済み・未来日付を含む。Cache-Control: no-store、業務DB更新なし。</td></tr>
+              <tr><td><code>/api/transactions/photo</code> POST</td><td>Node.js。multipart/form-dataの<code>workspaceId</code>（UUID）と<code>image</code>（JPEG・PNG・WebP、3MiB以下）1枚。</td><td>認証・所属を確認してOpenAIへ送信し、nullableな日付・時刻・取引先・金額・メモとカテゴリ候補を返す。Cache-Control: no-store。写真の永続保存・明細登録は行わない。</td></tr>
               <tr><td><code>/api/home</code> GET</td><td>Node.js。queryはworkspace UUIDと<code>month=YYYY-MM</code>。</td><td>有効利用者・現在の所属・実在する年月を検証。月次収支、全期間の未清算共有収支と清算結果、最新20件の清算履歴を返す。明細・清算対象ID配列を含めず、Cache-Control: no-store。</td></tr>
               <tr><td><code>/api/app</code> POST</td><td>Node.js Route Handler。JSON <code>{ action, ... }</code>。</td><td>入力・認可・業務条件を検証し、アクション別成功JSONまたは<code>{ error }</code>。</td></tr>
               <tr><td><code>/api/import/duplicates</code> POST</td><td>Node.js Route Handler。workspace UUID、外部ID配列1〜2000件。</td><td>所属を確認し、指定IDに一致するexternalIdsと既存明細の最小照合情報を返す。</td></tr>
@@ -492,6 +497,12 @@
             <li><code>/api/app</code>成功はHTTP 200。GET失敗は基本401、POST失敗は基本400。<code>UserAccessError</code>は固有statusを優先し、応答は<code>{ error }</code>。</li>
             <li>GETは<code>getBootstrap(user, workspaceId, scope)</code>を実行。scope省略はfull。所属していない/不正形式の指定IDは本人の所属一覧先頭へフォールバックする。</li>
           </ul>
+          <h3>写真解析専用POST</h3>
+          <p><code>POST /api/transactions/photo</code>はアプリactionと別のmultipart APIで、<code>workspaceId</code>と<code>image</code>だけを受ける。認証・現在のworkspace所属を検証してから外部解析を行う。JPEG・PNG・WebPの種類・署名・サイズをサーバーでも検証し、検証で不正と判定した画像をOpenAIへ送らない。APIキーはサーバー専用の<code>OPENAI_API_KEY</code>、モデルは<code>OPENAI_RECEIPT_MODEL</code>（既定<code>gpt-6.1-terra</code>）を使う。設定手順は<a href="../README.md">README</a>を参照する。</p>
+          <p>本文はストリーム読取で3MiB＋multipart用64KiBに制限し、画像単体は3MiB以下とする。MIMEとJPEG・PNG・WebPの署名を照合する。サーバーの形式確認は完全デコードではなく、画像としての完全な解釈はOpenAI側に委ねる。未認証401、所属なし403、不正入力400、容量超過413、非対応形式415、中断408、上流障害・不正な応答502、キー未設定・上流混雑503、解析タイムアウト504を返す。成功・失敗とも<code>Cache-Control: no-store</code>を付ける。</p>
+          <p>成功応答は<code>{ date, time, merchant, amountYen, memo, categoryId, categorySuggestionFailed }</code>。日付は実在する<code>YYYY-MM-DD</code>、時刻は24時間制<code>HH:mm</code>、金額は正の整数円、取引先はtrim後1〜240文字、メモは2000文字以下とし、抽出できない項目はnullにする。カテゴリはAI出力に含めず、読み取った取引先を既存の履歴候補処理へ渡す。候補なしは<code>categoryId=null</code>、候補処理だけの失敗は<code>categorySuggestionFailed=true</code>とし、日時などの抽出結果を返す。所属・入力・画像・API設定や外部解析の失敗は固定の利用者向けエラーで返し、OpenAIの応答本文・キー・写真をログや画面へ出さない。</p>
+          <p>OpenAI Responses APIをサーバーから直接呼び、画像入力と厳密なJSON Schemaの構造化出力を使う。応答の完了状態・拒否・JSONの形式と共通の値制約を再検証し、タイムアウトを設定する。写真に記載された文を操作命令として実行せず、日時・店名・税込合計・購入品の要約など読める事実だけを抽出する。推測による日付・金額・メモの補完はしない。<code>store: false</code>を指定し、Cake側では写真・解析結果を永続保存しない。OpenAI側のデータ保持全体を無効化する指定とは扱わない。</p>
+          <p>外部要求のタイムアウトは45秒、Route Handlerの<code>maxDuration</code>は60秒。OpenAIのJSON応答本文は128KiB以下とし、<code>reasoning.effort="none"</code>、<code>max_output_tokens=2048</code>で要求する。モデルの画像入力・構造化出力とこれらのオプションへの対応、実利用権限は対象OpenAIプロジェクトで確認する。読取精度・待ち時間・費用の評価はスタブテストと分ける。</p>
           <h3>用途別の割合コンテキスト取得</h3>
           <ul>
             <li>各操作はDB上の最新workspace所属を確認してから取得する。<code>splitMembers(workspaceId)</code>は参加者のID・重み・名前、<code>splitRules(workspaceId)</code>は部分一致判定に必要なルール一覧を優先順・作成日時・ID順で返す。</li>
@@ -713,6 +724,7 @@
             <tbody>
               <tr><td>「＋ 明細を追加」／「＋ 新しく作成」</td><td>Dashboardの開閉Stateを変更。</td><td>モーダル表示まで。DB保存はフォームの送信時。</td></tr>
               <tr><td>明細フォームの「追加する」</td><td>run(saveTransaction)：workspaceId、日時、取引先、方法、金額、actor、区分、割合、メモ。</td><td>B → DB → 取得済み一覧があれば確定transactionを追加。ホームサマリーを再取得する。保存成功後の取得失敗で再登録を促さず、フォームは保存済みとして閉じる。</td></tr>
+              <tr><td>明細フォームの「写真から入力」</td><td>画像の選択・JPEG変換後、workspaceIdとimageを専用POSTへ送信。</td><td>OpenAI抽出 → 既存カテゴリ候補store → 現在の未保存フォーム。明細登録は通常の「追加する」まで行わない。</td></tr>
               <tr><td>明細のblur / Enter、選択項目の変更</td><td>行の検証 → 保存キュー → run(saveTransaction)：workspaceId、transactionId、明細値。</td><td>B → DB → 確定transactionで対象行を差し替え。</td></tr>
               <tr><td>メモのblur / Ctrl+Enter</td><td>保存キュー → run(saveTransactionMemo)：workspaceId、transactionId、memo。</td><td>B → DB → 対象明細のメモだけ更新。</td></tr>
               <tr><td>取込の「ヘルプ」</td><td>現在originの取込URLを画面Stateへ設定してnative dialogを開閉。「URLをコピー」でのみclipboard.writeText。</td><td>サーバー通信・DB更新なし。CSV原本を読まない。</td></tr>
@@ -738,6 +750,7 @@
             <tbody>
               <tr><td>workspaceの「完全に削除」</td><td>SettingsPanel → 確認 → postAction(deleteWorkspace) → /api/app → DB削除 → afterDeleteからhookのrefresh。共通runの保存後分岐は経由しない。</td></tr>
               <tr><td>定期支払いの更新・追加・編集・停止・再開・削除</td><td>RecurringPaymentsPanel → /api/recurring-paymentsのGET/POST → 専用サービス・DB。結果を同パネルのStateへ反映し、保存成功後は専用GETも行う。1:1の選択だけでは通信せず、フォーム保存時に重み1:1を送る。DashboardのBootstrapDataとは別に保持。</td></tr>
+              <tr><td>写真からの入力補完</td><td>NewTransactionModal → ブラウザでJPEG変換 → POST /api/transactions/photo → 認証・所属・画像検証 → OpenAI・カテゴリ履歴照会。runを経由せず、追加モーダル内のdraftだけを更新する。</td></tr>
               <tr><td>取込履歴の表示・更新・再試行</td><td>ImportHistoryPanel → GET /api/import/history → 認証・入力検証・workspace所属照合・本人の最新5件SQL → 同パネルのState。controllerがbulkImport POST成功時に対象家計のrevisionを進め、Dashboard → ImportPanel → ImportHistoryPanelへ渡す更新キーで履歴だけを再取得する。</td></tr>
               <tr><td>履歴のファイル名から明細を開く</td><td>ImportTransactionsDialog → GET /api/import/transactions → 認証・所属とbatch照合 → 現在の明細とカテゴリ。ImportTransactionsDialogが取得状態を共通TransactionListDialogへ渡す。履歴一覧とは独立し、開いたときだけ取得する。</td></tr>
               <tr><td>利用者管理</td><td>UserManagement → /api/admin/usersのGET/POST/DELETE → 管理者認可・DB。応答一覧は同コンポーネントのStateへ反映。</td></tr>
@@ -832,6 +845,51 @@
           <p><code>formatJstDateTime</code>は<code>DateTimePrecision.Minute</code>／<code>Second</code>で表示精度を指定し（既定は秒）、Asia/Tokyo固定で、ホーム・清算履歴・清算済み明細では秒まで、スマートフォンの明細要約では分まで表示する。CSVの元日時と定期支払いの日付表示は各画面で保持する。表示関数はdatetime-local入力には使わない。明細編集の<code>transactionDateInput</code>／<code>transactionDateToIso</code>は秒・ミリ秒を保持し、UTCへ変換する。新規明細の入力初期値は専用formatterを再利用して分まで表示する。</p>
           <h3>新規明細</h3>
           <p>NewTransactionModalはPAYMENTまたはRECEIPTを登録する。初期値は支払い・共有・現在のデフォルト割合で、支払い時だけ取引先ルールを適用する。新規収入の区分・割合初期化と保存経路は後述の「支払い・収入の追加と種別変更」に従う。登録成功でフォームを閉じ、保存失敗では入力を保持する。</p>
+          <h3 id="photo-transactions">写真からの明細入力</h3>
+          <p>追加モーダルのカメラボタンは<code>input type="file"</code>の画像選択を開く。<code>capture="environment"</code>でスマートフォンの背面カメラを優先する。カメラの起動と撮影・画像選択の提示方法はブラウザに依存し、PCなどでは画像選択を使う。1回の処理は写真1枚・1取引とし、複数明細の分割登録や複数写真の一括読取は行わない。</p>
+          <p>JPEG・PNG・WebPの原本20MiB以下を受け付ける。ブラウザでデコードして縦横比を保ち、長辺2048px以下・3MiB以下のJPEGへ再圧縮してから送信する。HEICなどの非対応形式、破損画像、変換後も上限を超える画像は案内して送信しない。写真はOpenAIへ送信することと、登録前に確認できることを操作の近くに表示する。Cake側では写真を永続保存せず、APIキーはブラウザへ渡さない。</p>
+          <p>入力中の値は<code>NewTransactionModal</code>が所有する。解析結果は日時・取引先・金額・メモのうち読めた項目だけへ反映し、nullは元の入力を保持する。日付・時刻はJSTの入力値へ組み立て、片方だけ読めた場合は入力中のもう片方を保持して確認を促す。種別・方法・担当者を写真から変更せず、支払いの取引先が変わった場合の区分・割合は既存ルールを使う。手動調整済みの区分・割合は保持する。カテゴリは手動の選択・未分類への解除も操作済みとして保護する。手動変更しておらず取引先が読めた場合、再撮影前の自動補完値を含めて新しい有効候補へ更新し、候補なしは未分類へ戻す。取引先が読めなければカテゴリも保持する。</p>
+          <p>すべての項目が読めない場合は、読取不能と再撮影・入力確認を案内する。日付か時刻だけを読めて、入力中の日時も空欄などで片方を補えない場合は、無効な日時文字列を作らず元の入力を保持する。部分読取では読めた取引日または時刻を案内文へ個別に表示し、不明なもう片方の入力を促す。</p>
+          <p>画像変換・送信・カテゴリ照会を含む解析中は入力・再撮影・保存の競合操作を無効にする。閉じる操作は使える。要求IDと中止状態を確認し、モーダルを閉じた後やworkspace切替によるunmount後の応答は破棄する。解析の失敗では既存入力を変更しない。カテゴリ照会だけ失敗した場合は抽出結果を反映してカテゴリの確認を案内する。読めなかった項目を利用者が補い、全項目を確認・修正した後、通常の「追加する」で保存する。</p>
+          <div class="data-flow" id="flow-photo-transactions">
+            <div class="data-flow-head"><h4>写真解析と確認後の保存</h4><small>外部画像解析・履歴照会・明細登録の到達先を分離</small></div>
+            <div class="dfd-track" role="img" aria-label="カメラボタンから撮影または選択した写真をブラウザで縮小し、認証と所属を確認する写真APIを通してOpenAIへ送り、構造化した抽出結果を検証する">
+              <div class="dfd-node source"><strong>撮影 / 画像選択</strong><small>JPEG・PNG・WebP 1枚<br />原本20MiB以下</small></div>
+              <div class="dfd-arrow"><b>→</b><small>ブラウザで再圧縮<br />入力を固定</small></div>
+              <div class="dfd-node process"><strong>JPEG・長辺2048px以下</strong><small>workspaceId + image<br />3MiB以下のmultipart</small></div>
+              <div class="dfd-arrow"><b>→</b><small>POST<br />/api/transactions/photo</small></div>
+              <div class="dfd-node process"><strong>認証・所属・画像検証</strong><small>サーバー専用のAPIキー<br />タイムアウト・store: false</small></div>
+              <div class="dfd-arrow"><b>⇄</b><small>画像入力<br />strict JSON出力・再検証</small></div>
+              <div class="dfd-node store"><strong>OpenAI Responses API</strong><small>日時・取引先・税込合計<br />購入品などのメモ</small></div>
+            </div>
+            <div class="dfd-track" role="img" aria-label="読み取った取引先を既存のカテゴリ履歴照会へ渡し、候補または補完失敗の印を抽出結果へ添える。新しい要求の応答だけを未保存フォームへ反映し、確認して追加する操作で初めて既存APIからDBへ登録する">
+              <div class="dfd-node process"><strong>検証済みの抽出結果</strong><small>取引先ありの場合<br />既存の候補storeへ</small></div>
+              <div class="dfd-arrow"><b>⇄</b><small>所属・閲覧可能な履歴<br />DB共通正規化</small></div>
+              <div class="dfd-node store"><strong>確認済み支払い最新30件</strong><small>最多・同率は最新のカテゴリ<br />照会失敗でも抽出は保持</small></div>
+              <div class="dfd-arrow"><b>→</b><small>要求ID・生存状態<br />候補の有効性を照合</small></div>
+              <div class="dfd-node output"><strong>未保存のフォーム</strong><small>読めた項目とカテゴリを補完<br />手動カテゴリは保持・確認修正</small></div>
+              <div class="dfd-arrow"><b>→</b><small>「追加する」<br />run(saveTransaction)</small></div>
+              <div class="dfd-node store"><strong>POST /api/app → DB</strong><small>既存の所属・値・カテゴリ検証<br />MANUAL明細として保存</small></div>
+            </div>
+            <div class="flow-branches" role="group" aria-label="写真解析の結果別のフォーム反映">
+              <div class="dfd-node source"><strong>画像・解析が失敗</strong><p>入力を保持してエラー表示。再撮影・別画像選択・手入力を利用できる。APIキー未設定は503で案内する。</p></div>
+              <div class="dfd-node output"><strong>一部だけ判読 / カテゴリ照会失敗</strong><p>読めた項目を反映し、不明項目と手動変更済みカテゴリは保持する。日付だけの場合の時刻、候補取得失敗を確認案内する。</p></div>
+              <div class="dfd-node source"><strong>閉じる / workspace切替</strong><p>進行中の要求を中止し、その要求の遅い変換・API応答を採用しない。明細は登録しない。</p></div>
+            </div>
+            <div class="dfd-boundary"><b>保存と秘密情報の境界:</b> 写真はブラウザからCakeサーバーを経由してOpenAIへ送る。解析・履歴照会はDBを更新せず、写真と抽出結果をCake側に永続保存しない。確認後の保存値だけを既存の明細登録へ渡す。新しいDB schema・取引sourceは追加しない。</div>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>操作・状態</th><th>処理・payload</th><th>フォーム・保存への影響</th></tr></thead>
+            <tbody>
+              <tr><td>カメラボタン</td><td>対応画像1枚を撮影・選択する。選択キャンセルではAPIを呼ばない。</td><td>選択後に入力を固定し、縮小を開始。ブラウザの画像選択だけではDB更新なし。</td></tr>
+              <tr><td>画像変換・解析</td><td>JPEGへ縮小し、<code>{ workspaceId, image }</code>を専用POSTへ送信。</td><td>認証・所属・画像を検証した後だけOpenAIを呼ぶ。入力と追加操作は固定、閉じることは可能。</td></tr>
+              <tr><td>カテゴリ候補</td><td>読めた取引先を既存storeへ渡す。候補IDまたはnull、失敗フラグを返す。</td><td>AIへ履歴を渡さない。手動選択・解除を保持し、それ以外は新しい候補へ更新。候補なしは未分類。候補失敗でも抽出値を利用する。</td></tr>
+              <tr><td>解析終了・確認</td><td>現在の要求の応答だけを共通schemaで検証して反映。</td><td>読めない項目は保持。部分読取・時刻不明を案内し、利用者が修正できる。DB更新なし。</td></tr>
+              <tr><td>「追加する」</td><td>既存<code>run(saveTransaction)</code>へ最終日時・取引先・金額・メモ・categoryId等を送る。</td><td>既存の検証・認可を通して初めて保存。保存失敗では入力保持、成功で閉じる。</td></tr>
+              <tr><td>閉じる・workspace切替</td><td>処理の中止と要求世代の無効化。</td><td>旧応答を破棄し、新しく開いたフォームを上書きしない。</td></tr>
+            </tbody>
+          </table></div>
+          <p>自動テストは外部APIをスタブして入力・応答・遅延・失敗を確認する。実APIのモデル利用権限、読取精度・時間・費用、実機のカメラ権限と起動は別途確認する。<code>dev:cloud</code>は外部サービスの秘密値を引き継がないため、実APIの検証は通常のローカルまたは対象Previewで行う。秘密値を他環境からCloudへコピーしない。</p>
           <h3 id="recurring-payments">定期支払いの取得・変更・実行</h3>
           <p>設定表示時に<code>GET /api/recurring-payments?workspaceId=UUID</code>を実行し、payments、eligibleActorUserIds、日本時間のtoday、サーバー時刻のISO文字列nowを取得する。設定を既存bootstrapへ混在させず、full/metadataの通常2 SQLを維持する。現在の設定と次回予定を返し、開始日・適用月・変更予約・成功月はDTOへ含めない。</p>
           <p>ワークスペース設定では集計用カテゴリの次、デフォルトルールの前に定期支払いを配置する。追加・編集フォームと一覧に開始日の項目は設けない。</p>
@@ -1327,6 +1385,7 @@ amountYen         = abs(payer.balance)</div>
               <tr><td><code>ImportFormat / ImportHistoryEntry / ImportHistoryResponse</code></td><td>形式はPAYPAY。履歴はid、format、importedBy、importedByName、fileName、totalRows、importedRows、skippedRows、精度を保持したUTC ISO createdAt。応答はhistory配列。BootstrapMetadata・WorkspaceDataへは含めない。</td></tr>
               <tr><td><code>ImportTransactionsResponse</code></td><td>選択した取込batchに紐づく現在のtransactions配列と、同workspaceの旧停止済みを含むcategories配列。TransactionRecord・Categoryの共通DTOを使う。</td></tr>
               <tr><td><code>ImportCategorySuggestion / ImportCategorySuggestionsResponse</code></td><td>取引先の元文字列merchantとnullable categoryId、これらのsuggestions配列。候補照会に既存明細本文・確認状態・照合用正規化値は含めない。</td></tr>
+              <tr><td><code>PhotoTransactionExtraction / PhotoTransactionResponse</code></td><td>nullableなdate（実在するYYYY-MM-DD）、time（HH:mm）、merchant（1〜240文字）、amountYen（正の整数円）、memo（2000文字以下）。Responseはnullable categoryIdとboolean categorySuggestionFailedを追加する。画像・取引履歴本文・APIキーは返さない。</td></tr>
             </tbody>
           </table></div>
           <h3>DTO関係</h3>
@@ -1383,6 +1442,8 @@ BootstrapData extends BootstrapMetadata
             <thead><tr><th>テストファイル群</th><th>主な検証</th></tr></thead>
             <tbody>
               <tr><td>tests/architecture/</td><td>実ソースの配置・依存方向・推移的なDB到達を検査し、境界違反のfixtureで検出規則を確認する。</td></tr>
+              <tr><td>tests/shared/photo-transaction.test.ts<br />tests/server/photo-transaction.test.ts / photo-transaction-handler.test.ts</td><td>nullable項目と共通制約、日付・時刻・金額・文字数、認証・所属、multipart容量・形式と署名、画像解析前の拒否、構造化応答・上流失敗・タイムアウト・中断、キー未設定、カテゴリ候補失敗時の抽出保持をスタブで確認する。写真と秘密情報の非保存・安全なエラー応答を含め、実APIの精度・費用評価とは区別する。</td></tr>
+              <tr><td>tests/client/photo-transaction.test.ts</td><td>PC/mobileでカメラ操作のcaptureと形式指定、画像縮小・multipart送信、読めた項目の補完と不明項目の保持、日付・時刻の部分読取、カテゴリ手動選択・解除の保護と再撮影時の自動候補更新、解析中の入力固定、失敗後の再試行、閉じる・workspace切替後の旧応答破棄、確認後の保存payloadをローカルChromiumで確認する。実機でのカメラ起動とは区別する。</td></tr>
               <tr><td>tests/shared/paypay.test.ts / tests/shared/paypay-id.test.ts / tests/shared/import-duplicates.test.ts / tests/server/paypay-import.test.ts</td><td>支払い抽出、JST日時・外部ID・先頭ゼロ、旧ID正規化、行/既存重複・内容衝突、保存順、Transactionと実挿入件数。</td></tr>
               <tr><td>tests/server/import-duplicates-store.test.ts</td><td>所属確認後に指定外部IDだけを照会し、既存明細の最小照合情報を返すことを確認する。</td></tr>
               <tr><td>tests/client/import-paste.test.ts</td><td>PC/mobileの実ImportPanelで初期チェックOFF・チェックによらない全登録・選択行の削除と取消・元のtotalRows保持・対象0件/登録中の無効化・登録済み行のグレー表示、見出し・ボタン・Safari注記、ヘルプの内容・安全なURL・明示コピーと拒否時案内・開閉時の通信/読取なし・閉じ方とfocus復帰・モバイルスクロール、CSV本文・手動入力UIの不在、タップ時だけのclipboard読取とファイル選択の共通処理、拒否・非対応・空/不正CSV・照会失敗からの再コピー/再選択と再試行、原本不送信、本人・ルール・重複、登録失敗時の確認表保持と成功時解除、読み込み中の入口抑止、workspace切替後の遅延読取・照会結果破棄を検証する。</td></tr>

@@ -7,6 +7,7 @@
 - [Googleログインと管理者による利用者管理（通常利用者は二人まで）](docs/detail-design.html#auth)
 - [個人用・共有用ワークスペースの管理と招待リンクによる参加](docs/detail-design.html#api)
 - [取引明細の追加・直接編集・自動保存](docs/detail-design.html#client)
+- [レシート写真から日時・取引先・金額・メモを入力し、履歴からカテゴリを補完](docs/detail-design.html#photo-transactions)
 - [明細の絞り込みと画面の手動更新](docs/detail-design.html#client)
 - [明細の一括削除・共有費ルールの適用](docs/detail-design.html#client)
 - [毎月指定日の定期支払い](docs/detail-design.html#recurring-payments)
@@ -29,8 +30,23 @@ iPhoneでのPayPay共有ショートカットとCSV貼り付けの確認方法�
 - Auth.js（Google OAuth）
 - Neon PostgreSQL 18以上（UTF8）
 - Vercel
+- OpenAI Responses API（写真からの明細入力）
 
 データ取得・DBクエリログの仕様は[詳細設計書のRepository・データ取得設計](docs/detail-design.html#repository)を参照してください。
+
+「明細を追加」のカメラボタンから、レシート写真1枚を1取引として読み取れます。
+スマートフォンでは背面カメラの起動を優先し、ブラウザによって画像選択になります。
+読み取った取引日時・取引先・税込合計金額・商品名などのメモを入力欄へ反映し、カテゴリは既存の確認済み支払い履歴から補完します。
+読めない項目と手動で選択・解除したカテゴリは保持します。
+再撮影した場合、手動で変更していないカテゴリは新しい取引先の候補に更新し、候補がなければ未分類に戻します。
+日付だけ読めた場合は入力中の時刻を保持し、確認を案内します。
+解析結果を確認・修正して「追加する」を押すまで、明細は保存しません。
+
+写真はOpenAIへ送信して解析します。Cake側では写真を永続保存せず、OpenAIには`store: false`で要求します。
+これはOpenAI側のデータ保持がすべてなくなることを意味しません。
+JPEG・PNG・WebPの原本20MiB以下を受け付け、ブラウザで長辺2048px以下・3MiB以下のJPEGへ変換して送信します。
+HEICなどの非対応形式はJPEG等へ変換してから選択してください。
+解析中もモーダルを閉じられ、解析失敗時は入力内容を保持して手入力を続けられます。
 
 明細の取引先は表示用の値を保持し、NFKC・小文字化・空白整理による照合用の値をDBの生成列へ保存します。
 手入力・CSV・定期支払いなどの保存経路で同じSQL関数を使い、既存明細もmigrationで補完します。
@@ -174,6 +190,26 @@ AUTH_MODE=google
 
 Productionで定期支払いを実行する場合は、Vercelの環境変数に16文字以上のランダムな `CRON_SECRET` を設定してください。
 実行条件・認証・検証方法は[詳細設計書の定期支払い](docs/detail-design.html#recurring-payments)を参照してください。
+
+写真から入力する場合は、次のサーバー専用環境変数も設定します。
+
+```dotenv
+OPENAI_API_KEY=対象環境用のOpenAI APIキー
+OPENAI_RECEIPT_MODEL=gpt-6.1-terra
+```
+
+`OPENAI_RECEIPT_MODEL`は省略可能で、既定は`gpt-6.1-terra`です。
+指定するモデルには画像入力と厳密なJSON構造化出力の対応、およびそのOpenAIプロジェクトからの利用権限が必要です。
+モデルの読取精度・待ち時間・費用は、実際に扱うレシートで比較して判断してください。
+APIキー未設定時、写真解析APIは503で利用不可を案内し、通常の手入力は利用できます。
+
+- 通常のローカル開発は、対象worktreeのGit管理外の`.env.local`へ設定し、開発サーバーを再起動します。
+- Vercelは対象プロジェクト・対象環境の環境変数へ設定し、その設定を使う新しいDeploymentで確認します。
+- `NEXT_PUBLIC_`は付けません。キーをソース・チャット・ログ・検証artifactへ出さないでください。
+- `dev:cloud`は外部サービスの秘密値を引き継ぐ構成ではありません。実API検証は通常のローカルまたは対象Previewで行い、他環境の秘密値をCloudへコピーしません。
+
+自動テストの応答スタブ検証と、実APIの読取精度・課金、スマートフォン実機のカメラ起動確認は分けて扱います。
+設定と境界の詳細は[写真からの明細入力](docs/detail-design.html#photo-transactions)を参照してください。
 
 ### 4. DBとアプリを起動
 

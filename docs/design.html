@@ -429,7 +429,7 @@
           <p class="lead">本システムは、個人および二人で共有する家計をワークスペース単位で管理するWebアプリケーションである。</p>
           <p>この文書は現在の実装・マイグレーション・テストを基準とする。項目・API・計算の詳細は<a href="detail-design.html">詳細設計書</a>、セットアップ・検証・デプロイの操作手順は<a href="../README.md">README</a>を参照する。</p>
           <div class="grid-3">
-            <div class="card"><h3>入力</h3><p>支払い・収入の手動登録、一覧での直接編集・メモ保存・一括操作、PayPay CSVの支払い明細取込に対応する。金額は支払いを−、収入を＋で表示する。</p></div>
+            <div class="card"><h3>入力</h3><p>支払い・収入の手動登録、レシート写真からの入力補完、一覧での直接編集・メモ保存・一括操作、PayPay CSVの支払い明細取込に対応する。金額は支払いを−、収入を＋で表示する。</p></div>
             <div class="card"><h3>共有</h3><p>一つのアカウントで複数ワークスペースを持ち、共有用は招待した二人で利用する。</p></div>
             <div class="card"><h3>清算</h3><p>共通支払いと共通収入を各明細の保存済み割合で配分し、誰が誰へいくら支払うかを算出する。</p></div>
           </div>
@@ -484,13 +484,14 @@
           <span class="tag fixed">採用構成</span>
           <h2>3. システム構成</h2>
           <p class="lead">利用者の操作、外部ファイル、認証、アプリケーション処理、永続化までを含む全体構成を示す。</p>
-          <div class="system-diagram" role="img" aria-label="利用者環境からVercel上のNext.jsアプリケーション、Google OAuthおよびNeon PostgreSQLへ接続する全体システム構成図">
+          <div class="system-diagram" role="img" aria-label="利用者環境からVercel上のNext.jsアプリケーション、Google OAuth、Neon PostgreSQLおよび写真解析用のOpenAI Responses APIへ接続する全体システム構成図">
             <div class="diagram-group">
               <p class="diagram-title">利用者環境 <span>PC / Smartphone</span></p>
               <div class="diagram-stack">
                 <div class="diagram-node accent"><strong>Webブラウザ</strong><small>レスポンシブUI<br />取引・設定・清算操作</small></div>
                 <div class="diagram-down">↑</div>
                 <div class="diagram-node"><strong>PayPay CSV</strong><small>端末上で選択・解析<br />原本は保存しない</small></div>
+                <div class="diagram-node"><strong>レシート写真</strong><small>撮影・選択して縮小<br />確認後に明細だけ保存</small></div>
               </div>
             </div>
 
@@ -507,14 +508,15 @@
               </div>
             </div>
 
-            <div class="diagram-arrow" aria-hidden="true">⇄<small>OAuth<br />SQL over TLS</small></div>
+            <div class="diagram-arrow" aria-hidden="true">⇄<small>OAuth / HTTPS<br />SQL over TLS</small></div>
 
             <div class="diagram-group">
               <p class="diagram-title">外部サービス</p>
               <div class="diagram-stack">
                 <div class="diagram-node accent"><strong>Google OAuth</strong><small>本人認証<br />基本プロフィール・メール</small></div>
                 <div class="diagram-node data"><strong>Neon PostgreSQL</strong><small>ユーザー・ワークスペース<br />明細・ルール・招待・清算履歴</small></div>
-                <div class="diagram-node"><strong>環境変数</strong><small>DB接続・Auth秘密情報<br />Vercelで暗号化管理</small></div>
+                <div class="diagram-node"><strong>OpenAI Responses API</strong><small>写真から明細項目を抽出<br />サーバー専用キー・store: false</small></div>
+                <div class="diagram-node"><strong>環境変数</strong><small>DB接続・Auth・OpenAI秘密情報<br />Vercelで暗号化管理</small></div>
               </div>
             </div>
           </div>
@@ -524,6 +526,7 @@
             <div class="card"><h3>デプロイ</h3><p>Vercelへ配置し、Neonの接続文字列とGoogle OAuth情報を暗号化された環境変数として設定する。</p></div>
           </div>
           <p>アプリAPIはHTTP処理、用途別サービス（workspace/招待・明細・ルール・取込・清算）、DB storeの順に処理する。共通の入力schemaとDTO変換を使用し、業務条件をDBなしで検証できる。workspaceの削除は、清算済み明細と履歴の関連も含めて一括で完了し、制約違反時は全体を取り消す。</p>
+          <p>写真からの明細入力は専用POSTで認証・所属・画像を検証し、OpenAI Responses APIへ送信して日時・取引先・税込合計・メモを抽出する。カテゴリはAIに選ばせず、既存の確認済み支払い履歴から候補を取得する。解析結果は追加モーダルの入力に反映し、確認後の「追加する」から既存の手動保存経路へ送る。解析だけではDBを更新せず、Cake側に写真を永続保存しない。OpenAI側の保持方針と、<code>store: false</code>によるResponse保存の無効化は区別する。</p>
           <p>ライブラリはブラウザの取得・保存制御を<code>lib/client/</code>、認証・HTTP境界・サービス・DB処理を<code>lib/server/</code>（<code>auth/</code>・<code>handlers/</code>・<code>services/</code>・<code>stores/</code>・<code>database/</code>・<code>preview/</code>）、両側で使う型・入力schema・純粋な計算を<code>lib/shared/</code>へ配置する。Client Componentからサーバー処理への推移的な参照と、共有定義から画面・サーバー・運用処理への依存を自動テストで検査する。運用処理は<code>scripts/</code>の用途別ディレクトリ、回帰テストは<code>tests/</code>の対象領域別ディレクトリへまとめる。各境界と依存方向は<a href="detail-design.html#architecture">詳細設計</a>を参照する。</p>
           <div class="note">通常APIはセッションとDB上の利用可否を確認する。ワークスペースの参照・更新は所属、招待承認はトークン・宛先メール・期限、利用者管理は管理者権限を検証する。</div>
           <div class="warning">ローカル・Preview環境では <code>AUTH_MODE=test</code> により、固定IDを持つテストユーザーA/Bを選択して通常のAuth.jsセッションを発行できる。Vercel Productionではサーバー側で常に無効化し、Googleログインだけを提供する。</div>
@@ -565,6 +568,7 @@
               <tr><td>TX-02</td><td>追加・直接編集</td><td>支払い・収入をモーダルから追加。一覧の種別・日時・取引先・方法・金額・支払者／受取者・区分・配分割合を編集し自動保存する。</td><td>清算済みの種別・金額・割合等は変更不可。外部取引IDは一覧で編集しない。</td></tr>
               <tr><td>TX-03</td><td>メモ</td><td>最大2,000文字のメモを独立した保存処理で更新する。</td><td>清算済みもメモは編集可。保存失敗時は入力を保持し再試行できる。</td></tr>
               <tr><td>TX-04</td><td>選択明細の一括操作</td><td>チェックした未清算明細を確認後に削除、または現在の区分のルールで区分・割合を更新する。</td><td>一度に最大5,000件。対象不足・清算済み混在等では全件を中止する。ルール適用は支払いだけに許可し、収入混在では全件を中止する。ルール適用は参加者の現在割合を一度集約し、全選択の割合を検証して集合単位で更新する。確定値は同じロック内で返す。</td></tr>
+              <tr><td>TX-05</td><td>写真から入力</td><td>追加モーダルのカメラボタンから写真1枚・1取引を解析し、日時・取引先・税込合計金額・メモを補完する。カテゴリは既存の履歴候補を使い、手動選択・解除を保持する。再撮影では手動変更していないカテゴリを新しい候補へ更新し、候補なしは未分類とする。確認後に通常の追加操作で保存する。</td><td>JPEG・PNG・WebPの原本20MiB以下。長辺2048px以下・3MiB以下のJPEGへ縮小してOpenAIへ送る。読めない値は保持し、日付だけの場合は時刻確認を案内。解析失敗・キー未設定時も手入力できる。複数取引の一括読取・写真の永続保存は扱わない。</td></tr>
               <tr><td>CAT-01</td><td>集計用カテゴリ</td><td>明細に任意階層のカテゴリを1つ設定できる。設定画面の「＋」で子を追加し、名前と色を保存する。大分類は根、小分類は全階層を表示する。</td><td>未分類可。削除は子孫も含み、清算済みを含む明細の参照を解除する。明細・清算情報は保持。清算済みもカテゴリ変更可。</td></tr>
               <tr><td>IMP-01</td><td>CSV読込</td><td>PayPay CSVから「取引内容＝支払い」の行だけを抽出し、登録前の確認表を表示する。</td><td>必須ヘッダー不足は読込を中止。日時・金額・必須値・重複は行単位で表示。</td></tr>
               <tr><td>IMP-02</td><td>確認・変更・登録</td><td>支払者を取込全体に指定し、選択行の区分・カテゴリを一括変更できる。確認表は表示領域の幅に応じて項目を折り返す。行ごとの取引先・メモ・割合・配分金額・カテゴリの調整、履歴から未分類行へのカテゴリ補完、選択行の確認表からの削除ができる。「確認して登録」はチェックにかかわらず残った登録可能行をすべて取り込む。</td><td>エラー・登録済み行は選択不可。取引先は前後空白を除いて1〜240文字、メモは改行・空白を保持して2000文字以内。編集不正時は登録不可。カテゴリ補完はボタン押下時だけ実行し、チェックによらず登録可能な未分類行を対象とする。一度の登録は最大2,000明細。</td></tr>
@@ -603,7 +607,7 @@
               <tr><td>SC-01</td><td>ログイン</td><td>Cakeロゴ、Googleログイン、同意文、認証エラー。テスト認証時はA/Bの選択ボタン。</td><td>一画面中央配置。</td></tr>
               <tr><td>SC-02</td><td>ホーム</td><td>対象年月を選べる収支の表（行は収入・支出・収支、列は各ユーザー名・合計）、次の清算（送金方向・金額、確認付き完了、下部の未清算の共有収支と対象件数）、共有費配分の表、最新20件の清算履歴、招待件数、主要操作。</td><td>指標を縦積み。配分表は行・列の見出しを保ち、金額を折り返す。</td></tr>
               <tr><td>SC-03</td><td>取引明細</td><td>上部の月単位明細／未精算明細、コンパクトな年月操作、列ソート・フィルタ、条件に一致する収入・支出・収支の小さな合計表示、追加、直接編集・自動保存、割合・金額、メモ、選択明細の一括削除・ルール適用。</td><td>取引先・日時・金額等の概要をカード表示し、編集欄を展開。列ソート・フィルタと上部の合計も操作・確認できる。</td></tr>
-              <tr><td>SC-04</td><td>明細追加モーダル</td><td>種別（支払い／収入）、日時、取引先、方法、金額、支払者／受取者、区分、配分割合・金額、メモ。IDは自動発行。</td><td>幅を画面内に収め、モーダル内を縦スクロール。</td></tr>
+              <tr><td>SC-04</td><td>明細追加モーダル</td><td>種別（支払い／収入）、日時、取引先、方法、金額、支払者／受取者、区分、配分割合・金額、カテゴリ、メモ。カメラボタンから写真解析して補完できる。IDは自動発行。</td><td>幅を画面内に収め、モーダル内を縦スクロール。背面カメラを優先するが、ブラウザにより画像選択となる。解析中は入力と保存を固定し、閉じることは可能。</td></tr>
               <tr><td>SC-05</td><td>CSV取込</td><td>PayPay形式、ファイル選択・ドロップ、重複確認、支払者指定、選択行の区分・カテゴリ変更、行ごとの割合・カテゴリ調整、履歴からのカテゴリ補完、確認して登録。最下部に選択した形式の本人の取込履歴を最新5件表示。</td><td>明細カードの詳細を展開する。カテゴリ操作を先頭の枠にまとめ、上部の一括操作欄・下部の登録操作欄とも画面に固定せずスクロールする。補完ボタン横の小さい「ⓘ」タップで説明を表示する。取込履歴はPCと同じ表で1履歴1行とし、長いファイル名を省略してタップで対象の取り込みの明細を確認する。</td></tr>
               <tr><td>SC-07</td><td>設定</td><td>表示名・ログアウト、ワークスペース名称・種別表示・参加者・招待・デフォルト割合・集計用カテゴリ・区分のデフォルトルール・定期支払い・削除、管理者のみ利用者管理。</td><td>個人設定の「基本情報」とワークスペース設定の各枠は縦に並べ、初期状態では閉じる。見出しと矢印から個別に開閉し、入力途中の内容を保持する。定期支払いの各明細も要約から詳細を開閉。</td></tr>
               <tr><td>SC-09</td><td>集計</td><td>表示対象ユーザーの選択、選択ユーザーの収支表と収入／共有費／個人費チェック、対象カテゴリの選択、月・指定期間、任意階層、収支の6か月推移、支出の構成比・前期間差分。</td><td>条件欄は通常スクロール。下部ナビは5項目。数値は一覧・表でも確認できる。</td></tr>
