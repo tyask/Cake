@@ -1,0 +1,41 @@
+.photoInput {
+  display: none;
+}
+
+.photoActions {
+  display: grid;
+  gap: .45rem;
+  margin-bottom: 1rem;
+}
+
+.photoButton {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: .5rem;
+  width: 100%;
+}
+
+.photoButton svg {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.photoHelp,
+.photoStatus {
+  margin: 0;
+  font-size: .72rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.photoHelp {
+  color: var(--muted);
+}
+
+.photoStatus {
+  padding: .6rem .7rem;
+  border-radius: .5rem;
+  background: var(--accent-soft);
+}
