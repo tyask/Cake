@@ -312,16 +312,18 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         assert.equal(await help.evaluate(element => element === document.activeElement), true);
         if (mobile) {
           const devtools = await context.newCDPSession(page);
-          await devtools.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 });
-          await page.waitForFunction(() => window.visualViewport?.scale === 2);
           await page.keyboard.press("Enter");
-          assert.equal(await tooltip.innerText(), helpText);
-          assert.equal(await tooltip.evaluate(element => {
+          const tooltipId = await tooltip.getAttribute("id");
+          await devtools.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 });
+          await page.waitForFunction(id => {
+            const viewport = window.visualViewport;
+            const element = id && document.getElementById(id);
+            if (viewport?.scale !== 2 || !element) return false;
             const { left, right, top, bottom } = element.getBoundingClientRect();
-            const viewport = window.visualViewport!;
             return left >= viewport.offsetLeft && right <= viewport.offsetLeft + viewport.width
               && top >= viewport.offsetTop && bottom <= viewport.offsetTop + viewport.height;
-          }), true, "拡大後の表示領域にも注釈が収まる");
+          }, tooltipId, { timeout: 6000 });
+          assert.equal(await tooltip.innerText(), helpText);
           await page.keyboard.press("Escape");
           await devtools.send("Emulation.setPageScaleFactor", { pageScaleFactor: 1 });
           await devtools.detach();

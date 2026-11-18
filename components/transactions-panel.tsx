@@ -66,41 +66,46 @@ function TransactionClassHelp() {
     const help = anchor.current;
     const bubble = tooltip.current;
     const viewport = window.visualViewport;
-    const viewportLeft = viewport?.offsetLeft ?? 0;
-    const viewportTop = viewport?.offsetTop ?? 0;
-    const viewportWidth = viewport?.width ?? document.documentElement.clientWidth;
-    const viewportHeight = viewport?.height ?? window.innerHeight;
-    const edge = 8;
-    const right = viewportLeft + viewportWidth - edge;
-    const bottom = viewportTop + viewportHeight - edge;
-    bubble.style.maxWidth = `min(17rem, ${viewportWidth - 2 * edge}px)`;
-    bubble.style.maxHeight = `${viewportHeight - 2 * edge}px`;
-    const button = help.getBoundingClientRect();
-    const { width, height } = bubble.getBoundingClientRect();
-    const centered = button.left + (button.width - width) / 2;
-    const top = button.bottom + height <= bottom ? button.bottom : button.top - height;
-    bubble.style.left = `${Math.max(viewportLeft + edge, Math.min(centered, right - width))}px`;
-    bubble.style.top = `${Math.max(viewportTop + edge, Math.min(top, bottom - height))}px`;
-
     const close = () => setMode(null);
+    const position = () => {
+      const button = help.getBoundingClientRect();
+      if (!button.width || button.bottom < 0 || button.top > window.innerHeight) {
+        close();
+        return;
+      }
+      const viewportLeft = viewport?.offsetLeft ?? 0;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportWidth = viewport?.width ?? document.documentElement.clientWidth;
+      const viewportHeight = viewport?.height ?? window.innerHeight;
+      const edge = 8;
+      const right = viewportLeft + viewportWidth - edge;
+      const bottom = viewportTop + viewportHeight - edge;
+      bubble.style.maxWidth = `min(17rem, ${viewportWidth - 2 * edge}px)`;
+      bubble.style.maxHeight = `${viewportHeight - 2 * edge}px`;
+      const { width, height } = bubble.getBoundingClientRect();
+      const centered = button.left + (button.width - width) / 2;
+      const top = button.bottom + height <= bottom ? button.bottom : button.top - height;
+      bubble.style.left = `${Math.max(viewportLeft + edge, Math.min(centered, right - width))}px`;
+      bubble.style.top = `${Math.max(viewportTop + edge, Math.min(top, bottom - height))}px`;
+    };
     const closeOutside = (event: PointerEvent) => {
       if (event.target instanceof Node && !help.contains(event.target) && !bubble.contains(event.target)) close();
     };
     const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") close(); };
-    const closeOnScroll = (event: Event) => { if (event.target !== bubble) close(); };
+    position();
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
-    document.addEventListener("scroll", closeOnScroll, true);
-    window.addEventListener("resize", close);
-    viewport?.addEventListener("resize", close);
-    viewport?.addEventListener("scroll", close);
+    document.addEventListener("scroll", position, true);
+    window.addEventListener("resize", position);
+    viewport?.addEventListener("resize", position);
+    viewport?.addEventListener("scroll", position);
     return () => {
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("keydown", closeOnEscape);
-      document.removeEventListener("scroll", closeOnScroll, true);
-      window.removeEventListener("resize", close);
-      viewport?.removeEventListener("resize", close);
-      viewport?.removeEventListener("scroll", close);
+      document.removeEventListener("scroll", position, true);
+      window.removeEventListener("resize", position);
+      viewport?.removeEventListener("resize", position);
+      viewport?.removeEventListener("scroll", position);
     };
   }, [open]);
 
