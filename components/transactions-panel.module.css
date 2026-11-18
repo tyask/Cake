@@ -78,6 +78,13 @@
 .amountColumn { width: 6.5rem; }
 .actorColumn { width: 5.5rem; }
 .classColumn { width: 4.5rem; }
+.wrappingTable .classColumn { width: 6rem; }
+.classEditor { display: flex; align-items: center; gap: .2rem; }
+.classHelp { display: inline-flex; flex-shrink: 0; }
+.classHelp button { display: grid; place-items: center; width: 1.5rem; height: 2rem; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.classHelp button span { display: grid; place-items: center; width: 1rem; height: 1rem; border: 1px solid currentColor; border-radius: 50%; font-size: .65rem; font-weight: 700; line-height: 1; }
+.classHelp button:hover, .classHelp button[aria-expanded="true"] { color: var(--accent); }
+.classHelpTooltip { position: fixed; top: 0; left: 0; z-index: 25; width: max-content; max-width: 17rem; padding: .55rem .7rem; border-radius: .5rem; color: #fff; background: var(--ink); box-shadow: 0 .25rem .8rem #0002; font-size: .75rem; line-height: 1.6; overflow: auto; overflow-wrap: anywhere; }
 .ratioColumn { width: 15rem; }
 .splitCell :global(.split-editor) { margin: 0; }
 .splitCell :global(.split-editor) > legend { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -184,6 +191,7 @@
   .table .fullCell { grid-column: 1 / -1; }
   .table .splitCell :global(.split-editor-compact) { max-width: none; }
   .table input, .table select { min-height: 2.3rem; font-size: .78rem; }
+  .classHelp button { width: 2rem; height: 2.3rem; }
   /* Constrain native date controls to the cell, including iOS Safari's intrinsic width. */
   .table input[type="datetime-local"] { display: block; width: 0; min-width: 100%; max-width: 100%; padding: .35rem .4rem; font-size: .78rem; }
   .table input[type="datetime-local"]::-webkit-date-and-time-value { text-align: left; }

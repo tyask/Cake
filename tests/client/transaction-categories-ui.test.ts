@@ -247,8 +247,9 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         assert.deepEqual(errors, []);
       } finally { release?.(); await context.close(); }
     });
-    for (const width of [1440, 390]) await t.test(`${width}px: 個人費の担当者は本人に限定する`, async () => {
-      const context = await browser.newContext({ viewport: { width, height: 900 } });
+    for (const width of [1600, 1440, 390]) await t.test(`${width}px: 区分の注釈と個人費の担当者制限`, async () => {
+      const mobile = width < 768;
+      const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: mobile, hasTouch: mobile });
       const page = await context.newPage();
       const writes: Record<string, unknown>[] = [];
       await page.route("**/api/app", async route => {
@@ -259,15 +260,79 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
       try {
         await page.goto(origin);
         const first = page.locator('[data-transaction-id="first"]');
-        if (width < 768) await first.getByRole("button", { name: "firstの詳細を開く", exact: true }).click();
+        if (mobile) await first.getByRole("button", { name: "firstの詳細を開く", exact: true }).click();
         const actor = first.getByLabel("支払者", { exact: true });
         const classification = first.getByLabel("区分", { exact: true });
+        const help = first.getByRole("button", { name: "個人に変更する条件", exact: true });
+        const tooltip = page.getByRole("tooltip");
+        const helpText = "個人に変更する場合は、担当者を自分に変更してください。";
+        assert.equal(await help.count(), 0);
         await actor.selectOption("b");
         await page.waitForFunction(() => JSON.parse(document.getElementById("saved-transactions")!.textContent!)[0].actorUserId === "b");
         assert.equal(await classification.locator('option[value="PERSONAL"]').isDisabled(), true);
-        await first.getByText("個人に変更する場合は、担当者を自分に変更してください。", { exact: true }).waitFor();
+        await help.scrollIntoViewIfNeeded();
+        assert.equal(await page.getByText(helpText, { exact: true }).count(), 0);
+        const closedHeight = (await first.boundingBox())!.height;
+        if (mobile) {
+          await help.tap();
+        } else {
+          await help.hover();
+        }
+        assert.equal(await tooltip.innerText(), helpText);
+        assert.equal((await first.boundingBox())!.height, closedHeight);
+        const bounds = (await tooltip.boundingBox())!;
+        assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, JSON.stringify(bounds));
+        assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= 900, JSON.stringify(bounds));
+        assert.equal(await tooltip.evaluate(element => {
+          const bounds = element.getBoundingClientRect();
+          return element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+        }), true, "吹き出しはカードや表の端で切れずに表示される");
+
+        if (mobile) {
+          await help.tap();
+          await tooltip.waitFor({ state: "hidden" });
+          await help.tap();
+          await actor.tap();
+        } else {
+          await tooltip.hover();
+          assert.equal(await tooltip.isVisible(), true);
+          await page.mouse.move(0, 0);
+          await tooltip.waitFor({ state: "hidden" });
+          await help.click();
+          await page.mouse.move(0, 0);
+          assert.equal(await tooltip.isVisible(), true, "クリック後はホバーを外しても表示を保つ");
+          await page.mouse.click(0, 0);
+        }
+        await tooltip.waitFor({ state: "hidden" });
+        await help.focus();
+        await page.keyboard.press("Enter");
+        assert.equal(await tooltip.innerText(), helpText);
+        await page.keyboard.press("Escape");
+        await tooltip.waitFor({ state: "hidden" });
+        assert.equal(await help.evaluate(element => element === document.activeElement), true);
+        if (mobile) {
+          const devtools = await context.newCDPSession(page);
+          await page.keyboard.press("Enter");
+          const tooltipId = await tooltip.getAttribute("id");
+          await devtools.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 });
+          await page.waitForFunction(id => {
+            const viewport = window.visualViewport;
+            const element = id && document.getElementById(id);
+            if (viewport?.scale !== 2 || !element) return false;
+            const { left, right, top, bottom } = element.getBoundingClientRect();
+            return left >= viewport.offsetLeft && right <= viewport.offsetLeft + viewport.width
+              && top >= viewport.offsetTop && bottom <= viewport.offsetTop + viewport.height;
+          }, tooltipId, { timeout: 6000 });
+          assert.equal(await tooltip.innerText(), helpText);
+          await page.keyboard.press("Escape");
+          await devtools.send("Emulation.setPageScaleFactor", { pageScaleFactor: 1 });
+          await devtools.detach();
+        }
+        assert.equal(writes.length, 1, "注釈の操作で明細を更新しない");
+
         await actor.selectOption("a");
         await page.waitForFunction(() => JSON.parse(document.getElementById("saved-transactions")!.textContent!)[0].actorUserId === "a");
+        assert.equal(await help.count(), 0);
         await classification.selectOption("PERSONAL");
         await page.waitForFunction(() => JSON.parse(document.getElementById("saved-transactions")!.textContent!)[0].expenseClass === "PERSONAL");
         assert.equal(await actor.locator('option[value="b"]').isDisabled(), true);

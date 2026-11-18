@@ -9,6 +9,7 @@ import type { RunAppAction } from "@/lib/shared/schemas/app-input";
 import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/client/autosave";
 
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { transactionActorPatch, transactionDateInput, transactionDateToIso, transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues } from "@/lib/shared/transaction-editing";
 import type { ExpenseClass, TransactionRecord, WorkspaceData, WorkspaceMember } from "@/lib/shared/types";
 import styles from "./transactions-panel.module.css";
@@ -52,6 +53,76 @@ type TransactionListProps = {
 };
 
 const tableColumns = [{ id: "selection", label: "選択" }, ...transactionColumns, { id: "updateStatus", label: "更新状態" }] as const;
+
+function TransactionClassHelp() {
+  const id = useId();
+  const anchor = useRef<HTMLSpanElement>(null);
+  const tooltip = useRef<HTMLSpanElement>(null);
+  const [mode, setMode] = useState<"hover" | "pressed" | null>(null);
+  const open = mode !== null;
+
+  useLayoutEffect(() => {
+    if (!open || !anchor.current || !tooltip.current) return;
+    const help = anchor.current;
+    const bubble = tooltip.current;
+    const viewport = window.visualViewport;
+    const close = () => setMode(null);
+    const position = () => {
+      const button = help.getBoundingClientRect();
+      if (!button.width || button.bottom < 0 || button.top > window.innerHeight) {
+        close();
+        return;
+      }
+      const viewportLeft = viewport?.offsetLeft ?? 0;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportWidth = viewport?.width ?? document.documentElement.clientWidth;
+      const viewportHeight = viewport?.height ?? window.innerHeight;
+      const edge = 8;
+      const right = viewportLeft + viewportWidth - edge;
+      const bottom = viewportTop + viewportHeight - edge;
+      bubble.style.maxWidth = `min(17rem, ${viewportWidth - 2 * edge}px)`;
+      bubble.style.maxHeight = `${viewportHeight - 2 * edge}px`;
+      const { width, height } = bubble.getBoundingClientRect();
+      const centered = button.left + (button.width - width) / 2;
+      const top = button.bottom + height <= bottom ? button.bottom : button.top - height;
+      bubble.style.left = `${Math.max(viewportLeft + edge, Math.min(centered, right - width))}px`;
+      bubble.style.top = `${Math.max(viewportTop + edge, Math.min(top, bottom - height))}px`;
+    };
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !help.contains(event.target) && !bubble.contains(event.target)) close();
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") close(); };
+    position();
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("scroll", position, true);
+    window.addEventListener("resize", position);
+    viewport?.addEventListener("resize", position);
+    viewport?.addEventListener("scroll", position);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+      document.removeEventListener("scroll", position, true);
+      window.removeEventListener("resize", position);
+      viewport?.removeEventListener("resize", position);
+      viewport?.removeEventListener("scroll", position);
+    };
+  }, [open]);
+
+  return <span ref={anchor} className={styles.classHelp}
+    onPointerEnter={event => { if (event.pointerType === "mouse") setMode(current => current ?? "hover"); }}
+    onPointerLeave={event => { if (event.pointerType === "mouse") setMode(current => current === "hover" ? null : current); }}
+    onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setMode(null); }}>
+    <button type="button" aria-label="個人に変更する条件" aria-expanded={open}
+      aria-controls={open ? id : undefined} aria-describedby={open ? id : undefined}
+      onClick={() => setMode(current => current === "pressed" ? null : "pressed")}>
+      <span aria-hidden="true">?</span>
+    </button>
+    {open && createPortal(<span ref={tooltip} id={id} className={styles.classHelpTooltip} role="tooltip">
+      個人に変更する場合は、担当者を自分に変更してください。
+    </span>, document.body)}
+  </span>;
+}
 
 function signature(values: TransactionValues): string {
   return JSON.stringify([values.occurredAt, values.merchant, values.method, values.type, values.amountYen, values.actorUserId, values.expenseClass, Object.entries(values.splitWeights).sort(([a], [b]) => a.localeCompare(b))]);
@@ -548,7 +619,15 @@ function EditableTransaction({ item, currentUserId, members, categoryChoices, ca
     <td data-label="種別"><select aria-label="種別" value={draft.type} disabled={busy} onChange={event => change({ type: event.target.value as TransactionType }, true)}>{transactionTypes.map(type => <option key={type} value={type}>{transactionTypeLabels[type]}</option>)}</select></td>
     <td data-label="金額（円）"><span className="signed-amount-input"><span className={cashflowClass(draft.type === "PAYMENT" ? -draft.amountYen : draft.amountYen)} aria-hidden="true">{draft.amountYen === 0 ? "" : draft.type === "PAYMENT" ? "−" : "+"}</span><input aria-label="金額（円）" className={cashflowClass(draft.type === "PAYMENT" ? -draft.amountYen : draft.amountYen)} type="number" required min="1" max={MAX_AMOUNT_YEN} step="1" value={draft.amountYen} disabled={busy} onChange={(event) => change({ amountYen: Number(event.target.value) })} onBlur={requestCommit} onKeyDown={commitOnEnter} /></span></td>
     <td data-label={transactionActorLabels[draft.type]}><select aria-label={transactionActorLabels[draft.type]} value={draft.actorUserId} disabled={busy} onChange={(event) => change(transactionActorPatch(currentValues(), event.target.value, members), true)}>{members.map((member) => <option key={member.id} value={member.id} disabled={draft.expenseClass === "PERSONAL" && member.id !== currentUserId}>{member.name}</option>)}</select></td>
-    <td data-label="区分"><select aria-label="区分" value={draft.expenseClass} disabled={busy} onChange={(event) => change(transactionExpensePatch(currentValues(), event.target.value as ExpenseClass, members), true)}>{expenseClasses.map(value => <option key={value} value={value} disabled={value === "PERSONAL" && draft.actorUserId !== currentUserId}>{expenseClassLabels[value]}</option>)}</select>{draft.actorUserId !== currentUserId && <small className="ratio-note">個人に変更する場合は、担当者を自分に変更してください。</small>}</td>
+    <td data-label="区分">
+      <div className={styles.classEditor}>
+        <select aria-label="区分" value={draft.expenseClass} disabled={busy}
+          onChange={(event) => change(transactionExpensePatch(currentValues(), event.target.value as ExpenseClass, members), true)}>
+          {expenseClasses.map(value => <option key={value} value={value} disabled={value === "PERSONAL" && draft.actorUserId !== currentUserId}>{expenseClassLabels[value]}</option>)}
+        </select>
+        {draft.actorUserId !== currentUserId && <TransactionClassHelp />}
+      </div>
+    </td>
     <td data-label={transactionSplitLabel(members)} className={styles.splitCell + " " + styles.fullCell}>
       <SplitEditor compact inline label="配分割合" members={members} value={draft.splitWeights} amountYen={draft.amountYen} type={draft.type}
         disabled={busy || draft.expenseClass === "PERSONAL"} onChange={(splitWeights) => change({ splitWeights })} onCommit={requestCommit} />
