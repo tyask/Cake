@@ -10,7 +10,7 @@ Cake運用層の進捗表示。公式AI-DLCエンジンのstate/receiptではな
 - Branches：`codex/transaction-class-help`
 - Phase：Construction
 - Status：frozen
-- 記録更新日時：2026-11-18T13:58:33.052Z
+- 記録更新日時：2026-11-18T14:03:46.417Z
 - 計画承認：記録あり（対象計画のhash一致はCLIで検査）
 - 記録凍結：済み。以後の検証・Ready・Operation結果はIssue/PR/Actionsに保存する。
 

@@ -9,6 +9,7 @@ import type { RunAppAction } from "@/lib/shared/schemas/app-input";
 import { acknowledge, createAutosaveRequest, fieldEqual, saveChanged } from "@/lib/client/autosave";
 
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { transactionActorPatch, transactionDateInput, transactionDateToIso, transactionExpensePatch, transactionValues, validateTransactionValues, type TransactionValues } from "@/lib/shared/transaction-editing";
 import type { ExpenseClass, TransactionRecord, WorkspaceData, WorkspaceMember } from "@/lib/shared/types";
 import styles from "./transactions-panel.module.css";
@@ -64,32 +65,42 @@ function TransactionClassHelp() {
     if (!open || !anchor.current || !tooltip.current) return;
     const help = anchor.current;
     const bubble = tooltip.current;
-    bubble.showPopover();
+    const viewport = window.visualViewport;
+    const viewportLeft = viewport?.offsetLeft ?? 0;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const viewportWidth = viewport?.width ?? document.documentElement.clientWidth;
+    const viewportHeight = viewport?.height ?? window.innerHeight;
+    const edge = 8;
+    const right = viewportLeft + viewportWidth - edge;
+    const bottom = viewportTop + viewportHeight - edge;
+    bubble.style.maxWidth = `min(17rem, ${viewportWidth - 2 * edge}px)`;
+    bubble.style.maxHeight = `${viewportHeight - 2 * edge}px`;
     const button = help.getBoundingClientRect();
     const { width, height } = bubble.getBoundingClientRect();
-    const viewportWidth = document.documentElement.clientWidth;
-    const viewportHeight = window.innerHeight;
-    const edge = 8;
     const centered = button.left + (button.width - width) / 2;
-    const top = button.bottom + height <= viewportHeight - edge ? button.bottom : button.top - height;
-    bubble.style.left = `${Math.max(edge, Math.min(centered, viewportWidth - width - edge))}px`;
-    bubble.style.top = `${Math.max(edge, Math.min(top, viewportHeight - height - edge))}px`;
+    const top = button.bottom + height <= bottom ? button.bottom : button.top - height;
+    bubble.style.left = `${Math.max(viewportLeft + edge, Math.min(centered, right - width))}px`;
+    bubble.style.top = `${Math.max(viewportTop + edge, Math.min(top, bottom - height))}px`;
 
     const close = () => setMode(null);
     const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !help.contains(event.target)) close();
+      if (event.target instanceof Node && !help.contains(event.target) && !bubble.contains(event.target)) close();
     };
     const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") close(); };
+    const closeOnScroll = (event: Event) => { if (event.target !== bubble) close(); };
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
-    document.addEventListener("scroll", close, true);
+    document.addEventListener("scroll", closeOnScroll, true);
     window.addEventListener("resize", close);
+    viewport?.addEventListener("resize", close);
+    viewport?.addEventListener("scroll", close);
     return () => {
-      if (bubble.matches(":popover-open")) bubble.hidePopover();
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("keydown", closeOnEscape);
-      document.removeEventListener("scroll", close, true);
+      document.removeEventListener("scroll", closeOnScroll, true);
       window.removeEventListener("resize", close);
+      viewport?.removeEventListener("resize", close);
+      viewport?.removeEventListener("scroll", close);
     };
   }, [open]);
 
@@ -102,9 +113,9 @@ function TransactionClassHelp() {
       onClick={() => setMode(current => current === "pressed" ? null : "pressed")}>
       <span aria-hidden="true">?</span>
     </button>
-    {open && <span ref={tooltip} id={id} className={styles.classHelpTooltip} popover="manual" role="tooltip">
+    {open && createPortal(<span ref={tooltip} id={id} className={styles.classHelpTooltip} role="tooltip">
       個人に変更する場合は、担当者を自分に変更してください。
-    </span>}
+    </span>, document.body)}
   </span>;
 }
 

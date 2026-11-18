@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-11-18T13:54:27.540Z",
-  "updatedAt": "2026-11-18T13:58:33.052Z",
+  "updatedAt": "2026-11-18T14:03:46.417Z",
   "events": [
     {
       "action": "CREATED",
@@ -50,6 +50,36 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-11-18T13:58:33.052Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "4786f1c740748337b46caeb39b8af83e42443f5b726d96e8d4edea007ec2fa94"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-11-18T14:01:59.969Z",
+      "note": "別Agentレビューの指摘に対応し、表示領域を拡大後の画面に合わせる。ブラウザ固有のPopover APIへの依存もなくし、変更後のSHAを再レビューする。\n",
+      "planHash": "4786f1c740748337b46caeb39b8af83e42443f5b726d96e8d4edea007ec2fa94"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-11-18T14:03:26.903Z",
+      "note": "別Agentのレビューで、スマートフォンの200%拡大表示で注釈が見切れることを確認した。表示中のビューポートに合わせて幅と位置を調整し、固定位置のReact portalで表とカードの外に描画する。Popover APIの有無にかかわらず操作できる。モバイル相当のChromiumで200%拡大を含むテストを追加した。\n\n関連ブラウザテスト11件、対象のLint、型チェックが成功した。変更後のSHAで再レビューと最終検証を行う。\n",
+      "planHash": "4786f1c740748337b46caeb39b8af83e42443f5b726d96e8d4edea007ec2fa94"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-11-18T14:03:27.077Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "4786f1c740748337b46caeb39b8af83e42443f5b726d96e8d4edea007ec2fa94"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-11-18T14:03:46.160Z",
+      "note": "別Agentレビューの指摘に沿って、詳細設計の表示対象を編集可能な明細に限定して記述する。\n",
+      "planHash": "4786f1c740748337b46caeb39b8af83e42443f5b726d96e8d4edea007ec2fa94"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-11-18T14:03:46.417Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "4786f1c740748337b46caeb39b8af83e42443f5b726d96e8d4edea007ec2fa94"
     }

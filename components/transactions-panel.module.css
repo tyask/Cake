@@ -84,7 +84,7 @@
 .classHelp button { display: grid; place-items: center; width: 1.5rem; height: 2rem; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .classHelp button span { display: grid; place-items: center; width: 1rem; height: 1rem; border: 1px solid currentColor; border-radius: 50%; font-size: .65rem; font-weight: 700; line-height: 1; }
 .classHelp button:hover, .classHelp button[aria-expanded="true"] { color: var(--accent); }
-.classHelpTooltip { position: fixed; inset: auto; margin: 0; width: max-content; max-width: min(17rem, calc(100vw - 1rem)); padding: .55rem .7rem; border: 0; border-radius: .5rem; color: #fff; background: var(--ink); box-shadow: 0 .25rem .8rem #0002; font-size: .75rem; line-height: 1.6; overflow-wrap: anywhere; }
+.classHelpTooltip { position: fixed; top: 0; left: 0; z-index: 25; width: max-content; max-width: 17rem; padding: .55rem .7rem; border-radius: .5rem; color: #fff; background: var(--ink); box-shadow: 0 .25rem .8rem #0002; font-size: .75rem; line-height: 1.6; overflow: auto; overflow-wrap: anywhere; }
 .ratioColumn { width: 15rem; }
 .splitCell :global(.split-editor) { margin: 0; }
 .splitCell :global(.split-editor) > legend { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

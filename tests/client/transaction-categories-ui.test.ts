@@ -249,7 +249,7 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
     });
     for (const width of [1600, 1440, 390]) await t.test(`${width}px: 区分の注釈と個人費の担当者制限`, async () => {
       const mobile = width < 768;
-      const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: mobile });
+      const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: mobile, hasTouch: mobile });
       const page = await context.newPage();
       const writes: Record<string, unknown>[] = [];
       await page.route("**/api/app", async route => {
@@ -264,14 +264,14 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         const actor = first.getByLabel("支払者", { exact: true });
         const classification = first.getByLabel("区分", { exact: true });
         const help = first.getByRole("button", { name: "個人に変更する条件", exact: true });
-        const tooltip = first.getByRole("tooltip");
+        const tooltip = page.getByRole("tooltip");
         const helpText = "個人に変更する場合は、担当者を自分に変更してください。";
         assert.equal(await help.count(), 0);
         await actor.selectOption("b");
         await page.waitForFunction(() => JSON.parse(document.getElementById("saved-transactions")!.textContent!)[0].actorUserId === "b");
         assert.equal(await classification.locator('option[value="PERSONAL"]').isDisabled(), true);
         await help.scrollIntoViewIfNeeded();
-        assert.equal(await first.getByText(helpText, { exact: true }).count(), 0);
+        assert.equal(await page.getByText(helpText, { exact: true }).count(), 0);
         const closedHeight = (await first.boundingBox())!.height;
         if (mobile) {
           await help.tap();
@@ -310,6 +310,22 @@ test("明細カテゴリの保存・失敗保持・精算済み編集とPC/mobil
         await page.keyboard.press("Escape");
         await tooltip.waitFor({ state: "hidden" });
         assert.equal(await help.evaluate(element => element === document.activeElement), true);
+        if (mobile) {
+          const devtools = await context.newCDPSession(page);
+          await devtools.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 });
+          await page.waitForFunction(() => window.visualViewport?.scale === 2);
+          await page.keyboard.press("Enter");
+          assert.equal(await tooltip.innerText(), helpText);
+          assert.equal(await tooltip.evaluate(element => {
+            const { left, right, top, bottom } = element.getBoundingClientRect();
+            const viewport = window.visualViewport!;
+            return left >= viewport.offsetLeft && right <= viewport.offsetLeft + viewport.width
+              && top >= viewport.offsetTop && bottom <= viewport.offsetTop + viewport.height;
+          }), true, "拡大後の表示領域にも注釈が収まる");
+          await page.keyboard.press("Escape");
+          await devtools.send("Emulation.setPageScaleFactor", { pageScaleFactor: 1 });
+          await devtools.detach();
+        }
         assert.equal(writes.length, 1, "注釈の操作で明細を更新しない");
 
         await actor.selectOption("a");
