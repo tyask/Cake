@@ -108,6 +108,15 @@
         "codex/photo-transaction-input"
       ],
       "recordDir": "aidlc/spaces/default/intents/261117-photo-transaction-input"
+    },
+    {
+      "id": "261118-transaction-class-help",
+      "issue": 178,
+      "branch": "codex/transaction-class-help",
+      "branches": [
+        "codex/transaction-class-help"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261118-transaction-class-help"
     }
   ]
 }
