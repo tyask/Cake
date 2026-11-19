@@ -5,12 +5,12 @@ Cake運用層の進捗表示。公式AI-DLCエンジンのstate/receiptではな
 
 - 関連Issue：https://github.com/tyask/Cake/issues/180
 - Intent：`aidlc/spaces/default/intents/261120-dependency-security-update`
-- 承認済み計画SHA-256：`4a05bfaede01aacc9a9c9335c525591387b9b8d4e48b9c65ca47c74f7710e725`
+- 承認済み計画SHA-256：`723543d4aa2586d2cd11923d16c09216605e18958f44afe887ba11cacd01d590`
 - Primary branch：`codex/dependency-security-update`
 - Branches：`codex/dependency-security-update`
 - Phase：Construction
 - Status：frozen
-- 記録更新日時：2026-11-19T15:43:51.681Z
+- 記録更新日時：2026-11-19T23:58:16.979Z
 - 計画承認：記録あり（対象計画のhash一致はCLIで検査）
 - 記録凍結：済み。以後の検証・Ready・Operation結果はIssue/PR/Actionsに保存する。
 

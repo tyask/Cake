@@ -24,3 +24,9 @@ Next.js、sharp、Zod の脆弱性に対応します。あわせて、PostCSS �
 ## 関連記録
 
 依存関係の更新を **1 Issue・1 Intent・1 PR** で進めます。機能やデータ設計の変更を伴わないため、設計書の改訂は省きます。利用者のマージ後は、既存 Actions で main の CI、本番デプロイ、常設 Preview、PR 専用リソースの削除を確認します。[Cake の開発手順](https://github.com/tyask/Cake/blob/main/docs/aidlc-workflow.md)
+
+## Cloud QA の追加計画
+
+更新前は同じ QA が 4 ケースすべて成功しました。更新後は、Chromium が同一オリジンの GET の再開に `Invalid InterceptionId` を返し、QA が失敗します。途中まで実行したケースでは取引の削除と後片付けを確認できました。
+
+追加計画は、Cloud QA が中断済みの同一オリジン要求に対するこのエラーだけを区別できるよう、検証スクリプトと回帰テストを更新することです。外部通信は遮断し、他の通信エラーは失敗として扱うことをテストします。同じ PR で、当初の監査・ビルド・Cloud QA・CI・正式 Preview QA を最終コミットに対して実行します。
