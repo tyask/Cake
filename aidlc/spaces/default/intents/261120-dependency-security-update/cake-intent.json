@@ -1,0 +1,57 @@
+{
+  "protocol": "cake-intent/v1",
+  "id": "261120-dependency-security-update",
+  "repository": "tyask/Cake",
+  "issue": 180,
+  "issueUrl": "https://github.com/tyask/Cake/issues/180",
+  "branch": "codex/dependency-security-update",
+  "branches": [
+    "codex/dependency-security-update"
+  ],
+  "recordDir": "aidlc/spaces/default/intents/261120-dependency-security-update",
+  "phase": "Construction",
+  "status": "frozen",
+  "planHash": "4a05bfaede01aacc9a9c9335c525591387b9b8d4e48b9c65ca47c74f7710e725",
+  "approval": {
+    "actor": "このチャットの利用者",
+    "reply": "お願いします\n",
+    "recordedAt": "2026-11-19T15:43:07.044Z",
+    "planHash": "4a05bfaede01aacc9a9c9335c525591387b9b8d4e48b9c65ca47c74f7710e725",
+    "planFile": "plans/4a05bfaede01aacc9a9c9335c525591387b9b8d4e48b9c65ca47c74f7710e725.md"
+  },
+  "frozen": true,
+  "createdAt": "2026-11-19T15:43:01.800Z",
+  "updatedAt": "2026-11-19T15:43:51.681Z",
+  "events": [
+    {
+      "action": "CREATED",
+      "recordedAt": "2026-11-19T15:43:01.800Z",
+      "note": "Issueに対応する計画を記録した。承認は別途記録する。",
+      "planHash": "4a05bfaede01aacc9a9c9335c525591387b9b8d4e48b9c65ca47c74f7710e725"
+    },
+    {
+      "action": "APPROVE",
+      "recordedAt": "2026-11-19T15:43:07.044Z",
+      "note": "承認者：このチャットの利用者\n承認の記録日時：2026-11-19T15:43:07.044Z\n承認対象本文：[plans/4a05bfaede01aacc9a9c9335c525591387b9b8d4e48b9c65ca47c74f7710e725.md](../plans/4a05bfaede01aacc9a9c9335c525591387b9b8d4e48b9c65ca47c74f7710e725.md)\n利用者の実際の回答：\nお願いします",
+      "planHash": "4a05bfaede01aacc9a9c9335c525591387b9b8d4e48b9c65ca47c74f7710e725"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-11-19T15:43:07.201Z",
+      "note": "対象: https://github.com/tyask/Cake/issues/180\n承認者: このチャットの利用者\n承認発言: お願いします\n記録日時: 2026-11-19T15:43:01Z\n\n## 目的・背景\n\nNext.js、sharp、Zod の脆弱性に対応します。あわせて、PostCSS 経由で検出された `nanoid` と `source-map-js` を修正版に更新します。\n\n## 対象範囲・対象外\n\n| 依存関係 | 現在 → 更新候補 |\n|---|---|\n| `next`、`eslint-config-next` | `16.2.12` → `16.4.6` |\n| `sharp` の `overrides` | `0.35.3` → `0.35.5` |\n| `zod` | `4.4.3` → `4.6.7` |\n| `postcss` の `overrides` | `8.5.25` → `8.5.33` |\n\n最新 `main` を起点に、`package.json` と `package-lock.json` を更新します。React、ESLint・TypeScript のメジャー更新、Node.js・型定義の更新、アプリ仕様・DB スキーマの変更は対象外です。\n\n## 受入条件\n\n- [ ] AC-01: 指定バージョンで `npm ci` が成功し、`npm audit --omit=dev` で今回の対象が検出されない。開発依存も監査し、残る指摘があれば記録する。\n- [ ] AC-02: 最終コミットで lint、型チェック、文書参照チェック、自動テスト、ビルドが通る。Cloud のブラウザ QA で PC・モバイルのログイン、画面移動、取引の追加・編集・削除が通る。\n- [ ] AC-03: 別エージェントのレビュー、PR の CI、自動 Preview の正式 QA を完了し、条件が揃ったら PR を Ready にする。\n\n## 関連記録\n\n依存関係の更新を 1 Issue・1 Intent・1 PR で進めます。機能やデータ設計の変更を伴わないため、設計書の改訂は省きます。利用者のマージ後は、既存 Actions で main の CI、本番デプロイ、常設 Preview、PR 専用リソースの削除を確認します。[Cake の開発手順](https://github.com/tyask/Cake/blob/main/docs/aidlc-workflow.md)\n\n- 承認済み計画・Intent は着手時に紐付けます。\n- PR は作成後に紐付けます。\n\n## 進捗\n\n- 状況は未着手です。\n- チャットで開発計画の承認を取得しました。\n- 保存された Issue 本文の承認後に、専用ブランチと Intent を作成して実装に進みます。\n",
+      "planHash": "4a05bfaede01aacc9a9c9335c525591387b9b8d4e48b9c65ca47c74f7710e725"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-11-19T15:43:51.499Z",
+      "note": "承認された依存関係を更新し、Node.js v24.19.0 / npm 11.9.0 で npm ci を実行しました。\n本番依存の監査は 0 件でした。開発依存には高 2 件、中 7 件が残っています。\nNext.js と ESLint 設定のバージョンを揃え、既存の override を修正版へ更新しました。\nReact、ESLint、TypeScript、Node.js 型定義の解決済みバージョンは維持しています。\n事前の型チェックは成功し、lint は招待カードの画面遷移に関する警告 1 件でした。\n最終 SHA で別 Agent レビューと所定の検証を実施します。\n",
+      "planHash": "4a05bfaede01aacc9a9c9335c525591387b9b8d4e48b9c65ca47c74f7710e725"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-11-19T15:43:51.681Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "4a05bfaede01aacc9a9c9335c525591387b9b8d4e48b9c65ca47c74f7710e725"
+    }
+  ]
+}
