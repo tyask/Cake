@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import type { BrowserContext, Page } from 'playwright';
 import { interceptCloudRequests } from '../../scripts/cloud/verify-cloud';
 
 const origin = 'http://localhost:3000';
 const staleContinuation = 'cdpSession.send: Protocol error (Fetch.continueRequest): Invalid InterceptionId.';
 
-async function fixture(failure?: { command: string; message: string }) {
+async function fixture(failure?: { command: string; message: string }, beforeReply?: (name: string) => Promise<void> | undefined) {
   const events = new EventEmitter();
   const commands: Array<{ name: string; params: Record<string, unknown> }> = [];
   let blocked = 0;
@@ -16,6 +17,7 @@ async function fixture(failure?: { command: string; message: string }) {
       on: events.on.bind(events),
       async send(name: string, params: Record<string, unknown>) {
         commands.push({ name, params });
+        await beforeReply?.(name);
         if (failure?.command === name && params.errorReason !== 'Failed') throw new Error(failure.message);
       },
     }),
@@ -31,6 +33,20 @@ async function fixture(failure?: { command: string; message: string }) {
     failed: (requestId: string, canceled: boolean) => events.emit('Network.loadingFailed', { requestId, canceled }),
   };
 }
+
+test('Cloud QA は境界判定の待機中に到着した要求の処理も確認する', async () => {
+  const first = Promise.withResolvers<void>();
+  const second = Promise.withResolvers<void>();
+  const continuations = [first.promise, second.promise];
+  const state = await fixture(undefined, name => name === 'Fetch.continueRequest' ? continuations.shift() : undefined);
+  state.request(`${origin}/api/home`, 'network-1');
+  const verification = state.verify();
+  state.request(`${origin}/api/home`, 'network-2');
+  first.resolve();
+  await setImmediate();
+  second.resolve();
+  assert.equal(await verification, true);
+});
 
 test('Cloud QA は同一要求の中断を確認できた再開エラーだけを許容する', async () => {
   const failure = { command: 'Fetch.continueRequest', message: staleContinuation };

@@ -141,8 +141,8 @@ export async function interceptCloudRequests(context: BrowserContext, page: Page
   await session.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
 
   return async () => {
-    await Promise.all(pending);
-    return !failed && pending.size === 0 && [...invalidatedRequests].every(id => canceledRequests.has(id));
+    while (pending.size > 0) await Promise.all(pending);
+    return !failed && [...invalidatedRequests].every(id => canceledRequests.has(id));
   };
 }
 

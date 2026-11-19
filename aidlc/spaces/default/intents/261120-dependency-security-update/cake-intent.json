@@ -21,7 +21,7 @@
   },
   "frozen": true,
   "createdAt": "2026-11-19T15:43:01.800Z",
-  "updatedAt": "2026-11-19T23:58:16.979Z",
+  "updatedAt": "2026-11-19T23:59:34.806Z",
   "events": [
     {
       "action": "CREATED",
@@ -80,6 +80,24 @@
     {
       "action": "FREEZE",
       "recordedAt": "2026-11-19T23:58:16.979Z",
+      "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
+      "planHash": "723543d4aa2586d2cd11923d16c09216605e18958f44afe887ba11cacd01d590"
+    },
+    {
+      "action": "REOPEN",
+      "recordedAt": "2026-11-19T23:59:05.765Z",
+      "note": "別 Agent のレビューで、境界判定が開始時に存在する要求だけを待つため、待機中に到着した正常な要求を失敗扱いし得ることを確認しました。到着した要求の処理も待つように修正し、回帰テストを追加します。\n",
+      "planHash": "723543d4aa2586d2cd11923d16c09216605e18958f44afe887ba11cacd01d590"
+    },
+    {
+      "action": "PROGRESS",
+      "recordedAt": "2026-11-19T23:59:34.634Z",
+      "note": "境界判定が、新たに受信した待機中の要求も処理完了まで待つように修正しました。待機中に届く正常な要求を模したテストを加え、合計 4 件の回帰テストと型チェックが成功しました。\n",
+      "planHash": "723543d4aa2586d2cd11923d16c09216605e18958f44afe887ba11cacd01d590"
+    },
+    {
+      "action": "FREEZE",
+      "recordedAt": "2026-11-19T23:59:34.806Z",
       "note": "最終レビュー・検証前にGit管理対象の記録を凍結した。検証結果・Ready・Operation結果はIssue/PR/Actionsに保存する。",
       "planHash": "723543d4aa2586d2cd11923d16c09216605e18958f44afe887ba11cacd01d590"
     }
