@@ -97,6 +97,55 @@ function sameIds(first: string[], second: string[]): boolean {
   return first.length === second.length && first.every((id, index) => id === second[index]);
 }
 
+export async function interceptCloudRequests(context: BrowserContext, page: Page, origin: string, onBlocked: () => void) {
+  const session = await context.newCDPSession(page);
+  const canceledRequests = new Set<string>();
+  const invalidatedRequests = new Set<string>();
+  const pending = new Set<Promise<void>>();
+  let failed = false;
+
+  session.on('Network.loadingFailed', event => {
+    if (event.canceled === true) canceledRequests.add(event.requestId);
+  });
+
+  async function resolveRequest(event: { requestId: string; networkId?: string; request: { url: string } }) {
+    let sameOrigin = false;
+    try {
+      sameOrigin = new URL(event.request.url).origin === origin;
+      if (!sameOrigin) {
+        onBlocked();
+        await session.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'BlockedByClient' });
+        return;
+      }
+      await session.send('Fetch.continueRequest', { requestId: event.requestId });
+    } catch (error) {
+      // A cancellation can arrive before or after Chromium rejects the continuation.
+      if (sameOrigin && event.networkId && error instanceof Error
+        && error.message.endsWith('Protocol error (Fetch.continueRequest): Invalid InterceptionId.')) {
+        invalidatedRequests.add(event.networkId);
+        return;
+      }
+      failed = true;
+      try { await session.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'Failed' }); }
+      catch { /* A closing context has no active request. */ }
+    }
+  }
+
+  // Playwright routes only the first URL in a redirect chain; CDP checks every hop.
+  session.on('Fetch.requestPaused', event => {
+    const result = resolveRequest(event);
+    pending.add(result);
+    void result.then(() => pending.delete(result));
+  });
+  await session.send('Network.enable');
+  await session.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
+
+  return async () => {
+    while (pending.size > 0) await Promise.all(pending);
+    return !failed && [...invalidatedRequests].every(id => canceledRequests.has(id));
+  };
+}
+
 /** This proof is deliberately separate from the Preview/Ready proof protocol. */
 export async function verifyCloudBrowser(args: readonly string[] = []): Promise<CloudBrowserProof> {
   const cwd = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -165,7 +214,6 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
         isMobile: item.mobile, hasTouch: item.mobile, serviceWorkers: 'block', acceptDownloads: false,
       });
       contexts.add(context); proof.resources.browserContexts = contexts.size;
-      let routeFailed = false;
       const page = await context.newPage(); activePage = page; page.setDefaultTimeout(30_000);
       let analyticsRequestCount = 0;
       let homeRequestCount = 0;
@@ -178,21 +226,7 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
         if (observeHomeRequests && request.method() === 'GET' && url.pathname === '/api/app') homeAppRequests.push(url);
       });
       stage = 'boundary';
-      // Playwright routes only the first URL in a redirect chain; CDP checks every hop.
-      const interception = await context.newCDPSession(page);
-      interception.on('Fetch.requestPaused', async event => {
-        try {
-          if (new URL(event.request.url).origin !== origin) {
-            item.blockedExternalRequests++;
-            await interception.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'BlockedByClient' });
-          } else await interception.send('Fetch.continueRequest', { requestId: event.requestId });
-        } catch {
-          routeFailed = true;
-          try { await interception.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'Failed' }); }
-          catch { /* A closing context has no active request. */ }
-        }
-      });
-      await interception.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
+      const verifyInterception = await interceptCloudRequests(context, page, origin, () => { item.blockedExternalRequests++; });
       const screenshot = async (name: string) => {
         const filename = `${item.name}-${name}.png`;
         await page.screenshot({ path: resolve(directory, filename) }); item.screenshots.push(filename);
@@ -654,7 +688,9 @@ export async function verifyCloudBrowser(args: readonly string[] = []): Promise<
       item.existingTransactionIdsPreserved = sameIds(existingIds, ids(after.selected!.transactions));
       requireCondition(item.existingTransactionIdsPreserved); check('existing-transaction-ids-preserved');
       await screenshot('deleted');
-      stage = 'boundary'; requireCondition(!routeFailed && new URL(page.url()).origin === origin && !interrupted); check('origin-isolation');
+      stage = 'boundary';
+      requireCondition(await verifyInterception() && new URL(page.url()).origin === origin && !interrupted);
+      check('origin-isolation');
       await context.close(); contexts.delete(context); proof.resources.browserContexts = contexts.size;
       item.status = 'passed'; item.success = true; item.durationMs = Date.now() - caseStarted;
       process.stdout.write(`CLOUD_BROWSER_CASE_PASSED ${item.name}\n`);

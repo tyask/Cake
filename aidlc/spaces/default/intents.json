@@ -117,6 +117,15 @@
         "codex/transaction-class-help"
       ],
       "recordDir": "aidlc/spaces/default/intents/261118-transaction-class-help"
+    },
+    {
+      "id": "261120-dependency-security-update",
+      "issue": 180,
+      "branch": "codex/dependency-security-update",
+      "branches": [
+        "codex/dependency-security-update"
+      ],
+      "recordDir": "aidlc/spaces/default/intents/261120-dependency-security-update"
     }
   ]
 }
